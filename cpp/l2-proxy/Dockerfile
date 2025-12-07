@@ -1,6 +1,5 @@
 FROM ubuntu:24.04 AS builder
 
-ARG USE_OPENTELEMETRY=OFF
 ARG USE_JAEGER=OFF
 
 RUN apt-get update && apt-get install -y \
@@ -18,7 +17,7 @@ COPY civetweb/ civetweb/
 COPY jsoncpp/ jsoncpp/
 COPY nlohmann/ nlohmann
 COPY prometheus-cpp/ prometheus-cpp/
-RUN mkdir build && cd build && cmake -DUSE_OPENTELEMETRY=${USE_OPENTELEMETRY} -DUSE_JAEGER=${USE_JAEGER} .. && make
+RUN mkdir build && cd build && cmake -DUSE_JAEGER=${USE_JAEGER} .. && make
 
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y \

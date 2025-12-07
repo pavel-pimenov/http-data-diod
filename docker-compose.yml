@@ -37,7 +37,7 @@ services:
       - "5778:5778"
       - "9411:9411"
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
     networks:
       - l2_network
 
@@ -59,7 +59,6 @@ services:
     build:
       context: ./cpp/l2-proxy
       args:
-        USE_OPENTELEMETRY: ${USE_OPENTELEMETRY:-OFF}
         USE_JAEGER: ${USE_JAEGER:-ON}
     ports:
       - "8888:8888"
@@ -78,7 +77,8 @@ services:
       - OPENOBSERVE_URL=http://host.docker.internal:5080
       - OPENOBSERVE_LOGIN=${OPENOBSERVE_LOGIN}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}
-      - JAEGER_URL=http://jaeger:14268/api/traces
+#      - JAEGER_URL=http://jaeger:14268/api/traces
+      - JAEGER_URL=http://jaeger:9411/api/v2/spans
     networks:
       - l2_network
     labels:
@@ -92,7 +92,6 @@ services:
     build:
       context: ./cpp/l2-proxy
       args:
-        USE_OPENTELEMETRY: ${USE_OPENTELEMETRY:-OFF}
         USE_JAEGER: ${USE_JAEGER:-ON}
     ports:
       - "9091:9091"
@@ -109,7 +108,8 @@ services:
       - OPENOBSERVE_URL=http://host.docker.internal:5080
       - OPENOBSERVE_LOGIN=${OPENOBSERVE_LOGIN}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}
-      - JAEGER_URL=http://jaeger:14268/api/traces
+      # - JAEGER_URL=http://jaeger:14268/api/traces
+      - JAEGER_URL=http://jaeger:9411/api/v2/spans 
     networks:
       - l2_network
 

@@ -30,11 +30,7 @@
 #include "trace_loger.hpp"
 
 
-#if defined(USE_OPENTELEMETRY)
-using TracerType = TraceLogger;
-#elif defined(USE_JAEGER)
 using TracerType = JaegerLogger;
-#endif
 
 // Simple base64 encoding function
 std::string base64_encode(const std::string& input) {
@@ -90,30 +86,7 @@ const char* MODE_ENV = "MODE";
 const char* NUM_THREADS_ENV = "NUM_THREADS";
 
 // Initialize Tracer
-#ifdef USE_OPENTELEMETRY
-std::unique_ptr<TraceLogger> tracer;
-void init_tracer() {
-    const char* openobserve_url = std::getenv("OPENOBSERVE_URL");
-    const char* openobserve_login = std::getenv("OPENOBSERVE_LOGIN");
-    const char* openobserve_password = std::getenv("OPENOBSERVE_PASSWORD");
 
-    if (!openobserve_url) {
-        std::cerr << "OPENOBSERVE_URL not set, tracing disabled" << std::endl;
-        return;
-    }
-
-    std::string endpoint = std::string(openobserve_url) + "/api/default/http_traces/_json";
-
-    std::string login = openobserve_login ? std::string(openobserve_login) : "admin";
-    std::string password = openobserve_password ? std::string(openobserve_password) : "admin";
-    std::string credentials = login + ":" + password;
-    std::string auth = base64_encode(credentials);
-
-    tracer = std::make_unique<TraceLogger>(endpoint, auth);
-}
-#endif
-
-#ifdef USE_JAEGER
 std::unique_ptr<JaegerLogger> tracer;
 void init_tracer() {
     const char* jaeger_url = std::getenv("JAEGER_URL");
@@ -128,7 +101,6 @@ void init_tracer() {
     tracer = std::make_unique<JaegerLogger>(endpoint);
     std::cout << "JAEGER_URL set, tracing enbaled: " << endpoint << std::endl;
 }
-#endif
 
 // Prometheus registry for proxy
 std::shared_ptr<prometheus::Registry> proxy_registry = std::make_shared<prometheus::Registry>();
@@ -345,10 +317,23 @@ public:
 
         std::string request_id = use_sequential_id ? generate_sequential_id() : generate_uuid();
 
-        // Generate trace and span IDs for tracing propagation
-        std::string trace_id = tracer ? tracer->generate_trace_id() : "";
-        std::string span_id = tracer ? tracer->generate_span_id() : "";
+        // Extract trace context from W3C traceparent header, or generate new ones for tracing propagation
 
+        std::string trace_id;
+        std::string span_id;
+        std::string traceparent_header;
+        bool sampled = true;
+
+        const char* traceparent_raw = CivetServer::getHeader(conn, "traceparent");
+        if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, span_id, sampled)) {
+            // Successfully parsed traceparent, use existing trace context
+            traceparent_header = traceparent_raw;
+        } else {
+            // Generate new trace context
+            trace_id = tracer ? tracer->generate_trace_id() : "";
+            span_id = tracer ? tracer->generate_span_id() : "";
+            traceparent_header = tracer ? tracer->generate_traceparent(trace_id, span_id, sampled) : "";
+        }
         // Prepare request data for Redis
         Json::Value request_data;
         request_data["id"] = request_id;
@@ -357,12 +342,14 @@ public:
         if (!body.empty()) {
             request_data["body"] = body;
         }
+        /*
         if (!trace_id.empty()) {
             request_data["trace_id"] = trace_id;
         }
         if (!span_id.empty()) {
             request_data["span_id"] = span_id;
         }
+        */
         std::cout << "request_data: " << request_data << std::endl;
 
         bool redis_push_success = false;
@@ -415,10 +402,31 @@ public:
         Json::StreamWriterBuilder writer;
         std::string response_json = Json::writeString(writer, response);
         proxy_bytes_sent_counter.Increment(response_json.size());
-        mg_printf(conn, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n%s", response_json.c_str());
+        
+        // Build response headers including W3C Trace Context
+        std::string response_headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json";
+        if (!traceparent_header.empty()) {
+            response_headers += "\r\ntraceparent: " + traceparent_header;
+        }
+        response_headers += "\r\n\r\n";
+
+        mg_printf(conn, "%s%s", response_headers.c_str(), response_json.c_str());
+        
+        /*
+        // Build response headers including trace information
+        std::string response_headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json";
+        if (!trace_id.empty()) {
+            response_headers += "\r\ntrace_id: " + trace_id;
+        }
+        if (!span_id.empty()) {
+            response_headers += "\r\nspan_id: " + span_id;
+        }
+        response_headers += "\r\n\r\n";
+
+        mg_printf(conn, "%s%s", response_headers.c_str(), response_json.c_str());
+        */
 
         // Send tracing span
-#if defined(USE_OPENTELEMETRY) || defined(USE_JAEGER)
         if (tracer) {
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
@@ -426,7 +434,6 @@ public:
 
             tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id);
         }
-#endif
 
         return true;
     }
@@ -573,7 +580,7 @@ public:
         }
     }
 
-    std::string call_l2_server(const std::string& path, const std::string& body) {
+    std::string call_l2_server(const std::string& path, const std::string& body, const std::string& traceparent = "") {
         worker_l2_calls_counter.Increment();
 
         std::string url = l2_server_url + path;
@@ -584,21 +591,31 @@ public:
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
+        struct curl_slist* headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+
+        // Add W3C Trace Context header if provided
+        if (!traceparent.empty()) {
+            std::string traceparent_header = "traceparent: " + traceparent;
+            headers = curl_slist_append(headers, traceparent_header.c_str());
+        }
+
         if (!body.empty()) {
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, body.length());
-            struct curl_slist* headers = NULL;
-            headers = curl_slist_append(headers, "Content-Type: application/json");
-            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         }
+
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
             worker_l2_errors_counter.Increment();
+            curl_slist_free_all(headers);
             return "{\"error\": \"Failed to call L2 server: " + std::string(curl_easy_strerror(res)) + "\"}";
         }
 
+        curl_slist_free_all(headers);
         return response_string;
     }
 
@@ -634,8 +651,15 @@ public:
 
         std::cout << "Processing POST request: " << request_id << " path: " << path << "body:" << body << std::endl;
 
-        // Call L2 server
-        std::string l2_response = call_l2_server(path, body);
+        // Generate child span for L2 call and create traceparent header
+        std::string traceparent_header;
+        if (tracer && !parent_trace_id.empty()) {
+            std::string child_span_id = tracer->generate_span_id();
+            traceparent_header = tracer->generate_traceparent(parent_trace_id, child_span_id, true);
+        }
+
+        // Call L2 server with trace context
+        std::string l2_response = call_l2_server(path, body, traceparent_header);
 
         // Prepare response for Redis
         Json::Value response_data;
@@ -671,7 +695,6 @@ public:
         if (reply) freeReplyObject(reply);
 
         // Send tracing span
-#if defined(USE_OPENTELEMETRY) || defined(USE_JAEGER)
         if (tracer) {
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
@@ -696,7 +719,6 @@ public:
                 attrs
             );
         }
-#endif
     }
 
     void run() {
@@ -760,9 +782,7 @@ int main() {
     std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:3000";
 
     // Initialize Tracer
-#if defined(USE_OPENTELEMETRY) || defined(USE_JAEGER)
     init_tracer();
-#endif
 
     const char* mode = std::getenv(MODE_ENV);
     if (!mode) {

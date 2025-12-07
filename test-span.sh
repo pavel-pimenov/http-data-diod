@@ -1,0 +1,1 @@
+curl -v -H "Content-Type: application/json" --data-binary @span.json http://localhost:9411/api/v2/spans

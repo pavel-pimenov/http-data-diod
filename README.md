@@ -283,81 +283,12 @@ Perfect! The build completed successfully and quickly. I've successfully removed
 The TraceLogger sends traces to the configured OpenObserve endpoint with attributes like HTTP method, URL, status code, and request ID, exactly as requested. The build time has been significantly improved by removing the large OpenTelemetry library.
 
 
-I've successfully wrapped the OpenTelemetry tracing code with `#ifdef USE_OPENTELEMETRY` and created a Jaeger tracer implementation alongside it with `#ifdef USE_JAEGER`. Here's what I've done:
-
-## Changes Made:
-
-### 1. __trace_loger.hpp__:
-
-- Wrapped the existing `TraceLogger` class with `#ifdef USE_OPENTELEMETRY`
-- Added a new `JaegerLogger` class with `#ifdef USE_JAEGER` that sends spans to Jaeger collector via HTTP
-- Both classes have the same interface for easy switching
-
-### 2. __main.cpp__:
-
-- Added conditional compilation for tracer types using a `TracerType` typedef
-
-- Wrapped tracer declarations and initialization functions with appropriate `#ifdef` blocks
-
-- Wrapped all tracer usage in `RequestHandler` and `L2Worker` with `#if defined(USE_OPENTELEMETRY) || defined(USE_JAEGER)`
-
-- Added environment variable support:
-
-  - `OPENOBSERVE_URL` for OpenTelemetry (existing)
-  - `JAEGER_URL` for Jaeger (new)
-
-## How to Use:
-
-To compile with OpenTelemetry support:
-
-```bash
-g++ -DUSE_OPENTELEMETRY ... 
-```
-
-To compile with Jaeger support:
-
-```bash
-g++ -DUSE_JAEGER ...
-```
-
-The code now conditionally includes the appropriate tracer based on the defined macro, and both implementations send traces to their respective backends using similar JSON formats over HTTP.
-
-**
-
-and updated all necessary files for conditional compilation. Here's a summary of what I've done:
-
-## Changes Made:
-
-### 1. __docker-compose.yml__:
-
-- Added Jaeger service using `jaegertracing/all-in-one:latest` image
-- Exposed ports 16686 (Jaeger UI) and 14268 (Jaeger collector HTTP)
-- Added `JAEGER_URL=http://jaeger:14268/api/traces` to both proxy and worker services
-- Added build args for `USE_OPENTELEMETRY` and `USE_JAEGER` to both services
-
-### 2. __CMakeLists.txt__:
-
-- Added CMake options `USE_OPENTELEMETRY` and `USE_JAEGER`
-- Added conditional `target_compile_definitions` to define the macros at compile time
-
-### 3. __Dockerfile__:
-
-- Added build arguments `USE_OPENTELEMETRY` and `USE_JAEGER` with default OFF
-- Modified cmake command to pass these options
-
 ## How to Use:
 
 To enable Jaeger tracing:
 
 ```bash
 export USE_JAEGER=ON
-docker-compose up
-```
-
-To enable OpenTelemetry tracing:
-
-```bash
-export USE_OPENTELEMETRY=ON
 docker-compose up
 ```
 
@@ -390,3 +321,42 @@ The services will now send traces for HTTP requests processed by the proxy and w
 3. __Updated CivetServer options__: Replaced the hardcoded options array with a dynamic `std::vector<std::string>` that uses the environment variable value for `num_threads`.
 
 The code now defaults to 32 threads if `NUM_THREADS` is not set, maintaining backward compatibility. You can now configure the number of threads by setting the `NUM_THREADS` environment variable when running the proxy.
+
+I have successfully rewritten the trace transmission through headers to use the W3C Trace Context format. Here's what was implemented:
+
+## Changes Made
+
+### 1. __Added W3C Trace Context Helper Methods__ (`trace_loger.hpp`)
+
+- `generate_traceparent(trace_id, span_id, sampled)`: Creates traceparent header in format `00-{trace-id}-{parent-id}-{flags}`
+- `parse_traceparent(traceparent, trace_id, parent_span_id, sampled)`: Parses incoming traceparent header and extracts components
+
+### 2. __Updated RequestHandler__ (`main.cpp`)
+
+- __Incoming requests__: Now parses `traceparent` header instead of custom `trace_id`/`span_id` headers
+- __Fallback__: If no valid traceparent header is present, generates new trace context
+- __Response headers__: Returns `traceparent` header in responses for proper trace propagation
+
+### 3. __Updated L2Worker__ (`main.cpp`)
+
+- __Child span creation__: Generates new span IDs for L2 server calls
+- __Header propagation__: Sets `traceparent` header when making HTTP requests to L2 server
+- __Trace continuity__: Maintains trace context across service boundaries
+
+### 4. __Format Compliance__
+
+The implementation follows the W3C Trace Context specification:
+
+- __Header name__: `traceparent`
+- __Format__: `00-{trace-id}-{parent-id}-{flags}`
+- __Example__: `traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01`
+
+## Key Features
+
+✅ __Backward Compatible__: Still works with existing trace logging infrastructure\
+✅ __Standards Compliant__: Uses official W3C Trace Context format\
+✅ __Distributed Tracing__: Properly propagates trace context across service calls\
+✅ __Error Handling__: Validates traceparent format and falls back gracefully\
+✅ __Build Verified__: Code compiles successfully without errors
+
+The proxy now correctly handles W3C Trace Context headers for distributed tracing, enabling proper trace correlation across microservices that follow the W3C standard.

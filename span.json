@@ -1,0 +1,18 @@
+[
+  {
+    "id": "48e6851d3bed418c",
+    "traceId": "1aea70d7cf2c9af17ef2f27b37f1257b",
+    "name": "HTTP POST /",
+    "timestamp": 1765099287625730,
+    "duration": 102350,
+    "localEndpoint": {
+      "serviceName": "l2-proxy"
+    },
+    "tags": {
+      "http.method": "POST",
+      "http.url": "/",
+      "http.status_code": "200",
+      "request.id": "98"
+    }
+  }
+]
