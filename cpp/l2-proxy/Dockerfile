@@ -24,9 +24,12 @@ RUN apt-get update && apt-get install -y \
     libhiredis1.1.0 \
     libssl3t64 \
     libcurl4t64 \
+    chrony \
     && rm -rf /var/lib/apt/lists/*
+
+RUN echo "makestep 0.001 -1" >> /etc/chrony/chrony.conf
 
 WORKDIR /root/
 COPY --from=builder /app/build/l2-proxy .
 EXPOSE 8888 9090 9091
-CMD ["./l2-proxy"]
+CMD ["sh", "-c", "chronyd -s & ./l2-proxy"]
