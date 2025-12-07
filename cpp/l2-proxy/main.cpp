@@ -310,19 +310,20 @@ public:
     }
 
     bool handlePost(CivetServer *server, struct mg_connection *conn) {
-        const struct mg_request_info *req_info = mg_get_request_info(conn);
-        std::string body;
-        if (req_info->content_length > 0) {
-            char* buffer = new char[req_info->content_length + 1];
-            int read_len = mg_read(conn, buffer, req_info->content_length);
-            if (read_len > 0) {
-                buffer[read_len] = '\0';
-                body = std::string(buffer);
-            }
-            delete[] buffer;
+    const struct mg_request_info *req_info = mg_get_request_info(conn);
+    std::string body;
+
+    if (req_info->content_length > 0) {
+        body.resize(req_info->content_length);
+        int read_len = mg_read(conn, &body[0], req_info->content_length);
+        if (read_len >= 0) {
+            body.resize(read_len);
+        } else {
+            body.clear();
         }
-        proxy_bytes_received_counter.Increment(body.size());
-        return handle_request(server, conn, "POST", body);
+    }
+    proxy_bytes_received_counter.Increment(body.size());
+    return handle_request(server, conn, "POST", std::move(body));
     }
 
     bool handle_request(CivetServer *server, struct mg_connection *conn, const std::string& method, const std::string& body = "") {
@@ -520,8 +521,8 @@ prometheus::Counter& worker_bytes_sent_counter = l2_worker_bytes_sent_total.Add(
 
 class L2Worker {
 private:
-    redisContext* redis;
-    CURL* curl;
+    redisContext* redis = nullptr;
+    CURL* curl = nullptr;
     std::string l2_server_url;
 
     static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* response) {
@@ -533,6 +534,12 @@ private:
 public:
     L2Worker(const std::string& redis_host, int redis_port, const std::string& server_url) 
         : l2_server_url(server_url) {
+
+        curl = curl_easy_init();
+        if (!curl) {
+            std::cerr << "CURL initialization failed" << std::endl;
+            exit(1);
+        }
         
         redis = redisConnect(redis_host.c_str(), redis_port);
         if (redis == NULL || redis->err) {
@@ -540,11 +547,6 @@ public:
             exit(1);
         }
 
-        curl = curl_easy_init();
-        if (!curl) {
-            std::cerr << "CURL initialization failed" << std::endl;
-            exit(1);
-        }
     }
 
     ~L2Worker() {

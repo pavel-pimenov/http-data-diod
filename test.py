@@ -42,9 +42,9 @@ import aiohttp
 
 # Configuration
 PROXY_URL = "http://localhost:8888"
-NUM_REQUESTS = 10
-CONCURRENT_REQUESTS = 10
-MIN_PAYLOAD_SIZE = 1000  # bytes
+NUM_REQUESTS = 100
+CONCURRENT_REQUESTS = 100
+MIN_PAYLOAD_SIZE = 100  # bytes
 MAX_PAYLOAD_SIZE = 200000
 
 # Set up logging
