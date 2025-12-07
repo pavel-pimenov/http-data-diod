@@ -294,7 +294,7 @@ public:
 
     if (req_info->content_length > 0) {
         body.resize(req_info->content_length);
-        int read_len = mg_read(conn, &body[0], req_info->content_length);
+        const int read_len = mg_read(conn, &body[0], req_info->content_length);
         if (read_len >= 0) {
             body.resize(read_len);
         } else {
@@ -313,9 +313,9 @@ public:
         proxy_client_requests_counter.Increment();
 
         const struct mg_request_info *req_info = mg_get_request_info(conn);
-        std::string path = req_info->request_uri ? req_info->request_uri : "/";
+        const std::string path = req_info->request_uri ? req_info->request_uri : "/";
 
-        std::string request_id = use_sequential_id ? generate_sequential_id() : generate_uuid();
+        const std::string request_id = use_sequential_id ? generate_sequential_id() : generate_uuid();
 
         // Extract trace context from W3C traceparent header, or generate new ones for tracing propagation
 
@@ -406,8 +406,8 @@ public:
         response["traceparent"] = traceparent_header;
 
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
-        auto now = std::chrono::system_clock::now();
-        auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        const auto now = std::chrono::system_clock::now();
+        const auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()
         ).count();
         response["timestamp"] = (Json::Int64)timestamp_us; // ← микросекунды UTC
@@ -468,7 +468,7 @@ void run_proxy(const std::string& redis_host, int redis_port) {
 
     // Read number of threads from environment variable
     const char* num_threads_env = std::getenv(NUM_THREADS_ENV);
-    std::string num_threads = num_threads_env ? std::string(num_threads_env) : "32";
+    const std::string num_threads = num_threads_env ? std::string(num_threads_env) : "32";
 
 	std::vector<std::string> cpp_options;
 	cpp_options.push_back("listening_ports");
@@ -563,7 +563,7 @@ private:
     std::string l2_server_url;
 
     static size_t write_callback(void* contents, size_t size, size_t nmemb, std::string* response) {
-        size_t total_size = size * nmemb;
+        const size_t total_size = size * nmemb;
         response->append((char*)contents, total_size);
         return total_size;
     }
@@ -598,7 +598,7 @@ public:
     std::string call_l2_server(const std::string& path, const std::string& body, const std::string& traceparent = "") {
         worker_l2_calls_counter.Increment();
 
-        std::string url = l2_server_url + path;
+        const std::string url = l2_server_url + path;
         std::string response_string;
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -623,7 +623,7 @@ public:
 
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
-        CURLcode res = curl_easy_perform(curl);
+        const CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
             worker_l2_errors_counter.Increment();
             curl_slist_free_all(headers);
@@ -650,21 +650,21 @@ public:
             return;
         }
 
-        std::string method = request_data["method"].asString();
+        const std::string method = request_data["method"].asString();
         if (method != "POST") {
             std::cout << "Skipping non-POST request: " << method << std::endl;
             return;
         }
 
-        std::string request_id = request_data["id"].asString();
-        std::string path = request_data["path"].asString();
-        std::string body = request_data["body"].asString();
+        const std::string request_id = request_data["id"].asString();
+        const std::string path = request_data["path"].asString();
+        const std::string body = request_data["body"].asString();
 
         // Extract trace and span IDs for propagation from traceparent header
         std::string parent_trace_id;
         std::string parent_span_id;
         bool sampled = true;
-        std::string traceparent = request_data.isMember("traceparent") ? request_data["traceparent"].asString() : "";
+        const std::string traceparent = request_data.isMember("traceparent") ? request_data["traceparent"].asString() : "";
         if (!traceparent.empty() && tracer && tracer->parse_traceparent(traceparent.c_str(), parent_trace_id, parent_span_id, sampled)) {
             std::cout << "Successfully parsed traceparent" << std::endl;
         } else {
@@ -684,7 +684,7 @@ public:
         }
 
         // Call L2 server with trace context
-        std::string l2_response = call_l2_server(path, body, traceparent_header);
+        const std::string l2_response = call_l2_server(path, body, traceparent_header);
 
         // Prepare response for Redis
         Json::Value response_data;
@@ -701,8 +701,8 @@ public:
           } 
         
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
-        auto now = std::chrono::system_clock::now();
-        auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        const auto now = std::chrono::system_clock::now();
+        const auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()
         ).count();
         response_body["timestamp"] = (Json::Int64)timestamp_us; // ← микросекунды UTC
@@ -711,11 +711,11 @@ public:
 
         // Store response in Redis
         Json::StreamWriterBuilder writer;
-        std::string response_str = Json::writeString(writer, response_data);
+        const std::string response_str = Json::writeString(writer, response_data);
         worker_bytes_sent_counter.Increment(response_str.size());
 
         if (tracer) {
-            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            const auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
             tracer->log_request(method, path, 200, start_us, end_us, "l2-worker-redis-set-response", request_id, parent_trace_id, child_span_id, parent_span_id);
@@ -724,17 +724,17 @@ public:
 
         worker_redis_operations_counter.Increment();
         redisReply* reply = (redisReply*)redisCommand(redis, "SETEX http:response:%s 60 %s",
-                                                     request_id.c_str(), response_str.c_str());
+                                                      request_id.c_str(), response_str.c_str());
         if (reply && reply->type != REDIS_REPLY_STATUS) {
             worker_redis_errors_counter.Increment();
         }
         if (reply) freeReplyObject(reply);
 
         if (tracer) {
-            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            const auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-            std::string worker_span_id = tracer->generate_span_id();
+            const std::string worker_span_id = tracer->generate_span_id();
             tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, worker_span_id, parent_span_id);
         }
     }
@@ -791,13 +791,13 @@ int main() {
 
     // Get configuration from environment variables
     const char* redis_host_env = std::getenv("REDIS_HOST");
-    std::string redis_host = redis_host_env ? std::string(redis_host_env) : "valkey";
+    const std::string redis_host = redis_host_env ? std::string(redis_host_env) : "valkey";
 
     const char* redis_port_env = std::getenv("REDIS_PORT");
-    int redis_port = redis_port_env ? std::stoi(std::string(redis_port_env)) : 6379;
+    const int redis_port = redis_port_env ? std::stoi(std::string(redis_port_env)) : 6379;
 
     const char* l2_server_url_env = std::getenv("L2_SERVER_URL");
-    std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:3000";
+    const std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:3000";
 
     // Initialize Tracer
     init_tracer();
@@ -808,7 +808,7 @@ int main() {
         return 1;
     }
 
-    std::string mode_str = mode;
+    const std::string mode_str = mode;
     if (mode_str == "proxy") {
         std::cout << "Starting in proxy mode" << std::endl;
         run_proxy(redis_host, redis_port);
