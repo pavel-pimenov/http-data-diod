@@ -321,19 +321,24 @@ public:
 
         std::string trace_id;
         std::string span_id;
+        std::string parent_id;
         std::string traceparent_header;
         bool sampled = true;
 
         const char* traceparent_raw = CivetServer::getHeader(conn, "traceparent");
-        if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, span_id, sampled)) {
+        std::string incoming_span_id;
+        if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, incoming_span_id, sampled)) {
             // Successfully parsed traceparent, use existing trace context
-            traceparent_header = traceparent_raw;
+            parent_id = incoming_span_id;
+            span_id = tracer->generate_span_id();  // Generate new span ID for proxy
+            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
             std::cout << "Successfully parsed traceparent, use existing trace context:" << traceparent_header;
         } else {
             // Generate new trace context
-            trace_id = tracer ? tracer->generate_trace_id() : "";
-            span_id = tracer ? tracer->generate_span_id() : "";
-            traceparent_header = tracer ? tracer->generate_traceparent(trace_id, span_id, sampled) : "";
+            trace_id = tracer->generate_trace_id();
+            span_id = tracer->generate_span_id();
+            parent_id = "";
+            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
             std::cout << "Generate new trace context:" << traceparent_header << std::endl;;
         }
         // Prepare request data for Redis
@@ -344,23 +349,16 @@ public:
         if (!body.empty()) {
             request_data["body"] = body;
         }
-        if (traceparent_raw) {
-            request_data["traceparent"] = traceparent_header;
-        }
+        request_data["traceparent"] = traceparent_header;
         std::cout << " traceparent:" << traceparent_header << std::endl << "request_data: " << request_data << std::endl;
 
         bool redis_push_success = false;
 
-        if (tracer) {
-            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-            ).count();
+        // Push to Redis queue and measure timing
+        auto redis_push_start = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "Redis-push-begin", request_id, trace_id, span_id, "" /* parent_id */);
-            start_us = end_us;
-        }
-
-        // Push to Redis queue
         if (redis && !redis->err) {
             std::lock_guard<std::mutex> lock(redis_mutex);
             Json::StreamWriterBuilder writer;
@@ -380,19 +378,19 @@ public:
                 proxy_redis_errors_counter.Increment();
             }
             if (incr_reply) freeReplyObject(incr_reply);
-            
-            if (tracer) {
-            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-            ).count();
-
-            tracer->log_request(method, path, 200, start_us, end_us, "Redis-push-end", request_id, trace_id, span_id, "" /* parent_id */);
-            start_us = end_us;
-        }
-
 
         } else {
             proxy_redis_errors_counter.Increment();
+        }
+
+        auto redis_push_end = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        if (tracer) {
+            // Generate unique span ID for Redis push operation
+            std::string redis_span_id = tracer->generate_span_id();
+            tracer->log_request(method, path, 200, redis_push_start, redis_push_end, "Redis-push", request_id, trace_id, redis_span_id, span_id);
         }
 
         if (!redis_push_success) {
@@ -443,13 +441,15 @@ public:
         mg_printf(conn, "%s%s", response_headers.c_str(), response_json.c_str());
         */
 
-        // Send tracing span 
+        // Send tracing span for the complete proxy operation
         if (tracer) {
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id, "" /* parent_id */);
+            // Generate a unique span ID for the main proxy span
+            std::string proxy_span_id = tracer->generate_span_id();
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, proxy_span_id, parent_id);
         }
 
         return true;
@@ -682,7 +682,7 @@ public:
         if (tracer && !parent_trace_id.empty()) {
             child_span_id = tracer->generate_span_id();
             traceparent_header = tracer->generate_traceparent(parent_trace_id, child_span_id, true);
-            std::cout << "traceparent_header:" << traceparent_header << std::endl;
+            std::cout << "traceparent_header: " << traceparent_header << std::endl;
         }
 
         // Call L2 server with trace context
@@ -716,6 +716,14 @@ public:
         std::string response_str = Json::writeString(writer, response_data);
         worker_bytes_sent_counter.Increment(response_str.size());
 
+        if (tracer) {
+            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker-redis-set-response", request_id, parent_trace_id, child_span_id, parent_span_id);
+            start_us = end_us;
+        }
+
         worker_redis_operations_counter.Increment();
         redisReply* reply = (redisReply*)redisCommand(redis, "SETEX http:response:%s 60 %s",
                                                      request_id.c_str(), response_str.c_str());
@@ -724,12 +732,10 @@ public:
         }
         if (reply) freeReplyObject(reply);
 
-        // Send tracing span
         if (tracer) {
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-
             tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, child_span_id, parent_span_id);
         }
     }

@@ -180,7 +180,10 @@ public:
         nlohmann::json attrs = {
             {"http.method", method},
             {"http.url", url},
-            {"http.status_code", status_code}};
+            {"http.status_code", status_code},
+            {"trace_id", trace_id},  // TODO Debug
+            {"span_id", span_id} // TODO Debug
+         };
 
         if (!request_id.empty())
         {
