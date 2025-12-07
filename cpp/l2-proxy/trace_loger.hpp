@@ -100,10 +100,12 @@ public:
         uint64_t end_us,
         const std::string& service_name,
         const std::string& request_id = "",
+        const std::string& trace_id = "",
+        const std::string& span_id = "",
         const nlohmann::json& additional_attributes = {}
     ) {
-        std::string trace_id = generate_trace_id();
-        std::string span_id = generate_span_id();
+        std::string actual_trace_id = trace_id.empty() ? generate_trace_id() : trace_id;
+        std::string actual_span_id = span_id.empty() ? generate_span_id() : span_id;
 
         nlohmann::json attrs = {
             {"http.method", method},
@@ -120,8 +122,8 @@ public:
         }
 
         send_span(
-            trace_id,
-            span_id,
+            actual_trace_id,
+            actual_span_id,
             "",
             "HTTP " + method + " " + url,
             start_us,
@@ -253,10 +255,12 @@ public:
         uint64_t end_us,
         const std::string& service_name,
         const std::string& request_id = "",
+        const std::string& trace_id = "",
+        const std::string& span_id = "",
         const nlohmann::json& additional_attributes = {}
     ) {
-        std::string trace_id = generate_trace_id();
-        std::string span_id = generate_span_id();
+        std::string actual_trace_id = trace_id.empty() ? generate_trace_id() : trace_id;
+        std::string actual_span_id = span_id.empty() ? generate_span_id() : span_id;
 
         nlohmann::json attrs = {
             {"http.method", method},
@@ -273,8 +277,8 @@ public:
         }
 
         send_span(
-            trace_id,
-            span_id,
+            actual_trace_id,
+            actual_span_id,
             "",
             "HTTP " + method + " " + url,
             start_us,

@@ -22,7 +22,13 @@
 #include <prometheus/counter.h>
 
 #include "nlohmann/json.hpp"
+
+#if !defined(USE_JAEGER)
+#define USE_JAEGER
+#endif
+
 #include "trace_loger.hpp"
+
 
 #if defined(USE_OPENTELEMETRY)
 using TracerType = TraceLogger;
@@ -117,9 +123,10 @@ void init_tracer() {
         return;
     }
 
-    std::string endpoint = std::string(jaeger_url);
+    const std::string endpoint = std::string(jaeger_url);
 
     tracer = std::make_unique<JaegerLogger>(endpoint);
+    std::cout << "JAEGER_URL set, tracing enbaled: " << endpoint << std::endl;
 }
 #endif
 
@@ -338,6 +345,10 @@ public:
 
         std::string request_id = use_sequential_id ? generate_sequential_id() : generate_uuid();
 
+        // Generate trace and span IDs for tracing propagation
+        std::string trace_id = tracer ? tracer->generate_trace_id() : "";
+        std::string span_id = tracer ? tracer->generate_span_id() : "";
+
         // Prepare request data for Redis
         Json::Value request_data;
         request_data["id"] = request_id;
@@ -345,6 +356,12 @@ public:
         request_data["path"] = path;
         if (!body.empty()) {
             request_data["body"] = body;
+        }
+        if (!trace_id.empty()) {
+            request_data["trace_id"] = trace_id;
+        }
+        if (!span_id.empty()) {
+            request_data["span_id"] = span_id;
         }
         std::cout << "request_data: " << request_data << std::endl;
 
@@ -407,7 +424,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id);
         }
 #endif
 
@@ -611,6 +628,10 @@ public:
         std::string path = request_data["path"].asString();
         std::string body = request_data["body"].asString();
 
+        // Extract trace and span IDs for propagation
+        std::string parent_trace_id = request_data.isMember("trace_id") ? request_data["trace_id"].asString() : "";
+        std::string parent_span_id = request_data.isMember("span_id") ? request_data["span_id"].asString() : "";
+
         std::cout << "Processing POST request: " << request_id << " path: " << path << "body:" << body << std::endl;
 
         // Call L2 server
@@ -656,8 +677,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            std::string trace_id = tracer->generate_trace_id();
-            std::string span_id = tracer->generate_span_id();
+            std::string worker_span_id = tracer->generate_span_id();
 
             nlohmann::json attrs = {
                 {"request.id", request_id},
@@ -666,9 +686,9 @@ public:
             };
 
             tracer->send_span(
-                trace_id,
-                span_id,
-                "", // root span
+                parent_trace_id,
+                worker_span_id,
+                parent_span_id, // child of proxy span
                 "process_request",
                 start_us,
                 end_us,
