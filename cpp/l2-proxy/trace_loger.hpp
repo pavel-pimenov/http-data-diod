@@ -72,7 +72,7 @@ public:
     void send_span(
         const std::string &trace_id,
         const std::string &span_id,
-        const std::string &parent_span_id,
+        const std::string &parent_id,
         const std::string &name,
         uint64_t start_us,
         uint64_t end_us,
@@ -118,9 +118,10 @@ public:
             {"localEndpoint", {{"serviceName", service_name}}},
             {"tags", tags}};
 
-        if (!parent_span_id.empty())
+        if (!parent_id.empty())
         {
-            span["parentId"] = parent_span_id;
+            span["parentId"] = parent_id;
+            std::cout << "parentId: " << parent_id << std::endl;
         }
 
         std::string payload_str = nlohmann::json::array({span}).dump();
@@ -160,8 +161,19 @@ public:
         const std::string &request_id = "",
         const std::string &trace_id = "",
         const std::string &span_id = "",
-        const nlohmann::json &additional_attributes = {})
+        const std::string &parent_id = "",
+        const nlohmann::json &additional_attributes = {}
+      )
     {
+        if(trace_id.empty())
+        {
+           std::cout << "Use generate_trace_id!" << std::endl;
+        }
+        else
+        {
+            std::cout << "Use parent_trace_id:" << trace_id << std::endl;
+        }
+
         std::string actual_trace_id = trace_id.empty() ? generate_trace_id() : trace_id;
         std::string actual_span_id = span_id.empty() ? generate_span_id() : span_id;
 
@@ -183,7 +195,7 @@ public:
         send_span(
             actual_trace_id,
             actual_span_id,
-            "",
+            parent_id,
             "HTTP " + method + " " + url,
             start_us,
             end_us,

@@ -328,11 +328,13 @@ public:
         if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, span_id, sampled)) {
             // Successfully parsed traceparent, use existing trace context
             traceparent_header = traceparent_raw;
+            std::cout << "Successfully parsed traceparent, use existing trace context:" << traceparent_header;
         } else {
             // Generate new trace context
             trace_id = tracer ? tracer->generate_trace_id() : "";
             span_id = tracer ? tracer->generate_span_id() : "";
             traceparent_header = tracer ? tracer->generate_traceparent(trace_id, span_id, sampled) : "";
+            std::cout << "Generate new trace context:" << traceparent_header << std::endl;;
         }
         // Prepare request data for Redis
         Json::Value request_data;
@@ -345,9 +347,19 @@ public:
         if (traceparent_raw) {
             request_data["traceparent"] = traceparent_header;
         }
-        std::cout << "request_data: " << request_data << std::endl;
+        std::cout << " traceparent:" << traceparent_header << std::endl << "request_data: " << request_data << std::endl;
 
         bool redis_push_success = false;
+
+        if (tracer) {
+            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+
+            tracer->log_request(method, path, 200, start_us, end_us, "Redis-push-begin", request_id, trace_id, span_id, "" /* parent_id */);
+            start_us = end_us;
+        }
+
         // Push to Redis queue
         if (redis && !redis->err) {
             std::lock_guard<std::mutex> lock(redis_mutex);
@@ -368,6 +380,17 @@ public:
                 proxy_redis_errors_counter.Increment();
             }
             if (incr_reply) freeReplyObject(incr_reply);
+            
+            if (tracer) {
+            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+
+            tracer->log_request(method, path, 200, start_us, end_us, "Redis-push-end", request_id, trace_id, span_id, "" /* parent_id */);
+            start_us = end_us;
+        }
+
+
         } else {
             proxy_redis_errors_counter.Increment();
         }
@@ -377,7 +400,7 @@ public:
         }
 
         // Wait for response (simplified - in real implementation would poll Redis)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
         // Send response
         Json::Value response;
@@ -420,13 +443,13 @@ public:
         mg_printf(conn, "%s%s", response_headers.c_str(), response_json.c_str());
         */
 
-        // Send tracing span
+        // Send tracing span 
         if (tracer) {
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id, "" /* parent_id */);
         }
 
         return true;
@@ -613,7 +636,7 @@ public:
         return response_string;
     }
 
-    void process_request(const std::string& request_json) {
+    void process_request_from_redis(const std::string& request_json) {
         auto start_us = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
@@ -645,19 +668,21 @@ public:
         bool sampled = true;
         std::string traceparent = request_data.isMember("traceparent") ? request_data["traceparent"].asString() : "";
         if (!traceparent.empty() && tracer && tracer->parse_traceparent(traceparent.c_str(), parent_trace_id, parent_span_id, sampled)) {
-            // Successfully parsed traceparent
+            std::cout << "Successfully parsed traceparent" << std::endl;
         } else {
             parent_trace_id = "";
             parent_span_id = "";
         }
 
-        std::cout << "Processing POST request: " << request_id << " path: " << path << "body:" << body << std::endl;
+        std::cout << "Processing POST request: " << request_id << " traceparent:" << traceparent << " path: " << path <<  "body:" << body << std::endl;
 
         // Generate child span for L2 call and create traceparent header
         std::string traceparent_header;
+        std::string child_span_id;
         if (tracer && !parent_trace_id.empty()) {
-            std::string child_span_id = tracer->generate_span_id();
+            child_span_id = tracer->generate_span_id();
             traceparent_header = tracer->generate_traceparent(parent_trace_id, child_span_id, true);
+            std::cout << "traceparent_header:" << traceparent_header << std::endl;
         }
 
         // Call L2 server with trace context
@@ -669,10 +694,13 @@ public:
         response_data["headers"]["Content-Type"] = "application/json";
 
         Json::Value response_body;
-        response_body["message"] = "Processed by C++ L2 Worker";
-        response_body["language"] = "C++";
         response_body["request_id"] = request_id;
         response_body["l2_response"] = l2_response;
+        if(!traceparent_header.empty())
+          {
+            response_body["traceparent"] = traceparent_header;
+            // TODO - add http header
+          } 
         
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
         auto now = std::chrono::system_clock::now();
@@ -702,24 +730,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            std::string worker_span_id = tracer->generate_span_id();
-
-            nlohmann::json attrs = {
-                {"request.id", request_id},
-                {"request.path", path},
-                {"request.method", method}
-            };
-
-            tracer->send_span(
-                parent_trace_id,
-                worker_span_id,
-                parent_span_id, // child of proxy span
-                "process_request",
-                start_us,
-                end_us,
-                "l2-worker",
-                attrs
-            );
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, child_span_id, parent_span_id);
         }
     }
 
@@ -731,8 +742,8 @@ public:
             redisReply* reply = (redisReply*)redisCommand(redis, "BLPOP http:requests 10");
 
             if (reply && reply->type == REDIS_REPLY_ARRAY && reply->elements == 2) {
-                std::string request_json = reply->element[1]->str;
-                process_request(request_json);
+                const std::string request_json = reply->element[1]->str;
+                process_request_from_redis(request_json);
                 // Increment read counter
                 worker_redis_operations_counter.Increment();
                 redisReply* incr_reply = (redisReply*)redisCommand(redis, "INCR stats:redis_reads");

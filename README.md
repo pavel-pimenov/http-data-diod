@@ -329,7 +329,7 @@ I have successfully rewritten the trace transmission through headers to use the 
 ### 1. __Added W3C Trace Context Helper Methods__ (`trace_loger.hpp`)
 
 - `generate_traceparent(trace_id, span_id, sampled)`: Creates traceparent header in format `00-{trace-id}-{parent-id}-{flags}`
-- `parse_traceparent(traceparent, trace_id, parent_span_id, sampled)`: Parses incoming traceparent header and extracts components
+- `parse_traceparent(traceparent, trace_id, parent_id, sampled)`: Parses incoming traceparent header and extracts components
 
 ### 2. __Updated RequestHandler__ (`main.cpp`)
 
