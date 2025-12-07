@@ -360,3 +360,31 @@ The implementation follows the W3C Trace Context specification:
 ✅ __Build Verified__: Code compiles successfully without errors
 
 The proxy now correctly handles W3C Trace Context headers for distributed tracing, enabling proper trace correlation across microservices that follow the W3C standard.
+
+
+Refactoring Summary: Unified JSON Library Usage
+Problem: The code was using two different JSON libraries inconsistently:
+
+nlohmann::json in trace_loger.hpp for tracing spans
+JsonCpp (Json::Value, Json::Reader, Json::StreamWriterBuilder) in main.cpp for request/response handling
+Solution: Standardized on nlohmann::json throughout main.cpp for consistency and simplicity.
+
+Key Changes:
+
+Removed #include "jsoncpp/json.h"
+Added using json = nlohmann::json; for cleaner syntax
+Replaced all Json::Value declarations with json
+Updated JSON parsing from Json::Reader to exception-safe json::parse() with try-catch
+Simplified serialization from Json::StreamWriterBuilder to json.dump()
+Modernized JSON access methods:
+value.asString() → value (implicit conversion)
+obj.isMember("key") → obj.contains("key")
+Improved JSON object construction using initializer lists
+Benefits:
+
+Consistency: Single JSON library across the entire codebase
+Simplicity: Less boilerplate code for JSON operations
+Modern C++: Exception-safe parsing, cleaner syntax
+Maintainability: Easier to work with one JSON API
+Performance: nlohmann::json is header-only and efficient
+The code compiles successfully and maintains all existing functionality. This refactoring makes the codebase cleaner and more maintainable by eliminating redundant dependencies and inconsistent APIs.

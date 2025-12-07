@@ -15,13 +15,14 @@
 #include <hiredis/hiredis.h>
 #include <curl/curl.h>
 
-#include "jsoncpp/json.h"
 
 #include <prometheus/registry.h>
 #include <prometheus/exposer.h>
 #include <prometheus/counter.h>
 
 #include "nlohmann/json.hpp"
+
+using json = nlohmann::json;
 
 #if !defined(USE_JAEGER)
 #define USE_JAEGER
@@ -210,12 +211,11 @@ public:
             reads = atoll(reads_reply->str);
         }
 
-        Json::Value stats;
-        stats["redis_writes"] = (Json::Int64)writes;
-        stats["redis_reads"] = (Json::Int64)reads;
+        json stats;
+        stats["redis_writes"] = writes;
+        stats["redis_reads"] = reads;
 
-        Json::StreamWriterBuilder writer;
-        std::string stats_json = Json::writeString(writer, stats);
+        std::string stats_json = stats.dump();
         mg_printf(conn, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n%s", stats_json.c_str());
 
         if (writes_reply) freeReplyObject(writes_reply);
@@ -342,15 +342,16 @@ public:
             std::cout << "Generate new trace context:" << traceparent_header << std::endl;;
         }
         // Prepare request data for Redis
-        Json::Value request_data;
-        request_data["id"] = request_id;
-        request_data["method"] = method;
-        request_data["path"] = path;
+        json request_data = {
+            {"id", request_id},
+            {"method", method},
+            {"path", path},
+            {"traceparent", traceparent_header}
+        };
         if (!body.empty()) {
             request_data["body"] = body;
         }
-        request_data["traceparent"] = traceparent_header;
-        std::cout << " traceparent:" << traceparent_header << std::endl << "request_data: " << request_data << std::endl;
+        std::cout << " traceparent:" << traceparent_header << std::endl << "request_data: " << request_data.dump() << std::endl;
 
         bool redis_push_success = false;
 
@@ -361,8 +362,7 @@ public:
 
         if (redis && !redis->err) {
             std::lock_guard<std::mutex> lock(redis_mutex);
-            Json::StreamWriterBuilder writer;
-            std::string request_json = Json::writeString(writer, request_data);
+            std::string request_json = request_data.dump();
             redisReply* reply = (redisReply*)redisCommand(redis, "RPUSH http:requests %s", request_json.c_str());
             proxy_redis_requests_counter.Increment();
             if (reply && reply->type == REDIS_REPLY_INTEGER) {
@@ -400,22 +400,22 @@ public:
         // Wait for response (simplified - in real implementation would poll Redis)
         // std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        // Send response
-        Json::Value response;
-        response["request_id"] = request_id;
-        response["traceparent"] = traceparent_header;
-
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
         const auto now = std::chrono::system_clock::now();
         const auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()
         ).count();
-        response["timestamp"] = (Json::Int64)timestamp_us; // ← микросекунды UTC
 
-        std::cout << "response" << response << std::endl;
+        // Send response
+        json response = {
+            {"request_id", request_id},
+            {"traceparent", traceparent_header},
+            {"timestamp", timestamp_us}
+        };
 
-        Json::StreamWriterBuilder writer;
-        std::string response_json = Json::writeString(writer, response);
+        std::cout << "response" << response.dump() << std::endl;
+
+        std::string response_json = response.dump();
         proxy_bytes_sent_counter.Increment(response_json.size());
         
         // Build response headers including W3C Trace Context
@@ -642,29 +642,30 @@ public:
         worker_requests_processed_counter.Increment();
         worker_bytes_received_counter.Increment(request_json.size());
 
-        Json::Value request_data;
-        Json::Reader reader;
+        json request_data;
 
-        if (!reader.parse(request_json, request_data)) {
-            std::cerr << "Failed to parse JSON request" << std::endl;
+        try {
+            request_data = json::parse(request_json);
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to parse JSON request: " << e.what() << std::endl;
             return;
         }
 
-        const std::string method = request_data["method"].asString();
+        const std::string method = request_data["method"];
         if (method != "POST") {
             std::cout << "Skipping non-POST request: " << method << std::endl;
             return;
         }
 
-        const std::string request_id = request_data["id"].asString();
-        const std::string path = request_data["path"].asString();
-        const std::string body = request_data["body"].asString();
+        const std::string request_id = request_data["id"];
+        const std::string path = request_data["path"];
+        const std::string body = request_data["body"];
 
         // Extract trace and span IDs for propagation from traceparent header
         std::string parent_trace_id;
         std::string parent_span_id;
         bool sampled = true;
-        const std::string traceparent = request_data.isMember("traceparent") ? request_data["traceparent"].asString() : "";
+        const std::string traceparent = request_data.contains("traceparent") ? request_data["traceparent"] : "";
         if (!traceparent.empty() && tracer && tracer->parse_traceparent(traceparent.c_str(), parent_trace_id, parent_span_id, sampled)) {
             std::cout << "Successfully parsed traceparent" << std::endl;
         } else {
@@ -686,32 +687,29 @@ public:
         // Call L2 server with trace context
         const std::string l2_response = call_l2_server(path, body, traceparent_header);
 
-        // Prepare response for Redis
-        Json::Value response_data;
-        response_data["status_code"] = 200;
-        response_data["headers"]["Content-Type"] = "application/json";
-
-        Json::Value response_body;
-        response_body["request_id"] = request_id;
-        response_body["l2_response"] = l2_response;
-        if(!traceparent_header.empty())
-          {
-            response_body["traceparent"] = traceparent_header;
-            // TODO - add http header
-          } 
-        
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
         const auto now = std::chrono::system_clock::now();
         const auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch()
         ).count();
-        response_body["timestamp"] = (Json::Int64)timestamp_us; // ← микросекунды UTC
 
-        response_data["body"] = response_body;
+        // Prepare response for Redis
+        json response_data = {
+            {"status_code", 200},
+            {"headers", {{"Content-Type", "application/json"}}},
+            {"body", {
+                {"request_id", request_id},
+                {"l2_response", l2_response},
+                {"timestamp", timestamp_us}
+            }}
+        };
+
+        if(!traceparent_header.empty()) {
+            response_data["body"]["traceparent"] = traceparent_header;
+        }
 
         // Store response in Redis
-        Json::StreamWriterBuilder writer;
-        const std::string response_str = Json::writeString(writer, response_data);
+        const std::string response_str = response_data.dump();
         worker_bytes_sent_counter.Increment(response_str.size());
 
         if (tracer) {

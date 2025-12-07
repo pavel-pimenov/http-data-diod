@@ -16,7 +16,6 @@ find_library(HIREDIS_LIBRARY hiredis REQUIRED)
 # Add executable
 add_executable(l2-proxy
  main.cpp
- jsoncpp/jsoncpp.cpp
  prometheus-cpp/pull/src/basic_auth.cc
  prometheus-cpp/pull/src/endpoint.cc
  prometheus-cpp/pull/src/exposer.cc
@@ -55,7 +54,6 @@ include_directories(prometheus-cpp/include)
 include_directories(prometheus-cpp/util/include)
 include_directories(prometheus-cpp/pull/include)
 include_directories(civetweb)
-include_directories(jsoncpp)
 include_directories(nlohmann)
 
 #include_directories(sqlite)

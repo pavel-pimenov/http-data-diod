@@ -47,5 +47,11 @@ venv
 .PVS-Studio
 CMakeFiles
 makefile
+CMakeCache.txt 
+cmake_install.cmake_install
+cmake_install.cmake
+
+
+
 
 

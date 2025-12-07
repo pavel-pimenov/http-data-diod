@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 COPY CMakeLists.txt main.cpp trace_loger.hpp ./
 COPY civetweb/ civetweb/
-COPY jsoncpp/ jsoncpp/
+# COPY jsoncpp/ jsoncpp/
 COPY nlohmann/ nlohmann
 COPY prometheus-cpp/ prometheus-cpp/
 RUN mkdir build && cd build && cmake -DUSE_JAEGER=${USE_JAEGER} .. && make
