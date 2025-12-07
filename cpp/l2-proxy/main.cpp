@@ -415,9 +415,7 @@ public:
     }
 };
 
-void run_proxy() {
-    std::string redis_host = "valkey";
-    int redis_port = 6379;
+void run_proxy(const std::string& redis_host, int redis_port) {
 
     redisContext* redis = redisConnect(redis_host.c_str(), redis_port);
     if (redis == NULL || redis->err) {
@@ -710,11 +708,7 @@ public:
     }
 };
 
-void run_worker() {
-
-    std::string redis_host = "valkey";
-    int redis_port = 6379;
-    std::string l2_server_url = "http://l2-server:3000";
+void run_worker(const std::string& redis_host, int redis_port, const std::string& l2_server_url) {
 
     // Start Prometheus exposer
     prometheus::Exposer exposer{"0.0.0.0:9091"};
@@ -735,6 +729,16 @@ int main() {
     std::signal(SIGTERM, signal_handler);
     std::signal(SIGINT, signal_handler);
 
+    // Get configuration from environment variables
+    const char* redis_host_env = std::getenv("REDIS_HOST");
+    std::string redis_host = redis_host_env ? std::string(redis_host_env) : "valkey";
+
+    const char* redis_port_env = std::getenv("REDIS_PORT");
+    int redis_port = redis_port_env ? std::stoi(std::string(redis_port_env)) : 6379;
+
+    const char* l2_server_url_env = std::getenv("L2_SERVER_URL");
+    std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:3000";
+
     // Initialize Tracer
 #if defined(USE_OPENTELEMETRY) || defined(USE_JAEGER)
     init_tracer();
@@ -749,10 +753,10 @@ int main() {
     std::string mode_str = mode;
     if (mode_str == "proxy") {
         std::cout << "Starting in proxy mode" << std::endl;
-        run_proxy();
+        run_proxy(redis_host, redis_port);
     } else if (mode_str == "worker") {
         std::cout << "Starting in worker mode" << std::endl;
-        run_worker();
+        run_worker(redis_host, redis_port, l2_server_url);
     } else {
         std::cerr << "Invalid mode: " << mode_str << ". Use proxy or worker" << std::endl;
         return 1;
