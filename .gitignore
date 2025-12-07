@@ -45,5 +45,7 @@ build
 venv
 .vscode
 .PVS-Studio
+CMakeFiles
+makefile
 
 

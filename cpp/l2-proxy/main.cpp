@@ -342,14 +342,9 @@ public:
         if (!body.empty()) {
             request_data["body"] = body;
         }
-        /*
-        if (!trace_id.empty()) {
-            request_data["trace_id"] = trace_id;
+        if (traceparent_raw) {
+            request_data["traceparent"] = traceparent_header;
         }
-        if (!span_id.empty()) {
-            request_data["span_id"] = span_id;
-        }
-        */
         std::cout << "request_data: " << request_data << std::endl;
 
         bool redis_push_success = false;
@@ -386,9 +381,8 @@ public:
 
         // Send response
         Json::Value response;
-        response["message"] = "Processed by C++ DMZ Proxy";
         response["request_id"] = request_id;
-        response["language"] = "C++";
+        response["traceparent"] = traceparent_header;
 
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
         auto now = std::chrono::system_clock::now();
@@ -645,9 +639,17 @@ public:
         std::string path = request_data["path"].asString();
         std::string body = request_data["body"].asString();
 
-        // Extract trace and span IDs for propagation
-        std::string parent_trace_id = request_data.isMember("trace_id") ? request_data["trace_id"].asString() : "";
-        std::string parent_span_id = request_data.isMember("span_id") ? request_data["span_id"].asString() : "";
+        // Extract trace and span IDs for propagation from traceparent header
+        std::string parent_trace_id;
+        std::string parent_span_id;
+        bool sampled = true;
+        std::string traceparent = request_data.isMember("traceparent") ? request_data["traceparent"].asString() : "";
+        if (!traceparent.empty() && tracer && tracer->parse_traceparent(traceparent.c_str(), parent_trace_id, parent_span_id, sampled)) {
+            // Successfully parsed traceparent
+        } else {
+            parent_trace_id = "";
+            parent_span_id = "";
+        }
 
         std::cout << "Processing POST request: " << request_id << " path: " << path << "body:" << body << std::endl;
 
