@@ -447,9 +447,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            // Generate a unique span ID for the main proxy span
-            std::string proxy_span_id = tracer->generate_span_id();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, proxy_span_id, parent_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id, parent_id);
         }
 
         return true;
@@ -736,7 +734,8 @@ public:
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, child_span_id, parent_span_id);
+            std::string worker_span_id = tracer->generate_span_id();
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, worker_span_id, parent_span_id);
         }
     }
 
