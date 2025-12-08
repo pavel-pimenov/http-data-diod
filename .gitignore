@@ -42,6 +42,11 @@ build
 *.dwo
 *.log
 
+# archive
+*.gz
+*.zip
+*.7z
+
 venv
 .vscode
 .PVS-Studio
@@ -50,8 +55,3 @@ makefile
 CMakeCache.txt 
 cmake_install.cmake_install
 cmake_install.cmake
-
-
-
-
-
