@@ -388,3 +388,26 @@ Modern C++: Exception-safe parsing, cleaner syntax
 Maintainability: Easier to work with one JSON API
 Performance: nlohmann::json is header-only and efficient
 The code compiles successfully and maintains all existing functionality. This refactoring makes the codebase cleaner and more maintainable by eliminating redundant dependencies and inconsistent APIs.
+
+I've created two scripts as requested:
+
+1. __save_images.py__ - A Python script that parses the docker-compose.yml file, extracts all image names from services, pulls them using Docker, and saves each as a compressed tar.gz file.
+
+2. __load_images.sh__ - A Bash script that loads all tar.gz files in the current directory into Docker and optionally starts docker-compose.
+
+The scripts handle the following images from your docker-compose.yml:
+
+- valkey/valkey:alpine
+- cr.jaegertracing.io/jaegertracing/jaeger:2.13.0
+- ealen/echo-server:latest
+- redis/redisinsight:latest
+- traefik:v3.1
+
+I've also updated requirements.txt to include PyYAML for YAML parsing, and made both scripts executable.
+
+To use them:
+
+1. Run `pip install -r requirements.txt` to install dependencies
+2. Execute `./save_images.py` to save all images as tar.gz files
+3. Transfer the tar.gz files and scripts to your closed environment
+4. Run `./load_images.sh` to load the images and optionally start the services

@@ -1,2 +1,3 @@
 # requests
 # aiohttp
+PyYAML>=6.0
