@@ -33,62 +33,16 @@ using json = nlohmann::json;
 
 using TracerType = JaegerLogger;
 
-// Simple base64 encoding function
-std::string base64_encode(const std::string& input) {
-    const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    int i = 0;
-    int j = 0;
-    unsigned char char_array_3[3];
-    unsigned char char_array_4[4];
 
-    for (char c : input) {
-        char_array_3[i++] = c;
-        if (i == 3) {
-            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
-            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
-            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
-            char_array_4[3] = char_array_3[2] & 0x3f;
-
-            for (i = 0; i < 4; i++)
-                encoded += base64_chars[char_array_4[i]];
-            i = 0;
-        }
-    }
-
-    if (i) {
-        for (j = i; j < 3; j++)
-            char_array_3[j] = '\0';
-
-        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
-        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
-        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
-        char_array_4[3] = char_array_3[2] & 0x3f;
-
-        for (j = 0; j < i + 1; j++)
-            encoded += base64_chars[char_array_4[j]];
-
-        while (i++ < 3)
-            encoded += '=';
-    }
-
-    return encoded;
-}
-
-
-
-// Common variables
 std::atomic<bool> shutdown_flag(false);
 
-// Environment variable for mode
 const char* MODE_ENV = "MODE";
-
-// Environment variable for number of threads
 const char* NUM_THREADS_ENV = "NUM_THREADS";
 
-// Initialize Tracer
+std::string g_mode_proxy_worker;
 
 std::unique_ptr<JaegerLogger> tracer;
+
 void init_tracer() {
     const char* jaeger_url = std::getenv("JAEGER_URL");
 
@@ -100,7 +54,7 @@ void init_tracer() {
     const std::string endpoint = std::string(jaeger_url);
 
     tracer = std::make_unique<JaegerLogger>(endpoint);
-    std::cout << "JAEGER_URL set, tracing enbaled: " << endpoint << std::endl;
+    std::cout << "JAEGER_URL set, tracing enabled: " << endpoint << std::endl;
 }
 
 // Prometheus registry for proxy
@@ -259,6 +213,69 @@ private:
         if (reply) freeReplyObject(reply);
     }
 
+    std::tuple<std::string, std::string, std::string, std::string, bool> handle_trace_context(mg_connection* conn) {
+        std::string trace_id, span_id, parent_id, traceparent_header;
+        bool sampled = true;
+
+        const char* traceparent_raw = CivetServer::getHeader(conn, "traceparent");
+        std::string incoming_span_id;
+        if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, incoming_span_id, sampled)) {
+            parent_id = incoming_span_id;
+            span_id = tracer->generate_span_id();
+            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
+            std::cout << "Successfully parsed traceparent, use existing trace context: " << traceparent_header << std::endl;
+        } else {
+            trace_id = tracer->generate_trace_id();
+            span_id = tracer->generate_span_id();
+            parent_id = "";
+            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
+            std::cout << "Generate new trace context: " << traceparent_header << std::endl;
+        }
+        return {trace_id, span_id, parent_id, traceparent_header, sampled};
+    }
+
+    bool push_to_redis(const json& request_data, const std::string& trace_id, const std::string& span_id) {
+        auto redis_push_start = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        bool success = false;
+        if (redis && !redis->err) {
+            std::lock_guard<std::mutex> lock(redis_mutex);
+            std::string request_json = request_data.dump();
+            redisReply* reply = (redisReply*)redisCommand(redis, "RPUSH http:requests %s", request_json.c_str());
+            proxy_redis_requests_counter.Increment();
+            if (reply && reply->type == REDIS_REPLY_INTEGER) {
+                success = true;
+            } else {
+                proxy_redis_errors_counter.Increment();
+            }
+            if (reply) freeReplyObject(reply);
+#ifdef USE_REDIS_INCR            
+            // Increment write counter
+            redisReply* incr_reply = (redisReply*)redisCommand(redis, "INCR stats:redis_writes");
+            proxy_redis_requests_counter.Increment();
+            if (!(incr_reply && incr_reply->type == REDIS_REPLY_INTEGER)) {
+                proxy_redis_errors_counter.Increment();
+            }
+            if (incr_reply) freeReplyObject(incr_reply);
+#endif            
+        } else {
+            proxy_redis_errors_counter.Increment();
+        }
+
+        auto redis_push_end = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        if (tracer) {
+            std::string redis_span_id = tracer->generate_span_id();
+            tracer->log_request("RPUSH", "http:requests", 200, redis_push_start, redis_push_end, "l2-proxy-" + g_mode_proxy_worker, request_data["id"], trace_id, redis_span_id, span_id);
+        }
+
+        return success;
+    }
+
 public:
     RequestHandler(redisContext* r) : redis(r), request_id_counter(0) {
         // const char* env = std::getenv("USE_SEQUENTIAL_REQUEST_ID");
@@ -317,30 +334,7 @@ public:
 
         const std::string request_id = use_sequential_id ? generate_sequential_id() : generate_uuid();
 
-        // Extract trace context from W3C traceparent header, or generate new ones for tracing propagation
-
-        std::string trace_id;
-        std::string span_id;
-        std::string parent_id;
-        std::string traceparent_header;
-        bool sampled = true;
-
-        const char* traceparent_raw = CivetServer::getHeader(conn, "traceparent");
-        std::string incoming_span_id;
-        if (traceparent_raw && tracer && tracer->parse_traceparent(traceparent_raw, trace_id, incoming_span_id, sampled)) {
-            // Successfully parsed traceparent, use existing trace context
-            parent_id = incoming_span_id;
-            span_id = tracer->generate_span_id();  // Generate new span ID for proxy
-            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
-            std::cout << "Successfully parsed traceparent, use existing trace context:" << traceparent_header;
-        } else {
-            // Generate new trace context
-            trace_id = tracer->generate_trace_id();
-            span_id = tracer->generate_span_id();
-            parent_id = "";
-            traceparent_header = tracer->generate_traceparent(trace_id, span_id, sampled);
-            std::cout << "Generate new trace context:" << traceparent_header << std::endl;;
-        }
+        auto [trace_id, span_id, parent_id, traceparent_header, sampled] = handle_trace_context(conn);
         // Prepare request data for Redis
         json request_data = {
             {"id", request_id},
@@ -351,48 +345,9 @@ public:
         if (!body.empty()) {
             request_data["body"] = body;
         }
-        std::cout << " traceparent:" << traceparent_header << std::endl << "request_data: " << request_data.dump() << std::endl;
+        std::cout << " traceparent: " << traceparent_header << std::endl << "request_data: " << request_data.dump() << std::endl;
 
-        bool redis_push_success = false;
-
-        // Push to Redis queue and measure timing
-        auto redis_push_start = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count();
-
-        if (redis && !redis->err) {
-            std::lock_guard<std::mutex> lock(redis_mutex);
-            std::string request_json = request_data.dump();
-            redisReply* reply = (redisReply*)redisCommand(redis, "RPUSH http:requests %s", request_json.c_str());
-            proxy_redis_requests_counter.Increment();
-            if (reply && reply->type == REDIS_REPLY_INTEGER) {
-                redis_push_success = true;
-            } else {
-                proxy_redis_errors_counter.Increment();
-            }
-            if (reply) freeReplyObject(reply);
-            // Increment write counter
-            redisReply* incr_reply = (redisReply*)redisCommand(redis, "INCR stats:redis_writes");
-            proxy_redis_requests_counter.Increment();
-            if (!(incr_reply && incr_reply->type == REDIS_REPLY_INTEGER)) {
-                proxy_redis_errors_counter.Increment();
-            }
-            if (incr_reply) freeReplyObject(incr_reply);
-
-        } else {
-            proxy_redis_errors_counter.Increment();
-        }
-
-        auto redis_push_end = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count();
-
-        if (tracer) {
-            // Generate unique span ID for Redis push operation
-            std::string redis_span_id = tracer->generate_span_id();
-            tracer->log_request(method, path, 200, redis_push_start, redis_push_end, "Redis-push", request_id, trace_id, redis_span_id, span_id);
-        }
-
+        bool redis_push_success = push_to_redis(request_data, trace_id, span_id);
         if (!redis_push_success) {
             proxy_client_errors_counter.Increment();
         }
@@ -413,7 +368,7 @@ public:
             {"timestamp", timestamp_us}
         };
 
-        std::cout << "response" << response.dump() << std::endl;
+        std::cout << "Response: " << response.dump() << std::endl;
 
         std::string response_json = response.dump();
         proxy_bytes_sent_counter.Increment(response_json.size());
@@ -447,7 +402,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy", request_id, trace_id, span_id, parent_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, trace_id, span_id, parent_id);
         }
 
         return true;
@@ -716,7 +671,7 @@ public:
             const auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker-redis-set-response", request_id, parent_trace_id, child_span_id, parent_span_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, parent_trace_id, child_span_id, parent_span_id);
             start_us = end_us;
         }
 
@@ -733,7 +688,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
             const std::string worker_span_id = tracer->generate_span_id();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-worker", request_id, parent_trace_id, worker_span_id, parent_span_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, parent_trace_id, worker_span_id, parent_span_id);
         }
     }
 
@@ -747,6 +702,7 @@ public:
             if (reply && reply->type == REDIS_REPLY_ARRAY && reply->elements == 2) {
                 const std::string request_json = reply->element[1]->str;
                 process_request_from_redis(request_json);
+#ifdef USE_REDIS_INCR            
                 // Increment read counter
                 worker_redis_operations_counter.Increment();
                 redisReply* incr_reply = (redisReply*)redisCommand(redis, "INCR stats:redis_reads");
@@ -754,12 +710,13 @@ public:
                     worker_redis_errors_counter.Increment();
                 }
                 if (incr_reply) freeReplyObject(incr_reply);
+#endif
             } else if (reply && reply->type != REDIS_REPLY_ARRAY) {
                 worker_redis_errors_counter.Increment();
             }
 
             if (reply) freeReplyObject(reply);
-            // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // TODO std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
         std::cout << "Shutting down gracefully..." << std::endl;
@@ -806,15 +763,15 @@ int main() {
         return 1;
     }
 
-    const std::string mode_str = mode;
-    if (mode_str == "proxy") {
+    g_mode_proxy_worker = std::string(mode);
+    if (g_mode_proxy_worker == "proxy") {
         std::cout << "Starting in proxy mode" << std::endl;
         run_proxy(redis_host, redis_port);
-    } else if (mode_str == "worker") {
+    } else if (g_mode_proxy_worker == "worker") {
         std::cout << "Starting in worker mode" << std::endl;
         run_worker(redis_host, redis_port, l2_server_url);
     } else {
-        std::cerr << "Invalid mode: " << mode_str << ". Use proxy or worker" << std::endl;
+        std::cerr << "Invalid mode: " << g_mode_proxy_worker << ". Use proxy or worker" << std::endl;
         return 1;
     }
 
