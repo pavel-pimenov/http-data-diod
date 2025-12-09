@@ -104,7 +104,7 @@ services:
       - MODE=worker
       - REDIS_HOST=valkey
       - REDIS_PORT=6379
-      - L2_SERVER_URL=http://l2-server:3000
+      - L2_SERVER_URL=http://l2-server:8080
       - OPENOBSERVE_URL=http://host.docker.internal:5080
       - OPENOBSERVE_LOGIN=${OPENOBSERVE_LOGIN}
       - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}

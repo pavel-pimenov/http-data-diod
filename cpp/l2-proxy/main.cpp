@@ -402,7 +402,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
 
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, trace_id, span_id, parent_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, request_id, trace_id, span_id, parent_id);
         }
 
         return true;
@@ -569,7 +569,7 @@ public:
         // Generate span for L2 server call
         std::string span_id;
         if (tracer) {
-            span_id = tracer->generate_span_id();
+            span_id = tracer->generate_span_id();            
         }
 
         auto start_us = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -609,7 +609,8 @@ public:
 
         if (res != CURLE_OK) {
             worker_l2_errors_counter.Increment();
-            std::cout << "L2 server call failed: " << curl_easy_strerror(res) << std::endl;
+            std::cout << "L2 server call failed: " << curl_easy_strerror(res) << " http_code: "
+             << http_code  << " path: " << path << std::endl;
             curl_slist_free_all(headers);
 
             // Log failed span
@@ -617,7 +618,7 @@ public:
                 auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::system_clock::now().time_since_epoch()
                 ).count();
-                tracer->log_request("POST", url, 500, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, "", trace_id, span_id, parent_span_id);
+                tracer->log_request("POST", url, 500, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker + "-call-l2-server", "", trace_id, span_id, parent_span_id);
             }
 
             return "{\"error\": \"Failed to call L2 server: " + std::string(curl_easy_strerror(res)) + "\"}";
@@ -631,7 +632,7 @@ public:
             auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-            tracer->log_request("POST", url, static_cast<int>(http_code), start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, "", trace_id, span_id, parent_span_id);
+            tracer->log_request("POST", url, static_cast<int>(http_code), start_us, end_us, "l2-proxy-" + g_mode_proxy_worker + "-call-l2-server", "", trace_id, span_id, parent_span_id);
         }
 
         return response_string;
@@ -800,7 +801,7 @@ int main() {
     const int redis_port = redis_port_env ? std::stoi(std::string(redis_port_env)) : 6379;
 
     const char* l2_server_url_env = std::getenv("L2_SERVER_URL");
-    const std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:3000";
+    const std::string l2_server_url = l2_server_url_env ? std::string(l2_server_url_env) : "http://l2-server:8080";
 
     // Initialize Tracer
     init_tracer();
