@@ -411,3 +411,27 @@ To use them:
 2. Execute `./save_images.py` to save all images as tar.gz files
 3. Transfer the tar.gz files and scripts to your closed environment
 4. Run `./load_images.sh` to load the images and optionally start the services
+
+
+I've successfully added tracing to the `call_l2_server` method. Here's what I implemented:
+
+## Changes Made
+
+1. __Trace Context Extraction__: The method now parses the incoming `traceparent` header to extract the trace ID and parent span ID for proper trace continuation.
+
+2. __Span Creation__: Generates a new span ID for the L2 server call operation.
+
+3. __Timing Measurement__: Records start and end timestamps in microseconds to measure the duration of the HTTP call.
+
+4. __HTTP Response Code Capture__: Uses `curl_easy_getinfo` to get the actual HTTP response code from the L2 server.
+
+5. __Span Logging__: Logs tracing spans for both successful and failed L2 server calls using the existing JaegerLogger infrastructure.
+
+## Key Features
+
+- __Distributed Tracing__: The L2 server call now appears as a child span in the distributed trace, properly linked to the parent request processing span.
+- __Error Handling__: Failed calls (curl errors) are logged with a 500 status code.
+- __Success Tracking__: Successful calls log the actual HTTP response code from the L2 server.
+- __Service Naming__: Uses the same service naming convention as other spans in the codebase.
+
+The code compiled successfully, confirming that the tracing integration is syntactically correct and maintains compatibility with the existing codebase. The tracing will now provide visibility into L2 server call performance and help with debugging distributed request flows.

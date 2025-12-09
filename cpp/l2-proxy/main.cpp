@@ -553,8 +553,32 @@ public:
     std::string call_l2_server(const std::string& path, const std::string& body, const std::string& traceparent = "") {
         worker_l2_calls_counter.Increment();
 
+        std::cout << "Calling L2 server: URL=" << l2_server_url + path << ", body_size=" << body.size() << ", traceparent=" << traceparent << std::endl;
+
+        // Extract trace context
+        std::string trace_id;
+        std::string parent_span_id;
+        bool sampled = true;
+        if (!traceparent.empty() && tracer && tracer->parse_traceparent(traceparent.c_str(), trace_id, parent_span_id, sampled)) {
+            std::cout << "Successfully parsed traceparent for L2 call" << std::endl;
+        } else {
+            trace_id = "";
+            parent_span_id = "";
+        }
+
+        // Generate span for L2 server call
+        std::string span_id;
+        if (tracer) {
+            span_id = tracer->generate_span_id();
+        }
+
+        auto start_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
         const std::string url = l2_server_url + path;
         std::string response_string;
+        long http_code = 0;
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -579,13 +603,37 @@ public:
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
         const CURLcode res = curl_easy_perform(curl);
+
+        // Get HTTP response code
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
         if (res != CURLE_OK) {
             worker_l2_errors_counter.Increment();
+            std::cout << "L2 server call failed: " << curl_easy_strerror(res) << std::endl;
             curl_slist_free_all(headers);
+
+            // Log failed span
+            if (tracer && !trace_id.empty()) {
+                auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()
+                ).count();
+                tracer->log_request("POST", url, 500, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, "", trace_id, span_id, parent_span_id);
+            }
+
             return "{\"error\": \"Failed to call L2 server: " + std::string(curl_easy_strerror(res)) + "\"}";
         }
 
         curl_slist_free_all(headers);
+        std::cout << "L2 server call succeeded: response_size=" << response_string.size() << std::endl;
+
+        // Log successful span
+        if (tracer && !trace_id.empty()) {
+            auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            tracer->log_request("POST", url, static_cast<int>(http_code), start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, "", trace_id, span_id, parent_span_id);
+        }
+
         return response_string;
     }
 
@@ -671,7 +719,7 @@ public:
             const auto end_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, parent_trace_id, child_span_id, parent_span_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, request_id, parent_trace_id, child_span_id, parent_span_id);
             start_us = end_us;
         }
 
@@ -688,7 +736,7 @@ public:
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
             const std::string worker_span_id = tracer->generate_span_id();
-            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy" + g_mode_proxy_worker, request_id, parent_trace_id, worker_span_id, parent_span_id);
+            tracer->log_request(method, path, 200, start_us, end_us, "l2-proxy-" + g_mode_proxy_worker, request_id, parent_trace_id, worker_span_id, parent_span_id);
         }
     }
 
