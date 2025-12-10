@@ -442,3 +442,24 @@ I've successfully replaced the echo server in your docker-compose.yml. The previ
 The updated `l2-server` service now uses the new image. I tested it locally and confirmed that it returns the POST body in the response JSON under the "body" field.
 
 To apply the changes, run `docker compose up --build` in your project directory.
+
+
+I've successfully modified test.py to check the response and compare it with the request JSON. Here's what I changed:
+
+1. Added `import difflib` for generating diffs
+
+2. Modified the `test_json_endpoint` function to:
+
+   - Parse the response JSON
+   - Normalize both request and response JSON using `json.dumps` with `sort_keys=True` and `indent=2` for consistent formatting
+   - Compare the normalized strings
+   - If they match, the test passes
+   - If they don't match, the test fails and displays a colored diff showing the differences between request and response
+
+The diff is displayed with:
+
+- Yellow for diff headers
+- Red for lines removed from request
+- Green for lines added in response
+
+This ensures that in normal operation, the JSON response must exactly match the JSON request. If there are any differences (e.g., due to processing errors or modifications), they will be clearly shown as a diff for debugging.

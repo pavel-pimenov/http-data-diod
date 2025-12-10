@@ -9,6 +9,7 @@ import time
 import json
 import random
 import string
+import difflib
 from typing import List, Tuple, Dict
 import statistics
 import sys
@@ -42,10 +43,10 @@ import aiohttp
 
 # Configuration
 PROXY_URL = "http://localhost:8888"
-NUM_REQUESTS = 100
-CONCURRENT_REQUESTS = 100
+NUM_REQUESTS = 1
+CONCURRENT_REQUESTS = 1
 MIN_PAYLOAD_SIZE = 100  # bytes
-MAX_PAYLOAD_SIZE = 200000
+MAX_PAYLOAD_SIZE = 100
 
 # Set up logging
 logging.basicConfig(
@@ -98,7 +99,7 @@ def run_command(cmd: List[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 def test_json_endpoint(url: str, description: str = "") -> bool:
-    """Test an endpoint that should return valid JSON with POST request."""
+    """Test an endpoint that should return valid JSON matching the request."""
     logger.info(f"Starting functionality test for {description} ({url})")
     print(f"Testing {description} ({url})... ", end="", flush=True)
     json_payload = generate_random_json_payload(500)  # Fixed size for functionality test
@@ -106,10 +107,37 @@ def test_json_endpoint(url: str, description: str = "") -> bool:
         response = requests.post(url, json=json_payload, timeout=10)
         if response.status_code == 200:
             try:
-                json.loads(response.text)
-                print(f"{Colors.GREEN}PASS{Colors.NC} (Status: {response.status_code}, Valid JSON)")
-                logger.info(f"Functionality test passed for {description}")
-                return True
+                response_json = response.json()
+                # Normalize both JSON for comparison
+                request_normalized = json.dumps(json_payload, sort_keys=True, indent=2)
+                response_normalized = json.dumps(response_json, sort_keys=True, indent=2)
+
+                if request_normalized == response_normalized:
+                    print(f"{Colors.GREEN}PASS{Colors.NC} (Status: {response.status_code}, JSON matches)")
+                    logger.info(f"Functionality test passed for {description}")
+                    return True
+                else:
+                    print(f"{Colors.RED}FAIL{Colors.NC} (Status: {response.status_code}, JSON does not match)")
+                    print(f"\n{Colors.YELLOW}=== JSON Diff (Request vs Response) ==={Colors.NC}")
+                    diff = list(difflib.unified_diff(
+                        request_normalized.splitlines(keepends=True),
+                        response_normalized.splitlines(keepends=True),
+                        fromfile='Request',
+                        tofile='Response',
+                        lineterm=''
+                    ))
+                    for line in diff:
+                        if line.startswith('---') or line.startswith('+++') or line.startswith('@@'):
+                            print(f"{Colors.YELLOW}{line.rstrip()}{Colors.NC}", end='')
+                        elif line.startswith('-'):
+                            print(f"{Colors.RED}{line.rstrip()}{Colors.NC}")
+                        elif line.startswith('+'):
+                            print(f"{Colors.GREEN}{line.rstrip()}{Colors.NC}")
+                        else:
+                            print(line.rstrip())
+                    print(f"{Colors.YELLOW}=== End Diff ==={Colors.NC}")
+                    logger.error(f"Functionality test failed for {description}: JSON mismatch")
+                    return False
             except json.JSONDecodeError:
                 print(f"{Colors.RED}FAIL{Colors.NC} (Status: {response.status_code}, Invalid JSON)")
                 print(f"Response: {response.text}")

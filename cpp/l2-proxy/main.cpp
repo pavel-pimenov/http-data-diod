@@ -353,7 +353,7 @@ public:
         }
 
         // Wait for response (simplified - in real implementation would poll Redis)
-        // std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // TODO remove
 
         // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
         const auto now = std::chrono::system_clock::now();
