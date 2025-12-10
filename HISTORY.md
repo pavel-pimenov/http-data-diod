@@ -463,3 +463,37 @@ The diff is displayed with:
 - Green for lines added in response
 
 This ensures that in normal operation, the JSON response must exactly match the JSON request. If there are any differences (e.g., due to processing errors or modifications), they will be clearly shown as a diff for debugging.
+
+I've successfully updated test.py to include formatted JSON output for both incoming and outgoing messages before the diff display. The changes add:
+
+- A section showing the incoming JSON (request payload) with proper indentation
+- A section showing the outgoing JSON (response payload) with proper indentation
+
+Both are formatted using `json.dumps(indent=2)` for readable formatting. The output will now display the full messages before showing the detailed diff when JSON comparisons fail.
+
+The syntax highlighting is implemented through the existing color scheme in the script, with yellow headers for the JSON sections. For more advanced syntax highlighting (like color-coding JSON keys and values), additional libraries like `pygments` would be needed, but the current formatting provides clear, readable JSON output.
+
+1. __Added `poll_for_response` method__ in `RequestHandler` class that polls Redis for the response key with a 30-second timeout.
+
+2. __Modified `handle_request` method__ to:
+
+   - Push the request to Redis (unchanged)
+   - Poll Redis for the response using the new polling method
+   - Parse the response data from Redis
+   - Return the actual l2-server response to the client instead of dummy metadata
+   - Handle timeout and error cases properly
+
+3. __Rebuilt and deployed__ the updated Docker images to test the changes.
+
+### Verification:
+
+The proxy now correctly:
+
+- Receives POST requests from clients
+- Queues them in Redis
+- Waits for the worker to process them and store responses
+- Retrieves and returns the actual l2-server response to the client
+
+The test shows that instead of returning `{"request_id": "...", "timestamp": "...", "traceparent": "..."}`, it now returns the full response from the l2-server (http-https-echo), which includes request metadata, headers, body, and other information.
+
+The request-response flow is now complete and working as intended.

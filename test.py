@@ -118,6 +118,10 @@ def test_json_endpoint(url: str, description: str = "") -> bool:
                     return True
                 else:
                     print(f"{Colors.RED}FAIL{Colors.NC} (Status: {response.status_code}, JSON does not match)")
+                    print(f"\n{Colors.YELLOW}=== Incoming JSON ==={Colors.NC}")
+                    print(json.dumps(json_payload, indent=2))
+                    print(f"\n{Colors.YELLOW}=== Outgoing JSON ==={Colors.NC}")
+                    print(json.dumps(response_json, indent=2))
                     print(f"\n{Colors.YELLOW}=== JSON Diff (Request vs Response) ==={Colors.NC}")
                     diff = list(difflib.unified_diff(
                         request_normalized.splitlines(keepends=True),

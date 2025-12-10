@@ -251,7 +251,7 @@ private:
                 proxy_redis_errors_counter.Increment();
             }
             if (reply) freeReplyObject(reply);
-#ifdef USE_REDIS_INCR            
+#ifdef USE_REDIS_INCR
             // Increment write counter
             redisReply* incr_reply = (redisReply*)redisCommand(redis, "INCR stats:redis_writes");
             proxy_redis_requests_counter.Increment();
@@ -259,7 +259,7 @@ private:
                 proxy_redis_errors_counter.Increment();
             }
             if (incr_reply) freeReplyObject(incr_reply);
-#endif            
+#endif
         } else {
             proxy_redis_errors_counter.Increment();
         }
@@ -274,6 +274,38 @@ private:
         }
 
         return success;
+    }
+
+    std::string poll_for_response(const std::string& request_id, int timeout_seconds = 30) {
+        auto start_time = std::chrono::steady_clock::now();
+        std::string response_key = "http:response:" + request_id;
+
+        while (true) {
+            {
+                std::lock_guard<std::mutex> lock(redis_mutex);
+                redisReply* reply = (redisReply*)redisCommand(redis, "GET %s", response_key.c_str());
+                proxy_redis_requests_counter.Increment();
+
+                if (reply && reply->type == REDIS_REPLY_STRING) {
+                    std::string response_data = reply->str;
+                    freeReplyObject(reply);
+                    return response_data;
+                }
+
+                if (reply) freeReplyObject(reply);
+            }
+
+            // Check timeout
+            auto elapsed = std::chrono::steady_clock::now() - start_time;
+            if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() > timeout_seconds) {
+                break;
+            }
+
+            // Sleep for a short time before polling again
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        return ""; // Timeout or error
     }
 
 public:
@@ -350,37 +382,53 @@ public:
         bool redis_push_success = push_to_redis(request_data, trace_id, span_id);
         if (!redis_push_success) {
             proxy_client_errors_counter.Increment();
+            mg_printf(conn, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Failed to queue request\"}");
+            return true;
         }
 
-        // Wait for response (simplified - in real implementation would poll Redis)
-        // std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // TODO remove
+        // Poll for response from Redis
+        std::string response_data_str = poll_for_response(request_id, 30); // 30 second timeout
 
-        // Получаем timestamp в микросекундах UTC (стандарт для OpenObserve)
-        const auto now = std::chrono::system_clock::now();
-        const auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            now.time_since_epoch()
-        ).count();
+        if (response_data_str.empty()) {
+            proxy_client_errors_counter.Increment();
+            std::cout << "Timeout waiting for response for request_id: " << request_id << std::endl;
+            mg_printf(conn, "HTTP/1.1 504 Gateway Timeout\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Timeout waiting for response\", \"request_id\": \"%s\"}", request_id.c_str());
+            return true;
+        }
+        else
+        {
+            std::cout << "response_data_str: " <<  response_data_str << " for request_id: " << request_id << std::endl;
+        }
 
-        // Send response
-        json response = {
-            {"request_id", request_id},
-            {"traceparent", traceparent_header},
-            {"timestamp", timestamp_us}
-        };
 
-        std::cout << "Response: " << response.dump() << std::endl;
+        // Parse the response data from Redis
+        json response_data;
+        try {
+            response_data = json::parse(response_data_str);
+            std::cout << "[!] response_data_json: " <<  response_data << " for request_id: " << request_id << std::endl;
+        } catch (const std::exception& e) {
+            proxy_client_errors_counter.Increment();
+            std::cerr << "Failed to parse response data from Redis: " << e.what() << std::endl;
+            mg_printf(conn, "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Invalid response format\", \"request_id\": \"%s\"}", request_id.c_str());
+            return true;
+        }
 
-        std::string response_json = response.dump();
-        proxy_bytes_sent_counter.Increment(response_json.size());
-        
-        // Build response headers including W3C Trace Context
-        std::string response_headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json";
+        // Extract the actual response from l2-server
+        std::string l2_response = response_data["body"]["l2_response"];
+        int status_code = response_data["status_code"];
+
+        std::cout << "Sending response for request_id: " << request_id << ", status: " << status_code << ", response_size: " << l2_response.size() << std::endl;
+
+        proxy_bytes_sent_counter.Increment(l2_response.size());
+
+        // Build response headers
+        std::string response_headers = "HTTP/1.1 " + std::to_string(status_code) + " OK\r\nContent-Type: application/json";
         if (!traceparent_header.empty()) {
             response_headers += "\r\ntraceparent: " + traceparent_header;
         }
         response_headers += "\r\n\r\n";
 
-        mg_printf(conn, "%s%s", response_headers.c_str(), response_json.c_str());
+        mg_printf(conn, "%s%s", response_headers.c_str(), l2_response.c_str());
         
         /*
         // Build response headers including trace information
@@ -709,7 +757,7 @@ public:
         };
 
         if(!traceparent_header.empty()) {
-            response_data["body"]["traceparent"] = traceparent_header;
+            response_data["body"]["traceparent"] = traceparent_header; // TODO - headers
         }
 
         // Store response in Redis
