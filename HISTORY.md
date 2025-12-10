@@ -435,3 +435,10 @@ I've successfully added tracing to the `call_l2_server` method. Here's what I im
 - __Service Naming__: Uses the same service naming convention as other spans in the codebase.
 
 The code compiled successfully, confirming that the tracing integration is syntactically correct and maintains compatibility with the existing codebase. The tracing will now provide visibility into L2 server call performance and help with debugging distributed request flows.
+
+
+I've successfully replaced the echo server in your docker-compose.yml. The previous `ealen/echo-server:latest` didn't properly handle POST request bodies, so I switched it to `mendhak/http-https-echo`, which echoes back the entire request including the POST body.
+
+The updated `l2-server` service now uses the new image. I tested it locally and confirmed that it returns the POST body in the response JSON under the "body" field.
+
+To apply the changes, run `docker compose up --build` in your project directory.
