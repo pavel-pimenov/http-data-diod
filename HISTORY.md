@@ -27,6 +27,9 @@ HTTP DB Gateway (`/v1/sql/*`) реализован и привязан к NATS, 
 - `POST /v1/sql/oracle/query` → 200, 2 строки из Oracle (в т.ч. с bind-переменной `:id`).
 - Единичный ORA-01017 на первом сборе данных (volume был проинициализирован без env): решено полным сбросом volume `oracle-data` и пересозданием с корректными `ORACLE_PASSWORD`/`APP_USER_PASSWORD`.
 
+### Пример использования
+Добавлен `docs/http-db-gate-example.md`: схема контура (HTTP → l2-proxy → NATS → l2-worker → Oracle), таблица переменных окружения, реальные curl-команды с фактическим выводом (список баз, ping, SELECT, bind-переменная), описание кодов ошибок и логов воркера.
+
 ---
 
 # feature: проектирование HTTP DB Gateway API (Swagger/OpenAPI) — путь /v1/sql/{db}/query
