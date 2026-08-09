@@ -1,0 +1,298 @@
+openapi: 3.0.3
+info:
+  title: HTTP DB Gateway API
+  description: |
+    SQL-шлюз для выполнения read-only запросов к справочным базам данных
+    (reference dictionary) через HTTP.
+
+    Запросы исполняются синхронно, результат возвращается в JSON.
+    Поддерживается только чтение (SELECT / WITH) — модифицирующие запросы
+    отклоняются на уровне шлюза.
+
+    Каждая база данных сконфигурирована в шлюзе под собственным именем
+    (например `oracle`) и выбирается сегментом пути `{db}`.
+  version: 1.0.0
+  contact:
+    name: http-data-diod
+servers:
+  - url: http://localhost:8888
+    description: l2-proxy (локальный dev)
+tags:
+  - name: SQL Gateway
+    description: Выполнение SQL-запросов к базам данных
+paths:
+  /v1/sql:
+    get:
+      tags: [SQL Gateway]
+      summary: Список доступных баз данных
+      description: Возвращает перечень сконфигурированных баз данных и их состояние.
+      operationId: listDatabases
+      responses:
+        '200':
+          description: Список сконфигурированных баз данных
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [databases]
+                properties:
+                  databases:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, driver, enabled]
+                      properties:
+                        name:
+                          type: string
+                          description: Имя базы данных (сегмент пути `{db}`)
+                          example: oracle
+                        driver:
+                          type: string
+                          enum: [oracle]
+                          example: oracle
+                        enabled:
+                          type: boolean
+                          description: false, если база сконфигурирована, но отключена
+                          example: true
+  /v1/sql/{db}/ping:
+    get:
+      tags: [SQL Gateway]
+      summary: Проверка доступности базы данных
+      description: Выполняет быстрый запрос к базе данных для проверки соединения.
+      operationId: pingDb
+      parameters:
+        - name: db
+          in: path
+          required: true
+          description: Имя базы данных (например `oracle`)
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]{1,64}$'
+            example: oracle
+      responses:
+        '200':
+          description: База данных доступна
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db, latency_ms]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                    example: ok
+                  db:
+                    type: string
+                    example: oracle
+                  latency_ms:
+                    type: integer
+                    example: 3
+        '404':
+          description: База данных не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: База данных недоступна
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/sql/{db}/query:
+    post:
+      tags: [SQL Gateway]
+      summary: Выполнить read-only SQL запрос
+      description: |
+        Выполняет SELECT-запрос к указанной базе данных и возвращает результат.
+
+        Только read-only запросы: текст должен начинаться с `SELECT` или `WITH`
+        (с учётом пробелов/комментариев в начале). Прочие операторы отклоняются
+        с ошибкой 422.
+
+        Bind-переменные задаются в стиле Oracle (`:name`). Параметры передаются
+        как объект `params`, где ключ — имя переменной без двоеточия.
+      operationId: runQuery
+      parameters:
+        - name: db
+          in: path
+          required: true
+          description: Имя базы данных (например `oracle`)
+          schema:
+            type: string
+            pattern: '^[a-zA-Z0-9_-]{1,64}$'
+            example: oracle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Успешное выполнение запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: База данных не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Ошибка выполнения SQL (ORA-код или некорректный оператор)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: База данных недоступна (нет соединения)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: Превышен таймаут выполнения запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required: [sql]
+      properties:
+        sql:
+          type: string
+          description: |
+            Текст SQL-запроса. Допускаются только `SELECT` / `WITH`
+            (read-only). Начинается с ключевого слова после необязательных
+            пробелов и `--` / `/* */` комментариев.
+          minLength: 1
+          maxLength: 65536
+          example: SELECT code, name FROM ref_dict WHERE category = :category
+        params:
+          type: object
+          description: Именованные bind-переменные (стиль Oracle `:name`, ключ — без двоеточия)
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: integer
+                format: int64
+              - type: number
+                format: double
+              - type: boolean
+              - type: 'null'
+          example:
+            category: status
+        timeout_ms:
+          type: integer
+          description: Таймаут выполнения в миллисекундах. По умолчанию — из конфигурации шлюза.
+          minimum: 1
+          maximum: 300000
+          example: 5000
+        max_rows:
+          type: integer
+          description: Ограничение числа строк результата. По умолчанию — из конфигурации шлюза.
+          minimum: 1
+          maximum: 100000
+          example: 1000
+    QueryResponse:
+      type: object
+      required: [status, db, columns, rows, row_count, duration_ms]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+        db:
+          type: string
+          description: Имя базы данных, к которой был выполнен запрос
+          example: oracle
+        columns:
+          type: array
+          description: Метаданные колонок результата в порядке выборки
+          items:
+            $ref: '#/components/schemas/ColumnMeta'
+        rows:
+          type: array
+          description: |
+            Строки результата. Каждая строка — массив значений в порядке,
+            соответствующем `columns`. Числа передаются как числа JSON,
+            NULL — как `null`, даты — как строки.
+          items:
+            type: array
+            items: {}
+        row_count:
+          type: integer
+          description: Число возвращённых строк (до применения max_rows)
+          example: 2
+        truncated:
+          type: boolean
+          description: true, если результат обрезан ограничением max_rows
+          example: false
+        duration_ms:
+          type: integer
+          description: Время выполнения запроса в миллисекундах
+          example: 4
+    ColumnMeta:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          description: Имя колонки
+          example: CODE
+        type:
+          type: string
+          description: Тип данных Oracle (VARCHAR2, NUMBER, DATE, CLOB, ...)
+          example: VARCHAR2
+        nullable:
+          type: boolean
+          description: Признак допустимости NULL
+          example: false
+    ErrorResponse:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          type: string
+          enum: [error]
+          example: error
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: "Код ошибки: ORA-XXXXX, HTTP-код или внутренний код шлюза"
+              example: "ORA-00942"
+            message:
+              type: string
+              description: Человекочитаемое описание ошибки
+              example: "ORA-00942: table or view does not exist"
+            detail:
+              type: object
+              description: Дополнительный контекст (имя БД, смещение ошибки и т.п.)
+              additionalProperties: true
+  responses:
+    BadRequest:
+      description: Некорректный запрос (битый JSON, отсутствует `sql`, пустой путь)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Превышен лимит частоты запросов
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

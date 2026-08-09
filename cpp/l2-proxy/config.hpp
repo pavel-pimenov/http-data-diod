@@ -7,6 +7,23 @@
 
 struct NatsConfig;
 
+// Connection settings of a single named database exposed by the HTTP DB
+// Gateway (endpoint /v1/sql/{db}/query). Multiple databases are supported by
+// the routing layer; config currently populates the built-in "oracle" one.
+struct DbConfig {
+  std::string m_name;
+  std::string m_driver; // "oracle"
+  std::string m_host;
+  int m_port = 1521;
+  std::string m_service;
+  std::string m_user;
+  std::string m_password;
+  int m_pool_min = 1;
+  int m_pool_max = 5;
+  int m_query_timeout_ms = 5000;
+  int m_max_rows = 1000;
+};
+
 class Config {
 public:
   // ========================================================================
@@ -32,11 +49,15 @@ public:
   std::string m_nats_tls_cert_file;
   std::string m_nats_tls_key_file;
   std::string m_nats_tls_ca_cert_file;
+  std::string m_db_query_nats_subject;
+  std::string m_db_query_nats_queue_group;
 
   // ========================================================================
   // Group 2: std::vector fields (24 bytes each on libstdc++)
   // ========================================================================
   std::vector<std::string> m_l2_server_urls;
+  // Databases exposed through the HTTP DB Gateway (/v1/sql/{db}/...).
+  std::vector<DbConfig> m_databases;
 
   // ========================================================================
   // Group 3: double (8 bytes)
@@ -75,6 +96,14 @@ public:
   int m_duplicate_detection_ttl_ms;
   int m_nats_port;
   int m_nats_timeout_ms;
+  // DB Gateway NATS request timeout (how long the proxy waits for a worker
+  // reply) in ms.
+  int m_db_query_nats_timeout_ms;
+  // Default statement execution timeout in ms applied to every DB query unless
+  // the request overrides it.
+  int m_db_query_default_timeout_ms;
+  // Default row limit applied to every DB query unless the request overrides it.
+  int m_db_query_default_max_rows;
   // Test-only: random response delay in ms on the l2-server (0 = disabled).
   // Used to desynchronize response order from request order for the
   // response-to-request correlation test.
@@ -91,6 +120,9 @@ public:
   bool m_nats_enable_tls;
   bool m_dedup_enabled;
   bool m_duplicate_detection_enabled;
+  // Master switch of the HTTP DB Gateway (DB_QUERY_ENABLED). When false the
+  // /v1/sql/** endpoints answer 404 and the worker skips the DB subscription.
+  bool m_db_query_enabled;
   // When true the proxy rejects (HTTP 409) a POST whose body hash was already
   // seen within the detector TTL instead of forwarding it to the worker.
   // Off by default: only counting/logging happens (see /debug/duplicates).
@@ -133,6 +165,7 @@ private:
   void load_server_timeout_config();
   void load_feature_config();
   void load_nats_config();
+  void load_db_query_config();
 
   // True only for modes that talk to NATS (proxy/worker); l2-server does not.
   [[nodiscard]] bool uses_nats() const {

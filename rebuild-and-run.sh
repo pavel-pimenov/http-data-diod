@@ -117,6 +117,9 @@ export DOCKER_BUILDKIT=1
 if [ "$ENABLE_ASAN" = true ]; then
     export ENABLE_ASAN=true
     export L2_PROXY_DOCKER_TARGET=runtime-asan
+    # The worker keeps the DB gateway (Instant Client) even under ASan: the
+    # runtime-db stage layers on top of the same sanitized binary.
+    export L2_WORKER_DOCKER_TARGET=runtime-db
     # ASan+LSan roughly triples RSS, so raise the per-container
     # memory limits above the release-mode defaults (1g each). Override via
     # the same env vars if the host has less/more RAM to spare.
@@ -138,6 +141,8 @@ else
     # set to false (not unset): the `set -u` above trips on unbound vars
     export ENABLE_ASAN=false
     export L2_PROXY_DOCKER_TARGET=runtime
+    # The l2-worker image gets the Oracle Instant Client for the DB gateway.
+    export L2_WORKER_DOCKER_TARGET=runtime-db
     echo "Building Docker images (RelWithDebInfo, optimized, no sanitizers)..."
 fi
 

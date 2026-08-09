@@ -40,6 +40,21 @@ struct NatsReply {
   NatsHeaders m_headers;
 };
 
+using NatsMessageCallback =
+    std::function<void(const std::string &, const std::string &,
+                       const std::string &)>;
+
+// One active subscription. The callback is kept in a shared_ptr that is itself
+// heap-allocated: the C NATS delivery handler receives a pointer to that
+// shared_ptr (address stays stable across vector reallocations) and copies it
+// while a message is being processed, so the callback object outlives both the
+// subscription teardown and any in-flight delivery.
+struct NatsSubscription {
+  natsSubscription *m_sub = nullptr;
+  std::unique_ptr<std::shared_ptr<NatsMessageCallback>> m_callback;
+  std::string m_subject;
+};
+
 // NATS client for request/response messaging pattern
 class NatsClient : public IConnectableClient {
 public:
@@ -80,19 +95,15 @@ public:
 
   // Subscribe to subject with callback
   // Callback arguments: subject, data, reply_to
-  bool subscribe(const std::string &subject,
-                 std::function<void(const std::string &, const std::string &,
-                                    const std::string &)>
-                     callback,
+  bool subscribe(const std::string &subject, NatsMessageCallback callback,
                  const std::string &queue_group = "");
 
   // Subscribe with queue group for load balancing
-  bool
-  subscribe_queue(const std::string &subject, const std::string &queue_group,
-                  std::function<void(const std::string &, const std::string &,
-                                     const std::string &)>
-                      callback);
+  bool subscribe_queue(const std::string &subject,
+                       const std::string &queue_group,
+                       NatsMessageCallback callback);
 
+  // Unsubscribes (and destroys) all active subscriptions.
   void unsubscribe();
 
   // Drain subscription and connection — waits for in-flight messages
@@ -127,19 +138,13 @@ private:
 
   natsConnection *m_conn;
   natsOptions *m_opts;
-  natsSubscription *m_sub;
-  std::function<void(const std::string &, const std::string &,
-                     const std::string &)>
-      m_message_callback;
+  std::vector<NatsSubscription> m_subscriptions;
 
   std::atomic<bool> m_connected;
   std::atomic<bool> m_shutdown{false};
   std::mutex m_conn_mutex;
   mutable std::mutex m_error_mutex;
   std::string m_last_error;
-  bool m_subscription_active;
-  std::string m_subscription_subject;
-  std::string m_subscription_queue_group;
 
   bool setup_options();
   // Teardown helpers — caller must hold m_conn_mutex

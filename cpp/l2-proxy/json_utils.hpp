@@ -44,6 +44,47 @@ inline constexpr const char *kBodyContentType = "content_type";
 inline constexpr const char *kBodyTraceparent = "traceparent";
 } // namespace NatsResponseContract
 
+// JSON keys of the proxy<->worker contract of the HTTP DB Gateway. A query
+// request is published by the proxy on the DB subject; the worker executes it
+// against a database and replies with a NatsResponseContract-style envelope
+// carrying the DB gateway JSON body (kDbStatus/kDbBody).
+namespace DbQueryContract {
+inline constexpr const char *kType = "type";
+inline constexpr const char *kTypeQuery = "query";
+inline constexpr const char *kTypePing = "ping";
+inline constexpr const char *kRequestId = "request_id";
+inline constexpr const char *kDb = "db";
+inline constexpr const char *kSql = "sql";
+inline constexpr const char *kParams = "params";
+inline constexpr const char *kTimeoutMs = "timeout_ms";
+inline constexpr const char *kMaxRows = "max_rows";
+// Worker->proxy envelope: kStatus is the HTTP status of the DB gateway
+// response, kBody is its JSON body (or an ErrorResponse object).
+inline constexpr const char *kStatus = "status";
+inline constexpr const char *kBody = "body";
+} // namespace DbQueryContract
+
+// JSON keys of the DB Gateway HTTP response body (documented in
+// docs/openapi/http-db-gate.yaml).
+namespace DbResponseContract {
+inline constexpr const char *kStatus = "status";
+inline constexpr const char *kStatusOk = "ok";
+inline constexpr const char *kStatusError = "error";
+inline constexpr const char *kDb = "db";
+inline constexpr const char *kLatencyMs = "latency_ms";
+inline constexpr const char *kColumns = "columns";
+inline constexpr const char *kName = "name";
+inline constexpr const char *kType = "type";
+inline constexpr const char *kRows = "rows";
+inline constexpr const char *kRowCount = "row_count";
+inline constexpr const char *kTruncated = "truncated";
+inline constexpr const char *kDurationMs = "duration_ms";
+inline constexpr const char *kError = "error";
+inline constexpr const char *kCode = "code";
+inline constexpr const char *kMessage = "message";
+inline constexpr const char *kDetail = "detail";
+} // namespace DbResponseContract
+
 class JsonUtils {
 public:
   static std::expected<json, std::string> try_parse(const std::string &s) {

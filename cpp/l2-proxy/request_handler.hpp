@@ -102,6 +102,16 @@ public:
   ~RequestHandler();
   void handle_get(const httplib::Request &req, httplib::Response &res);
   void handle_post(const httplib::Request &req, httplib::Response &res);
+
+private:
+  // HTTP DB Gateway: routes /v1/sql/** (list/ping/query) to the worker over
+  // NATS and maps the worker reply envelope back to an HTTP response.
+  void handle_db_gateway(const httplib::Request &req, httplib::Response &res,
+                         const std::string &method,
+                         const std::string &body);
+  // Sends a validated DbQueryContract request to the DB subject and applies
+  // the worker's {status, body} envelope to the HTTP response.
+  void route_db_request(httplib::Response &res, const json &request);
 };
 
 #endif // REQUEST_HANDLER_HPP

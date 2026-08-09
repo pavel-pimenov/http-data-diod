@@ -39,7 +39,10 @@ Config::Config()
       m_nats_username(""), m_nats_password(""), m_nats_token(""),
       m_nats_credentials_file(""), m_nats_tls_cert_file(""),
       m_nats_tls_key_file(""), m_nats_tls_ca_cert_file(""),
-      m_l2_server_urls({"http://l2-server:8088"}), m_tracing_sample_rate(1.0),
+      m_db_query_nats_subject("service.db.query"),
+      m_db_query_nats_queue_group("db_workers"),
+      m_l2_server_urls({"http://l2-server:8088"}), m_databases(),
+      m_tracing_sample_rate(1.0),
       m_tracing_batch_size(50), m_request_timeout_seconds(30),
       m_http_timeout_seconds(10), m_proxy_port(8888), m_l2_server_port(8088),
       m_http_pool_size(400), m_http_pool_idle_timeout_seconds(300),
@@ -54,6 +57,8 @@ Config::Config()
       m_duplicate_detection_ttl_ms(60000),
 
       m_nats_port(4222), m_nats_timeout_ms(30000), m_test_response_delay_ms(0),
+      m_db_query_nats_timeout_ms(30000),
+      m_db_query_default_timeout_ms(5000), m_db_query_default_max_rows(1000),
       m_enable_tracing(false),
       m_enable_ssl_server_certificate_verification(false),
       m_enable_ssl_server_hostname_verification(false),
@@ -61,6 +66,7 @@ Config::Config()
 
       m_nats_enable_tls(false), m_dedup_enabled(false),
       m_duplicate_detection_enabled(true), m_duplicate_reject_enabled(false),
+      m_db_query_enabled(false),
       m_crash_test(false), m_enable_crash_test_endpoint(false),
       m_health_ready_allow_connect(false) {}
 
@@ -70,6 +76,7 @@ void Config::load_from_env() {
   load_feature_config();
   if (uses_nats()) {
     load_nats_config();
+    load_db_query_config();
   }
   m_crash_test = get_env_bool("CRASH_TEST", false);
   m_enable_crash_test_endpoint =
@@ -245,6 +252,43 @@ void Config::load_nats_config() {
   Logger::info("NATS subject: {}", m_nats_subject);
   Logger::info("NATS queue group: {}", m_nats_queue_group);
   Logger::info("NATS timeout: {}ms", m_nats_timeout_ms);
+}
+
+void Config::load_db_query_config() {
+  m_db_query_enabled = get_env_bool("DB_QUERY_ENABLED", false);
+  m_db_query_nats_subject =
+      get_env_string("DB_QUERY_NATS_SUBJECT", "service.db.query");
+  m_db_query_nats_queue_group =
+      get_env_string("DB_QUERY_NATS_QUEUE_GROUP", "db_workers");
+  m_db_query_nats_timeout_ms = get_env_int("DB_QUERY_NATS_TIMEOUT_MS", 30000);
+  m_db_query_default_timeout_ms =
+      get_env_int("DB_QUERY_DEFAULT_TIMEOUT_MS", 5000);
+  m_db_query_default_max_rows =
+      get_env_int("DB_QUERY_DEFAULT_MAX_ROWS", 1000);
+  if (!m_db_query_enabled) {
+    return;
+  }
+  if (!get_env_bool("DB_ORACLE_ENABLED", false)) {
+    Logger::warn("DB_QUERY_ENABLED=true but DB_ORACLE_ENABLED=false: no "
+                 "databases configured");
+    return;
+  }
+  DbConfig db;
+  db.m_name = "oracle";
+  db.m_driver = "oracle";
+  db.m_host = get_env_string("DB_ORACLE_HOST", "oracle");
+  db.m_port = get_env_int("DB_ORACLE_PORT", 1521);
+  db.m_service = get_env_string("DB_ORACLE_SERVICE", "XEPDB1");
+  db.m_user = get_env_string("DB_ORACLE_USER", "");
+  db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
+  db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
+  db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
+  db.m_query_timeout_ms = m_db_query_default_timeout_ms;
+  db.m_max_rows = m_db_query_default_max_rows;
+  m_databases.push_back(db);
+  Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
+               "service={})",
+               db.m_name, db.m_driver, db.m_host, db.m_port, db.m_service);
 }
 
 bool Config::get_env_bool(const std::string &env_name, bool default_val) {
@@ -471,6 +515,35 @@ bool Config::validate(bool log_issues) const {
             "NATS_TLS_CA_CERT_FILE is required when NATS_ENABLE_TLS=true");
       check(m_nats_tls_cert_file.empty() == m_nats_tls_key_file.empty(),
             "NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together");
+    }
+
+    // DB Gateway
+    if (m_db_query_enabled) {
+      check(!m_db_query_nats_subject.empty(),
+            "DB_QUERY_NATS_SUBJECT cannot be empty");
+      check(positive(m_db_query_nats_timeout_ms),
+            std::format("Invalid DB_QUERY_NATS_TIMEOUT_MS: {} (must be > 0)",
+                        m_db_query_nats_timeout_ms));
+      check(positive(m_db_query_default_timeout_ms),
+            std::format("Invalid DB_QUERY_DEFAULT_TIMEOUT_MS: {} (must be > 0)",
+                        m_db_query_default_timeout_ms));
+      check(positive(m_db_query_default_max_rows),
+            std::format("Invalid DB_QUERY_DEFAULT_MAX_ROWS: {} (must be > 0)",
+                        m_db_query_default_max_rows));
+      for (const auto &db : m_databases) {
+        check(!db.m_host.empty(),
+              std::format("DB '{}': host cannot be empty", db.m_name));
+        check(in_range(db.m_port, 1, 65535),
+              std::format("DB '{}': invalid port {} (must be 1-65535)",
+                          db.m_name, db.m_port));
+        check(!db.m_service.empty(),
+              std::format("DB '{}': service cannot be empty", db.m_name));
+        check(!db.m_user.empty(),
+              std::format("DB '{}': user cannot be empty", db.m_name));
+        check(db.m_pool_min >= 1 && db.m_pool_max >= db.m_pool_min,
+              std::format("DB '{}': invalid pool (min={} max={})", db.m_name,
+                          db.m_pool_min, db.m_pool_max));
+      }
     }
   }
 

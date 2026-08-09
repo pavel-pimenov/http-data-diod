@@ -1,5 +1,6 @@
 #include "request_handler.hpp"
 #include "common_utils.hpp"
+#include "db_query_utils.hpp"
 #include "duplicate_detector.hpp"
 #include "exceptions.hpp"
 #include "httplib/httplib.h"
@@ -35,6 +36,17 @@ struct ActiveClientTracker {
     }
   }
 };
+
+// URL prefix of the HTTP DB Gateway endpoints (docs/openapi/http-db-gate.yaml).
+inline constexpr const char *kDbGatewayPath = "/v1/sql";
+
+// Maps an unknown-db error into a ready-to-send HTTP response.
+void send_db_error(httplib::Response &res, int status, const std::string &code,
+                   const std::string &message) {
+  res.status = status;
+  res.set_content(make_db_error_body(status, code, message).dump(),
+                  "application/json");
+}
 
 RequestHandler::RequestHandler(AppContext &ctx, StatsLogger *stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
@@ -141,6 +153,11 @@ void RequestHandler::handle_get(const httplib::Request &req,
     return;
   }
 
+  if (req.path.starts_with(kDbGatewayPath)) {
+    handle_db_gateway(req, res, "GET", "");
+    return;
+  }
+
   handle_request(req, res, "GET", "");
 }
 
@@ -159,6 +176,11 @@ void RequestHandler::handle_post(const httplib::Request &req,
   if (!body.empty() && !nlohmann::json::accept(body)) {
     fail_request(res, 400, "Invalid JSON in request body",
                  &m_ctx.m_proxy.m_metrics->m_client_errors);
+    return;
+  }
+
+  if (req.path.starts_with(kDbGatewayPath)) {
+    handle_db_gateway(req, res, "POST", body);
     return;
   }
 
@@ -529,4 +551,139 @@ void RequestHandler::handle_request(const httplib::Request &req,
 
   // Phase 2: Process request (push to backend, poll, cache)
   process_request(method, path, body, req, res, client_ip);
+}
+
+void RequestHandler::handle_db_gateway(const httplib::Request &req,
+                                       httplib::Response &res,
+                                       const std::string &method,
+                                       const std::string &body) {
+  if (!m_ctx.m_config.m_db_query_enabled) {
+    send_db_error(res, 404, "NOT_FOUND", "DB gateway is disabled");
+    return;
+  }
+
+  std::string path_rest = req.path.substr(std::string(kDbGatewayPath).size());
+  while (!path_rest.empty() && path_rest.front() == '/') {
+    path_rest.erase(0, 1);
+  }
+  while (!path_rest.empty() && path_rest.back() == '/') {
+    path_rest.pop_back();
+  }
+
+  if (path_rest.empty()) {
+    if (method != "GET") {
+      send_db_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET");
+      return;
+    }
+    json names = json::array();
+    for (const DbConfig &db : m_ctx.m_config.m_databases) {
+      names.push_back(json{{"name", db.m_name},
+                           {"driver", db.m_driver},
+                           {"enabled", true}});
+    }
+    res.status = 200;
+    res.set_content(json{{"databases", names}}.dump(), "application/json");
+    return;
+  }
+
+  const size_t slash = path_rest.find('/');
+  const std::string db_name = path_rest.substr(0, slash);
+  const std::string action =
+      slash == std::string::npos ? "" : path_rest.substr(slash + 1);
+  if (db_name.empty() || action.empty() ||
+      action.find('/') != std::string::npos) {
+    send_db_error(res, 404, "NOT_FOUND", "Unknown DB gateway path");
+    return;
+  }
+
+  const bool known_db = std::ranges::any_of(
+      m_ctx.m_config.m_databases,
+      [&db_name](const DbConfig &db) { return db.m_name == db_name; });
+  if (!known_db) {
+    send_db_error(res, 404, "UNKNOWN_DATABASE",
+                  std::format("Unknown database '{}'", db_name));
+    return;
+  }
+
+  if (action == "query" && method == "POST") {
+    const auto parsed_body = JsonUtils::try_parse(body);
+    if (!parsed_body) {
+      send_db_error(res, 400, "BAD_REQUEST", "Invalid JSON body");
+      return;
+    }
+    json request{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                 {DbQueryContract::kRequestId,
+                  m_id_generator.generate_uuid()},
+                 {DbQueryContract::kDb, db_name},
+                 {DbQueryContract::kSql,
+                  JsonUtils::safe_get_string(*parsed_body,
+                                             DbQueryContract::kSql)}};
+    if (parsed_body->contains(DbQueryContract::kParams)) {
+      request[DbQueryContract::kParams] = (*parsed_body)[DbQueryContract::kParams];
+    }
+    if (parsed_body->contains(DbQueryContract::kTimeoutMs)) {
+      request[DbQueryContract::kTimeoutMs] =
+          (*parsed_body)[DbQueryContract::kTimeoutMs];
+    }
+    if (parsed_body->contains(DbQueryContract::kMaxRows)) {
+      request[DbQueryContract::kMaxRows] =
+          (*parsed_body)[DbQueryContract::kMaxRows];
+    }
+    const auto validated = parse_db_query_request(request);
+    if (!validated) {
+      send_db_error(res, 400, "BAD_REQUEST", validated.error());
+      return;
+    }
+    route_db_request(res, request);
+    return;
+  }
+
+  if (action == "ping" && method == "GET") {
+    json request{{DbQueryContract::kType, DbQueryContract::kTypePing},
+                 {DbQueryContract::kRequestId,
+                  m_id_generator.generate_uuid()},
+                 {DbQueryContract::kDb, db_name}};
+    route_db_request(res, request);
+    return;
+  }
+
+  send_db_error(res, 404, "NOT_FOUND",
+                std::format("Unsupported DB gateway action '{}' for {}",
+                            action, method));
+}
+
+void RequestHandler::route_db_request(httplib::Response &res,
+                                      const json &request) {
+  if (!m_ctx.m_nats_client) {
+    send_db_error(res, 503, "DB_UNAVAILABLE", "NATS client is not available");
+    return;
+  }
+  const std::string request_json = request.dump();
+  const auto reply = m_ctx.m_nats_client->request(
+      m_ctx.m_config.m_db_query_nats_subject, request_json,
+      m_ctx.m_config.m_db_query_nats_timeout_ms);
+  if (!reply) {
+    if (!m_ctx.m_nats_client->is_connected()) {
+      send_db_error(res, 503, "DB_UNAVAILABLE",
+                    "NATS connection is not available");
+    } else {
+      send_db_error(res, 504, "TIMEOUT",
+                    "DB worker did not respond in time");
+    }
+    return;
+  }
+  const auto envelope = JsonUtils::try_parse(*reply);
+  if (!envelope || !envelope->is_object()) {
+    send_db_error(res, 502, "BAD_GATEWAY",
+                  "Invalid response envelope from DB worker");
+    return;
+  }
+  const int status =
+      JsonUtils::safe_get_int(*envelope, DbQueryContract::kStatus, 502);
+  json response_body = json::object();
+  if (envelope->contains(DbQueryContract::kBody)) {
+    response_body = (*envelope)[DbQueryContract::kBody];
+  }
+  res.status = status;
+  res.set_content(response_body.dump(), "application/json");
 }

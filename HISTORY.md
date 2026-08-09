@@ -1,3 +1,60 @@
+# feature: Oracle XE 21c в стеке — рабочий DB Gateway через NATS
+
+## Date: 2026-08-09
+
+### Контекст
+HTTP DB Gateway (`/v1/sql/*`) реализован и привязан к NATS, но до сих пор не было настоящей БД: в рантайм-образе l2-worker не было Oracle Instant Client, а конфиг по умолчанию выключен (`DB_QUERY_ENABLED=false`). Нужно поднять полноценный контур «Oracle → l2-worker (ODPI-C pool) → NATS → l2-proxy → HTTP».
+
+### Что сделано
+- **`docker-compose.yml`**:
+  - Новый сервис `oracle` (`gvenzl/oracle-xe:21.3.0-slim`), порт `1521:1521`, env `ORACLE_PASSWORD`/`APP_USER`/`APP_USER_PASSWORD`/`ORACLE_CHARACTERSET`, healthcheck через `/opt/oracle/healthcheck.sh`, volume `oracle-data`, монтирование `./sql/init` в `/docker-entrypoint-initdb.d` (init-скрипты gvenzl запускает как SYS в CDB$ROOT — скрипт сам делает `ALTER SESSION SET CONTAINER = XEPDB1`).
+  - l2-worker собирается в `target: ${L2_WORKER_DOCKER_TARGET:-runtime-db}` (отдельная переменная от l2-proxy).
+  - l2-proxy и l2-worker получили все `DB_QUERY_*`/`DB_ORACLE_*` env (по умолчанию `DB_QUERY_ENABLED=true`, host `oracle`, service `XEPDB1`, user `app_user`).
+- **`cpp/l2-proxy/Dockerfile`**:
+  - Новый stage `oracle-client` (FROM ubuntu-base): `unzip` + загрузка Oracle Instant Client 21.13 basic (`download.oracle.com/otn_software/linux/instantclient/2113000/...`, логин не нужен, ~83 МБ). apt-get update и curl с ретраями — сеть buildkit бывает нестабильна (DNS отдаёт только IPv6).
+  - Новый stage `runtime-db` (FROM runtime-base): копирует клиент в `/opt/oracle`, ставит `libaio1t64`/`libnsl2`, регистрирует каталог в `/etc/ld.so.conf.d` + `ldconfig`. Встроенный ODPI-C находит `libclntsh.so` через dlopen.
+  - Ubuntu t64-transition кладёт `libaio` только как `libaio.so.1t64`, а `libclntsh.so` линкуется на SONAME `libaio.so.1` → в stage добавлен ABI-совместимый compat-symlink `libaio.so.1 -> libaio.so.1t64` (без него: DPI-1047).
+  - Обычный `runtime` образ Instant Client не содержит (~280 МБ unpacked экономия).
+- **`l2_worker_nats.cpp`**: DB-шлюз отделён от основного контура — инициализация пула и подписка `service.db.query` ретраятся независимо и **не рвут** рабочую подписку воркера (первый старт Oracle занимает минуты; иначе 504 на фоне холодного старта). Исправлены ошибки сборки в незакоммиченной ветке DB Gateway (`nats_client.cpp` — разыменование `shared_ptr` колбэка, `db_query_executor.cpp` — конфликт `steady_ms` в unity-батче, типы `dpiStmt_fetch`/`dpiLob_readBytes`).
+- **`sql/init/init.sql`**: демо-таблица `app_user.demo_messages` (id/message/created_at) + 2 строки.
+- **`rebuild-and-run.sh`**: `L2_WORKER_DOCKER_TARGET=runtime-db` в обоих режимах (release и ASan).
+
+### Проверка
+- `./rebuild-and-run.sh` (два полных цикла) → сборка и все health-checks зелёные, включая `oracle`.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — passed, в т.ч. пока Oracle ещё поднимается (ретрай DB-подписки не роняет основной контур).
+- `GET /v1/sql` → список баз: `oracle`.
+- `GET /v1/sql/oracle/ping` → `{"db":"oracle","latency_ms":496,"status":"ok"}`.
+- `POST /v1/sql/oracle/query` → 200, 2 строки из Oracle (в т.ч. с bind-переменной `:id`).
+- Единичный ORA-01017 на первом сборе данных (volume был проинициализирован без env): решено полным сбросом volume `oracle-data` и пересозданием с корректными `ORACLE_PASSWORD`/`APP_USER_PASSWORD`.
+
+---
+
+# feature: проектирование HTTP DB Gateway API (Swagger/OpenAPI) — путь /v1/sql/{db}/query
+
+## Date: 2026-08-09
+
+### Контекст
+Добавляем в l2-proxy возможность выполнять read-only SQL-запросы к справочным базам данных (reference dictionary) через HTTP. По решению: путь `/v1/sql/{db}/query`, имя БД выносится в сегмент пути, т.к. баз может быть несколько.
+
+### Что сделано
+- Создан `docs/openapi/http-db-gate.yaml` (OpenAPI 3.0.3) с тремя эндпоинтами:
+  - `GET /v1/sql` — список сконфигурированных баз данных;
+  - `GET /v1/sql/{db}/ping` — проверка доступности БД;
+  - `POST /v1/sql/{db}/query` — выполнение read-only SELECT/WITH с именованными bind-переменными (`:name`), опциями `timeout_ms`/`max_rows`.
+- Контракт ответа: `{status, db, columns[], rows[][], row_count, truncated, duration_ms}`; ошибки — `{status: "error", error: {code, message, detail}}` с HTTP 400/404/422/429/503/504.
+- Спека провалидирована (PyYAML): корректный YAML, все 13 `$ref` резолвятся в `#/components`.
+
+### Решения по контракту
+- Только read-only: текст запроса должен начинаться с `SELECT`/`WITH` (с учётом комментариев/пробелов в начале), иначе 422.
+- Строки результата — массивы значений, метаданные колонок отдельно в `columns` (компактно для больших выборок).
+- Bind-переменные — именованные в стиле Oracle; типы значений: string/int/double/bool/null.
+
+### Verification
+- `python3 -c` валидация спеки через PyYAML: passed.
+- Реализация C++ и сборка — следующий шаг (см. HISTORY после реализации).
+
+---
+
 # ASan-стресс: 902k запросов, 0 фейлов — проблема была в mem_limit 2g, а не в коде
 
 ## Date: 2026-08-07

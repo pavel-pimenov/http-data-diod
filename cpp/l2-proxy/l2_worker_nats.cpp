@@ -1,4 +1,5 @@
 #include "common_utils.hpp"
+#include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "logger.hpp"
@@ -19,8 +20,13 @@ void L2Worker::run_with_nats() {
                m_ctx.m_config.m_nats_subject,
                m_ctx.m_config.m_nats_queue_group);
 
+  if (m_ctx.m_config.m_db_query_enabled) {
+    m_db_query_handler = std::make_unique<DbQueryHandler>();
+  }
+
   RetryHandler backoff(1, 150);
   bool subscription_active = false;
+  bool db_subscription_active = false;
   bool was_connected = m_nats_client && m_nats_client->is_connected();
 
   auto subscribe_worker = [this]() -> bool {
@@ -64,6 +70,40 @@ void L2Worker::run_with_nats() {
     return true;
   };
 
+  auto subscribe_db = [this]() -> bool {
+    if (!m_db_query_handler || !m_db_query_handler->is_enabled()) {
+      return true;
+    }
+    const bool subscribed = m_nats_client->subscribe_queue(
+        m_ctx.m_config.m_db_query_nats_subject,
+        m_ctx.m_config.m_db_query_nats_queue_group,
+        [this](const std::string &subject, const std::string &data,
+               const std::string &reply_to) {
+          (void)subject;
+          if (reply_to.empty()) {
+            Logger::error("Invalid DB query request: missing reply subject");
+            return;
+          }
+          try {
+            m_thread_pool->enqueue([this, data, reply_to]() {
+              process_db_query_from_nats(data, reply_to);
+            });
+          } catch (const std::exception &e) {
+            Logger::error("Failed to enqueue DB query (reply_to={}): {}",
+                          reply_to, e.what());
+          }
+        });
+    if (!subscribed) {
+      Logger::error("Failed to subscribe worker to DB NATS subject: {}",
+                    m_ctx.m_config.m_db_query_nats_subject);
+      return false;
+    }
+    Logger::info("Worker subscribed to DB NATS subject: {} (queue group {})",
+                 m_ctx.m_config.m_db_query_nats_subject,
+                 m_ctx.m_config.m_db_query_nats_queue_group);
+    return true;
+  };
+
   while (!g_shutdown_flag) {
     const bool is_connected = m_nats_client && m_nats_client->is_connected();
 
@@ -71,6 +111,7 @@ void L2Worker::run_with_nats() {
       Logger::info("Worker detected restored NATS connection, forcing "
                    "subscription refresh");
       subscription_active = false;
+      db_subscription_active = false;
       if (m_nats_client) {
         m_nats_client->unsubscribe();
       }
@@ -110,8 +151,31 @@ void L2Worker::run_with_nats() {
       }
     }
 
+    // The DB gateway is independent from the worker path: Oracle may be
+    // cold-starting for minutes, so its retries must never tear down the
+    // worker subscription (that would drop the main HTTP flow).
+    if (m_nats_client && m_nats_client->is_connected() &&
+        subscription_active && !db_subscription_active) {
+      if (!m_db_query_handler) {
+        db_subscription_active = true;
+      } else if (!m_db_query_handler->is_enabled() &&
+                 !m_db_query_handler->init(m_ctx.m_config.m_databases)) {
+        Logger::warn("DB gateway is not ready yet (Oracle unavailable?), "
+                     "will retry");
+        backoff.record_failure();
+      } else if (!subscribe_db()) {
+        Logger::warn("DB subscription failed, will retry in {}ms",
+                     backoff.get_current_delay_ms());
+        backoff.record_failure();
+      } else {
+        db_subscription_active = true;
+        backoff.record_success();
+      }
+    }
+
     if (m_nats_client && !m_nats_client->is_connected()) {
       subscription_active = false;
+      db_subscription_active = false;
     }
 
     {
@@ -340,4 +404,34 @@ void L2Worker::send_nats_response_impl(const std::string &reply_to,
 
   Logger::error("NATS response delivery failed after {} attempts to: {}",
                 max_retries, reply_to);
+}
+
+void L2Worker::process_db_query_from_nats(const std::string &request_json,
+                                          const std::string &reply_to) {
+  int status = 500;
+  json body;
+  try {
+    const auto parsed = JsonUtils::try_parse(request_json);
+    if (!parsed) {
+      status = 400;
+      body = make_db_error_body(status, "BAD_REQUEST", "Invalid JSON body");
+    } else if (!m_db_query_handler) {
+      status = 503;
+      body = make_db_error_body(status, "DB_UNAVAILABLE",
+                                "DB gateway is not initialized");
+    } else {
+      m_db_query_handler->handle_request(*parsed, status, body);
+    }
+  } catch (const std::exception &e) {
+    Logger::error("Error processing DB query (reply_to={}): {}", reply_to,
+                  e.what());
+    status = 500;
+    body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
+  }
+
+  json envelope{{DbQueryContract::kStatus, status},
+                {DbQueryContract::kBody, body}};
+  send_nats_response(reply_to, envelope.dump());
+  m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
+      static_cast<double>(envelope.dump().size()));
 }

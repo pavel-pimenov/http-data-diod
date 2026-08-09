@@ -16,20 +16,26 @@ std::string nats_status_text(natsStatus status) {
 }
 
 // Delivery callback shared by Subscribe/QueueSubscribe: forwards the message
-// to the stored std::function callback and destroys the message.
+// to the stored std::function callback and destroys the message. The closure is
+// a pointer to the shared_ptr stored in NatsSubscription; a local copy is taken
+// so the callback object stays alive for the duration of this call even if the
+// subscription is being torn down concurrently.
 void nats_message_callback(natsConnection *nc, natsSubscription *sub,
                            natsMsg *msg, void *closure) {
   (void)nc;
   (void)sub;
-  auto *cb =
-      static_cast<std::function<void(const std::string &, const std::string &,
-                                     const std::string &)> *>(closure);
-  if (cb && msg) {
-    const char *data = natsMsg_GetData(msg);
-    const int len = natsMsg_GetDataLength(msg);
-    const char *subject = natsMsg_GetSubject(msg);
-    const char *reply = natsMsg_GetReply(msg);
-    (*cb)(subject ? subject : "", std::string(data, len), reply ? reply : "");
+  auto *callback_holder =
+      static_cast<std::shared_ptr<NatsMessageCallback> *>(closure);
+  if (callback_holder) {
+    const NatsMessageCallback callback = **callback_holder;
+    if (callback && msg) {
+      const char *data = natsMsg_GetData(msg);
+      const int len = natsMsg_GetDataLength(msg);
+      const char *subject = natsMsg_GetSubject(msg);
+      const char *reply = natsMsg_GetReply(msg);
+      callback(subject ? subject : "", std::string(data, len),
+               reply ? reply : "");
+    }
   }
   natsMsg_Destroy(msg);
 }
@@ -43,8 +49,7 @@ NatsClient::NatsClient(const NatsConfig &cfg)
       m_enable_tls(cfg.m_enable_tls), m_tls_cert_file(cfg.m_tls_cert_file),
       m_tls_key_file(cfg.m_tls_key_file),
       m_tls_ca_cert_file(cfg.m_tls_ca_cert_file), m_conn(nullptr),
-      m_opts(nullptr), m_sub(nullptr), m_connected(false),
-      m_subscription_active(false) {
+      m_opts(nullptr), m_connected(false) {
   std::string auth_info;
   if (!m_username.empty())
     auth_info += " username=" + m_username;
@@ -313,22 +318,32 @@ void NatsClient::disconnect() {
 }
 
 void NatsClient::drain_subscription_locked(bool log_success) {
-  if (m_sub) {
-    const natsStatus s = natsSubscription_Drain(m_sub);
+  for (auto &subscription : m_subscriptions) {
+    if (!subscription.m_sub) {
+      continue;
+    }
+    const natsStatus s = natsSubscription_Drain(subscription.m_sub);
     if (s != NATS_OK) {
-      Logger::warn("NATS subscription drain failed: {}", nats_status_text(s));
+      Logger::warn("NATS subscription drain failed for subject '{}': {}",
+                   subscription.m_subject, nats_status_text(s));
     } else if (log_success) {
-      Logger::info("NATS subscription drained successfully");
+      Logger::info("NATS subscription drained successfully: {}",
+                   subscription.m_subject);
     }
   }
 }
 
 void NatsClient::destroy_subscription_locked() {
-  if (m_sub) {
-    natsSubscription_Destroy(m_sub);
-    m_sub = nullptr;
-    m_subscription_active = false;
+  // Drain must have completed before this point (drain_subscription_locked
+  // blocks until in-flight deliveries finish), so destroying the C
+  // subscription and freeing the callback holder is safe.
+  for (auto &subscription : m_subscriptions) {
+    if (subscription.m_sub) {
+      natsSubscription_Destroy(subscription.m_sub);
+    }
+    subscription.m_callback.reset();
   }
+  m_subscriptions.clear();
 }
 
 void NatsClient::destroy_connection_locked() {
@@ -459,12 +474,9 @@ bool NatsClient::publish(const std::string &subject, const std::string &data) {
   return true;
 }
 
-bool NatsClient::subscribe(
-    const std::string &subject,
-    std::function<void(const std::string &, const std::string &,
-                       const std::string &)>
-        callback,
-    const std::string &queue_group) {
+bool NatsClient::subscribe(const std::string &subject,
+                           NatsMessageCallback callback,
+                           const std::string &queue_group) {
   if (!ensure_connected()) {
     return false;
   }
@@ -476,24 +488,22 @@ bool NatsClient::subscribe(
     return false;
   }
 
-  if (m_sub) {
-    natsSubscription_Destroy(m_sub);
-    m_sub = nullptr;
-  }
+  NatsSubscription subscription;
+  subscription.m_callback =
+      std::make_unique<std::shared_ptr<NatsMessageCallback>>(
+          std::make_shared<NatsMessageCallback>(std::move(callback)));
+  subscription.m_subject = subject;
 
-  m_message_callback = std::move(callback);
-  m_subscription_subject = subject;
-  m_subscription_queue_group = queue_group;
-  m_subscription_active = false;
-
+  natsSubscription *sub = nullptr;
   natsStatus s;
   if (queue_group.empty()) {
-    s = natsConnection_Subscribe(&m_sub, m_conn, subject.c_str(),
-                                 nats_message_callback, &m_message_callback);
+    s = natsConnection_Subscribe(&sub, m_conn, subject.c_str(),
+                                 nats_message_callback,
+                                 subscription.m_callback.get());
   } else {
     s = natsConnection_QueueSubscribe(
-        &m_sub, m_conn, subject.c_str(), queue_group.c_str(),
-        nats_message_callback, &m_message_callback);
+        &sub, m_conn, subject.c_str(), queue_group.c_str(),
+        nats_message_callback, subscription.m_callback.get());
   }
 
   if (s != NATS_OK) {
@@ -502,30 +512,31 @@ bool NatsClient::subscribe(
     return false;
   }
 
-  m_subscription_active = true;
+  subscription.m_sub = sub;
+  m_subscriptions.push_back(std::move(subscription));
+
   std::string queue_group_info =
       queue_group.empty() ? "" : " queue_group=" + queue_group;
   Logger::info("Subscribed to NATS subject: {}{}", subject, queue_group_info);
   return true;
 }
 
-bool NatsClient::subscribe_queue(
-    const std::string &subject, const std::string &queue_group,
-    std::function<void(const std::string &, const std::string &,
-                       const std::string &)>
-        callback) {
+bool NatsClient::subscribe_queue(const std::string &subject,
+                                 const std::string &queue_group,
+                                 NatsMessageCallback callback) {
   return subscribe(subject, std::move(callback), queue_group);
 }
 
 void NatsClient::unsubscribe() {
   std::lock_guard<std::mutex> lock(m_conn_mutex);
-  if (m_sub) {
-    natsSubscription_Unsubscribe(m_sub);
-    natsSubscription_Destroy(m_sub);
-    m_sub = nullptr;
-    m_subscription_active = false;
-    Logger::info("Unsubscribed from NATS");
+  if (m_subscriptions.empty()) {
+    return;
   }
+  const size_t count = m_subscriptions.size();
+  // Drain so in-flight handlers finish before the subscriptions are destroyed.
+  drain_subscription_locked(false);
+  destroy_subscription_locked();
+  Logger::info("Unsubscribed from {} NATS subject(s)", count);
 }
 
 bool NatsClient::drain(int timeout_ms) {

@@ -230,6 +230,34 @@ services:
     profiles:
       - nostart
 
+  # Oracle XE 21c for the HTTP DB gateway (l2-worker connects via ODPI-C).
+  # First boot initializes the database (takes ~1-3 min); the worker retries
+  # its DB subscription until the healthcheck turns green, so the rest of the
+  # stack is unaffected while it starts up.
+  oracle:
+    container_name: oracle
+    image: gvenzl/oracle-xe:21.3.0-slim
+    restart: unless-stopped
+    mem_limit: ${ORACLE_MEM_LIMIT:-2g}
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_PASSWORD=${ORACLE_PASSWORD:-oracle_password}
+      - APP_USER=${ORACLE_APP_USER:-app_user}
+      - APP_USER_PASSWORD=${ORACLE_APP_PASSWORD:-app_password}
+      - ORACLE_CHARACTERSET=${ORACLE_CHARACTERSET:-AL32UTF8}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/oracle/healthcheck.sh > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
   l2-proxy:
     container_name: l2-proxy
     build:
@@ -281,6 +309,23 @@ services:
       - NATS_TLS_CERT_FILE=${NATS_TLS_CERT_FILE:-}
       - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
       - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
+      # HTTP DB gateway (route /v1/sql/* to the DB worker over NATS). The proxy
+      # only registers the database config for routing/validation; the worker
+      # holds the ODPI-C connection pool (runtime-db image).
+      - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
+      - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
+      - DB_QUERY_NATS_QUEUE_GROUP=${DB_QUERY_NATS_QUEUE_GROUP:-db_workers}
+      - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
+      - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
+      - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
+      - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
+      - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
+      - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}
+      - DB_ORACLE_USER=${DB_ORACLE_USER:-app_user}
+      - DB_ORACLE_PASSWORD=${DB_ORACLE_PASSWORD:-app_password}
+      - DB_ORACLE_POOL_MIN=${DB_ORACLE_POOL_MIN:-1}
+      - DB_ORACLE_POOL_MAX=${DB_ORACLE_POOL_MAX:-5}
       # Per-IP rate limiting (включено по умолчанию; занизь лимиты через
       # env для trip-теста, см. docker-compose.ratelimit.yml)
       - ENABLE_PER_IP_RATE_LIMITING=${ENABLE_PER_IP_RATE_LIMITING:-true}
@@ -375,7 +420,7 @@ services:
     build:
       context: ./cpp/l2-proxy
       dockerfile: Dockerfile
-      target: ${L2_PROXY_DOCKER_TARGET:-runtime}
+      target: ${L2_WORKER_DOCKER_TARGET:-runtime-db}
       args:
         BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
         APT_MIRROR: "${APT_MIRROR:-}"
@@ -449,6 +494,24 @@ services:
       - NATS_TLS_CERT_FILE=${NATS_TLS_CERT_FILE:-}
       - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
       - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
+      # HTTP DB gateway: the worker owns the ODPI-C pool against Oracle
+      # (runtime-db image, Instant Client at /opt/oracle). DB_QUERY_ENABLED=false
+      # disables the whole gateway. The subscription is retried at startup until
+      # Oracle is reachable, so the worker tolerates a slow cold start.
+      - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
+      - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
+      - DB_QUERY_NATS_QUEUE_GROUP=${DB_QUERY_NATS_QUEUE_GROUP:-db_workers}
+      - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
+      - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
+      - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
+      - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
+      - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
+      - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}
+      - DB_ORACLE_USER=${DB_ORACLE_USER:-app_user}
+      - DB_ORACLE_PASSWORD=${DB_ORACLE_PASSWORD:-app_password}
+      - DB_ORACLE_POOL_MIN=${DB_ORACLE_POOL_MIN:-1}
+      - DB_ORACLE_POOL_MAX=${DB_ORACLE_POOL_MAX:-5}
       # HTTPS server SSL configuration (optional - for client certificate verification)
       - SSL_SERVER_CERT_FILE=${SSL_SERVER_CERT_FILE:-}
       - SSL_SERVER_KEY_FILE=${SSL_SERVER_KEY_FILE:-}
@@ -519,4 +582,6 @@ volumes:
   vmagent-data:
     driver: local
   nats-data:
+    driver: local
+  oracle-data:
     driver: local

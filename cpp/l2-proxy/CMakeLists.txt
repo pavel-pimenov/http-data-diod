@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(l2-proxy)
+project(l2-proxy LANGUAGES C CXX)
 
 # Set C++23 standard
 set(CMAKE_CXX_STANDARD 23)
@@ -202,12 +202,15 @@ add_executable(l2-proxy
  nats_push_service.cpp
  nats_poll_service.cpp
   metrics_manager.cpp
- http_client.cpp
- http_client_pool.cpp
- stats_logger.cpp
- labeled_counter_collector.cpp
- labeled_histogram_collector.cpp
- httplib/httplib.cc
+  http_client.cpp
+  http_client_pool.cpp
+  stats_logger.cpp
+  db_query_handler.cpp
+  db_query_executor.cpp
+  labeled_counter_collector.cpp
+  labeled_histogram_collector.cpp
+  httplib/httplib.cc
+  odpi/embed/dpi.c
 )
 
 # Common compile options and definitions
@@ -245,6 +248,7 @@ set_source_files_properties(
     l2_worker.cpp l2_worker_nats.cpp trace_logger.cpp nats_client.cpp
     nats_push_service.cpp nats_poll_service.cpp metrics_manager.cpp
     http_client.cpp http_client_pool.cpp stats_logger.cpp
+    db_query_handler.cpp db_query_executor.cpp
     labeled_counter_collector.cpp labeled_histogram_collector.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
@@ -254,6 +258,7 @@ target_include_directories(l2-proxy PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/httplib
     ${CMAKE_CURRENT_SOURCE_DIR}/base64
+    ${CMAKE_CURRENT_SOURCE_DIR}/odpi/include
 )
 
 target_include_directories(l2-proxy PRIVATE ${NATS_C_INCLUDE_DIR})

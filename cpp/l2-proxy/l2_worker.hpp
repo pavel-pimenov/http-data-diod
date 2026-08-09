@@ -3,6 +3,7 @@
 
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "db_query_handler.hpp"
 #include "dedup_cache.hpp"
 #include "http_client.hpp"
 #include "http_client_pool.hpp"
@@ -52,6 +53,9 @@ private:
   // Caches produced responses by request_id so a re-delivered NATS request
   // (reply lost during reconnect) is answered without a duplicate L2 call.
   DedupCache m_dedup_cache;
+  // HTTP DB Gateway: initialized only in NATS worker mode when
+  // DB_QUERY_ENABLED=true.
+  std::unique_ptr<DbQueryHandler> m_db_query_handler;
 
 public:
   explicit L2Worker(AppContext &context);
@@ -79,6 +83,8 @@ private:
   void run_with_nats();
   void process_request_from_nats(const std::string &request_json,
                                  const std::string &reply_to);
+  void process_db_query_from_nats(const std::string &request_json,
+                                  const std::string &reply_to);
   void send_nats_response(const std::string &reply_to,
                           const std::string &response_json);
   void send_nats_response(const std::string &reply_to,
