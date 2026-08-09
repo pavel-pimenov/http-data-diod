@@ -1,0 +1,46 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-auto,
+  modernize-use-emplace,
+  modernize-loop-convert,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-identifier-naming,
+  readability-redundant-string-cstr,
+  -readability-implicit-bool-conversion,
+  clang-analyzer-*,
+  cppcoreguidelines-avoid-goto,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-slicing,
+  google-explicit-constructor,
+  google-build-using-namespace
+
+WarningsAsErrors: ''
+HeaderFilterRegex: 'l2-proxy/.*\.(hpp|h)$'
+FormatStyle: none
+
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.MemberPrefix
+    value: m_
+  - key: readability-identifier-naming.StaticConstantPrefix
+    value: g_
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: aNy_CasE
+  - key: readability-identifier-naming.StaticConstexprVariableCase
+    value: aNy_CasE
+  - key: modernize-use-nullptr.NullMacros
+    value: 'NULL'

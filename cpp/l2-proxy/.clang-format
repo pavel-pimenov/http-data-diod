@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
+# Note: clang-format 21.1.8-6ubuntu1 applies PointerAlignment inverted (Left <-> Right).
+# PointerAlignment: Right here produces the project's canonical 'Type *name' (docs-Left) style.
+PointerAlignment: Right
+ReferenceAlignment: Pointer
+Standard: c++17

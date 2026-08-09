@@ -1,0 +1,26 @@
+# Python tooling config for the repo (ruff based).
+#
+# Full usefulness requires `ruff` installed (e.g. in a venv with network):
+#     pip install ruff
+#     ruff check .            # lint (see "lint select" below)
+#     ruff format --check .   # formatting (line-length = 100)
+#
+# A network-free, stdlib-only check lives in scripts/lint-python.sh and needs
+# no third-party packages.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "build", "build_tests", "build-lint", "cpp/l2-proxy/httplib", "cpp/l2-proxy/nats", "cpp/l2-proxy/base64"]
+
+[tool.ruff.lint]
+# Keep the initial selection conservative (PEP8 basics + undefined names only)
+# so adopting ruff reports real issues without forcing a reformat of the whole
+# repo (many files are not black-formatted). Widen over time.
+select = ["E", "W", "F"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+line-ending = "auto"
+indent-style = "space"
+skip-magic-trailing-comma = true

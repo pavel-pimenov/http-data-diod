@@ -1,142 +1,508 @@
 services:
-  valkey:
-    image: valkey/valkey:alpine
+
+  # NATS Server for messaging
+  nats-server:
+    container_name: nats-server
+    image: nats:2.14-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "4222:4222"  # NATS client port
+      - "8222:8222"  # NATS monitoring port
+    environment:
+      # NATS Authentication (optional)
+      - NATS_USER=${NATS_USER:-}
+      - NATS_PASSWORD=${NATS_PASSWORD:-}
+      - NATS_TOKEN=${NATS_TOKEN:-}
+      # NATS TLS (optional)
+      - NATS_ENABLE_TLS=${NATS_ENABLE_TLS:-false}
+    command: >
+      sh -c "
+        CMD='-js -m 8222 -sd /data';
+        if [ -n \"$${NATS_TOKEN}\" ]; then
+          CMD=\"$${CMD} --auth $${NATS_TOKEN}\";
+        elif [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; then
+          CMD=\"$${CMD} --user $${NATS_USER} --pass $${NATS_PASSWORD}\";
+        fi;
+        if [ \"$${NATS_ENABLE_TLS}\" = \"true\" ]; then
+          CMD=\"$${CMD} --tls --tlscert /etc/nats/certs_nats/server.crt --tlskey /etc/nats/certs_nats/server.key\";
+        fi;
+        exec nats-server $${CMD}
+      "
     volumes:
-      - ./valkey.conf:/etc/valkey/valkey.conf
-#      - valkey_data:/data
-    command: valkey-server /etc/valkey/valkey.conf
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      - nats-data:/data
+      - ./certs_nats:/etc/nats/certs_nats:ro
     networks:
       - l2_network
+    healthcheck:
+      # Real readiness check: probe the monitoring /healthz endpoint instead of
+      # just checking that the nats-server binary exists. 200 OK only when the
+      # server is accepting connections (503/refused in lame-duck or while down).
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
-  # openobserve:
-  #   image: ghcr.io/zincdb/openobserve:v0.10.8
-  #   ports:
-  #     - "5080:5080"
-  #   environment:
-  #     - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_LOGIN}
-  #     - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD}
-  #   volumes:
-  #     - ./zo_data:/data
-  #   networks:
-  #     - l2_network
+  # NATS Exporter for Prometheus metrics
+  nats-exporter:
+    container_name: nats-exporter
+    image: natsio/prometheus-nats-exporter:0.20.0
+    restart: unless-stopped
+    ports:
+      - "7778:7777"  # NATS exporter metrics port (7777 inside container, 7778 on host)
+    command:
+      - "-varz"
+      - "-connz"
+      - "-subz"
+      - "http://nats-server:8222"
+    depends_on:
+      - nats-server
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7777/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  nats-gui:
+    container_name: nats-gui
+    image: docker-registry.dp.nlmk.com/sphqxe/nats-webui:latest
+    restart: unless-stopped
+    ports:
+      - "7779:80"
+    depends_on:
+      - nats-server
+#    volumes:
+#      - ./nats-webui/sqlite.db:/usr/local/bin/nats/sqlite.db
+    networks:
+      - l2_network
+    profiles:
+      - nostart
 
   jaeger:
-    image: cr.jaegertracing.io/jaegertracing/jaeger:2.13.0
+    container_name: jaeger
+    image: jaegertracing/jaeger:2.15.1
+    restart: unless-stopped
     ports:
-      - "16686:16686"
-      - "14268:14268"
-      - "4317:4317"
-      - "4318:4318"
-      - "5778:5778"
-      - "9411:9411"
+      - "16686:16686"  # UI
+      - "14268:14268"  # Jaeger HTTP collector
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "9411:9411"    # Zipkin
+      - "5778:5778"    # Config
     environment:
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
     networks:
       - l2_network
+#    profiles:
+#      - nostart
+
+  # VictoriaMetrics - Prometheus-compatible metrics storage (lighter than Prometheus)
+  victoria-metrics:
+    container_name: victoria-metrics
+    image: victoriametrics/victoria-metrics:v1.97.0
+    restart: unless-stopped
+    ports:
+      - "8428:8428"
+    volumes:
+      - victoria-metrics-data:/victoria-metrics-data
+    command:
+      - '--httpListenAddr=:8428'
+      - '--storageDataPath=/victoria-metrics-data'
+      - '--retentionPeriod=15d'
+      - '--search.maxQueryLen=1048576'
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8428/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # VictoriaMetrics Agent - scrapes metrics from services
+  vmagent:
+    container_name: vmagent
+    image: victoriametrics/vmagent:v1.97.0
+    restart: unless-stopped
+    ports:
+      - "8429:8429"
+    volumes:
+      - ./prometheus/vmagent-scrape.yml:/etc/vmagent/prometheus.yml:ro
+      - vmagent-data:/tmp/vmagent-remotewrite
+    command:
+      - '--promscrape.config=/etc/vmagent/prometheus.yml'
+      - '--remoteWrite.url=http://victoria-metrics:8428/api/v1/write'
+      - '--httpListenAddr=:8429'
+      - '--promscrape.streamParse=true'
+    environment:
+      - VM_NAME=${VM_NAME:-hostname}
+    networks:
+      - l2_network
+    depends_on:
+      - victoria-metrics
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8429/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   l2-server:
-    image: mendhak/http-https-echo
+    container_name: l2-server
+    image: http-redis-proxy-l2-proxy:latest
+    restart: unless-stopped
+    mem_limit: ${L2_SERVER_MEM_LIMIT:-1g}
     ports:
-      - "3000:8080"
+      - "3333:8088"
+      - "19092:19092"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      - valkey
+    volumes:
+      - ./docker-memory-analysis:/memory-logs
+      - ./crash-dumps:/crash-dumps
+    environment:
+      - MODE=l2-server
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - L2_SERVER_PROTOCOL=http
+      - L2_SERVER_HOST=l2-server
+      - L2_SERVER_PORT=8088
+      # Test-only: random response delay in ms (0 = disabled). Desynchronizes
+      # response order for the response-to-request correlation test.
+      - L2_TEST_RESPONSE_DELAY_MS=${L2_TEST_RESPONSE_DELAY_MS:-0}
+      - JAEGER_URL=http://jaeger:9411/api/v2/spans
+      - THREAD_POOL_TYPE=custom
+      - ENABLE_TRACING=true
+      - ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION=false
+      - ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION=false
+      - HTTP_POOL_SIZE=200
+      - HTTP_TIMEOUT_SECONDS=300
+      # Tracing tuning
+      - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
+      - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
+      - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Crash test diagnostic (raises SIGSEGV on startup)
+      - CRASH_TEST=${CRASH_TEST:-false}
+      # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
+      - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # /health/ready may initiate a blocking NATS reconnect (default off)
+      - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
+      # HTTPS server SSL configuration (optional)
+      - SSL_SERVER_CERT_FILE=${SSL_SERVER_CERT_FILE:-}
+      - SSL_SERVER_KEY_FILE=${SSL_SERVER_KEY_FILE:-}
+      - ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=0:log_path=/memory-logs/l2-server-asan:ubsan_options=print_stacktrace=1}
+      - LSAN_OPTIONS=${LSAN_OPTIONS:-report_objects=1}
+      - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19092/metrics"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     networks:
       - l2_network
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+#    profiles:
+#      - nostart
 
-  l2-service-proxy:
+
+  l2-test:
+    container_name: l2-test
+    image: curlimages/curl:latest
+#    depends_on:
+#      - l2-server
+    networks:
+      - l2_network
+    command: >
+      sh -c "
+        echo 'Ожидание запуска l2-server...' &&
+        sleep 5 &&
+        echo 'Отправка тестового запроса...' &&
+        curl -v --request POST -H 'Content-Type: application/json' -d '{\"value\": 1}' http://l2-server:8088/
+      "
+    profiles:
+      - nostart
+
+  l2-proxy:
+    container_name: l2-proxy
     build:
       context: ./cpp/l2-proxy
+      dockerfile: Dockerfile
+      target: ${L2_PROXY_DOCKER_TARGET:-runtime}
       args:
-        USE_JAEGER: ${USE_JAEGER:-ON}
+        BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+        ENABLE_ASAN: "${ENABLE_ASAN:-false}"
+        ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
+        CACHE_BUST: "${CACHE_BUST:-1}"
+    restart: unless-stopped
+    mem_limit: ${L2_PROXY_MEM_LIMIT:-1g}
     ports:
       - "8888:8888"
-      - "9090:9090"
-    depends_on:
-      valkey:
-        condition: service_healthy
+      - "19090:19090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ./docker-memory-analysis:/memory-logs
+      - ./certs_nats:/etc/nats/certs_nats:ro
+      - ./crash-dumps:/crash-dumps
     environment:
+      - PROXY_PORT=8888
+      - PROXY_PROTOCOL=http
       - MODE=proxy
-      - USE_SEQUENTIAL_REQUEST_ID=true
-      - NUM_THREADS=${NUM_THREADS:-32}
-      - REDIS_HOST=valkey
-      - REDIS_PORT=6379
-      - OPENOBSERVE_URL=http://host.docker.internal:5080
-      - OPENOBSERVE_LOGIN=${OPENOBSERVE_LOGIN}
-      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}
-#      - JAEGER_URL=http://jaeger:14268/api/traces
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - THREAD_POOL_TYPE=custom
+      - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-100}
+      - REQUEST_TIMEOUT_SECONDS=30
+      - HTTP_TIMEOUT_SECONDS=10
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
+      - ENABLE_TRACING=true
+      # NATS Configuration
+      - NATS_HOST=${NATS_HOST:-nats-server}
+      - NATS_PORT=${NATS_PORT:-4222}
+      - NATS_SUBJECT=${NATS_SUBJECT:-service.proxy}
+      - NATS_QUEUE_GROUP=${NATS_QUEUE_GROUP:-proxy_workers}
+      - NATS_TIMEOUT_MS=${NATS_TIMEOUT_MS:-30000}
+      # NATS Authentication (optional)
+      - NATS_USERNAME=${NATS_USERNAME:-}
+      - NATS_PASSWORD=${NATS_PASSWORD:-}
+      - NATS_TOKEN=${NATS_TOKEN:-}
+      - NATS_CREDENTIALS_FILE=${NATS_CREDENTIALS_FILE:-}
+      # NATS TLS (optional)
+      - NATS_ENABLE_TLS=${NATS_ENABLE_TLS:-false}
+      - NATS_TLS_CERT_FILE=${NATS_TLS_CERT_FILE:-}
+      - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
+      - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
+      # Per-IP rate limiting (включено по умолчанию; занизь лимиты через
+      # env для trip-теста, см. docker-compose.ratelimit.yml)
+      - ENABLE_PER_IP_RATE_LIMITING=${ENABLE_PER_IP_RATE_LIMITING:-true}
+      # Per-IP rate limiting tuning (only when ENABLE_PER_IP_RATE_LIMITING=true)
+      - PER_IP_MAX_TOKENS=${PER_IP_MAX_TOKENS:-10000}
+      - PER_IP_REFILL_RATE=${PER_IP_REFILL_RATE:-1000}
+      - PER_IP_MAX_IPS=${PER_IP_MAX_IPS:-10000}
+      - PER_IP_CLEANUP_TTL_SECONDS=${PER_IP_CLEANUP_TTL_SECONDS:-300}
+      # Global rate limiting (all proxy requests; disable for load testing)
+      - ENABLE_GLOBAL_RATE_LIMITING=${ENABLE_GLOBAL_RATE_LIMITING:-true}
+      - GLOBAL_RATE_LIMIT_MAX_TOKENS=${GLOBAL_RATE_LIMIT_MAX_TOKENS:-10000}
+      - GLOBAL_RATE_LIMIT_REFILL_RATE=${GLOBAL_RATE_LIMIT_REFILL_RATE:-1000}
+      # Duplicate POST detection (report on GET /debug/duplicates)
+      - DUPLICATE_DETECTION_ENABLED=${DUPLICATE_DETECTION_ENABLED:-true}
+      - DUPLICATE_DETECTION_TOP_N=${DUPLICATE_DETECTION_TOP_N:-100}
+      - DUPLICATE_DETECTION_MAX_ENTRIES=${DUPLICATE_DETECTION_MAX_ENTRIES:-1000}
+      - DUPLICATE_DETECTION_MAX_BODY_BYTES=${DUPLICATE_DETECTION_MAX_BODY_BYTES:-500}
+      - DUPLICATE_DETECTION_TTL_MS=${DUPLICATE_DETECTION_TTL_MS:-60000}
+      # Reject (HTTP 409) a duplicate POST body within the detector TTL instead
+      # of forwarding it (default false: only count/log duplicates)
+      - DUPLICATE_REJECT_ENABLED=${DUPLICATE_REJECT_ENABLED:-false}
+      # Tracing tuning
+      - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
+      - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
+      - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Crash test diagnostic (raises SIGSEGV on startup)
+      - CRASH_TEST=${CRASH_TEST:-false}
+      # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
+      - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # /health/ready may initiate a blocking NATS reconnect (default off)
+      - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
+      # HTTPS server SSL configuration (optional)
+      - SSL_SERVER_CERT_FILE=${SSL_SERVER_CERT_FILE:-}
+      - SSL_SERVER_KEY_FILE=${SSL_SERVER_KEY_FILE:-}
+      - ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=0:log_path=/memory-logs/l2-proxy-asan:ubsan_options=print_stacktrace=1}
+      - LSAN_OPTIONS=${LSAN_OPTIONS:-report_objects=1}
+      - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
     networks:
       - l2_network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.l2proxy.rule=Host(`localhost`)"
-      - "traefik.http.routers.l2proxy.entrypoints=websecure"
-      - "traefik.http.routers.l2proxy.service=l2proxy"
-      - "traefik.http.services.l2proxy.loadbalancer.server.port=8888"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:8888/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      nats-server:
+        condition: service_healthy
 
-  l2-service-worker:
+  nginx:
+    container_name: nginx
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "7777:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - l2-proxy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - l2_network
+
+  # Nginx metrics exporter for Prometheus
+  nginx-exporter:
+    container_name: nginx-exporter
+    image: nginx/nginx-prometheus-exporter:1.1
+    restart: unless-stopped
+    ports:
+      - "9113:9113"
+    environment:
+      - SCRAPE_URI=http://nginx/metrics
+    depends_on:
+      - nginx
+    networks:
+      - l2_network
+#    profiles:
+#      - nostart
+
+  l2-worker:
+    container_name: l2-worker
     build:
       context: ./cpp/l2-proxy
+      dockerfile: Dockerfile
+      target: ${L2_PROXY_DOCKER_TARGET:-runtime}
       args:
-        USE_JAEGER: ${USE_JAEGER:-ON}
+        BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+        ENABLE_ASAN: "${ENABLE_ASAN:-false}"
+        ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
+        CACHE_BUST: "${CACHE_BUST:-1}"
+    restart: unless-stopped
+    mem_limit: ${L2_WORKER_MEM_LIMIT:-1g}
     ports:
-      - "9091:9091"
-    depends_on:
-      - valkey
-      - l2-server
+      - "19091:19091"
+      - "19093:19093"
+#    depends_on:
+#      - l2-server
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./ca-bundle.crt
+        target: /root/ca-bundle.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./docker-memory-analysis:/memory-logs
+      - ./certs_nats:/etc/nats/certs_nats:ro
+      - ./crash-dumps:/crash-dumps
     environment:
       - MODE=worker
-      - REDIS_HOST=valkey
-      - REDIS_PORT=6379
-      - L2_SERVER_URL=http://l2-server:8080
-      - OPENOBSERVE_URL=http://host.docker.internal:5080
-      - OPENOBSERVE_LOGIN=${OPENOBSERVE_LOGIN}
-      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}
-      # - JAEGER_URL=http://jaeger:14268/api/traces
-      - JAEGER_URL=http://jaeger:9411/api/v2/spans 
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      # Optimized timeouts for faster failure detection
+      - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-128}
+      - HTTP_POOL_IDLE_TIMEOUT_SECONDS=${HTTP_POOL_IDLE_TIMEOUT_SECONDS:-300}
+      - L2_SERVER_URLS=["http://l2-server:8088/"]
+      - HTTP_TIMEOUT_SECONDS=10
+      - L2_WORKER_THREADS=${L2_WORKER_THREADS:-128}
+      - L2_WORKER_QUEUE_SIZE=${L2_WORKER_QUEUE_SIZE:-0}
+      - MAX_RETRIES=1
+      # Dedup cache for duplicate NATS requests (DEDUP_ENABLED=false disables it)
+      - DEDUP_ENABLED=${DEDUP_ENABLED:-false}
+      - DEDUP_MAX_ENTRIES=${DEDUP_MAX_ENTRIES:-4096}
+      - DEDUP_TTL_MS=${DEDUP_TTL_MS:-60000}
+      - JAEGER_URL=http://jaeger:9411/api/v2/spans
+      - THREAD_POOL_TYPE=custom
+      - ENABLE_TRACING=true
+      # Tracing tuning
+      - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
+      - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
+      - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Crash test diagnostic (raises SIGSEGV on startup)
+      - CRASH_TEST=${CRASH_TEST:-false}
+      # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
+      - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # /health/ready may initiate a blocking NATS reconnect (default off)
+      - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
+      - ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION=false
+      - ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION=false
+      #- SSL_CA_CERT_PATH=    # /root/ca-bundle.crt
+      # NATS Configuration
+      - NATS_HOST=${NATS_HOST:-nats-server}
+      - NATS_PORT=${NATS_PORT:-4222}
+      - NATS_SUBJECT=${NATS_SUBJECT:-service.proxy}
+      - NATS_QUEUE_GROUP=${NATS_QUEUE_GROUP:-proxy_workers}
+      - NATS_TIMEOUT_MS=${NATS_TIMEOUT_MS:-30000}
+      # NATS Authentication (optional)
+      - NATS_USERNAME=${NATS_USERNAME:-}
+      - NATS_PASSWORD=${NATS_PASSWORD:-}
+      - NATS_TOKEN=${NATS_TOKEN:-}
+      - NATS_CREDENTIALS_FILE=${NATS_CREDENTIALS_FILE:-}
+      # NATS TLS (optional)
+      - NATS_ENABLE_TLS=${NATS_ENABLE_TLS:-false}
+      - NATS_TLS_CERT_FILE=${NATS_TLS_CERT_FILE:-}
+      - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
+      - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
+      # HTTPS server SSL configuration (optional - for client certificate verification)
+      - SSL_SERVER_CERT_FILE=${SSL_SERVER_CERT_FILE:-}
+      - SSL_SERVER_KEY_FILE=${SSL_SERVER_KEY_FILE:-}
+      - SSL_CA_CERT_PATH=${SSL_CA_CERT_PATH:-}
+      - ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=0:log_path=/memory-logs/l2-worker-asan:ubsan_options=print_stacktrace=1}
+      - LSAN_OPTIONS=${LSAN_OPTIONS:-report_objects=1}
+      - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
     networks:
       - l2_network
-
-  redisinsight:
-    image: redis/redisinsight:latest
-    ports:
-      - "5540:5540"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19093/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
-      - valkey
+      nats-server:
+        condition: service_healthy
+
+  # Grafana for metrics visualization
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:12.4
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - l2-proxy
     environment:
-      - RIPORT=5540
-      - RIHOST=valkey
-      - RIPORT_REDIS=6379
-    networks:
-      - l2_network
-
-  traefik:
-    image: traefik:v3.1
-    ports:
-      - "443:443"
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # GF_INSTALL_PLUGINS=grafana-piechart-panel  # Deprecated - Angular plugins no longer supported
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command:
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.websecure.address=:443"
-    depends_on:
-      - l2-service-proxy
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
       - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+#    profiles:
+#      - nostart
 
 networks:
   l2_network:
@@ -145,5 +511,12 @@ networks:
       config:
         - subnet: 172.28.0.0/16
 
-# volumes:
-#   valkey_data:
+volumes:
+  grafana-storage:
+    driver: local
+  victoria-metrics-data:
+    driver: local
+  vmagent-data:
+    driver: local
+  nats-data:
+    driver: local

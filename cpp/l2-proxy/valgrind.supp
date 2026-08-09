@@ -1,0 +1,42 @@
+# Valgrind suppression file for l2-proxy
+
+# Suppress issues in libc
+{
+   libc_free
+   Memcheck:Free
+   fun:free
+   obj:/lib/x86_64-linux-gnu/libc.so.*
+}
+
+# Suppress issues in libcurl
+{
+   libcurl_leak
+   Memcheck:Leak
+   ...
+   obj:/usr/lib/x86_64-linux-gnu/libcurl.so.*
+}
+
+# Suppress issues in OpenSSL
+{
+   openssl_leak
+   Memcheck:Leak
+   ...
+   obj:/usr/lib/x86_64-linux-gnu/libssl.so.*
+}
+
+{
+   openssl_leak2
+   Memcheck:Leak
+   ...
+   obj:/usr/lib/x86_64-linux-gnu/libcrypto.so.*
+}
+
+
+
+# Suppress issues in prometheus-cpp
+{
+   prometheus_leak
+   Memcheck:Leak
+   ...
+   obj:/usr/lib/x86_64-linux-gnu/libprometheus-cpp-*.so.*
+}

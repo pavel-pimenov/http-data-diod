@@ -1,0 +1,4 @@
+# Files to exclude from clang-tidy analysis
+# Third-party libraries
+httplib/*
+clang-tidy/*

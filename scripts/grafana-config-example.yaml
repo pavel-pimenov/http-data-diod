@@ -1,0 +1,11 @@
+# Grafana Dashboard Generator Configuration
+# YAML format
+
+grafana_url: "http://localhost:3000"
+grafana_user: "admin"
+grafana_password: "admin"
+grafana_api_key: ""
+
+prometheus_url: "http://localhost:9090"
+discover_metrics: true
+correct_dashboards: true

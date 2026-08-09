@@ -1,0 +1,67 @@
+# vmagent scrape configuration
+
+# The label 'vm' is added by vmagent at scrape time and identifies the
+# physical/virtual machine the stack runs on. The value comes from the
+# environment variable VM_NAME (see docker-compose.yml and
+# rebuild-and-run.sh, which default it to the hostname).
+
+global:
+  scrape_interval: 10s
+  scrape_timeout: 5s
+
+scrape_configs:
+  - job_name: 'l2-proxy'
+    static_configs:
+      - targets: ['l2-proxy:19090']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  - job_name: 'l2-worker'
+    static_configs:
+      - targets: ['l2-worker:19091']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  - job_name: 'l2-server'
+    static_configs:
+      - targets: ['l2-server:19092']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats-exporter:7777']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'victoria-metrics'
+    static_configs:
+      - targets: ['victoria-metrics:8428']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  - job_name: 'vmagent'
+    static_configs:
+      - targets: ['vmagent:8429']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s

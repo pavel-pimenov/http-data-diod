@@ -1,0 +1,20 @@
+# Grafana Datasources Provisioning
+# Automatically configures VictoriaMetrics as a datasource
+
+apiVersion: 1
+
+datasources:
+  # VictoriaMetrics - Prometheus-compatible metrics storage
+  - name: VictoriaMetrics
+    type: prometheus
+    uid: prometheus
+    url: http://victoria-metrics:8428
+    access: proxy
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 10s
+    # Avoid conflicts with existing datasources
+    version: 2
+    overwrite: true

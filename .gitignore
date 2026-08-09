@@ -1,4 +1,11 @@
 build
+build-lint
+build_test
+profiles
+
+build_test/makefile
+build/makefile
+
 # Prerequisites
 *.d
 
@@ -51,8 +58,27 @@ build
 venv
 .vscode
 .PVS-Studio
+pvs-studio.log
+*.pvs.raw
+reports/
+crash-dumps/
 CMakeFiles
 makefile
 CMakeCache.txt 
 cmake_install.cmake_install
 cmake_install.cmake
+.env
+.env.proxy.worker
+!.env.example
+
+# CA certificate file (users should place their own CA bundle here)
+ca-bundle.crt
+certs/
+certs_nats/
+ssl/
+load_test_*.json
+build-pvs/
+*.i
+pvs-studio.log
+*.pvs.raw
+

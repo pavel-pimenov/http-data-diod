@@ -1,0 +1,8 @@
+// PVS-Studio configuration file for l2-proxy project
+// https://pvs-studio.ru/ru/docs/manual/6630/
+
+// V1096 - static storage duration in inline function (ODR false positive for const/Meyers singleton/call_once)
+//-V1096
+
+// Exclude specific paths via command line (see CMakeLists.txt ARGS):
+// httplib, nats, nlohmann, base64

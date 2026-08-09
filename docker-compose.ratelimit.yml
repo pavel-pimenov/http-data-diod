@@ -1,0 +1,15 @@
+services:
+  # Override для детерминированного тестирования rate limiters:
+  # маленький burst/refill, чтобы лимитеры срабатывали быстро.
+  l2-proxy:
+    environment:
+      # Глобальный лимитер выключен, чтобы в тесте срабатывал именно
+      # per-IP лимитер (он проверяется после глобального).
+      - ENABLE_GLOBAL_RATE_LIMITING=false
+      # Трип-тест per-IP лимитера: маленький burst/refill на IP,
+      # чтобы под нагрузкой с одного IP появлялись 429.
+      - ENABLE_PER_IP_RATE_LIMITING=true
+      - PER_IP_MAX_TOKENS=100
+      - PER_IP_REFILL_RATE=10
+
+  # Остальные сервисы остаются без изменений.

@@ -1,0 +1,173 @@
+#ifndef NATS_CLIENT_HPP
+#define NATS_CLIENT_HPP
+
+#include "interfaces.hpp"
+#include "logger.hpp"
+#include "nlohmann/json.hpp"
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <nats/nats.h>
+
+// Configuration bundle for NatsClient
+struct NatsConfig {
+  std::string m_host;
+  int m_port = 0;
+  std::string m_subject;
+  std::string m_queue_group;
+  int m_timeout_ms = 30000;
+  std::string m_username;
+  std::string m_password;
+  std::string m_token;
+  std::string m_credentials_file;
+  bool m_enable_tls = false;
+  std::string m_tls_cert_file;
+  std::string m_tls_key_file;
+  std::string m_tls_ca_cert_file;
+};
+
+using NatsHeaders = std::map<std::string, std::string>;
+
+struct NatsReply {
+  std::string m_data;
+  NatsHeaders m_headers;
+};
+
+// NATS client for request/response messaging pattern
+class NatsClient : public IConnectableClient {
+public:
+  explicit NatsClient(const NatsConfig &cfg);
+
+  ~NatsClient() override;
+
+  [[nodiscard]] bool connect();
+
+  void disconnect();
+
+  // IConnectableClient interface
+  bool is_connected() const override { return m_connected; }
+
+  // NATS-specific methods
+
+  // Send request and wait for response (synchronous)
+  // Returns nullopt on connection/error, empty string on valid empty reply
+  std::optional<std::string> request(const std::string &subject,
+                                     const std::string &data,
+                                     int timeout_ms = 0);
+
+  // Send request with headers, receive reply with headers
+  // reply_header_keys: list of header keys to extract from the reply (if empty,
+  // extracts none)
+  NatsReply
+  request_with_headers(const std::string &subject, const std::string &data,
+                       const NatsHeaders &headers = {},
+                       const std::vector<std::string> &reply_header_keys = {},
+                       int timeout_ms = 0);
+
+  // Publish message (fire-and-forget)
+  bool publish(const std::string &subject, const std::string &data);
+
+  // Publish message with headers
+  bool publish_with_headers(const std::string &subject, const std::string &data,
+                            const NatsHeaders &headers);
+
+  // Subscribe to subject with callback
+  // Callback arguments: subject, data, reply_to
+  bool subscribe(const std::string &subject,
+                 std::function<void(const std::string &, const std::string &,
+                                    const std::string &)>
+                     callback,
+                 const std::string &queue_group = "");
+
+  // Subscribe with queue group for load balancing
+  bool
+  subscribe_queue(const std::string &subject, const std::string &queue_group,
+                  std::function<void(const std::string &, const std::string &,
+                                     const std::string &)>
+                      callback);
+
+  void unsubscribe();
+
+  // Drain subscription and connection — waits for in-flight messages
+  // timeout_ms: maximum time to wait for drain to complete (0 = no wait)
+  bool drain(int timeout_ms = 5000);
+
+  // Health check (returns bool)
+  bool check_connection();
+
+  // Ping NATS server (nullopt = no connection)
+  std::optional<std::string> ping();
+
+  // Get last error (nullopt if no error recorded)
+  std::optional<std::string> get_last_error() const;
+
+private:
+  std::string m_host;
+  int m_port;
+  std::string m_subject;
+  std::string m_queue_group;
+  int m_timeout_ms;
+
+  // Authentication fields
+  std::string m_username;
+  std::string m_password;
+  std::string m_token;
+  std::string m_credentials_file;
+  bool m_enable_tls;
+  std::string m_tls_cert_file;
+  std::string m_tls_key_file;
+  std::string m_tls_ca_cert_file;
+
+  natsConnection *m_conn;
+  natsOptions *m_opts;
+  natsSubscription *m_sub;
+  std::function<void(const std::string &, const std::string &,
+                     const std::string &)>
+      m_message_callback;
+
+  std::atomic<bool> m_connected;
+  std::atomic<bool> m_shutdown{false};
+  std::mutex m_conn_mutex;
+  mutable std::mutex m_error_mutex;
+  std::string m_last_error;
+  bool m_subscription_active;
+  std::string m_subscription_subject;
+  std::string m_subscription_queue_group;
+
+  bool setup_options();
+  // Teardown helpers — caller must hold m_conn_mutex
+  void drain_subscription_locked(bool log_success);
+  void destroy_subscription_locked();
+  void destroy_connection_locked();
+  void disconnect_locked();
+  void cleanup();
+  // Copy the live connection pointer under the mutex; marks the client
+  // disconnected (with the operation name) when the connection is gone.
+  natsConnection *acquire_connection(const std::string &operation);
+  // Shared request path used by request()/request_with_headers()
+  std::optional<NatsReply>
+  request_impl(const std::string &subject, const std::string &data,
+               const NatsHeaders &headers,
+               const std::vector<std::string> &reply_header_keys,
+               int timeout_ms);
+  void set_error(const std::string &error);
+  void set_last_error(const std::string &error);
+  bool ensure_connected();
+  bool mark_disconnected(const std::string &reason);
+  // Sets caller-specified headers on a NATS message; on failure destroys the
+  // message, records the error (with the operation name), returns false.
+  bool set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
+                       const std::string &operation);
+
+  // Convert timeout
+  static int ms_to_seconds(int ms) { return (ms + 999) / 1000; }
+};
+
+#endif // NATS_CLIENT_HPP

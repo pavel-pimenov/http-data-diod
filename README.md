@@ -1,21 +1,276 @@
-# http-redis-proxy
+# Схема сетевых взаимодействий сервисов http-data-diod
 
-sudo apt install libhiredis-dev libmicrohttpd-dev libjsoncpp-dev libcurl4-openssl-dev python3-pip 
-sudo apt-get install apache2-utils
+## Транспорт сообщений
 
-# sudo apt-get install  opentelemetry-cpp-dev (only ubuntu 25.10)
+Система использует **NATS** для обмена сообщениями между `l2-proxy` и `l2-worker`:
 
-Perfect! The docker-compose.yml has been updated successfully:
+- `l2-proxy` отправляет запрос в `nats-server`
+- `l2-worker` подписан на NATS subject и получает запрос
+- `l2-worker` отвечает через NATS request/reply
+- `l2-proxy` получает ответ и возвращает его клиенту
 
-- Replaced Redis with Valkey (using `valkey/valkey:alpine` image)
+---
 
-- Added a custom network configuration with a specific subnet (`172.25.0.0/16`) to avoid Docker's address pool exhaustion error
+## Визуальная схема взаимодействий
 
-- All containers are now running:
+```mermaid
+flowchart TD
+    user[Пользователь/Тест]
+    nginx[nginx]
+    proxy[l2-proxy]
+    worker[l2-worker]
+    nats[nats-server]
+    nginxExporter[nginx-exporter]
+    natsExporter[nats-exporter]
+    prometheus[prometheus]
+    jaeger[jaeger]
+    datahub-gantpool[DataHub-GantPool]
+    server[l2-server]
 
-  - Valkey (Redis-compatible database) on port 6379
-  - l2-proxy on port 8888
-  - l2-server on port 3000
-  - l2-worker (running in the background)
+    user -- "HTTPS 443" --> nginx
+    nginx -- "HTTP" --> proxy
+    proxy -- "HTTP" --> server
+    worker -- "HTTP" --> server
+    worker -- "HTTPS 8181" --> datahub-gantpool
 
-The services are properly interconnected and should work as intended for the HTTP-Redis proxy system.
+    proxy -- "NATS TCP 4222" --> nats
+    worker -- "NATS TCP 4222" --> nats
+
+    nginxExporter -- "metrics" --> nginx
+    natsExporter -- "HTTP 8222 / metrics" --> nats
+
+    prometheus -- "scrape 19090" --> proxy
+    prometheus -- "scrape 19092" --> server
+    prometheus -- "scrape 19091" --> worker
+    prometheus -- "scrape 9113" --> nginxExporter
+    prometheus -- "scrape 7778" --> natsExporter
+
+    proxy -- "tracing" --> jaeger
+    worker -- "tracing" --> jaeger
+    server -- "tracing" --> jaeger
+```
+
+**Обозначения:**  
+- Направление стрелки: всегда КЛИЕНТ 👉 СЕРВЕР.
+- Надписи на стрелках = используемый протокол и порт.
+
+---
+
+## Сетевая схема с разделением сегментов
+
+```mermaid
+flowchart LR
+    %% Корпоративная сеть
+    subgraph CORP ["Корпоративная сеть"]
+        user[Пользователь/Тест]
+    end
+
+    %% DMZ зона
+    subgraph DMZ ["DMZ"]
+        nginx[nginx]
+        proxy[l2-proxy]
+        nats[nats-server]
+    end
+
+    %% Технологический сегмент l2
+    subgraph L2_NET ["Технологический сегмент (l2)"]
+        worker[l2-worker]
+        datahub-gantpool[DataHub-GantPool]
+    end
+
+    %% Основной клиентский маршрут
+    user -- "HTTPS →443" --> nginx
+    nginx -- "HTTP" --> proxy
+    worker -- "HTTPS 8181" --> datahub-gantpool
+
+    %% Messaging
+    proxy -- "NATS TCP 4222" --> nats
+    worker -- "NATS TCP 4222" --> nats
+```
+
+---
+
+## Путь доставки запросов между proxy и worker
+
+```text
+client -> nginx -> l2-proxy -> NATS -> l2-worker -> DataHub/GantPool
+client <- nginx <- l2-proxy <- NATS <- l2-worker <- DataHub/GantPool
+```
+
+Особенности:
+- ближе к классическому messaging/request-reply
+- меньше логики хрнения промежуточного состояния в proxy/worker
+- проще строить лёгкий messaging-only контур
+- хорошо подходит для событийной и message-driven архитектуры
+- требует корректной настройки subject/request-reply semantics и доступности messaging-сервера
+
+---
+
+## Практическая рекомендация
+
+Текущая реализация и деплой-конфигурация ориентированы на **NATS-only** сценарий.  
+Все упоминания ранее использовавшегося Redis/Valkey пути удалены из актуальной документации и конфигурации.
+
+---
+
+## Rate limiting
+
+Rate limiting применяется **только к `l2-proxy`** (в режиме `MODE=proxy`); воркер и l2-server не лимитируются. Два независимых уровня:
+
+- **Глобальный** — на все запросы прокси (token bucket на процесс).
+- **Per-IP** — на запросы с одного IP (token bucket на IP + LRU-кэш с TTL-очисткой).
+
+При превышении лимита возвращается `429 Too Many Requests` с заголовками `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`.
+
+### Настройка (переменные окружения)
+
+| Переменная | Default | Описание |
+|---|---|---|
+| `ENABLE_GLOBAL_RATE_LIMITING` | `true` | Полное включение/отключение глобального лимитера |
+| `GLOBAL_RATE_LIMIT_MAX_TOKENS` | `10000` | Burst-ёмкость глобального бакета (макс. мгновенный всплеск до 429) |
+| `GLOBAL_RATE_LIMIT_REFILL_RATE` | `1000` | Sustained rate: пополнение токенов/сек = допустимый постоянный req/s |
+| `ENABLE_PER_IP_RATE_LIMITING` | `true` | Включение per-IP лимитера (в compose — `true`; для trip-теста занизь лимиты через `docker-compose.ratelimit.yml`) |
+| `PER_IP_MAX_TOKENS` | `10000` (compose) | Burst-ёмкость бакета на IP |
+| `PER_IP_REFILL_RATE` | `1000` (compose) | Sustained req/s per IP |
+| `PER_IP_MAX_IPS` | `10000` | Максимум отслеживаемых IP; при превышении новые IP получают 429 |
+| `PER_IP_CLEANUP_TTL_SECONDS` | `300` | Idle-время до вытеснения IP из кэша |
+
+Дефолтные лимиты per-IP (в `docker-compose.yml`) специально щадящие — чтобы нагрузочное тестирование не резалось `429`. Чтобы продемонстрировать отказы по IP, разверните с малыми лимитами (`docker-compose.ratelimit.yml`) или через env. Для нагрузочного тестирования без лимитеров отключите оба через `ENABLE_GLOBAL_RATE_LIMITING=false` (+ `ENABLE_PER_IP_RATE_LIMITING=false`).
+
+### Метрики Prometheus
+
+- `l2_rate_limiter_tokens` — доступные токены глобального бакета (gauge).
+- `l2_rate_limiter_rejected_total` — запросы, отброшенные глобальным лимитером (counter).
+- `l2_per_ip_rate_limiter_rejected_total` — запросы, отброшенные per-IP лимитером (counter).
+- `l2_proxy_per_ip_rate_limiter_ips_tracked` — число отслеживаемых IP (gauge).
+- `l2_proxy_per_ip_requests_total{ip="..."}` — запросы по каждому IP (counter; label `ip`, кастомный коллектор).
+- `l2_proxy_per_ip_rejected_total{ip="..."}` — отказы по каждому IP (counter; label `ip`, кастомный коллектор).
+- `l2_proxy_per_client_id_requests_total{client_id="..."}` — запросы по значению заголовка `X-DataHub-Client-Id` (counter; label `client_id`, кастомный коллектор). Позволяет различать клиентов, работающих из-под одного IP.
+- `l2_proxy_per_client_id_rejected_total{client_id="..."}` — отказы по каждому клиенту `X-DataHub-Client-Id` (counter; label `client_id`, кастомный коллектор).
+- `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, кастомный коллектор) — p50/p95/p99 по клиентам в Grafana.
+
+Панель «Хот-клиенты» в Grafana (bar gauge) показывает топ client-id с нагрузкой, нормированной к самому горячему клиенту (1.0): горячие клиенты красные, длинный хвост обычных — зелёный. Эмуляцию хот-клиентов в нагрузочном тесте включают `--hot-clients N --hot-share 0.8` (доля запросов от фиксированных id `hot-client-1..N`). Для непрерывной нагрузки заданной длительности (например, чтобы наполнить 5m-окно rate) вместо `--iterations` используют `--duration <секунды>` — тест шлёт запросы без пауз с конвейером «в полёте ≤ `--concurrent`», пока не истечёт время.
+
+### Трейсинг отказов rate limiter
+
+Ответ `429` эмитится до основного трейсинга (`setup_tracing`), поэтому для отказов лимитера создаётся отдельный span с атрибутами:
+
+- `rate_limit.reason` — `global` или `per_ip`;
+- `rate_limit.client_ip` — IP клиента;
+- `rate_limit.limit` / `rate_limit.remaining` — ёмкость бакета и остаток токенов на момент отказа.
+
+Если клиент прислал заголовок `traceparent`, span привязывается к этому трейсу как дочерний; иначе создаётся новый трейс. Позволяет в Jaeger отличать 429-шторм глобального лимитера от per-IP.
+
+### Тест
+
+`python3 rate_limit_test.py` — интеграционный тест лимитера. Ожидание (`429` под нагрузкой или его отсутствие) выводится из `ENABLE_GLOBAL_RATE_LIMITING` (или флагов `--expect-429`/`--expect-zero`).
+
+Для быстрой детерминированной проверки `429` разверните стек с маленьким лимитом:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ratelimit.yml up -d
+python3 rate_limit_test.py --expect-429
+```
+
+Проверка отключённого лимитера (при `ENABLE_GLOBAL_RATE_LIMITING=false`):
+
+```bash
+python3 rate_limit_test.py --expect-zero
+```
+
+---
+
+## Отказоустойчивость (fault tolerance)
+
+`python3 fault_tolerance_test.py` — интеграционный набор, который по очереди «роняет» одну зависимость стека через `docker compose stop`, проверяет ожидаемое поведение и восстанавливает сервис (`docker compose start`). Все сценарии в конце возвращают стек в healthy-состояние.
+
+| Сценарий | Что делается | Что проверяется |
+|---|---|---|
+| `nats` | Рестарт `nats-server` | proxy/worker переходят в `not_ready` (503), после восстановления NATS возвращаются к 200; `message_counter.py` проходит без потерь |
+| `server` | Остановка `l2-server` | Запросы через proxy падают **быстро** с 5xx (не виснут), после старта `l2-server` возвращаются к 200 |
+| `worker` | Остановка `l2-worker` | In-flight запросы завершаются с 5xx в пределах таймаута (прокси не зависает), после рестарта воркера `message_counter.py` проходит |
+| `dedup` | Остановка `nats-server` во время in-flight нагрузки (payload ~900KB) | Ответы in-flight запросов теряются; после восстановления прокси **перепосылает** их (`l2_proxy_duplicate_requests_total` растёт), воркер отвечает из кэша дедупликации (`l2_worker_duplicate_requests_total` растёт) без повторных вызовов L2 |
+
+Пропуск сценария: `python3 fault_tolerance_test.py --skip nats --skip server --skip dedup`.
+
+### Поведение при простое NATS (потери / reconnect)
+
+Что происходит, когда `nats-server` недоступен:
+
+- **NATS-клиент (proxy и worker)** настроен на бесконечный reconnect: `natsOptions_SetAllowReconnect(true)` + `SetMaxReconnect(-1)`. Колбэк `SetDisconnectedCB` сразу переводит `m_connected=false`, поэтому health-endpoint `/health/ready` отвечает 503 и балансировщик перестаёт слать новый трафик.
+- **In-flight запросы** не теряются молча: `poll_response()` в цикле активно форсирует `connect()` с экспоненциальным backoff (250 мс → 2 с) и перепосылает request/reply до исчерпания бюджета `REQUEST_TIMEOUT_SECONDS`. Если NATS поднялся в этом окне — запрос завершается успешно; нет — клиент получает 504.
+- **Буферизации нет**: запросы, пришедшие во время простоя, не ставятся в очередь (нет JetStream). Исход для них — либо 503 на входе (пока health `not_ready`), либо 504 по дедлайну. Потери как таковой нет — отказ отдаётся клиенту явно.
+- **Перепосылка и дедупликация**: каждый реальный повторный запрос прокси (первый ответ потерян на reconnect/простое) инкрементирует `l2_proxy_duplicate_requests_total` (в `poll_response`, на второй и последующих попытках `request_with_headers`). В `l2-worker` работает кэш ответов `DedupCache` (header-only, до 4096 записей, TTL 60 с, thread-safe): повторная доставка с тем же `request_id` отдаётся из кэша (`l2_worker_duplicate_requests_total`), **без повторного вызова L2-сервера** (at-most-once на стороне L2). На cache-hit в Jaeger логируется спан с атрибутом `dedup.cached=true`.
+- **Worker** после reconnect пересоздаёт подписку на subject с queue-group — новые запросы снова распределяются по воркерам.
+
+Итог: при простое NATS наблюдается окно ошибок 503/504 (до `REQUEST_TIMEOUT_SECONDS`), но не тихие потери. Для гарантии доставки (например, retry-очередь или JetStream) нужно отдельное решение — в текущей архитектуре его нет.
+
+---
+
+## Grafana-дашборды (генерация скриптом)
+
+Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):
+
+```bash
+python3 scripts/generate-grafana-dashboards.py                 # создать/обновить все дашборды
+python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выровнять расхождения
+```
+
+Дашборды и их UID:
+
+| Дашборд | UID | Покрываемые метрики |
+|---|---|---|
+| Распределённая трассировка | `l2-distributed-tracing` | `l2_tracing_*` |
+| L2 Прокси | `l2-proxy` | proxy + NATS + http-pool + rate limiter (global + per-IP) |
+| L2 Воркер | `l2-worker` | все `l2_worker_*` |
+| L2 Сервер | `l2-server` | все `l2_server_*` |
+| SLO (уровень обслуживания) | `l2-slo-tracking` | availability / error budget |
+| NATS-сервер | `nats-dashboard` | `gnatsd_*` (генерируется скриптом) |
+| NGINX Метрики | `nginx-metrics` | nginx `stub_status` (из `grafana-dashboards/grafana-nginx.json`) |
+
+Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка покрытия: `python3 scripts/test-grafana-generator.sh` (поднимает временный Grafana и прогоняет генератор).
+
+### Выбор виртуальных машин
+
+Стек может разворачиваться на нескольких ВМ. Во всех дашбордах есть одна переменная **Виртуальная машина** (`$vm`): на каждой ВМ развёрнут один экземпляр каждого сервиса (proxy/worker/nats/nginx), поэтому **метрики на всех досках показываются только одной ВМ** — выбор узла обязателен (по умолчанию — первая ВМ из списка), мультиселекта нет.
+
+Label `vm` добавляет **vmagent при скрейпе** из переменной окружения `VM_NAME` (placeholder `%{VM_NAME}` в `prometheus/vmagent-scrape.yml`). По умолчанию `VM_NAME` берётся из hostname узла — см. `rebuild-and-run.sh`:
+
+```bash
+export VM_NAME="${VM_NAME:-$(hostname)}"   # rebuild-and-run.sh
+VM_NAME=my-node ./rebuild-and-run.sh        # переопределение на конкретной ВМ
+```
+
+Все PromQL-выражения фильтруются как `{vm=~"${vm:regex}"}`.
+
+---
+
+## Нагрузочное тестирование (baseline)
+
+Baseline зафиксирован 2026-08-06 на этом стеке через `python3 scripts/comprehensive-performance-test.py` (URL — через nginx, `http://localhost:7777`, запросы с payload метрик):
+
+| Сценарий | Итерации × concurrency | RPS | p50 | p95 | p99 | Avg latency |
+|---|---|---|---|---|---|---|
+| Low Load | 20 × 5 | 204.01 | 21.11 ms | 43.92 ms | 43.92 ms | 23.04 ms |
+| Medium Load | 50 × 10 | 201.33 | 42.08 ms | 68.68 ms | 72.14 ms | 41.64 ms |
+| High Load | 100 × 20 | 275.78 | 61.25 ms | 135.96 ms | 205.88 ms | 67.16 ms |
+| Stress Test | 200 × 50 | 341.07 | 118.35 ms | 211.57 ms | 286.38 ms | 125.13 ms |
+
+Средний RPS ≈ **255**, максимум ≈ **341**, success rate **100%**, ошибок 0. Учтите: прогоны на этой машине заметно различаются (RPS по сценариям колебался от ~155 до ~340 между запусками) — сравнивайте не по одному прогону, а по тренду.
+
+Перцентили латентности измеряются **реально на клиенте** (`message_counter.py` замеряет время каждого запроса и печатает `Latency p50/p95/p99/avg/min/max`), а не оцениваются по RPS. Полные результаты каждого прогона сохраняются в машинно-читаемый отчёт `scripts/perf-report.json` — используйте его для регрессионного сравнения (например, `worst p99` по сценариям).
+
+Для регрессионного сравнения: `scripts/performance-regression-test.sh` (см. его `--help`). После изменений кода перезапускайте baseline и сравнивайте RPS/success rate и перцентили с таблицей/`perf-report.json` выше.
+
+---
+
+## Замечание по диагностике и эксплуатации
+
+При диагностике контейнеров и health-check'ов необходимо ориентироваться на NATS-контур:
+
+- `nats-server` — транспорт сообщений
+- `nats-exporter` — экспорт метрик NATS
+- `l2-proxy` и `l2-worker` — прикладные сервисы
+- `nginx`, `nginx-exporter`, `jaeger`, `grafana`, `victoria-*` — сопутствующая инфраструктура
+
+Отсутствие NATS-сервисов в активной конфигурации следует рассматривать как проблему эксплуатации, так как текущий контур работает через NATS.

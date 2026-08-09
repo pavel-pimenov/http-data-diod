@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-08-06T09:04:40+0300",
+  "results": [
+    {
+      "name": "Low Load",
+      "iterations": 20,
+      "concurrent": 5,
+      "rps": 204.01,
+      "avg_latency_ms": 23.04,
+      "p50_latency_ms": 21.11,
+      "p95_latency_ms": 43.92,
+      "p99_latency_ms": 43.92,
+      "min_latency_ms": 10.64,
+      "max_latency_ms": 43.92,
+      "success_rate": 100.0,
+      "errors": 0
+    },
+    {
+      "name": "Medium Load",
+      "iterations": 50,
+      "concurrent": 10,
+      "rps": 201.33,
+      "avg_latency_ms": 41.64,
+      "p50_latency_ms": 42.08,
+      "p95_latency_ms": 68.68,
+      "p99_latency_ms": 72.14,
+      "min_latency_ms": 12.86,
+      "max_latency_ms": 72.14,
+      "success_rate": 100.0,
+      "errors": 0
+    },
+    {
+      "name": "High Load",
+      "iterations": 100,
+      "concurrent": 20,
+      "rps": 275.78,
+      "avg_latency_ms": 67.16,
+      "p50_latency_ms": 61.25,
+      "p95_latency_ms": 135.96,
+      "p99_latency_ms": 205.88,
+      "min_latency_ms": 18.05,
+      "max_latency_ms": 205.88,
+      "success_rate": 100.0,
+      "errors": 0
+    },
+    {
+      "name": "Stress Test",
+      "iterations": 200,
+      "concurrent": 50,
+      "rps": 341.07,
+      "avg_latency_ms": 125.13,
+      "p50_latency_ms": 118.35,
+      "p95_latency_ms": 211.57,
+      "p99_latency_ms": 286.38,
+      "min_latency_ms": 35.02,
+      "max_latency_ms": 301.42,
+      "success_rate": 100.0,
+      "errors": 0
+    }
+  ]
+}
