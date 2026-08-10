@@ -258,6 +258,30 @@ services:
       retries: 10
       start_period: 90s
 
+  # Swagger UI for the HTTP DB gateway API (docs/openapi/http-db-gate.yaml).
+  # Serves the spec at http://localhost:8081/http-db-gate.yaml and renders the
+  # interactive documentation on the root page.
+  swagger-ui:
+    container_name: swagger-ui
+    image: swaggerapi/swagger-ui:v5.17.14
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      # Path (inside the container) where the spec file is mounted. The
+      # entrypoint symlinks it into the nginx root and points the UI at it.
+      - SWAGGER_JSON=/tmp/http-db-gate.yaml
+    volumes:
+      - ./docs/openapi/http-db-gate.yaml:/tmp/http-db-gate.yaml:ro
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   l2-proxy:
     container_name: l2-proxy
     build:

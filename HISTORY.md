@@ -1,3 +1,24 @@
+# feature: Swagger UI для HTTP DB Gateway API
+
+## Date: 2026-08-10
+
+### Контекст
+Стек поднимает множество сервисов (l2-proxy, l2-worker, NATS, Grafana, Jaeger и т.д.), а OpenAPI-спецификация DB Gateway лежит в репозитории (`docs/openapi/http-db-gate.yaml`) без интерактивной документации. Нужно добавить контейнер Swagger UI, чтобы документацию и «попробовать в деле» можно было открыть в браузере.
+
+### Что сделано
+- **`docker-compose.yml`**: новый сервис `swagger-ui` (`swaggerapi/swagger-ui:v5.17.14`), порт `8081:8080`.
+  - Спецификация монтируется в контейнер по пути `SWAGGER_JSON=/tmp/http-db-gate.yaml` — entrypoint образа симлинкует её в nginx root и сам подставляет относительный URL (`./http-db-gate.yaml`) в `swagger-initializer.js` (через `cp -s` + `sed`).
+  - `healthcheck` ходит по IPv4 `127.0.0.1:8080` (busybox wget на `localhost` резолвится в `[::1]` → connection refused из-за отсутствия IPv6).
+
+### Проверка
+- `docker compose config` → OK.
+- `./rebuild-and-run.sh` → сборка и health-check зелёные.
+- `curl http://localhost:8081/` → 200 (Swagger UI), `curl http://localhost:8081/http-db-gate.yaml` → 200 (спецификация отдаётся), `swagger-initializer.js` содержит `url: "./http-db-gate.yaml"`.
+- `docker inspect swagger-ui` → health: healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+
+---
+
 # feature: распределённый трейсинг HTTP DB Gateway (/v1/sql/*) по аналогии с основным контуром
 
 ## Date: 2026-08-09
