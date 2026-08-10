@@ -1,3 +1,22 @@
+# bugfix: сборка падала из-за `Family<Histogram>::Add(labels)` без бакетов
+
+## Date: 2026-08-10
+
+### Контекст
+Метрики `m_db_request_duration_seconds`, `m_db_nats_request_duration_seconds` (request_handler) и `m_db_query_duration_seconds` (l2_worker_nats) — это семейства гистограмм, добавленные ранее по одной серии на БД. В prometheus-cpp бакеты гистограммы задаются при `Family::Add()` (конструктор `Histogram(BucketBoundaries)` обязателен), поэтому вызов `Add({{"db", name}})` без бакетов не компилировался: `make_unique<Histogram>()` без аргументов не собирается.
+
+### Что сделано
+- **`metrics_manager.hpp`**: добавлен inline-хелпер `latency_buckets_ms_to_10s()`, возвращающий `std::vector<double>` из `histogram_buckets::g_k_latency_ms_to_10s`. Семейство гистограмм не хранит бакеты, поэтому их нужно передавать в каждый `Add()`.
+- **`request_handler.cpp`**: оба места `m_db_request_duration_seconds.Add(...)` и `m_db_nats_request_duration_seconds.Add(...)` передают `latency_buckets_ms_to_10s()`; добавлен `#include "metrics_manager.hpp"`.
+- **`l2_worker_nats.cpp`**: `m_db_query_duration_seconds.Add(...)` передаёт `latency_buckets_ms_to_10s()`; добавлен `#include "metrics_manager.hpp"`.
+
+### Проверка
+- Сборка `l2-proxy` в lint-контейнере → OK.
+- `./rebuild-and-run.sh` → сборка и health-check зелёные.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+
+---
+
 # bugfix: DB-шлюз не подписывается на NATS, если PostgreSQL поднялся раньше Oracle (cold start)
 
 ## Date: 2026-08-10

@@ -119,6 +119,7 @@ struct OracleQueryExecutor::Impl {
   dpiContext *m_context = nullptr;
   dpiErrorInfo m_error_info{};
   dpiPool *m_pool = nullptr;
+  prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 
   explicit Impl(DbConfig db) : m_db(std::move(db)) {}
 
@@ -129,6 +130,30 @@ struct OracleQueryExecutor::Impl {
     if (m_context) {
       dpiContext_destroy(m_context);
     }
+  }
+
+  void update_pool_gauges() {
+    if (!m_pool_metrics) {
+      return;
+    }
+    uint32_t open = 0;
+    uint32_t busy = 0;
+    if (dpiPool_getOpenCount(m_pool, &open) < 0 ||
+        dpiPool_getBusyCount(m_pool, &busy) < 0) {
+      return;
+    }
+    const double active = static_cast<double>(busy);
+    const double idle = static_cast<double>(open >= busy ? open - busy : 0);
+    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
+    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
+  }
+
+  void release_conn(dpiConn *conn) {
+    if (!conn) {
+      return;
+    }
+    dpiConn_release(conn);
+    update_pool_gauges();
   }
 
   std::string describe_error() {
@@ -193,6 +218,7 @@ struct OracleQueryExecutor::Impl {
     if (timeout_ms > 0) {
       dpiConn_setCallTimeout(conn, static_cast<uint32_t>(timeout_ms));
     }
+    update_pool_gauges();
     return conn;
   }
 };
@@ -203,6 +229,16 @@ OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
 OracleQueryExecutor::~OracleQueryExecutor() = default;
 
 bool OracleQueryExecutor::init() { return m_impl->init(); }
+
+void OracleQueryExecutor::set_pool_metrics(
+    prometheus::Family<prometheus::Gauge> *pool_metrics) {
+  m_impl->m_pool_metrics = pool_metrics;
+  m_impl->update_pool_gauges();
+}
+
+void OracleQueryExecutor::release_conn(dpiConn *conn) {
+  m_impl->release_conn(conn);
+}
 
 int OracleQueryExecutor::default_timeout_ms() const {
   return m_impl->m_db.m_query_timeout_ms;
@@ -245,6 +281,19 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
                                   m_impl->describe_error());
   }
   dpiConn *conn = *maybe_conn;
+  // Returns the connection to the pool on every exit path (the pooled conn
+  // must be released exactly once per acquire or the pool exhausts at
+  // m_pool_max and further requests fail with 503).
+  struct ConnGuard {
+    OracleQueryExecutor *m_self = nullptr;
+    dpiConn *m_conn = nullptr;
+    ~ConnGuard() {
+      if (m_self && m_conn) {
+        m_self->release_conn(m_conn);
+      }
+    }
+  };
+  const ConnGuard conn_guard{this, conn};
 
   dpiStmt *stmt_raw = nullptr;
   if (dpiConn_prepareStmt(conn, 0, sql.data(),
@@ -472,6 +521,16 @@ bool OracleQueryExecutor::ping(int timeout_ms) {
     return false;
   }
   dpiConn *conn = *maybe_conn;
+  struct ConnGuard {
+    OracleQueryExecutor *m_self = nullptr;
+    dpiConn *m_conn = nullptr;
+    ~ConnGuard() {
+      if (m_self && m_conn) {
+        m_self->release_conn(m_conn);
+      }
+    }
+  };
+  const ConnGuard conn_guard{this, conn};
   dpiStmt *stmt_raw = nullptr;
   constexpr const char *kProbeSql = "SELECT 1 FROM DUAL";
   uint32_t num_query_columns = 0;

@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <prometheus/counter.h>
+#include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #include <prometheus/registry.h>
@@ -21,6 +22,14 @@ constexpr std::array<double, 10> g_k_size_100b_to_5mb = {
     100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000};
 } // namespace histogram_buckets
 
+// Histogram families need the bucket bounds on every Family::Add call (the
+// family itself does not remember them), so labeled call sites pass this
+// helper instead of rebuilding the vector inline.
+inline std::vector<double> latency_buckets_ms_to_10s() {
+  return {histogram_buckets::g_k_latency_ms_to_10s.begin(),
+          histogram_buckets::g_k_latency_ms_to_10s.end()};
+}
+
 class MetricsManager {
 public:
   static prometheus::Counter &
@@ -35,6 +44,32 @@ public:
   create_histogram(const std::shared_ptr<prometheus::Registry> &registry,
                    const std::string &name, const std::string &help,
                    const std::vector<double> &buckets);
+
+  // Labeled families: series are created lazily via Family::Add(labels) which
+  // deduplicates by label set and is internally synchronized, so recording
+  // code can call Add() on every request without caching.
+  static prometheus::Family<prometheus::Counter> &
+  create_counter_family(const std::shared_ptr<prometheus::Registry> &registry,
+                        const std::string &name, const std::string &help);
+
+  static prometheus::Family<prometheus::Gauge> &
+  create_gauge_family(const std::shared_ptr<prometheus::Registry> &registry,
+                      const std::string &name, const std::string &help);
+
+  static prometheus::Family<prometheus::Histogram> &
+  create_histogram_family(const std::shared_ptr<prometheus::Registry> &registry,
+                          const std::string &name, const std::string &help,
+                          const std::vector<double> &buckets);
+
+  template <std::size_t N>
+  static prometheus::Family<prometheus::Histogram> &
+  create_histogram_family(const std::shared_ptr<prometheus::Registry> &registry,
+                          const std::string &name, const std::string &help,
+                          const std::array<double, N> &buckets) {
+    return create_histogram_family(
+        registry, name, help,
+        std::vector<double>(buckets.begin(), buckets.end()));
+  }
 
   template <std::size_t N>
   static prometheus::Histogram &

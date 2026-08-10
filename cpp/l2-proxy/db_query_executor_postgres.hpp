@@ -22,6 +22,8 @@ public:
   json execute_query(const std::string &sql, const json &params, int timeout_ms,
                      int max_rows, int &status_code) override;
   bool ping(int timeout_ms) override;
+  void set_pool_metrics(
+      prometheus::Family<prometheus::Gauge> *pool_metrics) override;
 
 private:
   struct Impl;

@@ -38,9 +38,15 @@ public:
   // (success body or ErrorResponse object).
   void handle_request(const json &request, int &status_code, json &body);
 
+  // Wires the pool gauge family into every (future) executor created by
+  // init(). Safe to call before init(); executors already created keep their
+  // current pointer.
+  void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
+
 private:
   std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
   size_t m_expected_count = 0;
+  prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 };
 
 #endif // DB_QUERY_HANDLER_HPP

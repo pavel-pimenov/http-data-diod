@@ -92,7 +92,21 @@ AppContext::AppContext() {
       MetricsManager::create_counter(
           m_proxy_registry, "l2_proxy_duplicate_posts_detected_total",
           "Total number of duplicate POST bodies from clients detected by "
-          "the proxy (same body hash seen more than once)")});
+          "the proxy (same body hash seen more than once)"),
+      MetricsManager::create_counter_family(
+          m_proxy_registry, "l2_proxy_db_requests_total",
+          "Total number of HTTP DB Gateway requests by database, type and "
+          "HTTP status"),
+      MetricsManager::create_histogram_family(
+          m_proxy_registry, "l2_proxy_db_request_duration_seconds",
+          "Histogram of HTTP DB Gateway request processing duration in "
+          "seconds by database",
+          histogram_buckets::g_k_latency_ms_to_10s),
+      MetricsManager::create_histogram_family(
+          m_proxy_registry, "l2_proxy_db_nats_request_duration_seconds",
+          "Histogram of HTTP DB Gateway NATS round-trip duration in seconds "
+          "by database",
+          histogram_buckets::g_k_latency_ms_to_10s)});
 
   // Initialize worker metrics
   m_worker.m_metrics = std::make_unique<WorkerMetrics>(WorkerMetrics{
@@ -134,7 +148,19 @@ AppContext::AppContext() {
           "Circuit breaker state (0=closed, 1=open, 2=half_open)"),
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_duplicate_requests_total",
-          "Total number of duplicate NATS requests served from dedup cache")});
+          "Total number of duplicate NATS requests served from dedup cache"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_db_requests_total",
+          "Total number of HTTP DB Gateway requests executed by the worker "
+          "by database, type and HTTP status"),
+      MetricsManager::create_histogram_family(
+          m_worker_registry, "l2_worker_db_query_duration_seconds",
+          "Histogram of DB query execution duration in seconds by database",
+          histogram_buckets::g_k_latency_ms_to_10s),
+      MetricsManager::create_gauge_family(
+          m_worker_registry, "l2_worker_db_pool_connections",
+          "Current number of DB pool connections by database and state "
+          "(active/idle)")});
 
   // Initialize server metrics
   m_server.m_metrics = std::make_unique<ServerMetrics>(ServerMetrics{

@@ -1894,6 +1894,68 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Row 8: DB Gateway
+    panels.append(create_row_panel("DB Gateway", 70, y))
+    y += 1
+
+    # Panel 67: DB requests by db/type/status
+    panels.append(create_timeseries_panel(
+        title="DB запросы (по статусу)",
+        id=67,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "rate(l2_proxy_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 68: DB request duration
+    panels.append(create_timeseries_panel(
+        title="DB длительность запроса",
+        id=68,
+        x=12, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+        ]
+    ))
+    y += 8
+
+    # Panel 69: DB NATS round-trip duration
+    panels.append(create_timeseries_panel(
+        title="DB NATS round-trip",
+        id=69,
+        x=0, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+        ]
+    ))
+
+    # Panel 70: DB errors (4xx/5xx)
+    panels.append(create_timeseries_panel(
+        title="DB ошибки",
+        id=70,
+        x=12, y=y, w=12, h=8,
+        unit="reqps",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": "sum(rate(l2_proxy_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 
@@ -2110,7 +2172,68 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_duplicate_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Дубликаты/с", "refId": "A"}
         ]
     ))
-    
+    y += 8
+
+    # Row 7: DB Gateway
+    panels.append(create_row_panel("DB Gateway", 60, y))
+    y += 1
+
+    # Panel 45: DB requests by db/type/status
+    panels.append(create_timeseries_panel(
+        title="DB запросы (по статусу)",
+        id=45,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "rate(l2_worker_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 46: DB query duration
+    panels.append(create_timeseries_panel(
+        title="DB длительность запроса",
+        id=46,
+        x=12, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
+            {"expr": "histogram_quantile(0.99, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+        ]
+    ))
+    y += 8
+
+    # Panel 47: DB pool connections
+    panels.append(create_timeseries_panel(
+        title="DB пул соединений",
+        id=47,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": "l2_worker_db_pool_connections{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}} {{state}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 48: DB errors (4xx/5xx)
+    panels.append(create_timeseries_panel(
+        title="DB ошибки",
+        id=48,
+        x=12, y=y, w=12, h=8,
+        unit="reqps",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": "sum(rate(l2_worker_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 

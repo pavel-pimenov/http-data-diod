@@ -5,6 +5,8 @@
 #include "db_query_executor.hpp"
 #include <memory>
 
+struct dpiConn;
+
 // Oracle implementation of DbQueryExecutor built on ODPI-C and a connection
 // pool. Instances are owned by the DB gateway handler and are not shared
 // between threads: all pool access happens from one thread.
@@ -22,10 +24,15 @@ public:
   json execute_query(const std::string &sql, const json &params, int timeout_ms,
                      int max_rows, int &status_code) override;
   bool ping(int timeout_ms) override;
+  void set_pool_metrics(
+      prometheus::Family<prometheus::Gauge> *pool_metrics) override;
 
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
+
+  // Returns the pooled connection to the pool and refreshes pool gauges.
+  void release_conn(dpiConn *conn);
 };
 
 #endif // DB_QUERY_EXECUTOR_ORACLE_HPP

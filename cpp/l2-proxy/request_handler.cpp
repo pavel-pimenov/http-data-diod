@@ -7,6 +7,7 @@
 #include "json_utils.hpp"
 #include "labeled_counter_collector.hpp"
 #include "logger.hpp"
+#include "metrics_manager.hpp"
 #include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
@@ -721,10 +722,31 @@ void RequestHandler::route_db_request(
     httplib::Response &res, const json &request, const std::string &method,
     const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
     const std::string &request_id, const std::string &inlet_span_id) {
+  const std::string db_name =
+      JsonUtils::safe_get_string(request, DbQueryContract::kDb);
+
+  // Records the gateway counters/histograms on every exit path (success and
+  // each failure branch) so a stuck/erroring DB gateway is visible in
+  // Prometheus, not just in traces.
+  auto record_db_metrics = [this, &request, &db_name, start_us](int status) {
+    const std::string type =
+        JsonUtils::safe_get_string(request, DbQueryContract::kType);
+    m_ctx.m_proxy.m_metrics->m_db_requests_total.Add(
+        {{"db", db_name},
+         {"type", type.empty() ? "unknown" : type},
+         {"status", std::to_string(status)}})
+        .Increment();
+    m_ctx.m_proxy.m_metrics->m_db_request_duration_seconds.Add(
+        {{"db", db_name}}, latency_buckets_ms_to_10s())
+        .Observe(static_cast<double>(get_current_timestamp_us() - start_us) /
+                 1e6);
+  };
+
   if (!m_ctx.m_nats_client) {
     send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
                           "NATS client is not available", method, path,
                           start_us, trace_ctx, request_id);
+    record_db_metrics(503);
     return;
   }
 
@@ -735,8 +757,6 @@ void RequestHandler::route_db_request(
       JsonUtils::safe_get_string(request, NatsContract::kProxySpanId);
   std::string nats_parent_id =
       resolve_parent_id(inlet_span_id, trace_ctx.m_parent_id);
-  const std::string db_name =
-      JsonUtils::safe_get_string(request, DbQueryContract::kDb);
 
   // request_with_headers also returns the worker's consume span id (NATS
   // header), which links the round-trip span to the worker's consume span.
@@ -768,11 +788,16 @@ void RequestHandler::route_db_request(
       send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
                             "NATS connection is not available", method, path,
                             start_us, trace_ctx, request_id);
+      record_db_metrics(503);
     } else {
       send_db_gateway_error(res, 504, "TIMEOUT",
                             "DB worker did not respond in time", method, path,
                             start_us, trace_ctx, request_id);
+      record_db_metrics(504);
     }
+    m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
+        {{"db", db_name}}, latency_buckets_ms_to_10s())
+        .Observe(static_cast<double>(nats_end_us - nats_start_us) / 1e6);
     return;
   }
 
@@ -801,6 +826,7 @@ void RequestHandler::route_db_request(
     send_db_gateway_error(res, 502, "BAD_GATEWAY",
                           "Invalid response envelope from DB worker", method,
                           path, start_us, trace_ctx, request_id);
+    record_db_metrics(502);
     return;
   }
   const int status =
@@ -811,6 +837,11 @@ void RequestHandler::route_db_request(
   }
   res.status = status;
   res.set_content(response_body.dump(), "application/json");
+
+  m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
+      {{"db", db_name}}, latency_buckets_ms_to_10s())
+      .Observe(static_cast<double>(nats_end_us - nats_start_us) / 1e6);
+  record_db_metrics(status);
 
   JaegerSpanLogger::log_proxy_response(
       m_ctx.m_tracer.get(), method, path, status, start_us,

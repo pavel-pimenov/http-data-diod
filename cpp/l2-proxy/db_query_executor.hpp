@@ -4,6 +4,8 @@
 #include "config.hpp"
 #include "nlohmann/json.hpp"
 #include <memory>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
 #include <string>
 
 using json = nlohmann::json;
@@ -36,6 +38,12 @@ public:
   // Lightweight connectivity check ("SELECT 1"). Returns true when a
   // connection could be acquired and the probe succeeded.
   virtual bool ping(int timeout_ms) = 0;
+
+  // Wires the per-database pool gauge family (l2_worker_db_pool_connections)
+  // so the executor can publish active/idle connection counts on every
+  // acquire/release. nullptr (default) disables the updates.
+  virtual void
+  set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics) = 0;
 
 protected:
   DbQueryExecutor() = default;

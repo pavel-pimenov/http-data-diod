@@ -160,6 +160,7 @@ struct PostgresQueryExecutor::Impl {
   // returned to the pool on release.
   std::vector<PGconn *> m_idle;
   size_t m_total = 0;
+  prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 
   explicit Impl(DbConfig db) : m_db(std::move(db)) {}
 
@@ -168,6 +169,18 @@ struct PostgresQueryExecutor::Impl {
       PQfinish(conn);
     }
     m_idle.clear();
+  }
+
+  void update_pool_gauges() {
+    if (!m_pool_metrics) {
+      return;
+    }
+    const double idle = static_cast<double>(m_idle.size());
+    const double active =
+        static_cast<double>(m_total >= m_idle.size() ? m_total - m_idle.size()
+                                                     : 0);
+    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
+    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
   }
 
   PGconn *create_conn() const {
@@ -187,6 +200,7 @@ struct PostgresQueryExecutor::Impl {
     if (!m_idle.empty()) {
       PGconn *conn = m_idle.back();
       m_idle.pop_back();
+      update_pool_gauges();
       return conn;
     }
     if (m_total >= static_cast<size_t>(m_db.m_pool_max)) {
@@ -202,8 +216,10 @@ struct PostgresQueryExecutor::Impl {
                    trim_copy(PQerrorMessage(conn)));
       PQfinish(conn);
       --m_total;
+      update_pool_gauges();
       return std::nullopt;
     }
+    update_pool_gauges();
     return conn;
   }
 
@@ -216,9 +232,11 @@ struct PostgresQueryExecutor::Impl {
       if (m_total > 0) {
         --m_total;
       }
+      update_pool_gauges();
       return;
     }
     m_idle.push_back(conn);
+    update_pool_gauges();
   }
 
   static std::string trim_copy(const char *text) {
@@ -256,6 +274,12 @@ bool PostgresQueryExecutor::init() {
                m_impl->m_db.m_pool_max, m_impl->m_db.m_host,
                m_impl->m_db.m_port, m_impl->m_db.m_database);
   return true;
+}
+
+void PostgresQueryExecutor::set_pool_metrics(
+    prometheus::Family<prometheus::Gauge> *pool_metrics) {
+  m_impl->m_pool_metrics = pool_metrics;
+  m_impl->update_pool_gauges();
 }
 
 int PostgresQueryExecutor::default_timeout_ms() const {

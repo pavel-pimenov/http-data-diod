@@ -4,7 +4,6 @@
 #include "logger.hpp"
 #include <chrono>
 #include <format>
-
 namespace {
 uint64_t steady_ms() {
   return static_cast<uint64_t>(
@@ -27,6 +26,7 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
                     db.m_name);
       continue;
     }
+    executor->set_pool_metrics(m_pool_metrics);
     m_executors.emplace(db.m_name, std::move(executor));
   }
   if (m_executors.empty()) {
@@ -36,6 +36,11 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   Logger::info("DB handler: ready with {}/{} database(s)", m_executors.size(),
                m_expected_count);
   return true;
+}
+
+void DbQueryHandler::set_pool_metrics(
+    prometheus::Family<prometheus::Gauge> *pool_metrics) {
+  m_pool_metrics = pool_metrics;
 }
 
 void DbQueryHandler::handle_request(const json &request, int &status_code,

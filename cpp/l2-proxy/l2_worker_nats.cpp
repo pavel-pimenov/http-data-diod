@@ -3,6 +3,7 @@
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "logger.hpp"
+#include "metrics_manager.hpp"
 #include "retry_utils.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
@@ -22,6 +23,8 @@ void L2Worker::run_with_nats() {
 
   if (m_ctx.m_config.m_db_query_enabled) {
     m_db_query_handler = std::make_unique<DbQueryHandler>();
+    m_db_query_handler->set_pool_metrics(
+        &m_ctx.m_worker.m_metrics->m_db_pool_connections);
   }
 
   RetryHandler backoff(1, 150);
@@ -475,11 +478,15 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
         const uint64_t db_start_us = get_current_timestamp_us();
         m_db_query_handler->handle_request(request_data, status, body);
         const uint64_t db_end_us = get_current_timestamp_us();
+        const std::string db_name = JsonUtils::safe_get_string(
+            request_data, DbQueryContract::kDb);
+        m_ctx.m_worker.m_metrics->m_db_query_duration_seconds.Add(
+            {{"db", db_name.empty() ? "unknown" : db_name}},
+            latency_buckets_ms_to_10s())
+            .Observe(static_cast<double>(db_end_us - db_start_us) / 1e6);
         if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
           const std::string db_span_id =
               JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
-          const std::string db_name = JsonUtils::safe_get_string(
-              request_data, DbQueryContract::kDb);
           nlohmann::json attrs = {
               {"db.name", db_name},
               {"db.operation",
@@ -503,6 +510,15 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
 
   json envelope{{DbQueryContract::kStatus, status},
                 {DbQueryContract::kBody, body}};
+  const std::string db_name =
+      JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
+  const std::string type =
+      JsonUtils::safe_get_string(request_data, DbQueryContract::kType);
+  m_ctx.m_worker.m_metrics->m_db_requests_total.Add(
+      {{"db", db_name.empty() ? "unknown" : db_name},
+       {"type", type.empty() ? "unknown" : type},
+       {"status", std::to_string(status)}})
+      .Increment();
   NatsHeaders response_headers;
   if (!consume_span_id.empty()) {
     response_headers[NatsContract::kConsumeSpanIdHeader] = consume_span_id;

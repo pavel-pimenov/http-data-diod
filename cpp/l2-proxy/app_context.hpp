@@ -32,6 +32,12 @@ struct ProxyMetrics {
   prometheus::Counter &m_duplicate_requests_total;
   // Duplicate POST requests from clients (proxy-side detection)
   prometheus::Counter &m_duplicate_posts_detected;
+  // HTTP DB Gateway (/v1/sql/*) metrics. Labeled families: series are created
+  // lazily by label set (db, type, status), so recording code just calls
+  // Add() with the label map on every request.
+  prometheus::Family<prometheus::Counter> &m_db_requests_total;
+  prometheus::Family<prometheus::Histogram> &m_db_request_duration_seconds;
+  prometheus::Family<prometheus::Histogram> &m_db_nats_request_duration_seconds;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
@@ -62,6 +68,12 @@ struct WorkerMetrics {
   prometheus::Histogram &m_l2_response_size_bytes;
   prometheus::Gauge &m_circuit_breaker_state;
   prometheus::Counter &m_duplicate_requests;
+  // HTTP DB Gateway metrics: execution counters/duration on the worker and
+  // per-database pool gauges (state label: "active"/"idle"). Labeled families
+  // as in ProxyMetrics.
+  prometheus::Family<prometheus::Counter> &m_db_requests_total;
+  prometheus::Family<prometheus::Histogram> &m_db_query_duration_seconds;
+  prometheus::Family<prometheus::Gauge> &m_db_pool_connections;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
