@@ -100,8 +100,12 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
   Logger::info("Main thread waiting for shutdown signal...");
   {
     std::unique_lock<std::mutex> lock(g_shutdown_mutex);
+    // Poll for the shutdown flag every 100ms. Nothing notifies the condition
+    // variable, so each wait_for must re-check the predicate after the timeout
+    // (the while-loop retries until the flag is actually set).
     while (!g_shutdown_flag.load()) {
-      g_shutdown_cv.wait_for(lock, std::chrono::milliseconds(100));
+      g_shutdown_cv.wait_for(lock, std::chrono::milliseconds(100),
+                             []() { return g_shutdown_flag.load(); });
     }
     Logger::info("Received signal {}, exiting...", g_signal_number.load());
   }
@@ -354,7 +358,7 @@ int main() { // NOLINT(bugprone-exception-escape)
       spdlog::default_logger()->flush();
       // Trigger crash
       volatile int *bad_ptr = nullptr;
-      *bad_ptr = 42; // NOLINT — intentional crash for testing
+      *bad_ptr = 42; // NOLINT //-V522 intentional crash for testing
     }
 
     if (app_ctx.m_config.m_mode == "proxy") {

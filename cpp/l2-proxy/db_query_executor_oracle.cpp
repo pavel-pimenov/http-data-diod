@@ -73,7 +73,6 @@ std::string oracle_type_name(dpiOracleTypeNum type) {
   case DPI_ORACLE_TYPE_BFILE:
     return "BFILE";
   case DPI_ORACLE_TYPE_LONG_VARCHAR:
-    return "LONG";
   case DPI_ORACLE_TYPE_LONG_NVARCHAR:
     return "LONG";
   case DPI_ORACLE_TYPE_LONG_RAW:
@@ -142,8 +141,8 @@ struct OracleQueryExecutor::Impl {
         dpiPool_getBusyCount(m_pool, &busy) < 0) {
       return;
     }
-    const double active = static_cast<double>(busy);
-    const double idle = static_cast<double>(open >= busy ? open - busy : 0);
+    const auto active = static_cast<double>(busy);
+    const auto idle = static_cast<double>(open >= busy ? open - busy : 0);
     m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
     m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
   }

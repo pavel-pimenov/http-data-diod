@@ -260,8 +260,7 @@ public:
 
   // Initialize logger (call once at startup)
   static void init() {
-    static std::once_flag init_flag;
-    std::call_once(init_flag, []() {
+    std::call_once(s_init_flag, []() {
       const std::string logger_name = default_logger_name();
 
       // Check if logger already exists globally
@@ -372,7 +371,7 @@ public:
     // Logger::Level and spdlog::level::level_enum use different numeric
     // values, so map explicitly instead of casting (a cast would silently
     // select a more verbose level, e.g. INFO -> spdlog::debug).
-    spdlog::level::level_enum spdlog_level = spdlog::level::info;
+    spdlog::level::level_enum spdlog_level = spdlog::level::off;
     switch (level) {
     case DEBUG:
       spdlog_level = spdlog::level::debug;
@@ -490,6 +489,11 @@ private:
   static std::shared_ptr<spdlog::logger> s_logger;
   static bool s_initialized;
   static std::atomic<bool> s_colors_enabled;
+  // Single initialization guard for Logger::init(). Inline so the header
+  // defines exactly one object program-wide (function-local statics inside an
+  // implicitly-inline member function are a shared object, but an inline data
+  // member is explicit and analyzer-friendly).
+  static inline std::once_flag s_init_flag;
 
   // Logger name doubles as the default "service" field (JsonFormatter falls
   // back to msg.logger_name when the thread-local context is empty), so it is

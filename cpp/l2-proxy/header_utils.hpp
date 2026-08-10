@@ -9,48 +9,54 @@
 #include <string>
 #include <vector>
 
+namespace header_utils {
+// Inline namespace-scope singletons: guaranteed to be a single object across
+// all translation units (C++17 inline variables), unlike function-local statics
+// inside implicitly-inline member functions.
+inline const std::set<std::string> g_default_skip_headers = {
+    "host", "content-length", "connection", "transfer-encoding"};
+inline const std::set<std::string> g_response_skip_headers = {
+    "content-length", "transfer-encoding", "content-encoding"};
+inline const std::set<std::string> g_sensitive_headers = {
+    "authorization", "proxy-authorization",
+    "cookie",        "set-cookie",
+    "x-api-key",     "api-key",
+    "x-apikey",      "apikey",
+    "x-auth-token",  "x-access-token",
+    "x-token",       "x-csrf-token",
+    "x-xsrf-token",  "x-secret",
+    "x-ws-secret",   "x-session-id",
+    "session-id",    "jsessionid",
+    "phpsessid",     "aspsessionid",
+    "x-password",    "password",
+    "passwd",        "x-credentials",
+    "credentials",   "x-tenant-token",
+    "authentication"};
+// Substrings that mark a header name as sensitive even if it is not in the
+// exact list above (e.g. x-amz-security-token, x-datadog-api-key).
+inline const std::vector<std::string> g_sensitive_header_fragments = {
+    "auth",     "token",  "secret", "key",        "cookie", "session",
+    "password", "passwd", "pwd",    "credential", "csrf",   "xsrf"};
+} // namespace header_utils
+
 class HeaderUtils {
 public:
   static const std::set<std::string> &get_default_skip_headers() {
-    static const std::set<std::string> g_skip_headers = {
-        "host", "content-length", "connection", "transfer-encoding"};
-    return g_skip_headers;
+    return header_utils::g_default_skip_headers;
   }
 
   static const std::set<std::string> &get_response_skip_headers() {
-    static const std::set<std::string> g_skip_headers = {
-        "content-length", "transfer-encoding", "content-encoding"};
-    return g_skip_headers;
+    return header_utils::g_response_skip_headers;
   }
 
   // Header names whose values must never appear in logs (credentials, tokens,
   // cookies). Values are still forwarded, only log lines are redacted.
   static const std::set<std::string> &get_sensitive_headers() {
-    static const std::set<std::string> g_sensitive_headers = {
-        "authorization", "proxy-authorization",
-        "cookie",        "set-cookie",
-        "x-api-key",     "api-key",
-        "x-apikey",      "apikey",
-        "x-auth-token",  "x-access-token",
-        "x-token",       "x-csrf-token",
-        "x-xsrf-token",  "x-secret",
-        "x-ws-secret",   "x-session-id",
-        "session-id",    "jsessionid",
-        "phpsessid",     "aspsessionid",
-        "x-password",    "password",
-        "passwd",        "x-credentials",
-        "credentials",   "x-tenant-token",
-        "authentication"};
-    return g_sensitive_headers;
+    return header_utils::g_sensitive_headers;
   }
 
-  // Substrings that mark a header name as sensitive even if it is not in the
-  // exact list above (e.g. x-amz-security-token, x-datadog-api-key).
   static const std::vector<std::string> &get_sensitive_header_fragments() {
-    static const std::vector<std::string> g_fragments = {
-        "auth",     "token",  "secret", "key",        "cookie", "session",
-        "password", "passwd", "pwd",    "credential", "csrf",   "xsrf"};
-    return g_fragments;
+    return header_utils::g_sensitive_header_fragments;
   }
 
   static bool is_sensitive_header(const std::string &header_name) {

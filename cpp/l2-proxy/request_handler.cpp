@@ -80,7 +80,7 @@ void RequestHandler::handle_get(const httplib::Request &req,
     }
     Logger::error("CRASH TEST: intentional SIGSEGV via /crash-test endpoint");
     volatile int *bad_ptr = nullptr;
-    *bad_ptr = 42; // NOLINT — triggers SIGSEGV for crash handler test
+    *bad_ptr = 42; // NOLINT //-V522 triggers SIGSEGV for crash handler test
     // unreachable
     res.status = 200;
     return;

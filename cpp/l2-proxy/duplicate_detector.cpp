@@ -56,7 +56,7 @@ size_t DuplicateDetector::duplicate_bodies() const {
 nlohmann::json DuplicateDetector::report() const {
   std::lock_guard<std::mutex> lock(m_mutex);
   nlohmann::json result;
-  result["enabled"] = m_options.m_enabled;
+  result["enabled"] = m_options.m_enabled; //-V601 nlohmann::json handles bool
 
   std::vector<const Entry *> duplicates;
   size_t duplicate_occurrences = 0;

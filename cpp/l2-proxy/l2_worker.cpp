@@ -204,9 +204,9 @@ std::string L2Worker::construct_l2_url(const std::string &selected_url,
   // Ensure path starts with "/" for proper URL construction
   const std::string normalized_path = normalize_path(path);
 
-  // Fix: Ensure that we don't have double slashes in the URL
-  if (!base_url.empty() && base_url.back() == '/' && !normalized_path.empty() &&
-      normalized_path[0] == '/') {
+  // normalize_path() guarantees a non-empty path starting with '/', so only
+  // the base_url trailing slash decides whether a double slash would occur.
+  if (!base_url.empty() && base_url.back() == '/') {
     // Remove trailing slash from base URL to avoid double slashes
     url = base_url.substr(0, base_url.length() - 1) + normalized_path;
   } else {

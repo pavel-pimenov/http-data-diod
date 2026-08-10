@@ -27,7 +27,7 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
       continue;
     }
     executor->set_pool_metrics(m_pool_metrics);
-    m_executors.emplace(db.m_name, std::move(executor));
+    m_executors.try_emplace(db.m_name, std::move(executor));
   }
   if (m_executors.empty()) {
     Logger::warn("DB handler: no database executor initialized");

@@ -1,3 +1,31 @@
+# pvs-studio: исправлены все 13 замечаний GA:1,2,3 (0 warnings после правки)
+
+## Date: 2026-08-10
+
+### Контекст
+Проект имеет таргет PVS-Studio (`l2-proxy.pvs`), но не запускался в контейнерном окружении. Проверка модуля l2-proxy через PVS-Studio 7.43 (GA:1,2,3) в builder-образе (бинарники pvs-studio-analyzer/plog-converter скопированы из образа pvs-studio-spider, компил-база — свежая через CMake с `-DCMAKE_UNITY_BUILD=OFF`) выявила 13 замечаний: 3 High, 3 Medium, 7 Low.
+
+### Что сделано (по замечаниям)
+- **V1037** (`db_query_executor_oracle.cpp:76`): два одинаковых case `DPI_ORACLE_TYPE_LONG_VARCHAR`/`DPI_ORACLE_TYPE_LONG_NVARCHAR` (оба `return "LONG"`) объединены в один список меток.
+- **V1098** (`db_query_handler.cpp:30`): `m_executors.emplace(db.m_name, std::move(executor))` → `try_emplace()` — перемещение происходит только при реальной вставке, при дубле ключа аргумент не разрушается.
+- **V601** (`duplicate_detector.cpp:59`): `result["enabled"] = m_options.m_enabled` — ложное срабатывание (nlohmann::json корректно принимает bool), добавлен комментарий-подавление `//-V601`.
+- **V1096** (`header_utils.hpp`, 4 места): функция-локал `static const std::set/vector` внутри implicitly-inline статических методов вынесены в namespace-скоп `inline const` переменные `header_utils::g_*` (гарантированно один объект на программу, C++17 inline variables) — убран ODR-риск и `static` из заголовка.
+- **V1096** (`logger.hpp:263`): `static std::once_flag init_flag` в `Logger::init()` → `static inline std::once_flag s_init_flag` как член класса (один объект на программу, явный inline).
+- **V560** (`l2_worker.cpp:208`): `!normalized_path.empty()` всегда true (normalize_path() гарантирует непустой путь с ведущим `/`) — условие упрощено до проверки только `base_url` на хвостовой слэш.
+- **V1048** (`logger.hpp:381`): переменная инициализировалась `spdlog::level::info`, а case INFO присваивал то же значение — инициализация заменена на `spdlog::level::off` (в switch покрыты все ветки).
+- **V522** (`main.cpp:357`, `request_handler.cpp:83`): намеренный разыменование nullptr для crash-теста — добавлено подавление `//-V522` (NOLINT сохранён).
+- **V1089** (`main.cpp:104`): `g_shutdown_cv.wait_for()` без предиката → добавлен предикат `[] { return g_shutdown_flag.load(); }`; цикл `while` сохранён (CV никто не нотифицирует, каждый wait_for истекает по таймауту и перепроверяет флаг — без цикла процесс завершался по signal 0 через 100ms).
+- Бонус (clang-tidy `modernize-use-auto` в уже изменённом файле): `const double active/idle = static_cast<double>(...)` → `const auto` в `db_query_executor_oracle.cpp:144-145`.
+
+### Проверка
+- Повторный прогон PVS-Studio GA:1,2,3 → `warnings: []` (JSON), 0 проектных замечаний.
+- `./scripts/run-clang-tidy.sh` → 0 errors/0 warnings в проектных файлах (диагностики из odpi/nats/httplib/base64 отфильтрованы).
+- `./rebuild-and-run.sh` → сборка успешна, все health-check зелёные (включая oracle), 79 тестов / 427 assertions PASS.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed (POST+GET).
+- l2-proxy: running, restart=0, healthy после 30+ секунд аптайма (регрессия shutdown-цикла исключена).
+
+---
+
 # bugfix: сборка падала из-за `Family<Histogram>::Add(labels)` без бакетов
 
 ## Date: 2026-08-10
