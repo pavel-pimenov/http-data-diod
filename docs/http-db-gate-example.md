@@ -21,14 +21,21 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 
 | Сервис | Роль | Что задействовано |
 |--------|------|-------------------|
-| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/init/init.sql` |
+| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/init/init.sql`. Запускается только через profile: `docker compose --profile oracle up -d` |
 | `l2-proxy` | HTTP-вход | регистрирует БД из `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
 | `l2-worker` | Исполнитель | образ `runtime-db` (Oracle Instant Client 21.13), держит пул сессий, отвечает на `service.db.query` |
 | `nats-server` | Транспорт | subject `service.db.query`, queue group `db_workers` |
 
 ## Переменные окружения (docker-compose.yml)
 
-По умолчанию шлюз включён (`DB_QUERY_ENABLED=true`). Отключить: `DB_QUERY_ENABLED=false`.
+По умолчанию шлюз включён (`DB_QUERY_ENABLED=true`), PostgreSQL подключён, Oracle отключён (`DB_ORACLE_ENABLED=false`). Для запуска Oracle-контура поднимите сервис с профилем и включите Oracle:
+
+```
+docker compose --profile oracle up -d
+DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
+```
+
+Полностью отключить шлюз: `DB_QUERY_ENABLED=false`.
 
 - `DB_QUERY_NATS_SUBJECT` — subject запросов (default `service.db.query`)
 - `DB_QUERY_NATS_QUEUE_GROUP` — queue group (default `db_workers`)

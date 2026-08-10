@@ -238,6 +238,9 @@ services:
     container_name: oracle
     image: gvenzl/oracle-xe:21.3.0-slim
     restart: unless-stopped
+    # Started only on demand: `docker compose --profile oracle up -d`
+    profiles:
+      - oracle
     mem_limit: ${ORACLE_MEM_LIMIT:-2g}
     ports:
       - "1521:1521"
@@ -367,7 +370,7 @@ services:
       - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
       - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
       - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
-      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
       - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
       - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
       - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}
@@ -562,7 +565,7 @@ services:
       - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
       - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
       - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
-      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
       - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
       - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
       - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}

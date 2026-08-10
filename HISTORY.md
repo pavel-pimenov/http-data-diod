@@ -1,3 +1,23 @@
+# feat: Oracle вынесен в compose-профиль `oracle` (по умолчанию выключен)
+
+## Date: 2026-08-10
+
+### Контекст
+Oracle XE — тяжёлый сервис (mem_limit 2g, долгий холодный старт, занимает порт 1521). Вместо запуска всегда, его вынесли в профиль compose, чтобы по умолчанию контур поднимался только с PostgreSQL (512m) и не требовал Oracle-инстанса.
+
+### Что сделано
+- `docker-compose.yml`: сервис `oracle` получил `profiles: [oracle]` — запускается только `docker compose --profile oracle up -d`.
+- `DB_ORACLE_ENABLED` по умолчанию `false` для l2-proxy и l2-worker (перезапуск стека без Oracle больше не требует переопределения env).
+- `docs/http-db-gate-example.md`: описана команда запуска Oracle-контура и переключение `DB_ORACLE_ENABLED`.
+
+### Проверка
+- `./rebuild-and-run.sh` → успешно, стек healthy (oracle после `stop` не поднимается повторно).
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+- `GET /v1/sql` → только postgres (Oracle отключён), `POST /v1/sql/postgres/query` → ok (1 строка).
+- l2-worker/l2-proxy: restart=0, healthy; в логах воркера нет ошибок Oracle.
+
+---
+
 # pvs-studio: исправлены все 13 замечаний GA:1,2,3 (0 warnings после правки)
 
 ## Date: 2026-08-10
