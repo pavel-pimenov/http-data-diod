@@ -1,4 +1,4 @@
-#include "db_query_executor.hpp"
+#include "db_query_executor_oracle.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -114,7 +114,7 @@ std::string format_interval_ym(const dpiIntervalYM &i) {
 }
 } // namespace
 
-struct DbQueryExecutor::Impl {
+struct OracleQueryExecutor::Impl {
   const DbConfig m_db;
   dpiContext *m_context = nullptr;
   dpiErrorInfo m_error_info{};
@@ -197,20 +197,20 @@ struct DbQueryExecutor::Impl {
   }
 };
 
-DbQueryExecutor::DbQueryExecutor(DbConfig db)
+OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
     : m_impl(std::make_unique<Impl>(std::move(db))) {}
 
-DbQueryExecutor::~DbQueryExecutor() = default;
+OracleQueryExecutor::~OracleQueryExecutor() = default;
 
-bool DbQueryExecutor::init() { return m_impl->init(); }
+bool OracleQueryExecutor::init() { return m_impl->init(); }
 
-int DbQueryExecutor::default_timeout_ms() const {
+int OracleQueryExecutor::default_timeout_ms() const {
   return m_impl->m_db.m_query_timeout_ms;
 }
 
-int DbQueryExecutor::default_max_rows() const { return m_impl->m_db.m_max_rows; }
+int OracleQueryExecutor::default_max_rows() const { return m_impl->m_db.m_max_rows; }
 
-const std::string &DbQueryExecutor::db_name() const { return m_impl->m_db.m_name; }
+const std::string &OracleQueryExecutor::db_name() const { return m_impl->m_db.m_name; }
 
 namespace {
 struct ColumnPlan {
@@ -231,7 +231,7 @@ struct StmtGuard {
 };
 } // namespace
 
-json DbQueryExecutor::execute_query(const std::string &sql, const json &params,
+json OracleQueryExecutor::execute_query(const std::string &sql, const json &params,
                                     int timeout_ms, int max_rows,
                                     int &status_code) {
   status_code = 200;
@@ -466,7 +466,7 @@ json DbQueryExecutor::execute_query(const std::string &sql, const json &params,
                                 rows.size(), truncated, end_ms - start_ms);
 }
 
-bool DbQueryExecutor::ping(int timeout_ms) {
+bool OracleQueryExecutor::ping(int timeout_ms) {
   auto maybe_conn = m_impl->acquire_conn(timeout_ms);
   if (!maybe_conn) {
     return false;

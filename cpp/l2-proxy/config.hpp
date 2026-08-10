@@ -9,13 +9,18 @@ struct NatsConfig;
 
 // Connection settings of a single named database exposed by the HTTP DB
 // Gateway (endpoint /v1/sql/{db}/query). Multiple databases are supported by
-// the routing layer; config currently populates the built-in "oracle" one.
+// the routing layer; config populates the built-in "oracle" and "postgres"
+// databases from DB_ORACLE_* / DB_POSTGRES_* env vars.
 struct DbConfig {
   std::string m_name;
-  std::string m_driver; // "oracle"
+  std::string m_driver; // "oracle" (ODPI-C) | "postgres" (libpq)
   std::string m_host;
   int m_port = 1521;
+  // Oracle service name (host:port/service connect string). PostgreSQL uses
+  // m_database instead.
   std::string m_service;
+  // PostgreSQL database name (dbname=...). Unused by the Oracle driver.
+  std::string m_database;
   std::string m_user;
   std::string m_password;
   int m_pool_min = 1;

@@ -19,11 +19,19 @@ public:
   DbQueryHandler(const DbQueryHandler &) = delete;
   DbQueryHandler &operator=(const DbQueryHandler &) = delete;
 
-  // Creates an executor for every configured database. Returns false when no
-  // database could be initialized (the worker then skips the DB subscription).
+  // Creates executors for configured databases that do not have one yet (the
+  // caller retries while some database is still starting up, e.g. Oracle cold
+  // start). Returns false when no executor could be initialized.
   bool init(const std::vector<DbConfig> &databases);
 
   [[nodiscard]] bool is_enabled() const { return !m_executors.empty(); }
+
+  // True when every configured database has an initialized executor. The
+  // worker retries init() until this holds so a fast-starting database (e.g.
+  // PostgreSQL) cannot mask a slow one (Oracle cold start).
+  [[nodiscard]] bool all_configured() const {
+    return m_expected_count > 0 && m_executors.size() >= m_expected_count;
+  }
 
   // Executes one DbQueryContract request. Fills status_code with the HTTP
   // status of the DB gateway response and body with its JSON body
@@ -32,6 +40,7 @@ public:
 
 private:
   std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+  size_t m_expected_count = 0;
 };
 
 #endif // DB_QUERY_HANDLER_HPP

@@ -142,6 +142,9 @@ if(BUILD_TESTS)
     include(Catch)
 endif()
 
+# Find PostgreSQL client (libpq) for the DB gateway's postgres driver
+find_package(PostgreSQL REQUIRED)
+
 # Find CLI11 (command line parsing) - optional
 if(BUILD_TESTS)
     find_package(CLI11 CONFIG QUIET)
@@ -206,7 +209,9 @@ add_executable(l2-proxy
   http_client_pool.cpp
   stats_logger.cpp
   db_query_handler.cpp
-  db_query_executor.cpp
+  db_query_executor_oracle.cpp
+  db_query_executor_postgres.cpp
+  db_query_executor_factory.cpp
   labeled_counter_collector.cpp
   labeled_histogram_collector.cpp
   httplib/httplib.cc
@@ -248,7 +253,8 @@ set_source_files_properties(
     l2_worker.cpp l2_worker_nats.cpp trace_logger.cpp nats_client.cpp
     nats_push_service.cpp nats_poll_service.cpp metrics_manager.cpp
     http_client.cpp http_client_pool.cpp stats_logger.cpp
-    db_query_handler.cpp db_query_executor.cpp
+    db_query_handler.cpp db_query_executor_oracle.cpp
+    db_query_executor_postgres.cpp db_query_executor_factory.cpp
     labeled_counter_collector.cpp labeled_histogram_collector.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
@@ -271,6 +277,7 @@ target_link_libraries(l2-proxy PRIVATE
     pthread
     ZLIB::ZLIB
     spdlog::spdlog_header_only
+    PostgreSQL::PostgreSQL
 )
 
 

@@ -38,6 +38,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libfmt10 \
     libspdlog1.15 \
     libssl3t64 \
+    libpq5 \
     ca-certificates \
     curl \
     && apt-get clean \
@@ -74,6 +75,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     catch2 \
     libcli11-dev \
     nlohmann-json3-dev \
+    libpq-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

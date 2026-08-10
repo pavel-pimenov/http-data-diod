@@ -151,18 +151,30 @@ void L2Worker::run_with_nats() {
       }
     }
 
-    // The DB gateway is independent from the worker path: Oracle may be
-    // cold-starting for minutes, so its retries must never tear down the
-    // worker subscription (that would drop the main HTTP flow).
+    // The DB gateway is independent from the worker path: databases (Oracle in
+    // particular) may be cold-starting for minutes, so its retries must never
+    // tear down the worker subscription (that would drop the main HTTP flow).
+    // init() is incremental, so repeated calls only create the missing
+    // executors; we wait until every configured database is ready before
+    // subscribing.
     if (m_nats_client && m_nats_client->is_connected() &&
         subscription_active && !db_subscription_active) {
       if (!m_db_query_handler) {
         db_subscription_active = true;
-      } else if (!m_db_query_handler->is_enabled() &&
-                 !m_db_query_handler->init(m_ctx.m_config.m_databases)) {
-        Logger::warn("DB gateway is not ready yet (Oracle unavailable?), "
-                     "will retry");
-        backoff.record_failure();
+      } else if (!m_db_query_handler->all_configured()) {
+        m_db_query_handler->init(m_ctx.m_config.m_databases);
+        if (!m_db_query_handler->all_configured()) {
+          Logger::warn("DB gateway is not ready yet (database(s) "
+                       "unavailable?), will retry");
+          backoff.record_failure();
+        } else if (!subscribe_db()) {
+          Logger::warn("DB subscription failed, will retry in {}ms",
+                       backoff.get_current_delay_ms());
+          backoff.record_failure();
+        } else {
+          db_subscription_active = true;
+          backoff.record_success();
+        }
       } else if (!subscribe_db()) {
         Logger::warn("DB subscription failed, will retry in {}ms",
                      backoff.get_current_delay_ms());

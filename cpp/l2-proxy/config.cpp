@@ -268,27 +268,49 @@ void Config::load_db_query_config() {
   if (!m_db_query_enabled) {
     return;
   }
-  if (!get_env_bool("DB_ORACLE_ENABLED", false)) {
-    Logger::warn("DB_QUERY_ENABLED=true but DB_ORACLE_ENABLED=false: no "
+  if (!get_env_bool("DB_ORACLE_ENABLED", false) &&
+      !get_env_bool("DB_POSTGRES_ENABLED", false)) {
+    Logger::warn("DB_QUERY_ENABLED=true but no database driver enabled "
+                 "(DB_ORACLE_ENABLED/DB_POSTGRES_ENABLED are false): no "
                  "databases configured");
     return;
   }
-  DbConfig db;
-  db.m_name = "oracle";
-  db.m_driver = "oracle";
-  db.m_host = get_env_string("DB_ORACLE_HOST", "oracle");
-  db.m_port = get_env_int("DB_ORACLE_PORT", 1521);
-  db.m_service = get_env_string("DB_ORACLE_SERVICE", "XEPDB1");
-  db.m_user = get_env_string("DB_ORACLE_USER", "");
-  db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
-  db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
-  db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
-  db.m_query_timeout_ms = m_db_query_default_timeout_ms;
-  db.m_max_rows = m_db_query_default_max_rows;
-  m_databases.push_back(db);
-  Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
-               "service={})",
-               db.m_name, db.m_driver, db.m_host, db.m_port, db.m_service);
+  if (get_env_bool("DB_ORACLE_ENABLED", false)) {
+    DbConfig db;
+    db.m_name = "oracle";
+    db.m_driver = "oracle";
+    db.m_host = get_env_string("DB_ORACLE_HOST", "oracle");
+    db.m_port = get_env_int("DB_ORACLE_PORT", 1521);
+    db.m_service = get_env_string("DB_ORACLE_SERVICE", "XEPDB1");
+    db.m_user = get_env_string("DB_ORACLE_USER", "");
+    db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
+    db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
+    db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
+    db.m_query_timeout_ms = m_db_query_default_timeout_ms;
+    db.m_max_rows = m_db_query_default_max_rows;
+    m_databases.push_back(db);
+    Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
+                 "service={})",
+                 db.m_name, db.m_driver, db.m_host, db.m_port, db.m_service);
+  }
+  if (get_env_bool("DB_POSTGRES_ENABLED", false)) {
+    DbConfig db;
+    db.m_name = "postgres";
+    db.m_driver = "postgres";
+    db.m_host = get_env_string("DB_POSTGRES_HOST", "postgres");
+    db.m_port = get_env_int("DB_POSTGRES_PORT", 5432);
+    db.m_database = get_env_string("DB_POSTGRES_DB", "postgres");
+    db.m_user = get_env_string("DB_POSTGRES_USER", "");
+    db.m_password = get_env_string("DB_POSTGRES_PASSWORD", "");
+    db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", 1);
+    db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", 5);
+    db.m_query_timeout_ms = m_db_query_default_timeout_ms;
+    db.m_max_rows = m_db_query_default_max_rows;
+    m_databases.push_back(db);
+    Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
+                 "db={})",
+                 db.m_name, db.m_driver, db.m_host, db.m_port, db.m_database);
+  }
 }
 
 bool Config::get_env_bool(const std::string &env_name, bool default_val) {
@@ -531,13 +553,21 @@ bool Config::validate(bool log_issues) const {
             std::format("Invalid DB_QUERY_DEFAULT_MAX_ROWS: {} (must be > 0)",
                         m_db_query_default_max_rows));
       for (const auto &db : m_databases) {
+        check(db.m_driver == "oracle" || db.m_driver == "postgres",
+              std::format("DB '{}': unknown driver '{}'", db.m_name,
+                          db.m_driver));
         check(!db.m_host.empty(),
               std::format("DB '{}': host cannot be empty", db.m_name));
         check(in_range(db.m_port, 1, 65535),
               std::format("DB '{}': invalid port {} (must be 1-65535)",
                           db.m_name, db.m_port));
-        check(!db.m_service.empty(),
-              std::format("DB '{}': service cannot be empty", db.m_name));
+        if (db.m_driver == "oracle") {
+          check(!db.m_service.empty(),
+                std::format("DB '{}': service cannot be empty", db.m_name));
+        } else {
+          check(!db.m_database.empty(),
+                std::format("DB '{}': database cannot be empty", db.m_name));
+        }
         check(!db.m_user.empty(),
               std::format("DB '{}': user cannot be empty", db.m_name));
         check(db.m_pool_min >= 1 && db.m_pool_max >= db.m_pool_min,

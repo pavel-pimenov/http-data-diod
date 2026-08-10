@@ -15,11 +15,15 @@ uint64_t steady_ms() {
 } // namespace
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
+  m_expected_count = databases.size();
   for (const DbConfig &db : databases) {
-    auto executor = std::make_unique<DbQueryExecutor>(db);
-    if (!executor->init()) {
+    if (m_executors.contains(db.m_name)) {
+      continue;
+    }
+    auto executor = create_db_query_executor(db);
+    if (!executor || !executor->init()) {
       Logger::error("DB handler: failed to init executor for database '{}', "
-                    "skipping",
+                    "skipping (will retry)",
                     db.m_name);
       continue;
     }
@@ -29,7 +33,8 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
     Logger::warn("DB handler: no database executor initialized");
     return false;
   }
-  Logger::info("DB handler: ready with {} database(s)", m_executors.size());
+  Logger::info("DB handler: ready with {}/{} database(s)", m_executors.size(),
+               m_expected_count);
   return true;
 }
 

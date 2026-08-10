@@ -48,7 +48,7 @@ paths:
                           example: oracle
                         driver:
                           type: string
-                          enum: [oracle]
+                          enum: [oracle, postgres]
                           example: oracle
                         enabled:
                           type: boolean
@@ -111,8 +111,10 @@ paths:
         (с учётом пробелов/комментариев в начале). Прочие операторы отклоняются
         с ошибкой 422.
 
-        Bind-переменные задаются в стиле Oracle (`:name`). Параметры передаются
-        как объект `params`, где ключ — имя переменной без двоеточия.
+        Bind-переменные задаются в стиле драйвера: Oracle — `:name`,
+        PostgreSQL — позиционные `$1..$N`. Параметры передаются как объект
+        `params`; для PostgreSQL ключи объекта сопоставляются `$1..$N` в
+        порядке сортировки ключей (как их хранит JSON-объект).
       operationId: runQuery
       parameters:
         - name: db
@@ -145,7 +147,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Ошибка выполнения SQL (ORA-код или некорректный оператор)
+          description: Ошибка выполнения SQL (ORA-код / SQLSTATE или некорректный оператор)
           content:
             application/json:
               schema:
@@ -181,7 +183,10 @@ components:
           example: SELECT code, name FROM ref_dict WHERE category = :category
         params:
           type: object
-          description: Именованные bind-переменные (стиль Oracle `:name`, ключ — без двоеточия)
+          description: |
+            Bind-переменные. Для Oracle — именованные (`:name`, ключ — без
+            двоеточия); для PostgreSQL — позиционные `$1..$N` в порядке
+            сортировки ключей объекта.
           additionalProperties:
             oneOf:
               - type: string
@@ -253,7 +258,10 @@ components:
           example: CODE
         type:
           type: string
-          description: Тип данных Oracle (VARCHAR2, NUMBER, DATE, CLOB, ...)
+          description: |
+            Тип данных колонки в терминах драйвера (Oracle: VARCHAR2, NUMBER,
+            DATE, CLOB, ...; PostgreSQL: TEXT, INTEGER, BIGINT, NUMERIC,
+            TIMESTAMP, BOOLEAN, ...)
           example: VARCHAR2
         nullable:
           type: boolean
@@ -273,7 +281,7 @@ components:
           properties:
             code:
               type: string
-              description: "Код ошибки: ORA-XXXXX, HTTP-код или внутренний код шлюза"
+              description: "Код ошибки: ORA-XXXXX / SQLSTATE, HTTP-код или внутренний код шлюза"
               example: "ORA-00942"
             message:
               type: string

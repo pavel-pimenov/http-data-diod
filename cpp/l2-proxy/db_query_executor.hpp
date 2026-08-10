@@ -8,39 +8,41 @@
 
 using json = nlohmann::json;
 
-// Executes read-only SQL against a single database using ODPI-C and a
-// connection pool. Instances are owned by the DB gateway handler and are not
-// shared between threads: all pool access happens from one thread.
+// Driver-agnostic interface of the HTTP DB Gateway executor. One executor is
+// created per configured database by create_db_query_executor() based on
+// DbConfig::m_driver ("oracle" uses ODPI-C, "postgres" uses libpq). Executors
+// are owned by the DB gateway handler and are not shared between threads: all
+// pool access happens from one thread.
 class DbQueryExecutor {
 public:
-  explicit DbQueryExecutor(DbConfig db);
-  ~DbQueryExecutor();
-  DbQueryExecutor(const DbQueryExecutor &) = delete;
-  DbQueryExecutor &operator=(const DbQueryExecutor &) = delete;
+  virtual ~DbQueryExecutor() = default;
 
-  // Creates the ODPI-C context and pool. Must be called (and return true)
+  // Creates the driver context and pool. Must be called (and return true)
   // before execute_query()/ping().
-  bool init();
+  virtual bool init() = 0;
 
   // Configured defaults applied when a request does not override them.
-  [[nodiscard]] int default_timeout_ms() const;
-  [[nodiscard]] int default_max_rows() const;
-  [[nodiscard]] const std::string &db_name() const;
+  [[nodiscard]] virtual int default_timeout_ms() const = 0;
+  [[nodiscard]] virtual int default_max_rows() const = 0;
+  [[nodiscard]] virtual const std::string &db_name() const = 0;
 
   // Executes a read-only query. On success status_code is set to 200 and the
   // returned body is a DbResponseContract query response; on failure
   // status_code carries the mapped HTTP status and the body is an
   // ErrorResponse object.
-  json execute_query(const std::string &sql, const json &params, int timeout_ms,
-                     int max_rows, int &status_code);
+  virtual json execute_query(const std::string &sql, const json &params,
+                             int timeout_ms, int max_rows, int &status_code) = 0;
 
-  // Lightweight connectivity check ("SELECT 1 FROM DUAL"). Returns true when a
+  // Lightweight connectivity check ("SELECT 1"). Returns true when a
   // connection could be acquired and the probe succeeded.
-  bool ping(int timeout_ms);
+  virtual bool ping(int timeout_ms) = 0;
 
-private:
-  struct Impl;
-  std::unique_ptr<Impl> m_impl;
+protected:
+  DbQueryExecutor() = default;
 };
+
+// Creates the executor matching DbConfig::m_driver ("oracle" | "postgres").
+// Returns nullptr for an unknown driver.
+std::unique_ptr<DbQueryExecutor> create_db_query_executor(const DbConfig &db);
 
 #endif // DB_QUERY_EXECUTOR_HPP

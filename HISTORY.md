@@ -1,3 +1,21 @@
+# bugfix: DB-шлюз не подписывается на NATS, если PostgreSQL поднялся раньше Oracle (cold start)
+
+## Date: 2026-08-10
+
+### Контекст
+Ретрай-логика DB-шлюза была основана на `DbQueryHandler::is_enabled()`: подписка создавалась, как только *хотя бы один* исполнитель инициализирован. После запуска `./rebuild-and-run.sh` PostgreSQL поднимается за секунды, а Oracle холодно стартует минутами. К моменту инициализации воркера первый вызов `init()` уже мог успешно создать исполнитель PostgreSQL → `is_enabled()` возвращал `true` → подписка создавалась без ожидания Oracle, и запросы к БД шли только к PostgreSQL, а Oracle оставался недоступным.
+
+### Что сделано
+- **`db_query_handler.hpp`**: добавлен метод `all_configured()` — `true`, когда число инициализированных исполнителей достигло числа сконфигурированных БД (`m_expected_count`). Заведено поле `m_expected_count`.
+- **`db_query_handler.cpp`**: `init()` стал инкрементальным — создаёт только отсутствующие исполнители, не сбрасывая уже готовые; лог стал «ready with N/M database(s)».
+- **`l2_worker_nats.cpp`**: ретрай-цикл подписки DB-шлюза теперь ждёт `all_configured()` (и повторно вызывает `init()`, пока не поднимутся все БД), и только потом вызывает `subscribe_db()`. Worker-подписка при этом по-прежнему не рвётся.
+
+### Проверка
+- `./rebuild-and-run.sh` → сборка и health-check зелёные.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+
+---
+
 # feature: Swagger UI для HTTP DB Gateway API
 
 ## Date: 2026-08-10
