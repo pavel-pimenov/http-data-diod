@@ -557,8 +557,51 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                                        httplib::Response &res,
                                        const std::string &method,
                                        const std::string &body) {
+  // Distributed tracing by analogy with the main request path: extract (or
+  // generate) the trace context, log the INCOMING span and correlate all DB
+  // gateway log lines via the thread-local request context.
+  const uint64_t start_us = get_current_timestamp_us();
+  const std::string traceparent_raw = get_traceparent_header(req.headers);
+  const TraceContext trace_ctx =
+      handle_trace_context(traceparent_raw, m_ctx.m_tracer.get());
+  const std::string request_id = m_id_generator.generate_uuid();
+
+  LogContextScope log_scope;
+  Logger::set_request_id(request_id);
+  Logger::set_trace_id(trace_ctx.m_trace_id);
+  Logger::set_client_ip(extract_client_ip(req));
+
+  std::string inlet_span_id;
+  if (m_ctx.m_tracer) {
+    const std::string trace_id =
+        resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
+    inlet_span_id = m_ctx.m_tracer->generate_span_id();
+    m_ctx.m_tracer->log_request(
+        "INCOMING", req.path, 200, start_us, start_us, "l2-proxy-proxy",
+        request_id, trace_id, inlet_span_id, trace_ctx.m_parent_id,
+        nlohmann::json({}));
+  }
+
+  // Attach the proxy's tracing context to the DB request so the worker can
+  // extend the same trace (analogous to NatsPushService on the main path).
+  auto add_trace_fields = [&](json &request_json) {
+    if (!m_ctx.m_tracer) {
+      return;
+    }
+    const std::string trace_id =
+        resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
+    const std::string nats_db_span_id = m_ctx.m_tracer->generate_span_id();
+    request_json[NatsContract::kProxyTraceId] = trace_id;
+    request_json[NatsContract::kProxySpanId] = nats_db_span_id;
+    request_json[NatsContract::kProxyInletSpanId] = inlet_span_id;
+    request_json[NatsContract::kProxyTraceparent] =
+        m_ctx.m_tracer->generate_traceparent(trace_id, nats_db_span_id,
+                                             trace_ctx.m_sampled);
+  };
+
   if (!m_ctx.m_config.m_db_query_enabled) {
-    send_db_error(res, 404, "NOT_FOUND", "DB gateway is disabled");
+    send_db_gateway_error(res, 404, "NOT_FOUND", "DB gateway is disabled",
+                          method, req.path, start_us, trace_ctx, request_id);
     return;
   }
 
@@ -572,7 +615,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
 
   if (path_rest.empty()) {
     if (method != "GET") {
-      send_db_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET");
+      send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
+                            req.path, start_us, trace_ctx, request_id);
       return;
     }
     json names = json::array();
@@ -592,7 +636,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       slash == std::string::npos ? "" : path_rest.substr(slash + 1);
   if (db_name.empty() || action.empty() ||
       action.find('/') != std::string::npos) {
-    send_db_error(res, 404, "NOT_FOUND", "Unknown DB gateway path");
+    send_db_gateway_error(res, 404, "NOT_FOUND", "Unknown DB gateway path",
+                          method, req.path, start_us, trace_ctx, request_id);
     return;
   }
 
@@ -600,20 +645,21 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       m_ctx.m_config.m_databases,
       [&db_name](const DbConfig &db) { return db.m_name == db_name; });
   if (!known_db) {
-    send_db_error(res, 404, "UNKNOWN_DATABASE",
-                  std::format("Unknown database '{}'", db_name));
+    send_db_gateway_error(res, 404, "UNKNOWN_DATABASE",
+                          std::format("Unknown database '{}'", db_name),
+                          method, req.path, start_us, trace_ctx, request_id);
     return;
   }
 
   if (action == "query" && method == "POST") {
     const auto parsed_body = JsonUtils::try_parse(body);
     if (!parsed_body) {
-      send_db_error(res, 400, "BAD_REQUEST", "Invalid JSON body");
+      send_db_gateway_error(res, 400, "BAD_REQUEST", "Invalid JSON body",
+                            method, req.path, start_us, trace_ctx, request_id);
       return;
     }
     json request{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
-                 {DbQueryContract::kRequestId,
-                  m_id_generator.generate_uuid()},
+                 {DbQueryContract::kRequestId, request_id},
                  {DbQueryContract::kDb, db_name},
                  {DbQueryContract::kSql,
                   JsonUtils::safe_get_string(*parsed_body,
@@ -629,53 +675,132 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       request[DbQueryContract::kMaxRows] =
           (*parsed_body)[DbQueryContract::kMaxRows];
     }
+    add_trace_fields(request);
     const auto validated = parse_db_query_request(request);
     if (!validated) {
-      send_db_error(res, 400, "BAD_REQUEST", validated.error());
+      send_db_gateway_error(res, 400, "BAD_REQUEST", validated.error(), method,
+                            req.path, start_us, trace_ctx, request_id);
       return;
     }
-    route_db_request(res, request);
+    route_db_request(res, request, method, req.path, start_us, trace_ctx,
+                     request_id, inlet_span_id);
     return;
   }
 
   if (action == "ping" && method == "GET") {
     json request{{DbQueryContract::kType, DbQueryContract::kTypePing},
-                 {DbQueryContract::kRequestId,
-                  m_id_generator.generate_uuid()},
+                 {DbQueryContract::kRequestId, request_id},
                  {DbQueryContract::kDb, db_name}};
-    route_db_request(res, request);
+    add_trace_fields(request);
+    route_db_request(res, request, method, req.path, start_us, trace_ctx,
+                     request_id, inlet_span_id);
     return;
   }
 
-  send_db_error(res, 404, "NOT_FOUND",
-                std::format("Unsupported DB gateway action '{}' for {}",
-                            action, method));
+  send_db_gateway_error(res, 404, "NOT_FOUND",
+                        std::format("Unsupported DB gateway action '{}' for {}",
+                                    action, method),
+                        method, req.path, start_us, trace_ctx, request_id);
 }
 
-void RequestHandler::route_db_request(httplib::Response &res,
-                                      const json &request) {
+void RequestHandler::send_db_gateway_error(
+    httplib::Response &res, int status, const std::string &code,
+    const std::string &message, const std::string &method,
+    const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
+    const std::string &request_id) {
+  if (m_ctx.m_tracer) {
+    JaegerSpanLogger::log_proxy_response(
+        m_ctx.m_tracer.get(), method, path, status, start_us,
+        get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_mode,
+        request_id);
+  }
+  send_db_error(res, status, code, message);
+}
+
+void RequestHandler::route_db_request(
+    httplib::Response &res, const json &request, const std::string &method,
+    const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
+    const std::string &request_id, const std::string &inlet_span_id) {
   if (!m_ctx.m_nats_client) {
-    send_db_error(res, 503, "DB_UNAVAILABLE", "NATS client is not available");
+    send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
+                          "NATS client is not available", method, path,
+                          start_us, trace_ctx, request_id);
     return;
   }
+
   const std::string request_json = request.dump();
-  const auto reply = m_ctx.m_nats_client->request(
-      m_ctx.m_config.m_db_query_nats_subject, request_json,
+  const int64_t nats_start_us = TimeUtils::epoch_us();
+  const std::string trace_id = resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
+  std::string nats_db_span_id =
+      JsonUtils::safe_get_string(request, NatsContract::kProxySpanId);
+  std::string nats_parent_id =
+      resolve_parent_id(inlet_span_id, trace_ctx.m_parent_id);
+  const std::string db_name =
+      JsonUtils::safe_get_string(request, DbQueryContract::kDb);
+
+  // request_with_headers also returns the worker's consume span id (NATS
+  // header), which links the round-trip span to the worker's consume span.
+  const NatsReply reply = m_ctx.m_nats_client->request_with_headers(
+      m_ctx.m_config.m_db_query_nats_subject, request_json, {},
+      {NatsContract::kConsumeSpanIdHeader},
       m_ctx.m_config.m_db_query_nats_timeout_ms);
-  if (!reply) {
+  const int64_t nats_end_us = TimeUtils::epoch_us();
+
+  if (reply.m_data.empty()) {
+    const std::string last_error =
+        m_ctx.m_nats_client->get_last_error().value_or("");
+    if (m_ctx.m_tracer && !trace_id.empty()) {
+      nlohmann::json attrs = {
+          {"nats.success", false},
+          {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
+          {"nats.duration_us", nats_end_us - nats_start_us},
+          {"db.name", db_name},
+      };
+      if (!last_error.empty()) {
+        attrs["nats.last_error"] = last_error;
+      }
+      JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_db_request",
+                                      500, request_id, trace_id,
+                                      nats_db_span_id, nats_parent_id,
+                                      nats_start_us, attrs);
+    }
     if (!m_ctx.m_nats_client->is_connected()) {
-      send_db_error(res, 503, "DB_UNAVAILABLE",
-                    "NATS connection is not available");
+      send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
+                            "NATS connection is not available", method, path,
+                            start_us, trace_ctx, request_id);
     } else {
-      send_db_error(res, 504, "TIMEOUT",
-                    "DB worker did not respond in time");
+      send_db_gateway_error(res, 504, "TIMEOUT",
+                            "DB worker did not respond in time", method, path,
+                            start_us, trace_ctx, request_id);
     }
     return;
   }
-  const auto envelope = JsonUtils::try_parse(*reply);
+
+  const auto consume_it =
+      reply.m_headers.find(NatsContract::kConsumeSpanIdHeader);
+  if (consume_it != reply.m_headers.end() && !consume_it->second.empty()) {
+    nats_parent_id = consume_it->second;
+  }
+
+  if (m_ctx.m_tracer && !trace_id.empty()) {
+    nlohmann::json attrs = {
+        {"nats.success", true},
+        {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
+        {"nats.response_size", reply.m_data.size()},
+        {"nats.duration_us", nats_end_us - nats_start_us},
+        {"db.name", db_name},
+    };
+    JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_db_request",
+                                    200, request_id, trace_id,
+                                    nats_db_span_id, nats_parent_id,
+                                    nats_start_us, attrs);
+  }
+
+  const auto envelope = JsonUtils::try_parse(reply.m_data);
   if (!envelope || !envelope->is_object()) {
-    send_db_error(res, 502, "BAD_GATEWAY",
-                  "Invalid response envelope from DB worker");
+    send_db_gateway_error(res, 502, "BAD_GATEWAY",
+                          "Invalid response envelope from DB worker", method,
+                          path, start_us, trace_ctx, request_id);
     return;
   }
   const int status =
@@ -686,4 +811,9 @@ void RequestHandler::route_db_request(httplib::Response &res,
   }
   res.status = status;
   res.set_content(response_body.dump(), "application/json");
+
+  JaegerSpanLogger::log_proxy_response(
+      m_ctx.m_tracer.get(), method, path, status, start_us,
+      get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_mode,
+      request_id);
 }

@@ -410,17 +410,77 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
                                           const std::string &reply_to) {
   int status = 500;
   json body;
+  std::string consume_span_id;
+  const uint64_t start_us = get_current_timestamp_us();
+
+  // Correlate all DB gateway log lines of this NATS task via the thread-local
+  // context; the scope restores the previous values on exit so one thread
+  // cannot leak context into the next task.
+  LogContextScope log_scope;
+
+  json request_data;
+  TraceContext trace_ctx;
   try {
     const auto parsed = JsonUtils::try_parse(request_json);
     if (!parsed) {
       status = 400;
       body = make_db_error_body(status, "BAD_REQUEST", "Invalid JSON body");
-    } else if (!m_db_query_handler) {
-      status = 503;
-      body = make_db_error_body(status, "DB_UNAVAILABLE",
-                                "DB gateway is not initialized");
     } else {
-      m_db_query_handler->handle_request(*parsed, status, body);
+      request_data = *parsed;
+      const std::string request_id =
+          JsonUtils::safe_get_string(request_data, DbQueryContract::kRequestId);
+      Logger::set_request_id(request_id);
+
+      const std::string traceparent = JsonUtils::safe_get_string(
+          request_data, NatsContract::kProxyTraceparent);
+      trace_ctx = handle_trace_context(traceparent, m_ctx.m_tracer.get());
+      Logger::set_trace_id(trace_ctx.m_trace_id);
+
+      consume_span_id =
+          JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
+      const std::string proxy_span_id = JsonUtils::safe_get_string(
+          request_data, NatsContract::kProxySpanId);
+
+      if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
+        nlohmann::json attrs = {
+            {"messaging.system", "nats"},
+            {"messaging.operation", "consume"},
+            {"messaging.destination", m_ctx.m_config.m_db_query_nats_subject},
+            {"messaging.reply_to", reply_to},
+        };
+        log_span_to_jaeger(m_ctx.m_tracer.get(), "NATS_consume", "/nats", 200,
+                           start_us, start_us,
+                           proxy_service_name(m_ctx.m_config.m_mode),
+                           request_id, trace_ctx.m_trace_id, consume_span_id,
+                           proxy_span_id, attrs);
+      }
+
+      if (!m_db_query_handler) {
+        status = 503;
+        body = make_db_error_body(status, "DB_UNAVAILABLE",
+                                  "DB gateway is not initialized");
+      } else {
+        const uint64_t db_start_us = get_current_timestamp_us();
+        m_db_query_handler->handle_request(request_data, status, body);
+        const uint64_t db_end_us = get_current_timestamp_us();
+        if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
+          const std::string db_span_id =
+              JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
+          const std::string db_name = JsonUtils::safe_get_string(
+              request_data, DbQueryContract::kDb);
+          nlohmann::json attrs = {
+              {"db.name", db_name},
+              {"db.operation",
+               JsonUtils::safe_get_string(request_data,
+                                          DbQueryContract::kType)},
+          };
+          log_span_to_jaeger(m_ctx.m_tracer.get(), "DB_execute",
+                             "/v1/sql/" + db_name, status, db_start_us,
+                             db_end_us, proxy_service_name(m_ctx.m_config.m_mode),
+                             request_id, trace_ctx.m_trace_id, db_span_id,
+                             consume_span_id, attrs);
+        }
+      }
     }
   } catch (const std::exception &e) {
     Logger::error("Error processing DB query (reply_to={}): {}", reply_to,
@@ -431,7 +491,11 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
 
   json envelope{{DbQueryContract::kStatus, status},
                 {DbQueryContract::kBody, body}};
-  send_nats_response(reply_to, envelope.dump());
+  NatsHeaders response_headers;
+  if (!consume_span_id.empty()) {
+    response_headers[NatsContract::kConsumeSpanIdHeader] = consume_span_id;
+  }
+  send_nats_response(reply_to, envelope.dump(), response_headers);
   m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
       static_cast<double>(envelope.dump().size()));
 }

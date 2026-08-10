@@ -109,9 +109,22 @@ private:
   void handle_db_gateway(const httplib::Request &req, httplib::Response &res,
                          const std::string &method,
                          const std::string &body);
-  // Sends a validated DbQueryContract request to the DB subject and applies
-  // the worker's {status, body} envelope to the HTTP response.
-  void route_db_request(httplib::Response &res, const json &request);
+  // Sends a DB gateway error response (send_db_error) and logs the proxy
+  // Jaeger span so failed /v1/sql requests stay visible in traces.
+  void send_db_gateway_error(httplib::Response &res, int status,
+                             const std::string &code,
+                             const std::string &message,
+                             const std::string &method, const std::string &path,
+                             uint64_t start_us, const TraceContext &trace_ctx,
+                             const std::string &request_id);
+  // Sends a validated DbQueryContract request to the DB subject, logs the
+  // NATS round-trip span and applies the worker's {status, body} envelope to
+  // the HTTP response.
+  void route_db_request(httplib::Response &res, const json &request,
+                        const std::string &method, const std::string &path,
+                        uint64_t start_us, const TraceContext &trace_ctx,
+                        const std::string &request_id,
+                        const std::string &inlet_span_id);
 };
 
 #endif // REQUEST_HANDLER_HPP

@@ -1,3 +1,26 @@
+# feature: распределённый трейсинг HTTP DB Gateway (/v1/sql/*) по аналогии с основным контуром
+
+## Date: 2026-08-09
+
+### Контекст
+Основной контур (HTTP → l2-proxy → NATS → l2-worker → L2 server) покрыт дистрибутивным трейсингом (INCOMING/NATS_push/NATS_consume/worker/l2_call/proxy response), а путь DB Gateway (`/v1/sql/*`) до сих пор трейсы не писал: `handle_db_gateway`/`route_db_request` шли в NATS на «голом» `natsClient::request()` без контекста. Нужно добавить трейсинг по аналогии: сценарий, где каждый HTTP-запрос виден в Jaeger цепочкой спанов через NATS вплоть до выполнения SQL.
+
+### Что сделано
+- **Proxy (`request_handler.cpp`)**:
+  - `handle_db_gateway`: извлекается (или генерируется) trace context из заголовка `traceparent`, логируется INCOMING-спан, `request_id` выносится на уровень HTTP-запроса (раньше генерировался заново для каждого DB-запроса) и прокидывается в thread-local контекст логирования (`LogContextScope` + request_id/trace_id/client_ip).
+  - В сообщение DB-запроса добавляются поля `proxy_trace_id`/`proxy_span_id`/`proxy_inlet_span_id`/`proxy_traceparent` (те же ключи `NatsContract`, что и в основном контуре) — воркер по ним продлевает ту же трассу.
+  - `route_db_request`: вместо `request()` теперь `request_with_headers()` — это позволяет забрать из ответа `X-Consume-Span-Id` (воркерский consume-спан) и связать им NATS-спан round-trip. Логируется спан `NATS_db_request` (с атрибутами `nats.success`/`nats.destination`/`nats.response_size`/`nats.duration_us`/`db.name`), а финальный ответ — через `JaegerSpanLogger::log_proxy_response`.
+  - Все ошибки DB-шлюза (404/405/400/503/504/502) логируют proxy-спан через новый `send_db_gateway_error` — неуспешные запросы не теряются в трассах (аналог `BackendErrorSpanLogger` для основного пути).
+- **Worker (`l2_worker_nats.cpp`)**: `process_db_query_from_nats` по аналогии с `process_request_from_nats` — читает `proxy_traceparent`, логирует `NATS_consume` (parent = proxy_span_id), оборачивает `DbQueryHandler::handle_request` в спан `DB_execute` (атрибуты `db.name`/`db.operation`, статус = HTTP-статус ответа), и возвращает воркерский `X-Consume-Span-Id` заголовком NATS.
+- `request_handler.hpp`: обновлены сигнатуры `route_db_request` (+ method/path/start_us/trace_ctx/request_id/inlet_span_id) и добавлен `send_db_gateway_error`.
+
+### Проверка
+- `./rebuild-and-run.sh` (release) → сборка и health-check зелёные (см. следующий шаг после запуска).
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+- `GET /v1/sql/oracle/ping`, `POST /v1/sql/oracle/query` → ответы прежние, в логах воркера видны спаны `NATS_consume`/`DB_execute`, в логах прокси — `INCOMING`/`NATS_db_request`.
+
+---
+
 # feature: Oracle XE 21c в стеке — рабочий DB Gateway через NATS
 
 ## Date: 2026-08-09
