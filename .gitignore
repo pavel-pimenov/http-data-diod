@@ -2,6 +2,7 @@ build
 build-lint
 build_test
 build-asan
+build-cov
 profiles
 
 build_test/makefile

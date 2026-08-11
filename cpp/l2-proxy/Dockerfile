@@ -201,7 +201,9 @@ EXPOSE 8888 19090 19091 19092 8088
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -sf http://localhost:8888/health/ready || exit 1
 
-CMD ["sh", "-c", "./l2-proxy"]
+# exec replaces the shell so the binary becomes PID 1: docker stop (SIGTERM)
+# reaches the process directly and graceful shutdown (drain, trace flush) runs.
+CMD ["sh", "-c", "exec ./l2-proxy"]
 
 # Optimized runtime stage - minimal Ubuntu with only essential libraries.
 # All runtime libs (incl. libssl3t64) come from the ubuntu-base stage.

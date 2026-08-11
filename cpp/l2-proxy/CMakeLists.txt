@@ -97,20 +97,17 @@ if(ENABLE_PROFILER)
     set(CMAKE_UNITY_BUILD OFF)
     message(STATUS "Unity Build disabled for profiler build (frame pointers needed)")
 
-    find_library(TCMALLOC_LIBRARY tcmalloc_minimal
+    # tcmalloc_and_profiler bundles malloc replacement + CPU profiler + heap
+    # profiler. Linked with --no-as-needed: the code never calls profiler
+    # symbols directly, and the default --as-needed would drop the library,
+    # silently disabling CPUPROFILE/HEAPPROFILE.
+    find_library(TCMALLOC_LIBRARY tcmalloc_and_profiler
         /usr/local/lib
         /usr/lib/x86_64-linux-gnu
         /usr/lib/aarch64-linux-gnu
         /usr/lib
         REQUIRED)
-    find_library(PROFILER_LIBRARY profiler
-        /usr/local/lib
-        /usr/lib/x86_64-linux-gnu
-        /usr/lib/aarch64-linux-gnu
-        /usr/lib
-        REQUIRED)
-    message(STATUS "Found tcmalloc_minimal: ${TCMALLOC_LIBRARY}")
-    message(STATUS "Found profiler: ${PROFILER_LIBRARY}")
+    message(STATUS "Found tcmalloc_and_profiler: ${TCMALLOC_LIBRARY}")
 
     add_compile_options(-g -fno-omit-frame-pointer)
 
@@ -284,8 +281,9 @@ target_link_libraries(l2-proxy PRIVATE
 
 if(ENABLE_PROFILER)
     target_link_libraries(l2-proxy PRIVATE
+        -Wl,--no-as-needed
         ${TCMALLOC_LIBRARY}
-        ${PROFILER_LIBRARY}
+        -Wl,--as-needed
     )
 endif()
 target_link_libraries(l2-proxy PRIVATE ${NATS_C_LIBRARY})

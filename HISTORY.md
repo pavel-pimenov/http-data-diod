@@ -1,3 +1,60 @@
+# chore: профилирование (gperftools), покрытие тестами, нагрузка, Docker-аудит и CVE-скан
+
+## Date: 2026-08-11
+
+### Контекст
+После раунда статического анализа (cppcheck/clang-tidy/PVS/ASan) — динамическая
+проверка: реальная нагрузка на стек, замер покрытия юнит-тестов, CPU+heap
+профилирование прокси под нагрузкой и аудит Docker-образов (lint + уязвимости).
+
+### Что сделано
+- **Нагрузочное тестирование** (`scripts/comprehensive-performance-test.py`, через nginx:7777):
+  Low 20×5: RPS 563, p50 11.4ms / Medium 50×10: RPS 542, p50 23.5ms /
+  High 100×20: RPS 567, p50 35.4ms / Stress 200×50: RPS 692, p50 136.6ms, p99 311.7ms.
+  **100% успех во всех сценариях, 0 потерь.** Бейзлайн записан в `scripts/perf-report.json`.
+- **Покрытие юнит-тестов** (`-DCMAKE_CXX_FLAGS=--coverage`, lcov в builder-контейнере, 79 тестов):
+  в рамках TU `test_components` (config.cpp + duplicate_detector.cpp + headers):
+  **lines 64.0% (824/1288), functions 76.1% (153/201)**.
+  duplicate_detector.cpp 94.8%, json_schema_validator.hpp 96.3%, in_flight_tracker.hpp 92.6%,
+  config.cpp 33.6% (большинство веток — разные режимы/опции, не покрытые тестами).
+  Основной код прокси (main, request_handler, nats_client и т.д.) в `test_components` не входит —
+  покрытие по ним не измеряется (отдельный TU, кандидат на следующий раунд).
+- **Профилирование под нагрузкой (gperftools, `runtime-profiler`)** — по пути нашлись и
+  **исправлены два бага**:
+  1. `CMakeLists.txt`: сборка `ENABLE_PROFILER` линковала `tcmalloc_minimal` + `profiler`,
+     но из-за `--as-needed` линкер выбрасывал `libprofiler` (код не вызывает его символы) —
+     `CPUPROFILE` молча не работал, а `tcmalloc_minimal` не умеет `HEAPPROFILE`.
+     → линкуется один `tcmalloc_and_profiler` c `-Wl,--no-as-needed`
+     (malloc + CPU + heap profiler). Проверено: `ldd` → `libtcmalloc_and_profiler.so.4`.
+  2. `Dockerfile`: `CMD ["sh","-c","./l2-proxy"]` — PID 1 это `sh`, поэтому `docker stop`
+     (SIGTERM) уходил обёртке, а не процессу; graceful shutdown (drain/флаш трассировок)
+     не срабатывал никогда. → `CMD ["sh","-c","exec ./l2-proxy"]`: бинарь становится PID 1,
+     SIGTERM доходит до процесса (проверено: "Received signal 15, exiting..." + сброс профилей).
+  Результаты CPU-профиля (200×50, частота 100Гц, 2671 сэмпл; разбор самописным
+  парсером формата gperftools): ~62% времени потоки стоят в futex/condvar-области libc
+  (ожидание работы, I/O-bound), плюс NATS `natsCondition_Wait`/`nats_timerThreadf`,
+  httplib `ThreadPool::worker`. Реальная работа размазана по
+  `httplib::Server::dispatch_request/process_request`, `RequestHandler::handle_*`,
+  `JaegerLogger::send_batch/sender_loop`, JSON (rb_tree) и аллокациям tcmalloc.
+  Hot path в проектном коде отсутствует. Heap: за прогон ~110МБ совокупных аллокаций,
+  на выходе 11 кБ в использовании — утечек нет.
+- **Аудит Docker-образов (hadolint 2.12.0, multi-stage)**:
+  0 критичных замечаний; только advisory: DL3008 (не пинятся apt-версии), DL3003
+  (cd вместо WORKDIR), SC-шеллинг. Dockerfile: 6 стадий (ubuntu-base/builder/lint/
+  runtime-base/runtime/runtime-db + profiler/valgrind/asan), прокси 259МБ, worker 605МБ
+  (Oracle Instant Client + libpq).
+- **CVE-скан (grype 0.117.0)**:
+  `l2-proxy` и `l2-worker` — **0 Critical / 0 High**; 110/109 Medium + 10 Low — всё в
+  базовых OS-пакетах ubuntu-base (rust-coreutils, perl-base, util-linux, gpgv, libbz2),
+  к проектным зависимостям отношения не имеют.
+- `.gitignore`: добавлен `build-cov` (артефакт локальной coverage-сборки).
+
+### Проверка
+- `./rebuild-and-run.sh` → сборка успешна, все сервисы healthy (проверка CMakeLists + Dockerfile).
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+
+---
+
 # chore: прогон clang-tidy (полный), PVS-Studio и ASan/UBSan/LSan + аудит env-переменных
 
 ## Date: 2026-08-11
