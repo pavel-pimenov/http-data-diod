@@ -1,6 +1,8 @@
 build
 build-lint
 build_test
+build-tests
+build_tests
 build-asan
 build-cov
 profiles

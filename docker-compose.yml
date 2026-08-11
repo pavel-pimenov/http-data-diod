@@ -323,6 +323,9 @@ services:
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
         CACHE_BUST: "${CACHE_BUST:-1}"
     restart: unless-stopped
+    # Covers the in-flight drain window (30s) plus the NATS C-library teardown
+    # (measured 1-19s) so docker never SIGKILLs mid-drain on rolling deploys.
+    stop_grace_period: 40s
     mem_limit: ${L2_PROXY_MEM_LIMIT:-1g}
     ports:
       - "8888:8888"
@@ -488,6 +491,8 @@ services:
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
         CACHE_BUST: "${CACHE_BUST:-1}"
     restart: unless-stopped
+    # Same rationale as l2-proxy: in-flight drain (30s) + NATS teardown (1-19s).
+    stop_grace_period: 40s
     mem_limit: ${L2_WORKER_MEM_LIMIT:-1g}
     ports:
       - "19091:19091"

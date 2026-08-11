@@ -6,6 +6,7 @@
 #include "in_flight_tracker.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
+#include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "retry_utils.hpp"
@@ -16,6 +17,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <future>
 #include <set>
 #include <thread>
@@ -214,6 +217,450 @@ TEST_CASE("Config: Worker threads zero fails validation", "[config]") {
   Config config;
   config.m_l2_worker_threads = 0;
   REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: request timeout zero fails validation", "[config]") {
+  Config config;
+  config.m_request_timeout_seconds = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: HTTP timeout zero fails validation", "[config]") {
+  Config config;
+  config.m_http_timeout_seconds = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: invalid L2 server protocol fails validation", "[config]") {
+  Config config;
+  config.m_l2_server_protocol = "ftp";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: https proxy protocol requires SSL files", "[config]") {
+  Config config;
+  config.m_proxy_protocol = "https";
+  REQUIRE(config.validate(false) == false);
+  config.m_ssl_server_cert_file = "/cert.pem";
+  config.m_ssl_server_key_file = "/key.pem";
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: https L2 server protocol requires SSL files", "[config]") {
+  Config config;
+  config.m_mode = "l2-server";
+  config.m_l2_server_protocol = "https";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: invalid thread pool type fails validation", "[config]") {
+  Config config;
+  config.m_thread_pool_type = "bogus";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: negative worker queue size fails validation", "[config]") {
+  Config config;
+  config.m_l2_worker_queue_size = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: oversized HTTP pool warns but stays valid", "[config]") {
+  Config config;
+  config.m_http_pool_size = 5000;
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: zero NATS timeout fails validation", "[config]") {
+  Config config;
+  config.m_nats_timeout_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: empty NATS subject fails validation", "[config]") {
+  Config config;
+  config.m_nats_subject = "";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: NATS TLS requires CA file", "[config]") {
+  Config config;
+  config.m_nats_enable_tls = true;
+  REQUIRE(config.validate(false) == false);
+  config.m_nats_tls_ca_cert_file = "/ca.pem";
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: NATS TLS cert without key fails validation", "[config]") {
+  Config config;
+  config.m_nats_enable_tls = true;
+  config.m_nats_tls_ca_cert_file = "/ca.pem";
+  config.m_nats_tls_cert_file = "/cert.pem";
+  REQUIRE(config.validate(false) == false);
+  config.m_nats_tls_key_file = "/key.pem";
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: negative per-IP tokens fail validation", "[config]") {
+  Config config;
+  config.m_per_ip_max_tokens = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero global max tokens fails validation", "[config]") {
+  Config config;
+  config.m_global_max_tokens = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero dedup max entries fails validation", "[config]") {
+  Config config;
+  config.m_dedup_enabled = true;
+  config.m_dedup_max_entries = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero dedup TTL fails validation", "[config]") {
+  Config config;
+  config.m_dedup_enabled = true;
+  config.m_dedup_ttl_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero duplicate detection top N fails validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_detection_top_n = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: negative duplicate max body bytes fails validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_detection_max_body_bytes = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero tracing batch size fails validation", "[config]") {
+  Config config;
+  config.m_tracing_batch_size = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: zero tracing flush interval fails validation", "[config]") {
+  Config config;
+  config.m_tracing_flush_interval_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: DB empty subject fails validation", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  config.m_db_query_nats_subject = "";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: DB zero timeout fails validation", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  config.m_db_query_default_timeout_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: DB unknown driver fails validation", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  DbConfig db;
+  db.m_name = "mysql";
+  db.m_driver = "mysql";
+  db.m_host = "db";
+  db.m_port = 3306;
+  db.m_user = "u";
+  db.m_database = "d";
+  config.m_databases.push_back(db);
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  DbConfig db;
+  db.m_name = "oracle";
+  db.m_driver = "oracle";
+  db.m_host = "ora";
+  db.m_port = 1521;
+  db.m_user = "u";
+  db.m_service = "";
+  config.m_databases.push_back(db);
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  DbConfig db;
+  db.m_name = "postgres";
+  db.m_driver = "postgres";
+  db.m_host = "pg";
+  db.m_port = 5432;
+  db.m_user = "u";
+  db.m_database = "d";
+  db.m_pool_min = 5;
+  db.m_pool_max = 1;
+  config.m_databases.push_back(db);
+  REQUIRE(config.validate(false) == false);
+}
+
+namespace {
+
+class EnvVarGuard {
+public:
+  EnvVarGuard(const char *name, const char *value) : m_name(name) {
+    if (value == nullptr) {
+      unsetenv(m_name.c_str());
+    } else {
+      setenv(m_name.c_str(), value, 1);
+    }
+  }
+  ~EnvVarGuard() { unsetenv(m_name.c_str()); }
+
+private:
+  std::string m_name;
+};
+
+} // namespace
+
+TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
+  EnvVarGuard mode("MODE", "proxy");
+  EnvVarGuard host("L2_SERVER_HOST", "10.0.0.5");
+  EnvVarGuard port("L2_SERVER_PORT", "9090");
+  EnvVarGuard proto("L2_SERVER_PROTOCOL", "http");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_mode == "proxy");
+  REQUIRE(config.m_l2_server_port == 9090);
+  REQUIRE(config.m_l2_server_url == "http://10.0.0.5:9090");
+  REQUIRE(config.m_l2_server_urls.size() == 1);
+  REQUIRE(config.m_l2_server_urls[0] == "http://10.0.0.5:9090");
+}
+
+TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
+  EnvVarGuard urls("L2_SERVER_URLS",
+                   R"(["http://host1:8088","http://host2:8089"])");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_l2_server_urls.size() == 2);
+  REQUIRE(config.m_l2_server_urls[0] == "http://host1:8088");
+  REQUIRE(config.m_l2_server_urls[1] == "http://host2:8089");
+}
+
+TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
+          "[config]") {
+  EnvVarGuard urls("L2_SERVER_URLS", "not-json");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_l2_server_urls.size() == 1);
+  REQUIRE(config.m_l2_server_urls[0] == config.m_l2_server_url);
+}
+
+TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
+          "[config]") {
+  EnvVarGuard urls("L2_SERVER_URLS", R"("just-a-string")");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_l2_server_urls.size() == 1);
+  REQUIRE(config.m_l2_server_urls[0] == config.m_l2_server_url);
+}
+
+TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
+  EnvVarGuard mode("MODE", "l2-server");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_mode == "l2-server");
+  REQUIRE(config.m_l2_server_url.empty());
+  REQUIRE(config.m_l2_server_urls.empty());
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: worker mode loads NATS config", "[config]") {
+  EnvVarGuard mode("MODE", "worker");
+  EnvVarGuard subj("NATS_SUBJECT", "svc.worker");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_mode == "worker");
+  REQUIRE(config.m_nats_subject == "svc.worker");
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: get_env_bool parses all true/false forms", "[config]") {
+  for (const char *v : {"true", "1", "yes", "on", "TRUE", "Yes"}) {
+    EnvVarGuard e("TEST_BOOL", v);
+    REQUIRE(Config::get_env_bool("TEST_BOOL", false) == true);
+  }
+  for (const char *v : {"false", "0", "no", "off", "FALSE", "No"}) {
+    EnvVarGuard e("TEST_BOOL", v);
+    REQUIRE(Config::get_env_bool("TEST_BOOL", true) == false);
+  }
+  EnvVarGuard e("TEST_BOOL", "maybe");
+  REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
+}
+
+TEST_CASE("Config: get_env_bool returns default when unset", "[config]") {
+  EnvVarGuard e("TEST_BOOL", nullptr);
+  REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
+  REQUIRE(Config::get_env_bool("TEST_BOOL", false) == false);
+}
+
+TEST_CASE("Config: get_env_int parses valid value", "[config]") {
+  EnvVarGuard e("TEST_INT", "42");
+  REQUIRE(Config::get_env_int("TEST_INT", 1) == 42);
+}
+
+TEST_CASE("Config: get_env_int negative falls back to default", "[config]") {
+  EnvVarGuard e("TEST_INT", "-5");
+  REQUIRE(Config::get_env_int("TEST_INT", 10) == 10);
+}
+
+TEST_CASE("Config: get_env_int non-numeric falls back to default", "[config]") {
+  EnvVarGuard e("TEST_INT", "abc");
+  REQUIRE(Config::get_env_int("TEST_INT", 7) == 7);
+}
+
+TEST_CASE("Config: get_env_int unset returns default", "[config]") {
+  EnvVarGuard e("TEST_INT", nullptr);
+  REQUIRE(Config::get_env_int("TEST_INT", 3) == 3);
+}
+
+TEST_CASE("Config: get_env_double parses and validates range", "[config]") {
+  EnvVarGuard e("TEST_DBL", "0.5");
+  REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 0.5);
+  EnvVarGuard e2("TEST_DBL", "1.5");
+  REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 1.0);
+  EnvVarGuard e3("TEST_DBL", "abc");
+  REQUIRE(Config::get_env_double("TEST_DBL", 0.7) == 0.7);
+}
+
+TEST_CASE("Config: get_env_string and silent variants", "[config]") {
+  EnvVarGuard e("TEST_STR", "hello");
+  REQUIRE(Config::get_env_string("TEST_STR", "d") == "hello");
+  REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "hello");
+  EnvVarGuard e2("TEST_STR", nullptr);
+  REQUIRE(Config::get_env_string("TEST_STR", "d") == "d");
+  REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "d");
+}
+
+TEST_CASE("Config: get_env_protocol validates http/https", "[config]") {
+  EnvVarGuard e("TEST_PROTO", "https");
+  REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "https");
+  EnvVarGuard e2("TEST_PROTO", "ftp");
+  REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "http");
+}
+
+TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
+  EnvVarGuard host("NATS_HOST", "nats.example");
+  EnvVarGuard port("NATS_PORT", "4223");
+  EnvVarGuard subj("NATS_SUBJECT", "svc.in");
+  EnvVarGuard qg("NATS_QUEUE_GROUP", "grp");
+  EnvVarGuard tm("NATS_TIMEOUT_MS", "5000");
+  EnvVarGuard user("NATS_USERNAME", "user");
+  EnvVarGuard pass("NATS_PASSWORD", "pass");
+  EnvVarGuard tok("NATS_TOKEN", "tok");
+  EnvVarGuard cred("NATS_CREDENTIALS_FILE", "/cred");
+  EnvVarGuard tls("NATS_ENABLE_TLS", "true");
+  EnvVarGuard cert("NATS_TLS_CERT_FILE", "/cert.pem");
+  EnvVarGuard key("NATS_TLS_KEY_FILE", "/key.pem");
+  EnvVarGuard ca("NATS_TLS_CA_CERT_FILE", "/ca.pem");
+  Config config;
+  config.load_from_env();
+  NatsConfig nc = config.create_nats_config();
+  REQUIRE(nc.m_host == "nats.example");
+  REQUIRE(nc.m_port == 4223);
+  REQUIRE(nc.m_subject == "svc.in");
+  REQUIRE(nc.m_queue_group == "grp");
+  REQUIRE(nc.m_timeout_ms == 5000);
+  REQUIRE(nc.m_username == "user");
+  REQUIRE(nc.m_password == "pass");
+  REQUIRE(nc.m_token == "tok");
+  REQUIRE(nc.m_credentials_file == "/cred");
+  REQUIRE(nc.m_enable_tls == true);
+  REQUIRE(nc.m_tls_cert_file == "/cert.pem");
+  REQUIRE(nc.m_tls_key_file == "/key.pem");
+  REQUIRE(nc.m_tls_ca_cert_file == "/ca.pem");
+}
+
+TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
+          "[config]") {
+  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
+  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
+  EnvVarGuard host("DB_POSTGRES_HOST", "pg.example");
+  EnvVarGuard port("DB_POSTGRES_PORT", "5433");
+  EnvVarGuard db("DB_POSTGRES_DB", "mydb");
+  EnvVarGuard user("DB_POSTGRES_USER", "alice");
+  EnvVarGuard pass("DB_POSTGRES_PASSWORD", "secret");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_db_query_enabled == true);
+  REQUIRE(config.m_databases.size() == 1);
+  const auto &dbcfg = config.m_databases[0];
+  REQUIRE(dbcfg.m_name == "postgres");
+  REQUIRE(dbcfg.m_driver == "postgres");
+  REQUIRE(dbcfg.m_host == "pg.example");
+  REQUIRE(dbcfg.m_port == 5433);
+  REQUIRE(dbcfg.m_database == "mydb");
+  REQUIRE(dbcfg.m_user == "alice");
+  REQUIRE(dbcfg.m_password == "secret");
+  REQUIRE(dbcfg.m_query_timeout_ms == config.m_db_query_default_timeout_ms);
+  REQUIRE(dbcfg.m_max_rows == config.m_db_query_default_max_rows);
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
+          "[config]") {
+  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
+  EnvVarGuard oe("DB_ORACLE_ENABLED", "true");
+  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_databases.size() == 2);
+  REQUIRE(config.m_databases[0].m_name == "oracle");
+  REQUIRE(config.m_databases[1].m_name == "postgres");
+}
+
+TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
+          "[config]") {
+  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_db_query_enabled == true);
+  REQUIRE(config.m_databases.empty());
+}
+
+TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
+          "[config]") {
+  EnvVarGuard proto("PROXY_PROTOCOL", "https");
+  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "/cert.pem");
+  EnvVarGuard key("SSL_SERVER_KEY_FILE", "/key.pem");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_proxy_protocol == "https");
+  REQUIRE(config.m_ssl_server_cert_file == "/cert.pem");
+  REQUIRE(config.m_ssl_server_key_file == "/key.pem");
+}
+
+TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
+  EnvVarGuard proto("PROXY_PROTOCOL", "https");
+  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_proxy_protocol == "https");
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: validate with logging enabled reports issues", "[config]") {
+  Config config;
+  config.m_mode = "bogus";
+  config.m_log_level = "TRACE";
+  REQUIRE(config.validate(true) == false);
 }
 
 // ============================================================================
@@ -931,4 +1378,151 @@ TEST_CASE("DuplicateDetector: bounded cache evicts the lowest-count body",
   // A fresh delivery of the evicted body is not a duplicate.
   REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
   REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
+}
+
+// ============================================================================
+// Fuzz-style stress tests
+// ============================================================================
+
+namespace {
+
+class Xorshift64 {
+public:
+  explicit Xorshift64(uint64_t seed) : m_state(seed == 0 ? 1 : seed) {}
+
+  uint64_t next() {
+    m_state ^= m_state << 13;
+    m_state ^= m_state >> 7;
+    m_state ^= m_state << 17;
+    return m_state;
+  }
+
+  uint64_t below(uint64_t limit) { return next() % limit; }
+
+private:
+  uint64_t m_state;
+};
+
+std::string random_json_string(Xorshift64 &rng, size_t max_len) {
+  static constexpr const char *kAlphabet =
+      "abcXYZ0123{}[]:\",\\/. \t\n\"\\u005c\n\\\"\xC3\xA9\xF0\x9F\x98\x80";
+  const size_t len = 1 + rng.below(max_len);
+  std::string s;
+  s.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    s.push_back(kAlphabet[rng.below(std::char_traits<char>::length(kAlphabet))]);
+  }
+  return s;
+}
+
+std::string random_ascii_string(Xorshift64 &rng, size_t max_len) {
+  const size_t len = 1 + rng.below(max_len);
+  std::string s;
+  s.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    s.push_back(static_cast<char>(' ' + rng.below(95)));
+  }
+  return s;
+}
+
+json random_json_value(Xorshift64 &rng, int depth) {
+  switch (rng.below(depth <= 0 ? 4 : 7)) {
+  case 0:
+    return rng.below(2) == 0;
+  case 1:
+    return static_cast<double>(static_cast<int64_t>(rng.next()) %
+                               (INT64_C(1) << 40));
+  case 2:
+    return random_ascii_string(rng, 32);
+  case 3:
+    return nullptr;
+  case 4: {
+    json arr = json::array();
+    const size_t n = rng.below(6);
+    for (size_t i = 0; i < n; ++i) {
+      arr.push_back(random_json_value(rng, depth - 1));
+    }
+    return arr;
+  }
+  default: {
+    json obj = json::object();
+    const size_t n = rng.below(6);
+    for (size_t i = 0; i < n; ++i) {
+      obj[random_ascii_string(rng, 12)] = random_json_value(rng, depth - 1);
+    }
+    return obj;
+  }
+  }
+}
+
+} // namespace
+
+TEST_CASE("Fuzz: JsonUtils::try_parse survives random byte strings",
+          "[fuzz]") {
+  Xorshift64 rng(0xA11CE5EED);
+  for (int i = 0; i < 20000; ++i) {
+    const std::string s = random_json_string(rng, 256);
+    const auto result = JsonUtils::try_parse(s);
+    (void)result;
+  }
+}
+
+TEST_CASE("Fuzz: validators survive random JSON documents", "[fuzz]") {
+  const auto request_validator = create_standard_request_validator();
+  const auto response_validator = create_standard_response_validator();
+  Xorshift64 rng(0xF0000A11);
+  for (int i = 0; i < 5000; ++i) {
+    const json doc = random_json_value(rng, 6);
+    std::string error;
+    try {
+      (void)request_validator.validate(doc, error);
+    } catch (const json::type_error &) {
+      continue;
+    }
+    try {
+      (void)response_validator.validate(doc, error);
+    } catch (const json::type_error &) {
+      continue;
+    }
+  }
+}
+
+TEST_CASE("Fuzz: validator type mismatches do not crash", "[fuzz]") {
+  // Wrong-typed fields (numbers/bools/objects where strings are expected) are
+  // fed to nlohmann::json conversions that throw type_error by design.
+  RequestValidator validator;
+  validator.add_required_field("method")
+      .add_required_field("path")
+      .add_allowed_method("GET")
+      .add_allowed_method("POST");
+  ResponseValidator resp;
+  resp.require_body(true).add_allowed_status_code(200);
+
+  Xorshift64 rng(0xBADCAFE0);
+  for (int i = 0; i < 20000; ++i) {
+    const json doc = random_json_value(rng, 4);
+    std::string error;
+    try {
+      (void)validator.validate(doc, error);
+    } catch (const json::type_error &) {
+      continue;
+    }
+    try {
+      (void)resp.validate(doc, error);
+    } catch (const json::type_error &) {
+      continue;
+    }
+  }
+}
+
+TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
+  Xorshift64 rng(0xFEEDBEEF);
+  for (int i = 0; i < 5000; ++i) {
+    const std::string value = random_ascii_string(rng, 64);
+    EnvVarGuard env("FUZZ_VALUE", value.c_str());
+    (void)Config::get_env_int("FUZZ_VALUE", 42);
+    (void)Config::get_env_double("FUZZ_VALUE", 0.5);
+    (void)Config::get_env_bool("FUZZ_VALUE", true);
+    (void)Config::get_env_protocol("FUZZ_VALUE", "http");
+  }
 }

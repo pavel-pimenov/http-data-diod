@@ -1,3 +1,55 @@
+# chore: расширение юнит-тестов (config.cpp → 98%), фаззинг-стресс под ASan, E2E graceful shutdown
+
+## Date: 2026-08-11
+
+### Контекст
+Новый раунд после динамического анализа (нагрузка/покрытие/профилирование): аудит
+TODO/NATS и метрик vs Grafana-дашборды, расширение покрытия тестами самого слабого
+TU (config.cpp 33.6%), фаззинг-стресс парсеров под ASan и E2E-проверка graceful
+shutdown под нагрузкой.
+
+### Что сделано
+- **Аудит TODO/FIXME + NATS**: в проектном коде `TODO`/`FIXME` отсутствуют. NATS-сабджекты
+  (`service.proxy`/`proxy_workers`, `service.db.query`/`db_workers`) задаются только через
+  config (defaults совпадают с docker-compose), захардкоженных нет; worker подписывается
+  с queue group, proxy публикует — соответствие ок.
+- **Аудит метрик/debug vs Grafana** (`generate-grafana-dashboards.py` + `grafana-nginx.json`):
+  все упоминаемые дашбордами `l2_*`-метрики есть в live-выводе `/metrics` либо являются
+  lazy-семействами prometheus-cpp (появляются после первой метки — проверено: DB-метрики
+  материализовались после реального запроса `POST /v1/sql/postgres/query`).
+  `http_requests_total` — от nginx-exporter. `GET /v1/sql/{db}/ping` реализован и совпадает
+  со спецификацией (в коде — только GET; POST корректно отдаёт 404). Расхождений нет.
+- **Расширение юнит-тестов** (`test_components.cpp`, 79 → 126 TEST_CASE, 538 assertions):
+  добавлено ~45 тестов на `Config::load_from_env()`, `get_env_*` (bool/int/double/protocol/
+  string), `create_nats_config()`, регистрацию БД (oracle/postgres), L2_SERVER_URLS,
+  HTTPS/SSL, NATS TLS и ранее непокрытые ветки `validate()` (таймауты, порты, пулы,
+  dedup/duplicate-detection, tracing).
+  **Покрытие config.cpp: 33.6% → 98.4%** исполняемых строк (gcov; оставшиеся 3 строки —
+  ветки логирования при `validate(log_issues=true)`, покрыты отдельным тестом).
+- **Фаззинг-стресс парсеров** (4 новых `[fuzz]`-теста, детерминированный Xorshift64):
+  `JsonUtils::try_parse` на случайных байтовых строках (20k), RequestValidator/ResponseValidator
+  на случайных JSON-документах (5k) и неверных типах полей (20k), `Config::get_env_*` на
+  мусорных значениях (5k). Прогнано под **ASan+UBSan: 130/130 PASS**, проблем не выявлено.
+- **E2E graceful shutdown** (новый `scripts/e2e-graceful-shutdown-test.py`): заливка 64
+  воркерами POST через :8888, `docker stop` под нагрузкой. Результат: rc=0, ExitCode 0,
+  drain in-flight завершён («All in-flight requests completed gracefully»), «Received signal
+  15», server thread joined, после `docker start` сервис healthy. Потерь нет (0 таймаутов,
+  0 refused при 2917 запросах).
+- **Найдена и закрыта проблема stop-таймаута**: `stop_grace_period` не был задан (дефолт
+  docker 10s), а процесс после graceful-логики ещё 1-19s удерживается `natsConnection_Destroy()`
+  (10ms poll-цикл внутри NATS C-либы до финального PING/close — внешняя либа, не наш код).
+  При деплое 10s могло не хватить на drain (до 30s) → SIGKILL. → в docker-compose.yml
+  добавлен `stop_grace_period: 40s` для `l2-proxy` и `l2-worker` (drain 30s + teardown NATS).
+- `.gitignore`: добавлены `build_tests`/`build-tests` (каталог локального прогона `run_tests.sh`).
+
+### Проверка
+- Юнит-тесты: release — 126 TEST_CASE / 538 assertions PASS; ASan+UBSan — 130 TEST_CASE PASS.
+- clang-tidy (scripts/run-clang-tidy.sh): без замечаний.
+- `scripts/e2e-graceful-shutdown-test.py` → PASS.
+- `./rebuild-and-run.sh` + `python3 message_counter.py --iterations 1 --concurrent 1` → passed.
+
+---
+
 # chore: профилирование (gperftools), покрытие тестами, нагрузка, Docker-аудит и CVE-скан
 
 ## Date: 2026-08-11
