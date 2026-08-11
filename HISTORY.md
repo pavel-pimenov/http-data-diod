@@ -1,3 +1,48 @@
+# chore: прогон clang-tidy (полный), PVS-Studio и ASan/UBSan/LSan + аудит env-переменных
+
+## Date: 2026-08-11
+
+### Контекст
+Продолжение раунда статического анализа: в прошлый раз (коммит `1b43d14`) был
+cppcheck, теперь — полный прогон clang-tidy по всем проектным файлам, повторный
+PVS-Studio и сборка с санитайзерами, плюс сверка переменных окружения
+`config.cpp` с `docker-compose.yml`.
+
+### Что сделано
+- **clang-tidy (`./scripts/run-clang-tidy.sh --all`, builder-образ, полный обход всех TU)**:
+  - `db_query_executor_postgres.cpp:120`: `const std::string s` → `std::string s`
+    (устранены `performance-no-automatic-move` на `return s;` в трёх местах — json
+    теперь получает строку move-ом).
+  - `db_query_executor_postgres.cpp:169-170`: `const double idle/active` → `const auto`
+    (`modernize-use-auto`).
+  - `db_query_executor_postgres.cpp:318`: `push_back(...)` → `emplace_back(...)`
+    (`modernize-use-emplace`).
+  - `nats_client.cpp:628`: `set_error("Failed to set header '" + key + ...)` → сборка
+    строки через `+=` (`performance-inefficient-string-concatenation`).
+  - Остальные ~680 диагностик — bundled-заголовки (odpi/httplib/base64/nats), не проект.
+    Итог: **0 error / 0 warning в проектных файлах**.
+- **PVS-Studio (GA:1,2,3, `-DCMAKE_UNITY_BUILD=OFF`, исключая httplib/nats/base64/odpi)**:
+  повторный прогон — **0 замечаний** в проектном коде (лицензия взята с хоста
+  `~/.config/PVS-Studio/PVS-Studio.lic`).
+- **ASan + UBSan + LSan** (`-DENABLE_ASAN=ON -DCMAKE_BUILD_TYPE=Debug` в
+  builder-контейнере): собраны юнит-тесты и прогнаны под санитайзерами —
+  **79/79 PASS**, ни одного сообщения AddressSanitizer/LeakSanitizer/UB.
+- **Аудит env-переменных (`config.cpp` get_env_* ↔ `docker-compose.yml`)**:
+  все 82 переменные из `config.cpp` присутствуют в compose; отсутствующие в
+  `config.cpp` compose-переменные — только контейнерные (postgres/oracle/grafana/
+  jaeger/vmagent/nginx-exporter/swagger) и sanitizer-runtime (`ASAN_OPTIONS`,
+  `LSAN_OPTIONS`, `UBSAN_OPTIONS`); `LOG_FORMAT` читается в `logger.hpp`.
+  Расхождений нет, висячих переменных не найдено.
+- `.gitignore`: добавлен `build-asan` (артефакт локальной ASan-сборки в контейнере).
+
+### Проверка
+- `./rebuild-and-run.sh` → сборка успешна, все сервисы healthy,
+  health checks passed.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed
+  (POST+GET + бинарный favicon, без потерь и перепутанных ответов).
+
+---
+
 # chore: cppcheck-анализ и переименование образов с `http-redis-*` на `http-data-diod-*`
 
 ## Date: 2026-08-11

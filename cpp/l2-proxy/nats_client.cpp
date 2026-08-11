@@ -625,7 +625,11 @@ bool NatsClient::set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
     const natsStatus s = natsMsgHeader_Set(msg, key.c_str(), value.c_str());
     if (s != NATS_OK) {
       natsMsg_Destroy(msg);
-      set_error("Failed to set header '" + key + "' on " + operation);
+      std::string err = "Failed to set header '";
+      err += key;
+      err += "' on ";
+      err += operation;
+      set_error(err);
       return false;
     }
   }

@@ -117,7 +117,7 @@ std::string hex_to_bytes(const std::string &hex) {
 
 // Converts a text-format value to the JSON value matching the column type.
 json pg_value(Oid oid, const char *text, int len) {
-  const std::string s(text, len);
+  std::string s(text, len);
   switch (oid) {
   case kPgBoolOid:
     return len > 0 && text[0] == 't';
@@ -166,8 +166,8 @@ struct PostgresQueryExecutor::Impl {
   }
 
   void update_pool_gauges() {
-    const double idle = static_cast<double>(m_idle.size());
-    const double active =
+    const auto idle = static_cast<double>(m_idle.size());
+    const auto active =
         static_cast<double>(m_total >= m_idle.size() ? m_total - m_idle.size()
                                                      : 0);
     m_owner->set_db_pool_gauges(idle, active);
@@ -315,7 +315,7 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
       param_values.push_back(nullptr);
       param_lengths.push_back(0);
     } else if (value.is_boolean()) {
-      text_values.push_back(value.get<bool>() ? "t" : "f");
+      text_values.emplace_back(value.get<bool>() ? "t" : "f");
       param_values.push_back(text_values.back().c_str());
       param_lengths.push_back(static_cast<int>(text_values.back().size()));
     } else if (value.is_number_integer()) {

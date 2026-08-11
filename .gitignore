@@ -1,6 +1,7 @@
 build
 build-lint
 build_test
+build-asan
 profiles
 
 build_test/makefile
