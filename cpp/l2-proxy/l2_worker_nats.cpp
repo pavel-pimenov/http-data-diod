@@ -460,8 +460,8 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   LogContextScope log_scope;
 
   json request_data;
-  TraceContext trace_ctx;
   try {
+    TraceContext trace_ctx;
     const auto parsed = JsonUtils::try_parse(request_json);
     if (!parsed) {
       status = 400;

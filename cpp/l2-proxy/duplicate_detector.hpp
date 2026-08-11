@@ -39,7 +39,7 @@ public:
   // default argument is written out-of-line because Options' default member
   // initializers are not usable in a default argument inside this class body).
   DuplicateDetector();
-  explicit DuplicateDetector(Options options);
+  explicit DuplicateDetector(const Options &options);
 
   // Records one request body. Returns true when this delivery makes the body
   // a duplicate (seen at least twice within the TTL window).

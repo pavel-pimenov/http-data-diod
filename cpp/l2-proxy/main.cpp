@@ -358,6 +358,7 @@ int main() { // NOLINT(bugprone-exception-escape)
       spdlog::default_logger()->flush();
       // Trigger crash
       volatile int *bad_ptr = nullptr;
+      // cppcheck-suppress nullPointer
       *bad_ptr = 42; // NOLINT //-V522 intentional crash for testing
     }
 

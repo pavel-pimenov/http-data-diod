@@ -6,7 +6,8 @@
 
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 
-DuplicateDetector::DuplicateDetector(Options options) : m_options(options) {}
+DuplicateDetector::DuplicateDetector(const Options &options)
+    : m_options(options) {}
 
 bool DuplicateDetector::record(std::string_view client_id,
                                std::string_view body_hash,

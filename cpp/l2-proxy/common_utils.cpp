@@ -39,7 +39,7 @@ std::expected<json, std::string> parse_json(const std::string &body) {
   }
   std::string body_preview = body;
   if (body_preview.length() > 100) {
-    body_preview = body_preview.substr(0, 100) + "...";
+    body_preview = body.substr(0, 100) + "...";
   }
   return std::unexpected(
       std::format("Failed to parse JSON: {}\nBody preview: {}", result.error(),

@@ -52,7 +52,7 @@ struct LogContext {
 class LogContextScope {
 public:
   LogContextScope() {
-    auto &ctx = LogContext::get();
+    const auto &ctx = LogContext::get();
     m_prev_request_id = ctx.m_request_id;
     m_prev_trace_id = ctx.m_trace_id;
     m_prev_client_ip = ctx.m_client_ip;

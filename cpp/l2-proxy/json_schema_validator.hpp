@@ -97,7 +97,7 @@ public:
       if (!m_allowed_paths.empty()) {
         bool path_allowed = false;
         for (const auto &prefix : m_allowed_paths) {
-          if (path.find(prefix) == 0) {
+          if (path.starts_with(prefix)) {
             path_allowed = true;
             break;
           }

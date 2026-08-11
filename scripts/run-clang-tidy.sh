@@ -3,7 +3,7 @@
 # Run clang-tidy on changed C++ files inside a container.
 #
 # The host has no C/C++ toolchain, so static analysis runs in the builder Docker
-# image (http-redis-proxy:builder), which contains clang-tidy, all dependencies
+# image (http-data-diod:builder), which contains clang-tidy, all dependencies
 # and the NATS library headers.
 #
 # Behavior:
@@ -39,7 +39,7 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-LINT_IMAGE="http-redis-proxy:builder"
+LINT_IMAGE="http-data-diod:builder"
 L2_DIR="cpp/l2-proxy"
 BUILD_DIR="$L2_DIR/build-lint"
 BUILD_DIR_CONTAINER="/app/build-lint"

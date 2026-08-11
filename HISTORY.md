@@ -1,3 +1,32 @@
+# chore: cppcheck-анализ и переименование образов с `http-redis-*` на `http-data-diod-*`
+
+## Date: 2026-08-11
+
+### Контекст
+Проект давно отказался от Redis, но имена Docker-образов и упоминания в скриптах/истории несли старое имя `http-redis-proxy`. Плюс — первый прогон cppcheck для проектного кода.
+
+### Что сделано
+- **cppcheck** (`--enable=all --std=c++23 --check-level=exhaustive` в builder-контейнере, флаги из CMake target):
+  - `main.cpp` / `request_handler.cpp`: добавлен `// cppcheck-suppress nullPointer` на intentional SIGSEGV `/crash-test` (уже были NOLINT + `//-V522`).
+  - `l2_worker_nats.cpp`: сужен scope `trace_ctx` (перенесён в `try`-блок).
+  - `common_utils.cpp`: `body_preview.substr()` → `body.substr()` (устранён `uselessCallsSubstr`).
+  - `duplicate_detector.{hpp,cpp}`: конструктор принимает `const Options &` (устранён `passedByValue`).
+  - `json_schema_validator.hpp`: `path.find(prefix) == 0` → `path.starts_with(prefix)` (`stlIfStrFind`).
+  - `logger.hpp` / `thread_pool.hpp`: `const`-ссылки в `LogContextScope` и цикле воркера (`constVariableReference`).
+  - `crash_handler.hpp`: `write_crash_report(..., const siginfo_t *info)` (`constParameterPointer`).
+  - Остальные находки (≈225 `unusedStructMember`, стилевые в `httplib.h`) — false positives из-за анализа заголовков отдельными TU и сторонняя либа; не трогались. Итог: **0 error / 0 warning / 0 performance** в проектных файлах.
+- **Переименование `http-redis-*` → `http-data-diod-*`:**
+  - `docker-compose.yml`: `l2-server` переведён с устаревшего тега `http-redis-proxy-l2-proxy:latest` на фактически собираемый `http-data-diod-l2-proxy:latest` (раньше l2-server запускал старый образ).
+  - `scripts/run-clang-tidy.sh`: builder-образ `http-redis-proxy:builder` → `http-data-diod:builder`.
+  - `HISTORY.md`: все упоминания `http-redis-proxy` → `http-data-diod`.
+
+### Проверка
+- `./rebuild-and-run.sh` → сборка успешна, все сервисы healthy, 79 тестов / 427 assertions PASS; l2-proxy/l2-worker/l2-server теперь на образах `http-data-diod-*`.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed (POST+GET + бинарный favicon).
+- Повторный прогон cppcheck → 0 error/warning/performance в проектных файлах.
+
+---
+
 # refactor: дедупликация повторяющихся паттернов (DB-gateway, трассировка, NATS) + фикс сборки
 
 ## Date: 2026-08-11
@@ -263,7 +292,7 @@ ASan-стресс-тесты (15 мин, 50 concurrent) давали 30% failed 
 
 ### Что сделано
 - Добавлена стадия `runtime-valgrind` в `cpp/l2-proxy/Dockerfile` (ставит `valgrind` 3.26 на `runtime-base`, используется поверх НЕ-санитайзерного (release) бинаря — valgrind несовместим с ASan).
-- Собран образ `http-redis-proxy-l2-worker:latest` с `L2_PROXY_DOCKER_TARGET=runtime-valgrind` (BuildKit-сборкой через compose; прямые `docker buildx` плагины на этом daemon не работают).
+- Собран образ `http-data-diod-l2-worker:latest` с `L2_PROXY_DOCKER_TARGET=runtime-valgrind` (BuildKit-сборкой через compose; прямые `docker buildx` плагины на этом daemon не работают).
 - l2-worker запущен под `valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes`, прогнан POST-трафик через proxy → NATS → worker → l2-server (30/30 ok), затем корректный SIGTERM.
 - Результат `LEAK SUMMARY`: **definitely lost: 0 bytes, indirectly lost: 0 bytes**, possibly lost: 960 B в 3 блоках (`allocate_dtv`/TLS-слоты pthread под `nats_threadCreate`), still reachable: 75 KB (обычный прогон NATS). ERROR SUMMARY: 3 (из TLS, не продукт).
 - Вывод: l2-worker в NATS-режиме **не течёт**. Рост RSS в ASan-сборке — накладные расходы санитайзера (quarantine, shadow memory, TLS), а не утечка приложения.
@@ -1732,7 +1761,7 @@ ASan-стресс-тесты (15 мин, 50 concurrent) давали 30% failed 
 - **Root cause сломанной lint-стадии**: `CMakeLists.txt` безусловно делал `set(CMAKE_UNITY_BUILD ON)`, перекрывая `-DCMAKE_UNITY_BUILD=OFF` из lint-стадии Dockerfile. В результате `compile_commands.json` содержал только `unity_*.cxx`, clang-tidy не находил запись для отдельных `.cpp`, анализировал без флагов и выдавал флуд `SSLClient`/`base64.hpp` ошибок.
 - `CMakeLists.txt`: Unity Build включается только `if(NOT DEFINED CMAKE_UNITY_BUILD)` — явный `-DCMAKE_UNITY_BUILD=OFF` теперь работает.
 - `Dockerfile` (lint): конфигурация в свежий `build-lint/` + `CMAKE_EXPORT_COMPILE_COMMANDS=ON` + `CMAKE_UNITY_BUILD=OFF` — появляются пер-файловые записи; lint-прогон по всем `.cpp` остаётся информационным.
-- `scripts/run-clang-tidy.sh`: новый скрипт для pre-commit — гоняет clang-tidy **только по изменённым** файлам в образе `http-redis-proxy:builder` (на хосте нет тулчейна). Падает на реальных `error:` в файлах проекта; `warning:` (в основном style-naming на snake_case, включая члены Prometheus-метрик) печатает, но не блокирует. Диагностика из системных заголовков и сторонних либ (httplib/base64/nats) фильтруется — это известные false positives fmt/spdlog consteval.
+- `scripts/run-clang-tidy.sh`: новый скрипт для pre-commit — гоняет clang-tidy **только по изменённым** файлам в образе `http-data-diod:builder` (на хосте нет тулчейна). Падает на реальных `error:` в файлах проекта; `warning:` (в основном style-naming на snake_case, включая члены Prometheus-метрик) печатает, но не блокирует. Диагностика из системных заголовков и сторонних либ (httplib/base64/nats) фильтруется — это известные false positives fmt/spdlog consteval.
 - `scripts/pre-commit.sh`: добавлен шаг `run_clang_tidy` (после message_counter).
 - `.gitignore`: добавлен `build-lint`.
 
@@ -1808,9 +1837,9 @@ ASan-стресс-тесты (15 мин, 50 concurrent) давали 30% failed 
 
 ### Changes
 - `docker-compose.yml`:
-  - сервис `l2-service-proxy` → `l2-proxy` (`container_name: l2-proxy`); авто-имя образа стало `http-redis-proxy-l2-proxy:latest`.
+  - сервис `l2-service-proxy` → `l2-proxy` (`container_name: l2-proxy`); авто-имя образа стало `http-data-diod-l2-proxy:latest`.
   - сервис `l2-service-worker` → `l2-worker` (`container_name: l2-worker`).
-  - `l2-server` по-прежнему использует тот же образ — ссылка обновлена на `http-redis-proxy-l2-proxy:latest`.
+  - `l2-server` по-прежнему использует тот же образ — ссылка обновлена на `http-data-diod-l2-proxy:latest`.
   - `depends_on` (nginx, grafana) — ссылки на `l2-proxy`.
 - DNS-имена в сети compose изменились, обновлены все потребители:
   - `nginx.conf` — `server l2-proxy:8888 resolve;`.
@@ -2420,7 +2449,7 @@ ASan-стресс-тесты (15 мин, 50 concurrent) давали 30% failed 
 
 #### docker-compose.yml
 - Removed duplicate `cpp-l2-server` service
-- Updated existing `l2-server` service to use `image: http-redis-proxy-l2-service-proxy:latest`
+- Updated existing `l2-server` service to use `image: http-data-diod-l2-service-proxy:latest`
 - `l2-server` now uses the same image as proxy/worker (single image, three modes)
 - Worker `L2_SERVER_URLS` points to `l2-server:8088`
 
@@ -2432,7 +2461,7 @@ ASan-стресс-тесты (15 мин, 50 concurrent) давали 30% failed 
 
 ### Architecture
 - **Single binary, three modes**: `MODE=proxy`, `MODE=worker`, `MODE=l2-server`
-- **Single Docker image**: `http-redis-proxy-l2-service-proxy:latest`
+- **Single Docker image**: `http-data-diod-l2-service-proxy:latest`
 - Same binary, different env vars → different roles
 
 ### Impact
@@ -3826,7 +3855,7 @@ cmake --build . --target l2-proxy.pvs
 ## Date: 2026-05-28
 
 ### Changes
-- **archive-src.sh**: скрипт создаёт `http-redis-proxy-YYYYMMDD-HHMMSS.tar.gz` через
+- **archive-src.sh**: скрипт создаёт `http-data-diod-YYYYMMDD-HHMMSS.tar.gz` через
   `git archive`, исключая всё что в .gitignore (перенесён из scripts/ в корень проекта 2026-06-16)
 
 # Worker NATS reconnect: retry loop с exponential backoff (M6)

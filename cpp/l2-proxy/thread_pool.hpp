@@ -87,7 +87,7 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
         this->m_not_full.notify_all();
 
         // Run tasks outside the lock — keeps the queue available to producers
-        for (std::function<void()> &task : batch) {
+        for (const std::function<void()> &task : batch) {
           task();
         }
       }

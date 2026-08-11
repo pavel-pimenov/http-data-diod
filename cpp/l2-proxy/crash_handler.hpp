@@ -57,7 +57,7 @@ private:
 
   // async-signal-safe: only uses POSIX open/write/close and stack-allocated
   // buffers. No heap allocation, no iostream — a signal may interrupt malloc.
-  static void write_crash_report(int signum, siginfo_t *info) {
+  static void write_crash_report(int signum, const siginfo_t *info) {
     // Generate timestamped filename using stack buffer
     time_t now = time(nullptr);
     struct tm tm_buf{};

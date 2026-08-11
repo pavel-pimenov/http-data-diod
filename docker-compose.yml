@@ -152,7 +152,7 @@ services:
 
   l2-server:
     container_name: l2-server
-    image: http-redis-proxy-l2-proxy:latest
+    image: http-data-diod-l2-proxy:latest
     restart: unless-stopped
     mem_limit: ${L2_SERVER_MEM_LIMIT:-1g}
     ports:
