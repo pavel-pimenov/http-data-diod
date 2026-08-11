@@ -3,6 +3,7 @@
 
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
 #include "nlohmann/json.hpp"
 #include "time_utils.hpp"
@@ -212,6 +213,72 @@ inline std::string resolve_trace_id(JaegerLogger *tracer,
     return ctx.m_trace_id;
   }
   return tracer ? tracer->generate_trace_id() : "";
+}
+
+// Generates a fresh span id (or reuses span_id_hint) plus the traceparent
+// string referencing it under ctx's trace id. Shared by the proxy's
+// trace-context extraction, the NATS push path and the worker's L2 call, which
+// each rebuilt the "new span id + matching traceparent" pair by hand.
+inline std::pair<std::string, std::string>
+make_span_and_traceparent(JaegerLogger *tracer, const TraceContext &ctx,
+                          const std::string &span_id_hint = "",
+                          bool sampled = true) {
+  const std::string span_id =
+      span_id_hint.empty() ? JaegerSpanLogger::generate_span_id(tracer)
+                           : span_id_hint;
+  if (!tracer || ctx.m_trace_id.empty()) {
+    return {span_id, ctx.m_traceparent_header};
+  }
+  return {span_id,
+          tracer->generate_traceparent(ctx.m_trace_id, span_id, sampled)};
+}
+
+// Logs the proxy INCOMING span and returns the generated inlet span id. Shared
+// by the main request handler and the DB gateway, which duplicated the
+// resolve-trace-id + generate-span-id + log_request sequence.
+inline std::string log_incoming_span(JaegerLogger *tracer,
+                                     const std::string &path,
+                                     uint64_t start_us,
+                                     const std::string &request_id,
+                                     const TraceContext &trace_ctx) {
+  if (!tracer) {
+    return "";
+  }
+  const std::string trace_id = resolve_trace_id(tracer, trace_ctx);
+  const std::string span_id = tracer->generate_span_id();
+  tracer->log_request("INCOMING", path, 200, start_us, start_us,
+                      "l2-proxy-proxy", request_id, trace_id, span_id,
+                      trace_ctx.m_parent_id, nlohmann::json({}));
+  return span_id;
+}
+
+// Attaches the proxy's tracing context (trace_id/span_id/inlet_span_id/
+// traceparent) to a request forwarded to the worker. Shared by the main
+// request path and the DB gateway, which wrote the same keys in three places.
+inline void add_proxy_trace_fields(json &request_data, JaegerLogger *tracer,
+                                   const TraceContext &trace_ctx,
+                                   const std::string &inlet_span_id,
+                                   const std::string &span_id,
+                                   bool sampled = true) {
+  if (!tracer) {
+    return;
+  }
+  const std::string trace_id = resolve_trace_id(tracer, trace_ctx);
+  request_data[NatsContract::kProxyTraceId] = trace_id;
+  request_data[NatsContract::kProxySpanId] = span_id;
+  request_data[NatsContract::kProxyInletSpanId] = inlet_span_id;
+  request_data[NatsContract::kProxyTraceparent] =
+      tracer->generate_traceparent(trace_id, span_id, sampled);
+}
+
+// Sets the "traceparent" response header from the request's trace context.
+// Shared by the l2-server and the proxy response builder, which duplicated the
+// set_header call (with differing empty-check).
+inline void set_traceparent_response_header(
+    httplib::Response &res, const TraceContext &trace_ctx) {
+  if (!trace_ctx.m_traceparent_header.empty()) {
+    res.set_header("traceparent", trace_ctx.m_traceparent_header);
+  }
 }
 
 #endif // TRACING_HELPERS_HPP

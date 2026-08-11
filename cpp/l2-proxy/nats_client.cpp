@@ -1,4 +1,5 @@
 #include "nats_client.hpp"
+#include "json_utils.hpp"
 #include <chrono>
 #include <cstring>
 #include <format>
@@ -451,6 +452,20 @@ NatsClient::request_impl(const std::string &subject, const std::string &data,
 
   natsMsg_Destroy(reply);
   return result;
+}
+
+std::pair<NatsReply, std::string>
+NatsClient::request_with_consume_span_id(const std::string &subject,
+                                         const std::string &data,
+                                         int timeout_ms) {
+  NatsReply reply = request_with_headers(
+      subject, data, {}, {NatsContract::kConsumeSpanIdHeader}, timeout_ms);
+  std::string consume_span_id;
+  const auto it = reply.m_headers.find(NatsContract::kConsumeSpanIdHeader);
+  if (it != reply.m_headers.end() && !it->second.empty()) {
+    consume_span_id = it->second;
+  }
+  return {std::move(reply), std::move(consume_span_id)};
 }
 
 bool NatsClient::publish(const std::string &subject, const std::string &data) {

@@ -18,6 +18,7 @@
 #include "tracing_helpers.hpp"
 #include <algorithm>
 #include <chrono>
+#include <tuple>
 #include <cstdlib>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
@@ -108,18 +109,20 @@ L2Worker::~L2Worker() {
 }
 
 std::string L2Worker::extract_scheme_host_port(const std::string &url) {
-  size_t scheme_end = url.find("://");
-  if (scheme_end == std::string::npos)
+  // Reuse the shared URL parser instead of a second hand-rolled scheme/host
+  // split. Reconstructs "scheme://host[:port]" omitting default ports.
+  try {
+    const ParsedUrl parsed = parse_url(url);
+    std::string result = parsed.m_is_https ? "https://" : "http://";
+    result += parsed.m_host;
+    const int default_port = parsed.m_is_https ? 443 : 80;
+    if (parsed.m_port != default_port) {
+      result += ":" + std::to_string(parsed.m_port);
+    }
+    return result;
+  } catch (const std::exception &) {
     return "";
-
-  std::string scheme = url.substr(0, scheme_end);
-  std::string rest = url.substr(scheme_end + 3);
-
-  size_t path_start = rest.find('/');
-  std::string host_port =
-      (path_start == std::string::npos) ? rest : rest.substr(0, path_start);
-
-  return scheme + "://" + host_port;
+  }
 }
 
 void L2Worker::extract_forwarded_headers(const json &request_data,
@@ -243,20 +246,13 @@ HttpResponse L2Worker::call_l2_server(
 
   const TraceContext l2_trace_ctx =
       handle_trace_context(traceparent, m_ctx.m_tracer.get());
-  // Use the provided l2_call_span_id if available, otherwise generate one
-  const std::string actual_l2_call_span_id =
-      l2_call_span_id.empty()
-          ? JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get())
-          : l2_call_span_id;
+  // Use the provided l2_call_span_id if available, otherwise generate one.
   // Rebuild the traceparent sent to the L2 server so the span id it links to
   // matches the span we log below. handle_trace_context generates a fresh
   // span id, which would orphan the L2 server span (parent not in trace).
-  const std::string traceparent_result =
-      m_ctx.m_tracer && !l2_trace_ctx.m_trace_id.empty()
-          ? m_ctx.m_tracer->generate_traceparent(l2_trace_ctx.m_trace_id,
-                                                 actual_l2_call_span_id,
-                                                 l2_trace_ctx.m_sampled)
-          : l2_trace_ctx.m_traceparent_header;
+  const auto [actual_l2_call_span_id, traceparent_result] =
+      make_span_and_traceparent(m_ctx.m_tracer.get(), l2_trace_ctx,
+                                l2_call_span_id, l2_trace_ctx.m_sampled);
 
   const auto start_us = get_current_timestamp_us();
 
@@ -597,9 +593,9 @@ L2Worker::create_tracing_spans(const TraceContext &parent_trace_ctx,
                   spans.m_worker_process_span_id,
                   spans.m_worker_process_parent_id);
 
-    spans.m_l2_call_span_id = m_ctx.m_tracer->generate_span_id();
-    spans.m_traceparent_header = m_ctx.m_tracer->generate_traceparent(
-        parent_trace_ctx.m_trace_id, spans.m_l2_call_span_id, true);
+    std::tie(spans.m_l2_call_span_id, spans.m_traceparent_header) =
+        make_span_and_traceparent(m_ctx.m_tracer.get(), parent_trace_ctx, "",
+                                  true);
     Logger::debug("Worker l2_call_span_id: {} traceparent_header: {}",
                   spans.m_l2_call_span_id, spans.m_traceparent_header);
   }
@@ -648,11 +644,7 @@ L2Worker::prepare_response_data(const L2Response &l2_response,
   data.m_content_type = (content_type_it != l2_response.m_headers.end())
                             ? content_type_it->second
                             : "";
-  data.m_is_binary = (data.m_content_type.find("image/") != std::string::npos ||
-                      data.m_content_type.find("application/octet-stream") !=
-                          std::string::npos ||
-                      data.m_content_type.find("audio/") != std::string::npos ||
-                      data.m_content_type.find("video/") != std::string::npos);
+  data.m_is_binary = HeaderUtils::is_binary_content_type(data.m_content_type);
 
   Logger::debug("Worker checking response type: content_type={} is_binary={}",
                 data.m_content_type, data.m_is_binary);

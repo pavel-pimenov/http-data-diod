@@ -3,6 +3,7 @@
 #include "db_query_utils.hpp"
 #include "duplicate_detector.hpp"
 #include "exceptions.hpp"
+#include "http_client.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
 #include "labeled_counter_collector.hpp"
@@ -288,16 +289,9 @@ TraceContext RequestHandler::setup_tracing(
   const TraceContext trace_ctx = extract_trace_context(
       req, m_ctx.m_tracer.get(), backend_push_span_id, traceparent_for_backend);
 
-  if (m_ctx.m_tracer) {
-    // No traceparent from client - generate new trace
-    const std::string trace_id = trace_ctx.m_trace_id.empty()
-                                     ? m_ctx.m_tracer->generate_trace_id()
-                                     : trace_ctx.m_trace_id;
-    inlet_span_id = m_ctx.m_tracer->generate_span_id();
-    m_ctx.m_tracer->log_request(
-        "INCOMING", "/", 200, start_us, start_us, "l2-proxy-proxy", request_id,
-        trace_id, inlet_span_id, trace_ctx.m_parent_id, nlohmann::json({}));
-  }
+  inlet_span_id =
+      log_incoming_span(m_ctx.m_tracer.get(), "/", start_us, request_id,
+                        trace_ctx);
 
   return trace_ctx;
 }
@@ -407,6 +401,8 @@ bool RequestHandler::process_request(const std::string &method,
       setup_tracing(req, request_id, request_timing.start_us(), inlet_span_id,
                     backend_push_span_id, traceparent_for_backend);
   Logger::set_trace_id(trace_ctx.m_trace_id);
+  const std::string trace_id =
+      resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
 
   // Prepare request data for backend
   nlohmann::json request_data = prepare_request_data(
@@ -414,20 +410,14 @@ bool RequestHandler::process_request(const std::string &method,
 
   // Add proxy span info for tracing chain
   if (m_ctx.m_tracer) {
-    const std::string trace_id =
-        resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
-    std::string nats_push_span_id = m_ctx.m_tracer->generate_span_id();
-    request_data[NatsContract::kProxyInletSpanId] = inlet_span_id;
-    request_data[NatsContract::kProxySpanId] = nats_push_span_id;
-    request_data[NatsContract::kProxyTraceId] = trace_id;
+    const std::string nats_push_span_id = m_ctx.m_tracer->generate_span_id();
+    add_proxy_trace_fields(request_data, m_ctx.m_tracer.get(), trace_ctx,
+                           inlet_span_id, nats_push_span_id);
   }
 
   // Push to backend
-  const std::string trace_id_for_push =
-      resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
-
   std::string request_json =
-      push_to_backend(std::move(request_data), request_id, trace_id_for_push,
+      push_to_backend(std::move(request_data), request_id, trace_id,
                       backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
     return fail_backend_request(
@@ -524,7 +514,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
               client_id);
         }
         res.status = 409;
-        res.set_content(R"({"error": "duplicate request"})",
+        res.set_content(make_error_json("duplicate request").dump(),
                         "application/json");
         return;
       }
@@ -573,15 +563,9 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   Logger::set_client_ip(extract_client_ip(req));
 
   std::string inlet_span_id;
-  if (m_ctx.m_tracer) {
-    const std::string trace_id =
-        resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
-    inlet_span_id = m_ctx.m_tracer->generate_span_id();
-    m_ctx.m_tracer->log_request(
-        "INCOMING", req.path, 200, start_us, start_us, "l2-proxy-proxy",
-        request_id, trace_id, inlet_span_id, trace_ctx.m_parent_id,
-        nlohmann::json({}));
-  }
+  inlet_span_id =
+      log_incoming_span(m_ctx.m_tracer.get(), req.path, start_us, request_id,
+                        trace_ctx);
 
   // Attach the proxy's tracing context to the DB request so the worker can
   // extend the same trace (analogous to NatsPushService on the main path).
@@ -589,15 +573,10 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!m_ctx.m_tracer) {
       return;
     }
-    const std::string trace_id =
-        resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
     const std::string nats_db_span_id = m_ctx.m_tracer->generate_span_id();
-    request_json[NatsContract::kProxyTraceId] = trace_id;
-    request_json[NatsContract::kProxySpanId] = nats_db_span_id;
-    request_json[NatsContract::kProxyInletSpanId] = inlet_span_id;
-    request_json[NatsContract::kProxyTraceparent] =
-        m_ctx.m_tracer->generate_traceparent(trace_id, nats_db_span_id,
-                                             trace_ctx.m_sampled);
+    add_proxy_trace_fields(request_json, m_ctx.m_tracer.get(), trace_ctx,
+                           inlet_span_id, nats_db_span_id,
+                           trace_ctx.m_sampled);
   };
 
   if (!m_ctx.m_config.m_db_query_enabled) {
@@ -738,8 +717,8 @@ void RequestHandler::route_db_request(
         .Increment();
     m_ctx.m_proxy.m_metrics->m_db_request_duration_seconds.Add(
         {{"db", db_name}}, latency_buckets_ms_to_10s())
-        .Observe(static_cast<double>(get_current_timestamp_us() - start_us) /
-                 1e6);
+        .Observe(
+            TimeUtils::duration_seconds(start_us, get_current_timestamp_us()));
   };
 
   if (!m_ctx.m_nats_client) {
@@ -758,12 +737,13 @@ void RequestHandler::route_db_request(
   std::string nats_parent_id =
       resolve_parent_id(inlet_span_id, trace_ctx.m_parent_id);
 
-  // request_with_headers also returns the worker's consume span id (NATS
-  // header), which links the round-trip span to the worker's consume span.
-  const NatsReply reply = m_ctx.m_nats_client->request_with_headers(
-      m_ctx.m_config.m_db_query_nats_subject, request_json, {},
-      {NatsContract::kConsumeSpanIdHeader},
-      m_ctx.m_config.m_db_query_nats_timeout_ms);
+  // request_with_consume_span_id also returns the worker's consume span id
+  // (NATS header), which links the round-trip span to the worker's consume
+  // span.
+  auto [reply, consume_span_id] =
+      m_ctx.m_nats_client->request_with_consume_span_id(
+          m_ctx.m_config.m_db_query_nats_subject, request_json,
+          m_ctx.m_config.m_db_query_nats_timeout_ms);
   const int64_t nats_end_us = TimeUtils::epoch_us();
 
   if (reply.m_data.empty()) {
@@ -797,14 +777,12 @@ void RequestHandler::route_db_request(
     }
     m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
         {{"db", db_name}}, latency_buckets_ms_to_10s())
-        .Observe(static_cast<double>(nats_end_us - nats_start_us) / 1e6);
+        .Observe(TimeUtils::duration_seconds(nats_start_us, nats_end_us));
     return;
   }
 
-  const auto consume_it =
-      reply.m_headers.find(NatsContract::kConsumeSpanIdHeader);
-  if (consume_it != reply.m_headers.end() && !consume_it->second.empty()) {
-    nats_parent_id = consume_it->second;
+  if (!consume_span_id.empty()) {
+    nats_parent_id = consume_span_id;
   }
 
   if (m_ctx.m_tracer && !trace_id.empty()) {
@@ -840,7 +818,7 @@ void RequestHandler::route_db_request(
 
   m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
       {{"db", db_name}}, latency_buckets_ms_to_10s())
-      .Observe(static_cast<double>(nats_end_us - nats_start_us) / 1e6);
+      .Observe(TimeUtils::duration_seconds(nats_start_us, nats_end_us));
   record_db_metrics(status);
 
   JaegerSpanLogger::log_proxy_response(

@@ -72,6 +72,16 @@ public:
     return false;
   }
 
+  // True for content types carrying opaque binary payloads (images, audio,
+  // video, octet-stream). Shared by the worker (which base64-encodes such
+  // responses) and the response path that decodes them.
+  static bool is_binary_content_type(const std::string &content_type) {
+    return content_type.find("image/") != std::string::npos ||
+           content_type.find("application/octet-stream") != std::string::npos ||
+           content_type.find("audio/") != std::string::npos ||
+           content_type.find("video/") != std::string::npos;
+  }
+
   // Replace the value of sensitive headers in log lines with "***"
   static std::string redact_header_value(const std::string &header_name,
                                          const std::string &value) {

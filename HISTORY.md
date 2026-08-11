@@ -1,3 +1,38 @@
+# refactor: дедупликация повторяющихся паттернов (DB-gateway, трассировка, NATS) + фикс сборки
+
+## Date: 2026-08-11
+
+### Контекст
+Накопившиеся рукотворные повторы одного и того же кода в трёх областях: (1) DB-шлюз — дублирование fetch/error/columns-логики между pg/oracle экзекуторами, (2) трассировка — несколько мест вручную собирали «новый span_id + matching traceparent» и прокидывали traceparent-заголовки, (3) NATS — извлечение `X-Consume-Span-Id` из ответа и логирование `NATS_consume`/длительности дублировались между poll-сервисом, DB-шлюзом и двумя обработчиками воркера.
+
+### Что сделано
+- **`db_query_utils.hpp`**: новые header-only хелперы `resolve_positive_or()`, `make_db_unavailable()`, `make_db_sql_error()`, `DbRowCollector` (row-limit + truncation), `make_db_columns_json()`. Использованы в `db_query_handler.cpp`, `db_query_executor_postgres.cpp`, `db_query_executor_oracle.cpp` (убраны дюжина повторяющихся error-путей и два одинаковых fetch-цикла).
+- **`db_query_executor_base.{hpp,cpp}`** (новый файл): база `DbExecutorBase` — общий `DbConfig`, `default_timeout_ms()/default_max_rows()`, `db_name()`, пул-гейджи; экзекуторы pg/oracle приведены к ней. Файл добавлен в `CMakeLists.txt`.
+- **`db_query_handler.cpp`**: локальный `steady_ms()` заменён на `TimeUtils::steady_ms()`.
+
+- **`tracing_helpers.hpp`**: новые inline-хелперы `get_traceparent_header()`, `make_span_and_traceparent()` (новый span-id + matching traceparent), `log_incoming_span()`, `add_proxy_trace_fields()`, `set_traceparent_response_header()`.
+- **`trace_context_extractor.cpp`**: переведён на `get_traceparent_header()` + `make_span_and_traceparent()`.
+- **`trace_logger.cpp`**: `extract_trace_info()` делегирует `JaegerLogger::parse_traceparent()`; `parse_traceparent()`/`validate_traceparent()` стали `static` (чистые функции, формат «00-{32}-{16}-{2}» живёт в одном месте).
+- **`common_utils.cpp`**: в `handle_trace_context()` оба traced-бранча сходятся на общий `generate_traceparent()` (убрано дублирование).
+- **`response_builder.cpp` / `server_handler.cpp`**: `traceparent`-заголовок ответа и `Logger::set_client_ip` через `set_traceparent_response_header()` / `extract_client_ip()`.
+
+- **`nats_client.{hpp,cpp}`**: новый метод `request_with_consume_span_id()` — `request_with_headers()` + извлечение `X-Consume-Span-Id` из заголовков ответа.
+- **`nats_poll_service.cpp` / `request_handler.cpp`**: main-poll и DB-запрос переведены на `request_with_consume_span_id()`; длительности метрик — через `TimeUtils::duration_seconds()`.
+- **`l2_worker.cpp`**: `extract_scheme_host_port()` переписан на общий `parse_url()`; `call_l2_server()`/`create_tracing_spans()` — на `make_span_and_traceparent()`; определение бинарного контент-типа вынесено в `HeaderUtils::is_binary_content_type()`.
+- **`header_utils.hpp`**: добавлен `is_binary_content_type()`.
+- **`l2_worker_nats.cpp`**: файловые хелперы `log_nats_consume_span()` и `make_consume_span_headers()` объединяют NATS_consume-логирование и сборку ответных заголовков в обоих обработчиках (main и DB); длительность DB-запроса — через `TimeUtils::duration_seconds()`.
+
+### Фиксы сборки, найденные контейнерной сборкой
+- `make_db_columns_json()`: у `nlohmann::json` нет `reserve()` — вызов убран.
+- `parse_traceparent()`/`validate_traceparent()`: статический вызов из свободной функции `extract_trace_info()` без объекта — сделаны `static`.
+
+### Проверка
+- `./rebuild-and-run.sh` → сборка успешна, все сервисы healthy, 79 тестов / 427 assertions PASS.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → passed (POST+GET), без потери/перепутывания ответов.
+- `GET /favicon.ico` (бинарный ответ) → passed.
+
+---
+
 # feat: Oracle вынесен в compose-профиль `oracle` (по умолчанию выключен)
 
 ## Date: 2026-08-10

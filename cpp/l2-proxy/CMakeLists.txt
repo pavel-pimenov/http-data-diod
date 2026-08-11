@@ -209,6 +209,7 @@ add_executable(l2-proxy
   http_client_pool.cpp
   stats_logger.cpp
   db_query_handler.cpp
+  db_query_executor_base.cpp
   db_query_executor_oracle.cpp
   db_query_executor_postgres.cpp
   db_query_executor_factory.cpp

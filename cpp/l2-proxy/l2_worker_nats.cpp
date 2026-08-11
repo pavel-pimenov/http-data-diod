@@ -13,6 +13,42 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 
+namespace {
+// Logs the worker-side NATS_consume span. Shared by the main and DB request
+// handlers, which duplicated the messaging.* attributes + log_span_to_jaeger
+// pair.
+void log_nats_consume_span(JaegerLogger *tracer, const std::string &request_id,
+                           const std::string &trace_id, uint64_t start_us,
+                           const std::string &consume_span_id,
+                           const std::string &proxy_span_id,
+                           const std::string &service_name,
+                           const std::string &destination,
+                           const std::string &reply_to) {
+  if (!tracer || trace_id.empty()) {
+    return;
+  }
+  nlohmann::json attrs = {
+      {"messaging.system", "nats"},
+      {"messaging.operation", "consume"},
+      {"messaging.destination", destination},
+      {"messaging.reply_to", reply_to},
+  };
+  log_span_to_jaeger(tracer, "NATS_consume", "/nats", 200, start_us, start_us,
+                     service_name, request_id, trace_id, consume_span_id,
+                     proxy_span_id, attrs);
+}
+
+// Builds the response headers carrying the worker's consume span id (or an
+// empty map when absent). Shared by the main and DB response paths.
+NatsHeaders make_consume_span_headers(const std::string &consume_span_id) {
+  NatsHeaders response_headers;
+  if (!consume_span_id.empty()) {
+    response_headers[NatsContract::kConsumeSpanIdHeader] = consume_span_id;
+  }
+  return response_headers;
+}
+} // namespace
+
 extern std::atomic<bool> g_shutdown_flag;
 
 void L2Worker::run_with_nats() {
@@ -275,18 +311,11 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
       return;
     }
 
-    if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
-      nlohmann::json attrs = {
-          {"messaging.system", "nats"},
-          {"messaging.operation", "consume"},
-          {"messaging.destination", m_ctx.m_config.m_nats_subject},
-          {"messaging.reply_to", reply_to}};
-      log_span_to_jaeger(m_ctx.m_tracer.get(), "NATS_consume", "/nats", 200,
-                         start_us, start_us,
-                         proxy_service_name(m_ctx.m_config.m_mode),
-                         metadata.m_request_id, metadata.m_trace_ctx.m_trace_id,
-                         nats_consume_span_id, metadata.m_proxy_span_id);
-    }
+    log_nats_consume_span(
+        m_ctx.m_tracer.get(), metadata.m_request_id,
+        metadata.m_trace_ctx.m_trace_id, start_us, nats_consume_span_id,
+        metadata.m_proxy_span_id, proxy_service_name(m_ctx.m_config.m_mode),
+        m_ctx.m_config.m_nats_subject, reply_to);
 
     const auto &worker_parent_span_id = nats_consume_span_id;
 
@@ -335,11 +364,8 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     }
 
     // Send nats_consume_span_id as NATS header instead of JSON body
-    NatsHeaders response_headers;
-    if (!nats_consume_span_id.empty()) {
-      response_headers[NatsContract::kConsumeSpanIdHeader] =
-          nats_consume_span_id;
-    }
+    const NatsHeaders response_headers =
+        make_consume_span_headers(nats_consume_span_id);
 
     const std::string response_json_dump = response_json.dump();
     m_dedup_cache.store(metadata.m_request_id, response_json_dump);
@@ -456,19 +482,11 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       const std::string proxy_span_id = JsonUtils::safe_get_string(
           request_data, NatsContract::kProxySpanId);
 
-      if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
-        nlohmann::json attrs = {
-            {"messaging.system", "nats"},
-            {"messaging.operation", "consume"},
-            {"messaging.destination", m_ctx.m_config.m_db_query_nats_subject},
-            {"messaging.reply_to", reply_to},
-        };
-        log_span_to_jaeger(m_ctx.m_tracer.get(), "NATS_consume", "/nats", 200,
-                           start_us, start_us,
-                           proxy_service_name(m_ctx.m_config.m_mode),
-                           request_id, trace_ctx.m_trace_id, consume_span_id,
-                           proxy_span_id, attrs);
-      }
+      log_nats_consume_span(
+          m_ctx.m_tracer.get(), request_id, trace_ctx.m_trace_id, start_us,
+          consume_span_id, proxy_span_id,
+          proxy_service_name(m_ctx.m_config.m_mode),
+          m_ctx.m_config.m_db_query_nats_subject, reply_to);
 
       if (!m_db_query_handler) {
         status = 503;
@@ -483,7 +501,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
         m_ctx.m_worker.m_metrics->m_db_query_duration_seconds.Add(
             {{"db", db_name.empty() ? "unknown" : db_name}},
             latency_buckets_ms_to_10s())
-            .Observe(static_cast<double>(db_end_us - db_start_us) / 1e6);
+            .Observe(TimeUtils::duration_seconds(db_start_us, db_end_us));
         if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
           const std::string db_span_id =
               JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
@@ -519,10 +537,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
        {"type", type.empty() ? "unknown" : type},
        {"status", std::to_string(status)}})
       .Increment();
-  NatsHeaders response_headers;
-  if (!consume_span_id.empty()) {
-    response_headers[NatsContract::kConsumeSpanIdHeader] = consume_span_id;
-  }
+  const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
   send_nats_response(reply_to, envelope.dump(), response_headers);
   m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
       static_cast<double>(envelope.dump().size()));

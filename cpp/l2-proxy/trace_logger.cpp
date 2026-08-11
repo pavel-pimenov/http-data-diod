@@ -115,24 +115,14 @@ bool JaegerLogger::parse_traceparent(const std::string &traceparent,
 }
 
 // Extract trace_id and parent_span_id from traceparent header
+// Delegate to JaegerLogger::parse_traceparent so the "00-{32}-{16}-{2}"
+// format (positions, lengths, hex/flags validation) lives in one place.
 TraceInfo extract_trace_info(const std::string &traceparent) {
   TraceInfo info;
-
-  if (traceparent.size() < 55)
-    return info;
-
-  if (traceparent[0] != '0' || traceparent[1] != '0' || traceparent[2] != '-')
-    return info;
-  if (traceparent[35] != '-' || traceparent[52] != '-')
-    return info;
-
-  info.m_trace_id = traceparent.substr(3, 32);
-  info.m_parent_span_id = traceparent.substr(36, 16);
-  std::string flags = traceparent.substr(53, 2);
-
-  info.m_sampled = (flags == "01");
-  info.m_valid = true;
-
+  if (JaegerLogger::parse_traceparent(traceparent, info.m_trace_id,
+                                      info.m_parent_span_id, info.m_sampled)) {
+    info.m_valid = true;
+  }
   return info;
 }
 

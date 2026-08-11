@@ -61,9 +61,7 @@ void set_response_content(httplib::Response &res,
     res.set_content(l2_response, "application/json");
   }
 
-  if (!trace_ctx.m_traceparent_header.empty()) {
-    res.set_header("traceparent", trace_ctx.m_traceparent_header);
-  }
+  set_traceparent_response_header(res, trace_ctx);
 
   const auto span_end_us = get_current_timestamp_us();
   JaegerSpanLogger::log_proxy_response(

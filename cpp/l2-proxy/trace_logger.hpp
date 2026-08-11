@@ -199,8 +199,10 @@ public:
                                    bool sampled = true);
 
   // Parse traceparent header: "00-{trace-id}-{parent-id}-{flags}"
-  bool parse_traceparent(const std::string &traceparent, std::string &trace_id,
-                         std::string &parent_span_id, bool &sampled);
+  // Pure function: also available to the static extract_trace_info() helper.
+  static bool parse_traceparent(const std::string &traceparent,
+                                std::string &trace_id,
+                                std::string &parent_span_id, bool &sampled);
 
   void enqueue_span(const std::string &trace_id, const std::string &span_id,
                     const std::string &parent_id, const std::string &name,
@@ -218,7 +220,7 @@ public:
                    const nlohmann::json &additional_attributes = {});
 
   // Simplified validation
-  bool validate_traceparent(const std::string &traceparent);
+  static bool validate_traceparent(const std::string &traceparent);
 
   void sender_loop();
   bool send_span(const std::string &trace_id, const std::string &span_id,

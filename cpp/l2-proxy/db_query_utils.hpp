@@ -3,8 +3,11 @@
 
 #include "json_utils.hpp"
 #include <cctype>
+#include <cstddef>
 #include <expected>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Pure helpers of the HTTP DB Gateway shared by the proxy and the worker.
 // Header-only and free of ODPI-C so the unit tests can exercise them without
@@ -141,6 +144,13 @@ parse_db_query_request(const json &j) {
   return req;
 }
 
+// Returns value when positive, otherwise fallback. Shared by the DB gateway
+// request resolution that otherwise repeated the `value > 0 ? value : default`
+// ternary in both the handler and the executors.
+inline int resolve_positive_or(int value, int fallback) {
+  return value > 0 ? value : fallback;
+}
+
 // Builds the DbResponseContract error body shared by the proxy and the worker.
 inline json make_db_error_body(int http_status, const std::string &code,
                                const std::string &message) {
@@ -150,6 +160,25 @@ inline json make_db_error_body(int http_status, const std::string &code,
       {DbResponseContract::kError,
        json{{DbResponseContract::kCode, code},
             {DbResponseContract::kMessage, message}}}};
+}
+
+// Sets status_code to 503 and returns a DB_UNAVAILABLE error body.
+// detail (e.g. the driver error text) is appended to the standard message.
+inline json make_db_unavailable(int &status_code,
+                                const std::string &detail = "") {
+  status_code = 503;
+  return make_db_error_body(
+      status_code, "DB_UNAVAILABLE",
+      detail.empty() ? "Failed to acquire a database connection"
+                     : "Failed to acquire a database connection: " + detail);
+}
+
+// Sets status_code to 422 and returns a SQL_ERROR body. Shared by the twelve
+// error paths in the pg/oracle executors that repeated the identical
+// status+code+body triple.
+inline json make_db_sql_error(int &status_code, const std::string &message) {
+  status_code = 422;
+  return make_db_error_body(status_code, "SQL_ERROR", message);
 }
 
 // Builds the DbResponseContract success body of a query execution.
@@ -173,6 +202,47 @@ inline json make_db_ping_response(const std::string &db,
   return json{{DbResponseContract::kStatus, DbResponseContract::kStatusOk},
               {DbResponseContract::kDb, db},
               {DbResponseContract::kLatencyMs, latency_ms}};
+}
+
+// Accumulates result rows up to max_rows and remembers whether the limit cut
+// the result set short. Shared by the pg/oracle fetch loops that duplicated
+// the `rows.size() >= max_rows -> truncated` bookkeeping.
+class DbRowCollector {
+public:
+  explicit DbRowCollector(size_t max_rows) : m_max_rows(max_rows) {}
+
+  // Returns false when the row limit is reached (and marks the result as
+  // truncated); the caller must stop fetching.
+  bool try_add(json &&row) {
+    if (m_rows.size() >= m_max_rows) {
+      m_truncated = true;
+      return false;
+    }
+    m_rows.push_back(std::move(row));
+    return true;
+  }
+
+  json take_rows() { return std::move(m_rows); }
+  size_t size() const { return m_rows.size(); }
+  bool truncated() const { return m_truncated; }
+
+private:
+  const size_t m_max_rows;
+  json m_rows = json::array();
+  bool m_truncated = false;
+};
+
+// Builds the DbResponseContract columns array from (name, type) pairs. Shared
+// by the pg/oracle result descriptors that repeated the same push_back loop.
+inline json make_db_columns_json(
+    const std::vector<std::pair<std::string, std::string>> &name_type) {
+  json columns_json = json::array();
+  for (const auto &[name, type] : name_type) {
+    columns_json.push_back(
+        json{{DbResponseContract::kName, name},
+             {DbResponseContract::kType, type}});
+  }
+  return columns_json;
 }
 
 #endif // DB_QUERY_UTILS_HPP

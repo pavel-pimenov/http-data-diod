@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nats/nats.h>
@@ -85,6 +86,14 @@ public:
                        const NatsHeaders &headers = {},
                        const std::vector<std::string> &reply_header_keys = {},
                        int timeout_ms = 0);
+
+  // Send request and return the reply plus the worker's consume span id
+  // extracted from the reply headers (empty when absent). Shared by the poll
+  // service and the DB gateway, which repeated request_with_headers + header
+  // lookup.
+  std::pair<NatsReply, std::string>
+  request_with_consume_span_id(const std::string &subject,
+                               const std::string &data, int timeout_ms = 0);
 
   // Publish message (fire-and-forget)
   bool publish(const std::string &subject, const std::string &data);

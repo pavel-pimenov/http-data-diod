@@ -2,9 +2,9 @@
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "time_utils.hpp"
 #include <base64.hpp>
 #include <libpq-fe.h>
-#include <chrono>
 #include <cstdint>
 #include <format>
 #include <optional>
@@ -37,13 +37,6 @@ constexpr Oid kPgNumericOid = 1700;
 constexpr Oid kPgJsonOid = 114;
 constexpr Oid kPgJsonbOid = 3802;
 constexpr Oid kPgUuidOid = 2950;
-
-uint64_t pg_steady_ms() {
-  return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count());
-}
 
 std::string pg_type_name(Oid oid) {
   switch (oid) {
@@ -154,15 +147,16 @@ json pg_value(Oid oid, const char *text, int len) {
 } // namespace
 
 struct PostgresQueryExecutor::Impl {
-  const DbConfig m_db;
+  const DbConfig &m_db;
+  DbExecutorBase *m_owner = nullptr;
   // Idle pooled connections. Total connections never exceed m_db.m_pool_max:
   // acquire() only creates when below the limit and every connection is
   // returned to the pool on release.
   std::vector<PGconn *> m_idle;
   size_t m_total = 0;
-  prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 
-  explicit Impl(DbConfig db) : m_db(std::move(db)) {}
+  explicit Impl(const DbConfig &db, DbExecutorBase *owner)
+      : m_db(db), m_owner(owner) {}
 
   ~Impl() {
     for (PGconn *conn : m_idle) {
@@ -172,15 +166,11 @@ struct PostgresQueryExecutor::Impl {
   }
 
   void update_pool_gauges() {
-    if (!m_pool_metrics) {
-      return;
-    }
     const double idle = static_cast<double>(m_idle.size());
     const double active =
         static_cast<double>(m_total >= m_idle.size() ? m_total - m_idle.size()
                                                      : 0);
-    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
-    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
+    m_owner->set_db_pool_gauges(idle, active);
   }
 
   PGconn *create_conn() const {
@@ -253,7 +243,8 @@ struct PostgresQueryExecutor::Impl {
 };
 
 PostgresQueryExecutor::PostgresQueryExecutor(DbConfig db)
-    : m_impl(std::make_unique<Impl>(std::move(db))) {}
+    : DbExecutorBase(std::move(db)),
+      m_impl(std::make_unique<Impl>(m_db, this)) {}
 
 PostgresQueryExecutor::~PostgresQueryExecutor() = default;
 
@@ -276,40 +267,24 @@ bool PostgresQueryExecutor::init() {
   return true;
 }
 
-void PostgresQueryExecutor::set_pool_metrics(
-    prometheus::Family<prometheus::Gauge> *pool_metrics) {
-  m_impl->m_pool_metrics = pool_metrics;
+void PostgresQueryExecutor::refresh_pool_gauges() {
   m_impl->update_pool_gauges();
-}
-
-int PostgresQueryExecutor::default_timeout_ms() const {
-  return m_impl->m_db.m_query_timeout_ms;
-}
-
-int PostgresQueryExecutor::default_max_rows() const {
-  return m_impl->m_db.m_max_rows;
-}
-
-const std::string &PostgresQueryExecutor::db_name() const {
-  return m_impl->m_db.m_name;
 }
 
 json PostgresQueryExecutor::execute_query(const std::string &sql,
                                           const json &params, int timeout_ms,
                                           int max_rows, int &status_code) {
   status_code = 200;
-  const uint64_t start_ms = pg_steady_ms();
+  const uint64_t start_ms = TimeUtils::steady_ms();
 
   auto maybe_conn = m_impl->acquire_conn();
   if (!maybe_conn) {
-    status_code = 503;
-    return make_db_error_body(status_code, "DB_UNAVAILABLE",
-                              "Failed to acquire a database connection");
+    return make_db_unavailable(status_code);
   }
   PGconn *conn = *maybe_conn;
 
   const int effective_timeout =
-      timeout_ms > 0 ? timeout_ms : m_impl->m_db.m_query_timeout_ms;
+      resolve_positive_or(timeout_ms, m_impl->m_db.m_query_timeout_ms);
   PGresult *set_res = PQexec(
       conn, std::format("SET statement_timeout = {}", effective_timeout)
                 .c_str());
@@ -320,9 +295,8 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   }
   if (!set_ok) {
     m_impl->release_conn(conn);
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR",
-                              "Failed to set statement timeout: " + set_error);
+    return make_db_sql_error(
+        status_code, "Failed to set statement timeout: " + set_error);
   }
 
   // Bind parameters as positional $1..$N. Params are passed in text format
@@ -366,8 +340,7 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
     const std::string message = Impl::trim_copy(PQresultErrorMessage(res));
     PQclear(res);
     m_impl->release_conn(conn);
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR", message);
+    return make_db_sql_error(status_code, message);
   }
 
   const int num_fields = PQnfields(res);
@@ -375,18 +348,11 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   if (num_fields == 0) {
     PQclear(res);
     m_impl->release_conn(conn);
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR",
-                              "Statement returned no result set");
+    return make_db_sql_error(status_code, "Statement returned no result set");
   }
 
-  json rows = json::array();
-  bool truncated = false;
+  DbRowCollector rows(static_cast<size_t>(max_rows));
   for (int r = 0; r < num_tuples; ++r) {
-    if (rows.size() >= static_cast<size_t>(max_rows)) {
-      truncated = true;
-      break;
-    }
     json row = json::array();
     for (int c = 0; c < num_fields; ++c) {
       if (PQgetisnull(res, r, c)) {
@@ -394,23 +360,29 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
         continue;
       }
       const Oid oid = PQftype(res, c);
-      row.push_back(pg_value(oid, PQgetvalue(res, r, c), PQgetlength(res, r, c)));
+      row.push_back(
+          pg_value(oid, PQgetvalue(res, r, c), PQgetlength(res, r, c)));
     }
-    rows.push_back(std::move(row));
+    if (!rows.try_add(std::move(row))) {
+      break;
+    }
   }
 
-  json columns_json = json::array();
+  std::vector<std::pair<std::string, std::string>> name_type;
+  name_type.reserve(num_fields);
   for (int c = 0; c < num_fields; ++c) {
-    columns_json.push_back(json{
-        {DbResponseContract::kName, PQfname(res, c)},
-        {DbResponseContract::kType, pg_type_name(PQftype(res, c))}});
+    name_type.emplace_back(PQfname(res, c), pg_type_name(PQftype(res, c)));
   }
+  const json columns_json = make_db_columns_json(name_type);
   PQclear(res);
   m_impl->release_conn(conn);
 
-  const uint64_t end_ms = pg_steady_ms();
-  return make_db_query_response(m_impl->m_db.m_name, columns_json, rows,
-                                rows.size(), truncated, end_ms - start_ms);
+  const size_t row_count = rows.size();
+  const bool truncated = rows.truncated();
+  const uint64_t end_ms = TimeUtils::steady_ms();
+  return make_db_query_response(m_impl->m_db.m_name, columns_json,
+                                rows.take_rows(), row_count, truncated,
+                                end_ms - start_ms);
 }
 
 bool PostgresQueryExecutor::ping(int timeout_ms) {

@@ -55,20 +55,22 @@ TraceContext handle_trace_context(const std::string &traceparent_raw,
       tracer->parse_traceparent(traceparent_raw, ctx.m_trace_id,
                                 ctx.m_parent_id, ctx.m_sampled)) {
     ctx.m_span_id = tracer->generate_span_id();
-    ctx.m_traceparent_header = tracer->generate_traceparent(
-        ctx.m_trace_id, ctx.m_span_id, ctx.m_sampled);
   } else if (tracer) {
     ctx.m_trace_id = tracer->generate_trace_id();
     ctx.m_span_id = tracer->generate_span_id();
     ctx.m_parent_id = "";
-    ctx.m_traceparent_header = tracer->generate_traceparent(
-        ctx.m_trace_id, ctx.m_span_id, ctx.m_sampled);
   } else {
     ctx.m_trace_id = "";
     ctx.m_span_id = "";
     ctx.m_parent_id = "";
     ctx.m_traceparent_header = "";
+    return ctx;
   }
+
+  // Both traced branches converge here: rebuild the traceparent from the
+  // freshly generated span id so the downstream span links to the log records.
+  ctx.m_traceparent_header = tracer->generate_traceparent(
+      ctx.m_trace_id, ctx.m_span_id, ctx.m_sampled);
 
   return ctx;
 }

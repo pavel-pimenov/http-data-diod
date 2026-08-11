@@ -2,16 +2,8 @@
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
-#include <chrono>
+#include "time_utils.hpp"
 #include <format>
-namespace {
-uint64_t steady_ms() {
-  return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count());
-}
-} // namespace
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   m_expected_count = databases.size();
@@ -68,9 +60,9 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   }
 
   if (req.m_type == DbQueryContract::kTypePing) {
-    const uint64_t start_ms = steady_ms();
+    const uint64_t start_ms = TimeUtils::steady_ms();
     const bool ok = executor->ping(req.m_timeout_ms);
-    const uint64_t latency_ms = steady_ms() - start_ms;
+    const uint64_t latency_ms = TimeUtils::steady_ms() - start_ms;
     status_code = ok ? 200 : 503;
     body = ok ? make_db_ping_response(executor->db_name(), latency_ms)
               : make_db_error_body(status_code, "DB_UNAVAILABLE",
@@ -79,9 +71,9 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   }
 
   const int timeout_ms =
-      req.m_timeout_ms > 0 ? req.m_timeout_ms : executor->default_timeout_ms();
+      resolve_positive_or(req.m_timeout_ms, executor->default_timeout_ms());
   const int max_rows =
-      req.m_max_rows > 0 ? req.m_max_rows : executor->default_max_rows();
+      resolve_positive_or(req.m_max_rows, executor->default_max_rows());
   int exec_status = 200;
   json exec_body =
       executor->execute_query(req.m_sql, req.m_params, timeout_ms, max_rows,

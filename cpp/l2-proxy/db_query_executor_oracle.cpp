@@ -2,27 +2,35 @@
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "time_utils.hpp"
 #include <base64.hpp>
 #include <dpi.h>
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+// RAII guard returning an acquired Oracle connection to the pool exactly once.
+// Shared by execute_query() and ping() (previously each function defined its
+// own identical struct). The nested class has access to the private
+// release_conn().
+struct OracleQueryExecutor::ConnGuard {
+  OracleQueryExecutor *m_self = nullptr;
+  dpiConn *m_conn = nullptr;
+  ~ConnGuard() {
+    if (m_self && m_conn) {
+      m_self->release_conn(m_conn);
+    }
+  }
+};
 
 namespace {
 constexpr uint32_t g_max_lob_bytes = 1024 * 1024;
 constexpr uint32_t g_max_inline_bytes = 1024 * 1024;
-
-uint64_t executor_steady_ms() {
-  return static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count());
-}
 
 std::string oracle_type_name(dpiOracleTypeNum type) {
   switch (type) {
@@ -114,13 +122,14 @@ std::string format_interval_ym(const dpiIntervalYM &i) {
 } // namespace
 
 struct OracleQueryExecutor::Impl {
-  const DbConfig m_db;
+  const DbConfig &m_db;
+  DbExecutorBase *m_owner = nullptr;
   dpiContext *m_context = nullptr;
   dpiErrorInfo m_error_info{};
   dpiPool *m_pool = nullptr;
-  prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 
-  explicit Impl(DbConfig db) : m_db(std::move(db)) {}
+  explicit Impl(const DbConfig &db, DbExecutorBase *owner)
+      : m_db(db), m_owner(owner) {}
 
   ~Impl() {
     if (m_pool) {
@@ -132,7 +141,7 @@ struct OracleQueryExecutor::Impl {
   }
 
   void update_pool_gauges() {
-    if (!m_pool_metrics) {
+    if (!m_pool) {
       return;
     }
     uint32_t open = 0;
@@ -143,8 +152,7 @@ struct OracleQueryExecutor::Impl {
     }
     const auto active = static_cast<double>(busy);
     const auto idle = static_cast<double>(open >= busy ? open - busy : 0);
-    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
-    m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
+    m_owner->set_db_pool_gauges(idle, active);
   }
 
   void release_conn(dpiConn *conn) {
@@ -222,31 +230,6 @@ struct OracleQueryExecutor::Impl {
   }
 };
 
-OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
-    : m_impl(std::make_unique<Impl>(std::move(db))) {}
-
-OracleQueryExecutor::~OracleQueryExecutor() = default;
-
-bool OracleQueryExecutor::init() { return m_impl->init(); }
-
-void OracleQueryExecutor::set_pool_metrics(
-    prometheus::Family<prometheus::Gauge> *pool_metrics) {
-  m_impl->m_pool_metrics = pool_metrics;
-  m_impl->update_pool_gauges();
-}
-
-void OracleQueryExecutor::release_conn(dpiConn *conn) {
-  m_impl->release_conn(conn);
-}
-
-int OracleQueryExecutor::default_timeout_ms() const {
-  return m_impl->m_db.m_query_timeout_ms;
-}
-
-int OracleQueryExecutor::default_max_rows() const { return m_impl->m_db.m_max_rows; }
-
-const std::string &OracleQueryExecutor::db_name() const { return m_impl->m_db.m_name; }
-
 namespace {
 struct ColumnPlan {
   std::string m_name;
@@ -266,41 +249,43 @@ struct StmtGuard {
 };
 } // namespace
 
-json OracleQueryExecutor::execute_query(const std::string &sql, const json &params,
-                                    int timeout_ms, int max_rows,
-                                    int &status_code) {
+OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
+    : DbExecutorBase(std::move(db)),
+      m_impl(std::make_unique<Impl>(m_db, this)) {}
+
+OracleQueryExecutor::~OracleQueryExecutor() = default;
+
+bool OracleQueryExecutor::init() { return m_impl->init(); }
+
+void OracleQueryExecutor::release_conn(dpiConn *conn) {
+  m_impl->release_conn(conn);
+}
+
+void OracleQueryExecutor::refresh_pool_gauges() {
+  m_impl->update_pool_gauges();
+}
+
+json OracleQueryExecutor::execute_query(const std::string &sql,
+                                        const json &params, int timeout_ms,
+                                        int max_rows, int &status_code) {
   status_code = 200;
-  const uint64_t start_ms = executor_steady_ms();
+  const uint64_t start_ms = TimeUtils::steady_ms();
 
   auto maybe_conn = m_impl->acquire_conn(timeout_ms);
   if (!maybe_conn) {
-    status_code = 503;
-    return make_db_error_body(status_code, "DB_UNAVAILABLE",
-                              "Failed to acquire a database connection: " +
-                                  m_impl->describe_error());
+    return make_db_unavailable(status_code, m_impl->describe_error());
   }
   dpiConn *conn = *maybe_conn;
   // Returns the connection to the pool on every exit path (the pooled conn
   // must be released exactly once per acquire or the pool exhausts at
   // m_pool_max and further requests fail with 503).
-  struct ConnGuard {
-    OracleQueryExecutor *m_self = nullptr;
-    dpiConn *m_conn = nullptr;
-    ~ConnGuard() {
-      if (m_self && m_conn) {
-        m_self->release_conn(m_conn);
-      }
-    }
-  };
   const ConnGuard conn_guard{this, conn};
 
   dpiStmt *stmt_raw = nullptr;
   if (dpiConn_prepareStmt(conn, 0, sql.data(),
                           static_cast<uint32_t>(sql.size()), nullptr, 0,
                           &stmt_raw) < 0) {
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR",
-                              m_impl->describe_error());
+    return make_db_sql_error(status_code, m_impl->describe_error());
   }
   StmtGuard stmt_guard{stmt_raw};
 
@@ -331,24 +316,19 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
     if (dpiStmt_bindValueByName(stmt_raw, bind_name.data(),
                                 static_cast<uint32_t>(bind_name.size()),
                                 native, &data) < 0) {
-      status_code = 422;
-      return make_db_error_body(status_code, "SQL_ERROR",
-                                std::format("Failed to bind parameter '{}': {}",
-                                            name, m_impl->describe_error()));
+      return make_db_sql_error(
+          status_code, std::format("Failed to bind parameter '{}': {}", name,
+                                   m_impl->describe_error()));
     }
   }
 
   uint32_t num_query_columns = 0;
   if (dpiStmt_execute(stmt_raw, DPI_MODE_EXEC_DEFAULT, &num_query_columns) <
       0) {
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR",
-                              m_impl->describe_error());
+    return make_db_sql_error(status_code, m_impl->describe_error());
   }
   if (num_query_columns == 0) {
-    status_code = 422;
-    return make_db_error_body(status_code, "SQL_ERROR",
-                              "Statement returned no result set");
+    return make_db_sql_error(status_code, "Statement returned no result set");
   }
 
   std::vector<ColumnPlan> columns;
@@ -356,9 +336,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
   for (uint32_t pos = 1; pos <= num_query_columns; ++pos) {
     dpiQueryInfo info{};
     if (dpiStmt_getQueryInfo(stmt_raw, pos, &info) < 0) {
-      status_code = 422;
-      return make_db_error_body(status_code, "SQL_ERROR",
-                                m_impl->describe_error());
+      return make_db_sql_error(status_code, m_impl->describe_error());
     }
     ColumnPlan column;
     column.m_name.assign(info.name, info.nameLength);
@@ -404,35 +382,27 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
       if (column.m_buffer_size == 0) {
         column.m_buffer_size = 1024;
       }
-      column.m_buffer_size = std::min(column.m_buffer_size, g_max_inline_bytes);
+      column.m_buffer_size =
+          std::min(column.m_buffer_size, g_max_inline_bytes);
     }
     if (dpiStmt_defineValue(stmt_raw, pos, column.m_oracle_type,
                             column.m_native_type, column.m_buffer_size, 1,
                             nullptr) < 0) {
-      status_code = 422;
-      return make_db_error_body(status_code, "SQL_ERROR",
-                                std::format("Failed to define column '{}': {}",
-                                            column.m_name,
-                                            m_impl->describe_error()));
+      return make_db_sql_error(
+          status_code, std::format("Failed to define column '{}': {}",
+                                   column.m_name, m_impl->describe_error()));
     }
     columns.push_back(std::move(column));
   }
 
-  json rows = json::array();
+  DbRowCollector rows(static_cast<size_t>(max_rows));
   int found = 0;
   uint32_t buffer_row_index = 0;
-  bool truncated = false;
   while (true) {
     if (dpiStmt_fetch(stmt_raw, &found, &buffer_row_index) < 0) {
-      status_code = 422;
-      return make_db_error_body(status_code, "SQL_ERROR",
-                                m_impl->describe_error());
+      return make_db_sql_error(status_code, m_impl->describe_error());
     }
     if (!found) {
-      break;
-    }
-    if (rows.size() >= static_cast<size_t>(max_rows)) {
-      truncated = true;
       break;
     }
     json row = json::array();
@@ -441,16 +411,15 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
       dpiData *data = nullptr;
       if (dpiStmt_getQueryValue(stmt_raw, pos, &native_type, &data) < 0 ||
           !data) {
-        status_code = 422;
-        return make_db_error_body(status_code, "SQL_ERROR",
-                                  m_impl->describe_error());
+        return make_db_sql_error(status_code, m_impl->describe_error());
       }
       const ColumnPlan &column = columns[pos - 1];
       json value = nullptr;
       if (!data->isNull) {
         switch (column.m_native_type) {
         case DPI_NATIVE_TYPE_BYTES:
-          value = std::string(data->value.asBytes.ptr, data->value.asBytes.length);
+          value = std::string(data->value.asBytes.ptr,
+                              data->value.asBytes.length);
           break;
         case DPI_NATIVE_TYPE_INT64:
           value = data->value.asInt64;
@@ -476,7 +445,8 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
           if (lob) {
             uint64_t lob_size = 0;
             if (dpiLob_getSize(lob, &lob_size) == 0 && lob_size > 0) {
-              const uint64_t amount = std::min<uint64_t>(lob_size, g_max_lob_bytes);
+              const uint64_t amount =
+                  std::min<uint64_t>(lob_size, g_max_lob_bytes);
               buffer.resize(static_cast<size_t>(amount));
               uint64_t read_len = 0;
               if (dpiLob_readBytes(lob, 1, amount, buffer.data(), &read_len) <
@@ -499,19 +469,25 @@ json OracleQueryExecutor::execute_query(const std::string &sql, const json &para
       }
       row.push_back(std::move(value));
     }
-    rows.push_back(std::move(row));
+    if (!rows.try_add(std::move(row))) {
+      break;
+    }
   }
 
-  json columns_json = json::array();
+  std::vector<std::pair<std::string, std::string>> name_type;
+  name_type.reserve(columns.size());
   for (const auto &column : columns) {
-    columns_json.push_back(json{
-        {DbResponseContract::kName, column.m_name},
-        {DbResponseContract::kType, oracle_type_name(column.m_oracle_type)}});
+    name_type.emplace_back(column.m_name,
+                           oracle_type_name(column.m_oracle_type));
   }
+  const json columns_json = make_db_columns_json(name_type);
 
-  const uint64_t end_ms = executor_steady_ms();
-  return make_db_query_response(m_impl->m_db.m_name, columns_json, rows,
-                                rows.size(), truncated, end_ms - start_ms);
+  const size_t row_count = rows.size();
+  const bool truncated = rows.truncated();
+  const uint64_t end_ms = TimeUtils::steady_ms();
+  return make_db_query_response(m_impl->m_db.m_name, columns_json,
+                                rows.take_rows(), row_count, truncated,
+                                end_ms - start_ms);
 }
 
 bool OracleQueryExecutor::ping(int timeout_ms) {
@@ -520,15 +496,6 @@ bool OracleQueryExecutor::ping(int timeout_ms) {
     return false;
   }
   dpiConn *conn = *maybe_conn;
-  struct ConnGuard {
-    OracleQueryExecutor *m_self = nullptr;
-    dpiConn *m_conn = nullptr;
-    ~ConnGuard() {
-      if (m_self && m_conn) {
-        m_self->release_conn(m_conn);
-      }
-    }
-  };
   const ConnGuard conn_guard{this, conn};
   dpiStmt *stmt_raw = nullptr;
   constexpr const char *kProbeSql = "SELECT 1 FROM DUAL";

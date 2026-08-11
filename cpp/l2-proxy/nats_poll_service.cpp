@@ -8,6 +8,7 @@
 #include "tracing_helpers.hpp"
 #include <chrono>
 #include <thread>
+#include <tuple>
 
 NatsPollService::NatsPollService(AppContext &ctx) : m_ctx(ctx) {}
 
@@ -55,6 +56,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
     const auto request_deadline = std::chrono::steady_clock::now() +
                                   std::chrono::milliseconds(timeout_ms);
     NatsReply reply;
+    std::string consume_span_id;
     RetryHandler reconnect_backoff(250, 2000);
     bool reconnect_logged = false;
     bool no_responders_logged = false;
@@ -118,9 +120,10 @@ std::string NatsPollService::poll_response(const std::string &request_id,
       }
       first_attempt = false;
 
-      reply = m_ctx.m_nats_client->request_with_headers(
-          m_ctx.m_config.m_nats_subject, request_json, {},
-          {NatsContract::kConsumeSpanIdHeader}, static_cast<int>(remaining_ms));
+      std::tie(reply, consume_span_id) =
+          m_ctx.m_nats_client->request_with_consume_span_id(
+              m_ctx.m_config.m_nats_subject, request_json,
+              static_cast<int>(remaining_ms));
 
       if (!reply.m_data.empty()) {
         break;
@@ -164,11 +167,10 @@ std::string NatsPollService::poll_response(const std::string &request_id,
     Logger::debug("Received NATS response for request_id: {}, size: {}",
                   request_id, reply.m_data.size());
 
-    // Read nats_consume_span_id from NATS headers (no JSON parse needed)
-    const auto it_header =
-        reply.m_headers.find(NatsContract::kConsumeSpanIdHeader);
-    if (it_header != reply.m_headers.end() && !it_header->second.empty()) {
-      parent_id = it_header->second;
+    // Read nats_consume_span_id from NATS headers (already extracted by
+    // request_with_consume_span_id; no JSON parse needed)
+    if (!consume_span_id.empty()) {
+      parent_id = consume_span_id;
       Logger::debug(
           "poll_response: using nats_consume_span_id from header as parent: {}",
           parent_id);
@@ -176,7 +178,9 @@ std::string NatsPollService::poll_response(const std::string &request_id,
 
     const int64_t duration_us = TimeUtils::epoch_us() - nats_poll_start;
     m_ctx.m_proxy.m_metrics->m_nats_request_duration_seconds.Observe(
-        duration_us / 1000000.0);
+        TimeUtils::duration_seconds(
+            static_cast<uint64_t>(nats_poll_start),
+            static_cast<uint64_t>(TimeUtils::epoch_us())));
 
     JaegerSpanLogger::log_nats_span(
         m_ctx.m_tracer.get(), "NATS_poll", 200, request_id,
