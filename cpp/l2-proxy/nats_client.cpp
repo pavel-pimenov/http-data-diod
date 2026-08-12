@@ -71,11 +71,38 @@ NatsClient::~NatsClient() {
     // Prevent any reconnect attempts from a concurrent thread while the
     // connection resources are being torn down.
     m_shutdown.store(true, std::memory_order_release);
-    std::lock_guard<std::mutex> lock(m_conn_mutex);
-    cleanup();
+    {
+      std::lock_guard<std::mutex> lock(m_conn_mutex);
+      cleanup();
+    }
+    // natsConnection_Destroy() fires the Closed callback asynchronously on the
+    // NATS async-callback thread; block until it has been delivered so it
+    // cannot touch this object after the memory is freed (use-after-free).
+    wait_for_closed_callback();
     Logger::info("Disconnected from NATS server");
     // NOLINTNEXTLINE(bugprone-empty-catch) — destructor must not throw
   } catch (...) {
+  }
+}
+
+void NatsClient::wait_for_closed_callback() {
+  // Wait until the Closed callback has been delivered for every connection
+  // ever created. This handles connections opened by worker threads during
+  // shutdown (each fires its own Closed callback on the async thread).
+  const uint64_t expected =
+      m_connected_instances.load(std::memory_order_acquire);
+  if (m_closed_callbacks_delivered.load(std::memory_order_acquire) >=
+      expected) {
+    return;
+  }
+  // Bounded poll: on a healthy connection the callback is delivered within
+  // milliseconds; the timeout only guards a pathological async-thread stall.
+  constexpr auto kWaitTimeout = std::chrono::milliseconds(3000);
+  const auto deadline = std::chrono::steady_clock::now() + kWaitTimeout;
+  while (m_closed_callbacks_delivered.load(std::memory_order_acquire) <
+             expected &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 }
 
@@ -139,7 +166,11 @@ bool NatsClient::connect() {
                         [](natsConnection *nc, void *closure) {
                           (void)nc;
                           auto *client = static_cast<NatsClient *>(closure);
-                          if (client != nullptr) {
+                          // Skip state updates during teardown: the destructor
+                          // may hold m_conn_mutex, and the object may be freed
+                          // right after the Closed callback is delivered.
+                          if (client != nullptr &&
+                              !client->m_shutdown.load(std::memory_order_acquire)) {
                             client->mark_disconnected(
                                 "lost connection to NATS server");
                           }
@@ -153,7 +184,8 @@ bool NatsClient::connect() {
                         m_opts,
                         [](natsConnection *nc, void *closure) {
                           auto *client = static_cast<NatsClient *>(closure);
-                          if (client != nullptr) {
+                          if (client != nullptr &&
+                              !client->m_shutdown.load(std::memory_order_acquire)) {
                             client->m_connected = true;
 
                             std::string connected_url_suffix;
@@ -185,7 +217,8 @@ bool NatsClient::connect() {
                           (void)sub;
                           auto *client = static_cast<NatsClient *>(closure);
                           const std::string error_text = nats_status_text(err);
-                          if (client != nullptr) {
+                          if (client != nullptr &&
+                              !client->m_shutdown.load(std::memory_order_acquire)) {
                             client->set_error("asynchronous NATS error: " +
                                               error_text);
                           } else {
@@ -216,6 +249,10 @@ bool NatsClient::connect() {
                           auto *client = static_cast<NatsClient *>(closure);
                           if (client != nullptr) {
                             client->m_connected = false;
+                            // This connection's Closed callback has now been
+                            // delivered on the NATS async-callback thread.
+                            client->m_closed_callbacks_delivered.fetch_add(
+                                1, std::memory_order_acq_rel);
                             Logger::error("NATS connection closed permanently");
                           }
                         },
@@ -291,6 +328,9 @@ bool NatsClient::connect() {
 
       const natsStatus s = natsConnection_Connect(&m_conn, m_opts);
       if (s == NATS_OK) {
+        // A new natsConnection will fire its own Closed callback when
+        // destroyed; record it so the destructor can wait for the delivery.
+        m_connected_instances.fetch_add(1, std::memory_order_acq_rel);
         m_connected = true;
         set_last_error("");
         Logger::info("Connected to NATS server: {}", url);

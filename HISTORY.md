@@ -1,3 +1,43 @@
+# fix(l2-worker): shutdown use-after-free в JaegerLogger при включённом tracing
+
+## Date: 2026-08-12
+
+### Проблема
+Нестабильный краш worker'а (SIGSEGV, exit 139) при graceful shutdown под нагрузкой и
+включённом `ENABLE_TRACING=true` (прод-конфиг docker-compose). ASan-прогон давал
+`AddressSanitizer`-отчётов, но стабильный `corrupted double-linked list` / SIGSEGV
+после `Disconnected from NATS server`.
+
+### Корневая причина
+`AppContext` объявляет поля в порядке `m_tracer` → `m_*_registry` → ... Члены
+разрушаются в обратном порядке, поэтому `m_worker_registry` (владелец prometheus-метрик
+`TracingMetrics`) уничтожался **раньше** `m_tracer`. `JaegerLogger::sender_loop` при этом
+ещё жив и вызывает `m_tracing_*_histogram.Observe()` / `.Set()` на уже освобождённых
+метриках → use-after-free, точка падения `trace_logger.cpp:294` (`Observe`).
+Краш детерминированно воспроизводился под tracing: 3/3 прогона под ASan; при тестах без
+tracing (ранние проверки NATS-фикса) — отсутствовал, что маскировало причину.
+
+### Изменения
+- `cpp/l2-proxy/app_context.cpp`: в `~AppContext()` выполняется `m_tracer.reset()` до
+  разрушения членов — `~JaegerLogger` ставит `m_stop_sender` и join'ит sender-поток, пока
+  prometheus-реестры (метрики) ещё живы. Порядок разрушения членов больше не важен.
+- `cpp/l2-proxy/nats_client.hpp` / `nats_client.cpp`: вместо простого флага
+  `m_closed_cb_delivered` — счётчики `m_connected_instances` / `m_closed_callbacks_delivered`.
+  Один флаг не давал корректного ожидания, когда pool-потоки открывают второе соединение
+  во время drain (воспроизводилось в логах: два `NATS connection closed permanently` под
+  teardown): деструктор теперь ждёт доставки Closed callback для **каждого** созданного
+  соединения перед освобождением памяти — нет UAF Closed callback после free.
+
+### Верификация
+- Воспроизведение краха до фикса (ASan + traffic + SIGTERM, tracing on): 3/3 → exit 139,
+  дампы `crash_*_SIGSEGV.txt`.
+- После фикса: 3/3 → exit 0, новых дампов нет; порядок shutdown корректен (`L2Worker
+  shutdown complete` → `Disconnected from NATS server`).
+- Live-прод проверка (`docker stop -t 60 l2-worker` под трафиком): ExitCode=0, чистый
+  orderly shutdown, Jaeger flush после `Disconnected` без ошибок.
+- `./rebuild-and-run.sh`: сборка OK, все health checks зелёные; `message_counter.py
+  --iterations 1 --concurrent 1`: сообщения не теряются.
+
 # chore: расширение юнит-тестов (config.cpp → 98%), фаззинг-стресс под ASan, E2E graceful shutdown
 
 ## Date: 2026-08-11

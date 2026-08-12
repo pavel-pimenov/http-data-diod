@@ -341,4 +341,8 @@ AppContext::AppContext() {
   }
 }
 
-AppContext::~AppContext() {}
+AppContext::~AppContext() {
+  // Stop the JaegerLogger sender thread before the prometheus registries
+  // (which own the traced metrics) are destroyed in reverse member order.
+  m_tracer.reset();
+}

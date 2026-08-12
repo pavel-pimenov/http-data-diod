@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""E2E graceful shutdown test for l2-proxy.
+"""E2E graceful shutdown test for l2 services.
 
-Loads the proxy with a continuous flood of POST requests, issues `docker stop`
-mid-flood, then verifies:
-  * the container exits gracefully (not SIGKILL);
-  * the log shows "Received signal 15, exiting...", the in-flight drain
-    completed ("All in-flight requests completed gracefully") and the server
-    thread joined;
-  * requests in-flight at stop time are drained (completed) rather than lost;
-  * the proxy becomes healthy again after `docker start`.
+Runs `docker stop` on a service and verifies:
+  * the container exits gracefully (ExitCode 0/143, not 137 = SIGKILL);
+  * the service's own log shows its graceful-shutdown markers;
+  * when a flood URL is given, requests in-flight at stop time are drained
+    (completed) rather than lost;
+  * the service becomes healthy again after `docker start`.
 
-Exit code 0 = pass, 1 = fail. Meant to run against the compose stack
-(./rebuild-and-run.sh) with the l2-proxy container up.
+Usage:
+  scripts/e2e-graceful-shutdown-test.py                    # all three services
+  scripts/e2e-graceful-shutdown-test.py --container l2-worker
+  scripts/e2e-graceful-shutdown-test.py --help
+
+Exit code 0 = all tested services passed, 1 = any failed.
 """
 
+import argparse
 import asyncio
 import json
 import random
@@ -23,12 +26,40 @@ import time
 
 import aiohttp
 
-PROXY_URL = "http://localhost:8888"
-CONTAINER = "l2-proxy"
 CONCURRENCY = 64
 STEADY_SECONDS = 5.0
 STOP_TIMEOUT_SECONDS = 60
 HEALTH_POLLS = 30
+
+# Container name -> (health URL, flood URL or None, log markers)
+SERVICES = {
+    "l2-proxy": (
+        "http://localhost:8888/health",
+        "http://localhost:8888",
+        [
+            "Received signal 15",
+            "All in-flight requests completed gracefully",
+            "server thread joined",
+        ],
+    ),
+    "l2-worker": (
+        "http://localhost:19093/health/ready",
+        None,
+        [
+            "Shutting down gracefully",
+            "Waiting for in-flight requests to complete",
+            "Disconnected from NATS server",
+        ],
+    ),
+    "l2-server": (
+        "http://localhost:3333/health",
+        "http://localhost:3333",
+        [
+            "Received signal 15",
+            "server thread joined",
+        ],
+    ),
+}
 
 
 def make_payload(req_id: int) -> str:
@@ -55,8 +86,9 @@ class Stats:
 
 
 class Worker:
-    def __init__(self, stats: Stats, stop_event: asyncio.Event):
+    def __init__(self, stats: Stats, url: str, stop_event: asyncio.Event):
         self.stats = stats
+        self.url = url
         self.stop_event = stop_event
         self.in_flight = {}
         self.next_id = 0
@@ -81,7 +113,7 @@ class Worker:
             self.stats.sent += 1
             try:
                 async with session.post(
-                    PROXY_URL, data=make_payload(req_id), headers=headers,
+                    self.url, data=make_payload(req_id), headers=headers,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     await resp.read()
@@ -94,88 +126,101 @@ class Worker:
                 self._complete(req_id, time.monotonic())
 
 
-async def main() -> int:
+async def test_service(container: str, health_url: str, flood_url: str | None,
+                       markers: list[str]) -> bool:
+    print(f"\n{'=' * 70}\nTesting {container} (flood={flood_url or 'none'})\n"
+          f"{'=' * 70}")
     stats = Stats()
     stop_event = asyncio.Event()
-    workers = [Worker(stats, stop_event) for _ in range(CONCURRENCY)]
 
     async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(limit=200)) as session:
+        workers = [Worker(stats, flood_url, stop_event)
+                   for _ in range(CONCURRENCY)] if flood_url else []
         tasks = [asyncio.create_task(w.run(session)) for w in workers]
-        print(f"[flood] {CONCURRENCY} workers -> {PROXY_URL} "
-              f"for {STEADY_SECONDS}s")
-        await asyncio.sleep(STEADY_SECONDS)
+        if workers:
+            print(f"[flood] {CONCURRENCY} workers -> {flood_url} "
+                  f"for {STEADY_SECONDS}s")
+            await asyncio.sleep(STEADY_SECONDS)
 
         t0 = time.monotonic()
-        print(f"[stop] docker stop -t {STOP_TIMEOUT_SECONDS} {CONTAINER}")
+        print(f"[stop] docker stop -t {STOP_TIMEOUT_SECONDS} {container}")
         proc = subprocess.run(
-            ["docker", "stop", "-t", str(STOP_TIMEOUT_SECONDS), CONTAINER],
+            ["docker", "stop", "-t", str(STOP_TIMEOUT_SECONDS), container],
             capture_output=True, text=True)
         stats.stop_time = time.monotonic()
         stop_duration = stats.stop_time - t0
         stop_event.set()
         print(f"[stop] docker stop rc={proc.returncode} in {stop_duration:.2f}s")
 
-        await asyncio.sleep(0.5)
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        stats.in_flight_at_stop = sum(len(w.in_flight) for w in workers)
+        if workers:
+            await asyncio.sleep(0.5)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            stats.in_flight_at_stop = sum(len(w.in_flight) for w in workers)
 
         insp = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.ExitCode}}", CONTAINER],
+            ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
             capture_output=True, text=True)
         exit_code = insp.stdout.strip()
         logs = subprocess.run(
-            ["docker", "logs", CONTAINER], capture_output=True, text=True).stdout
+            ["docker", "logs", container], capture_output=True, text=True).stdout
 
-        print("\n=== RESULTS ===")
+        print("=== RESULTS ===")
         print(f"docker stop rc: {proc.returncode} "
               f"({'graceful' if proc.returncode == 0 else 'ERROR'})")
         print(f"stop duration: {stop_duration:.2f}s "
               f"(timeout {STOP_TIMEOUT_SECONDS}s)")
         print(f"container ExitCode: {exit_code} "
-              f"(143 = SIGTERM, 137 = SIGKILL)")
-        print(f"sent: {stats.sent}")
-        print(f"completed: {stats.completed}")
-        print(f"conn refused (after stop): {stats.refused}")
-        print(f"timed out: {stats.timed_out}")
-        print(f"in-flight at stop: {stats.in_flight_at_stop}")
-        print(f"of those completed after stop: "
-              f"{stats.completed_in_flight_at_stop}")
+              f"(0/143 = SIGTERM handled, 137 = SIGKILL)")
+        if workers:
+            print(f"sent: {stats.sent}")
+            print(f"completed: {stats.completed}")
+            print(f"conn refused (after stop): {stats.refused}")
+            print(f"timed out: {stats.timed_out}")
+            print(f"in-flight at stop: {stats.in_flight_at_stop}")
 
-        markers = [
-            "Received signal 15",
-            "All in-flight requests completed gracefully",
-            "server thread joined",
-        ]
-        ok = proc.returncode == 0
-        ok = ok and exit_code in ("0", "143")
+        ok = proc.returncode == 0 and exit_code in ("0", "143")
         for m in markers:
             found = m in logs
             print(f"log '{m}': {'FOUND' if found else 'MISSING'}")
             ok = ok and found
-        ok = ok and stats.in_flight_at_stop == 0
-        if stats.in_flight_at_stop != 0:
-            print("FAIL: requests were still in-flight when the process "
-                  "exited (drain incomplete)")
+        if workers:
+            if stats.in_flight_at_stop != 0:
+                print("FAIL: requests still in-flight when process exited "
+                      "(drain incomplete)")
+            ok = ok and stats.in_flight_at_stop == 0
 
-    subprocess.run(["docker", "start", CONTAINER], check=True, capture_output=True)
+    subprocess.run(["docker", "start", container], check=True, capture_output=True)
     healthy = False
     for _ in range(HEALTH_POLLS):
         time.sleep(1)
         r = subprocess.run(
             ["curl", "-s", "-m", "2", "-o", "/dev/null", "-w", "%{http_code}",
-             f"{PROXY_URL}/health"], capture_output=True, text=True)
+             health_url], capture_output=True, text=True)
         if r.stdout.strip() == "200":
             healthy = True
             break
-    print(f"proxy healthy after restart: {'YES' if healthy else 'NO'}")
-    ok = ok and healthy
+    print(f"healthy after restart: {'YES' if healthy else 'NO'}")
+    return ok and healthy
 
-    print("\n" + ("PASS: graceful shutdown verified" if ok else "FAIL"))
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--container", default=None,
+                        help="test a single container instead of all")
+    args = parser.parse_args()
+
+    ok = True
+    for container, (health_url, flood_url, markers) in SERVICES.items():
+        if args.container and container != args.container:
+            continue
+        ok = asyncio.run(
+            test_service(container, health_url, flood_url, markers)) and ok
+    print("\n" + ("PASS: all services shut down gracefully" if ok else "FAIL"))
     return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(main())

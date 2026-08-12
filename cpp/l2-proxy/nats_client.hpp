@@ -151,6 +151,16 @@ private:
 
   std::atomic<bool> m_connected;
   std::atomic<bool> m_shutdown{false};
+  // The NATS async-callback thread delivers the Closed callback
+  // asynchronously after each of our connections is destroyed. Keeping a
+  // simple "closed" flag is not enough: a worker thread may open a new
+  // connection while the pool is being drained, so several Closed callbacks
+  // can be in flight at once (one per created connection). We therefore count
+  // created connections and delivered Closed callbacks; the destructor blocks
+  // until every created connection has delivered its Closed callback, so no
+  // connection-level callback can dereference `this` after the object dies.
+  std::atomic<uint64_t> m_connected_instances{0};
+  std::atomic<uint64_t> m_closed_callbacks_delivered{0};
   std::mutex m_conn_mutex;
   mutable std::mutex m_error_mutex;
   std::string m_last_error;
@@ -162,6 +172,12 @@ private:
   void destroy_connection_locked();
   void disconnect_locked();
   void cleanup();
+  // Blocks until the asynchronously delivered Closed callback has run. The
+  // Closed callback is the last callback a connection fires, so waiting for it
+  // also guarantees the Disconnected/Reconnected/Error callbacks (queued
+  // before it) have been delivered. Bounded to avoid hanging on a connection
+  // that never opened.
+  void wait_for_closed_callback();
   // Copy the live connection pointer under the mutex; marks the client
   // disconnected (with the operation name) when the connection is gone.
   natsConnection *acquire_connection(const std::string &operation);
