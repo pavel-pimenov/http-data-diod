@@ -165,6 +165,7 @@ void ServerHandler::handle_get(const httplib::Request &req,
 
   if (req.path == kHealthReadyPath) {
     set_health_ready(res, "l2-server");
+    m_ctx.m_server.m_metrics->m_health_ready.Set(1.0);
     return;
   }
 

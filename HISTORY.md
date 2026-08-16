@@ -1,3 +1,93 @@
+# fix(docker-compose): Oracle только в продакшене, локальные тесты без него + сеть
+
+## Date: 2026-08-17
+
+### Проблема
+Сборка/поднятие стека для локальных тестов требовала Oracle Instant Client
+(цель сборки `runtime-db` тянет `download.oracle.com`) и поднимала Oracle XE,
+хотя для тестов достаточно PostgreSQL (DB_POSTGRES_ENABLED=true по умолчанию,
+DB_ORACLE_ENABLED=false). Кроме того, подсеть `l2_network` (172.28.0.0/16)
+совпадала с сетью другого проекта на этой машине (`http-redis-proxy_l2_network`),
+из-за чего `docker compose up` падал с "Pool overlaps with other one".
+
+### Что сделано
+- `docker-compose.yml`: цель сборки воркера по умолчанию — `runtime` (без
+  Oracle Instant Client); `runtime-db` оставлена для продакшена (через
+  `L2_WORKER_DOCKER_TARGET=runtime-db` + профиль `oracle` + `DB_ORACLE_ENABLED=true`).
+- `docker-compose.yml`: подсеть `l2_network` 172.28.0.0/16 → 172.20.0.0/16
+  (устранение конфликта с другим проектом на этой машине).
+- `rebuild-and-run.sh`: дефолт `L2_WORKER_DOCKER_TARGET=runtime`
+  (override через env для продакшена).
+- `main.cpp` (`run_l2_server`): `m_health_ready.Set(1.0)` при старте сервера —
+  у L2-server нет блокирующих зависимостей, он готов сразу после запуска; его
+  docker healthcheck бьёт в `/metrics`, а не в `/health/ready`, и иначе gauge
+  `l2_server_health_ready` оставался 0.
+
+### Проверка
+- `docker compose build` (runtime) — успешно, юнит-тесты проходят.
+- `docker compose up -d` — все сервисы healthy (Oracle за профилем, не поднят).
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ успех
+  (POST echo + GET favicon, 0 потерь).
+- Новые метрики (`l2_*_responses_total`, `in_flight`, `queue_size`,
+  `nats_connected`, `health_ready`) экспортируются и наполняются
+  (`*_responses_total{status="200"}` растёт).
+- `scripts/generate-grafana-dashboards.py --correct-dashboards` — 7/7 дашбордов
+  сохранены (exit 0), новые панели приняты Grafana.
+
+---
+
+# feat: обогащение метрик наблюдаемости (per-status, in-flight, queue, NATS/health) + панели Grafana
+
+## Date: 2026-08-17
+
+### Контекст
+Набор `l2_*`-метрик уже покрывал трафик/задержки/пулы, но не хватало:
+разбивки ответов по HTTP-статусу (невозможно построить error-rate/SLO по кодам),
+видимости насыщенности (in-flight / глубина очереди воркера — ранний сигнал
+backpressure до отказов), и явного сигнала доступности/связи с NATS для алертинга
+(ранее только docker healthcheck). Дашборды генерируются скриптом, поэтому
+метрики и панели добавлены согласованно.
+
+### Что сделано (метрики, C++)
+- `app_context.hpp` / `app_context.cpp`: добавлены метрики во все три контекста.
+- **Per-status ответы** (counter family `…_responses_total{status}`):
+  - `l2_proxy_responses_total` — через `set_post_routing_handler` (все HTTP-статусы,
+    кроме `/metrics`,`/health*`,`/debug*`);
+  - `l2_worker_responses_total` — через RAII-гвард в `process_request_from_nats` и
+    `process_db_query_from_nats` (финальный статус NATS-ответа: 200/400/500/реальный);
+  - `l2_server_responses_total` — через `set_post_routing_handler`.
+- **Насыщенность (Б)**:
+  - `l2_proxy_in_flight_requests` (gauge) — increment в лямбде обработчика,
+    decrement в post-routing;
+  - `l2_worker_in_flight_requests` (gauge) — RAII-гвард `WorkerActivityGuard`
+    (инкремент на входе, декремент на любом выходе из обработчика);
+  - `l2_worker_queue_size` (gauge) — глубина `ThreadPool` на момент обработки.
+- **Доступность/NATS (В)**:
+  - `l2_proxy_nats_connected` / `l2_worker_nats_connected` (gauge 0/1) — в
+    `/health/ready` по фактическому `is_connected()`;
+  - `l2_proxy_health_ready` / `l2_worker_health_ready` / `l2_server_health_ready`
+    (gauge 0/1) — в эндпоинтах готовности.
+- `l2_worker_nats.cpp`: `WorkerActivityGuard` (anon namespace) инкапсулирует
+  in-flight + запись per-status, покрывает все пути возврата (parse error → 400,
+  dedup → 200, success → `l2_response.m_status_code`, exception → 500).
+
+### Что сделано (Grafana, `scripts/generate-grafana-dashboards.py`)
+В каждый дашборд (`l2-proxy`, `l2-worker`, `l2-server`) добавлен ряд
+«Статус-коды, насыщенность и доступность» с панелями (id 200+):
+- Ответы по HTTP-статусам (stacked), Доля ошибок 4xx/5xx (percentunit);
+- In-flight запросы, очередь воркера (timeseries);
+- NATS подключение / Готовность (stat 0/1, red/green);
+- **Г (производные, без правок C++)**: RPS «успешные vs ошибки» (2xx/3xx против
+  4xx/5xx) на proxy/server; per-status уже даёт разбивку по БД в DB Gateway.
+
+### Проверка
+- `python3 -m py_compile scripts/generate-grafana-dashboards.py` → OK.
+- Сборка/тесты — через `./rebuild-and-run.sh` (C++-изменения требуют
+  контейнерной сборки); после сборки `python3 message_counter.py
+  --iterations 1 --concurrent 1` и проверка новых панелей в Grafana.
+
+---
+
 # fix(l2-worker): shutdown use-after-free в JaegerLogger при включённом tracing
 
 ## Date: 2026-08-12

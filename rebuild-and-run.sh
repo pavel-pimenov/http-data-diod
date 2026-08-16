@@ -141,8 +141,11 @@ else
     # set to false (not unset): the `set -u` above trips on unbound vars
     export ENABLE_ASAN=false
     export L2_PROXY_DOCKER_TARGET=runtime
-    # The l2-worker image gets the Oracle Instant Client for the DB gateway.
-    export L2_WORKER_DOCKER_TARGET=runtime-db
+    # Default worker build skips the Oracle Instant Client download so local
+    # and test runs work with PostgreSQL only. Production: set
+    # L2_WORKER_DOCKER_TARGET=runtime-db (and the `oracle` profile +
+    # DB_ORACLE_ENABLED=true) to embed the Oracle client for the DB gateway.
+    export L2_WORKER_DOCKER_TARGET="${L2_WORKER_DOCKER_TARGET:-runtime}"
     echo "Building Docker images (RelWithDebInfo, optimized, no sanitizers)..."
 fi
 

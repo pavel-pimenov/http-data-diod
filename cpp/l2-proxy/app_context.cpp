@@ -94,6 +94,9 @@ AppContext::AppContext() {
           "Total number of duplicate POST bodies from clients detected by "
           "the proxy (same body hash seen more than once)"),
       MetricsManager::create_counter_family(
+          m_proxy_registry, "l2_proxy_responses_total",
+          "Total number of proxy HTTP responses by HTTP status code"),
+      MetricsManager::create_counter_family(
           m_proxy_registry, "l2_proxy_db_requests_total",
           "Total number of HTTP DB Gateway requests by database, type and "
           "HTTP status"),
@@ -106,7 +109,17 @@ AppContext::AppContext() {
           m_proxy_registry, "l2_proxy_db_nats_request_duration_seconds",
           "Histogram of HTTP DB Gateway NATS round-trip duration in seconds "
           "by database",
-          histogram_buckets::g_k_latency_ms_to_10s)});
+          histogram_buckets::g_k_latency_ms_to_10s),
+      MetricsManager::create_gauge(
+          m_proxy_registry, "l2_proxy_in_flight_requests",
+          "Current number of in-flight proxy HTTP requests"),
+      MetricsManager::create_gauge(
+          m_proxy_registry, "l2_proxy_nats_connected",
+          "NATS connection state (1 = connected, 0 = disconnected)"),
+      MetricsManager::create_gauge(
+          m_proxy_registry, "l2_proxy_health_ready",
+          "Readiness state (1 = ready, 0 = not ready) mirrored from "
+          "/health/ready")});
 
   // Initialize worker metrics
   m_worker.m_metrics = std::make_unique<WorkerMetrics>(WorkerMetrics{
@@ -149,18 +162,34 @@ AppContext::AppContext() {
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
-      MetricsManager::create_counter_family(
-          m_worker_registry, "l2_worker_db_requests_total",
-          "Total number of HTTP DB Gateway requests executed by the worker "
-          "by database, type and HTTP status"),
-      MetricsManager::create_histogram_family(
-          m_worker_registry, "l2_worker_db_query_duration_seconds",
-          "Histogram of DB query execution duration in seconds by database",
-          histogram_buckets::g_k_latency_ms_to_10s),
-      MetricsManager::create_gauge_family(
-          m_worker_registry, "l2_worker_db_pool_connections",
-          "Current number of DB pool connections by database and state "
-          "(active/idle)")});
+       MetricsManager::create_counter_family(
+           m_worker_registry, "l2_worker_db_requests_total",
+           "Total number of HTTP DB Gateway requests executed by the worker "
+           "by database, type and HTTP status"),
+       MetricsManager::create_histogram_family(
+           m_worker_registry, "l2_worker_db_query_duration_seconds",
+           "Histogram of DB query execution duration in seconds by database",
+           histogram_buckets::g_k_latency_ms_to_10s),
+       MetricsManager::create_gauge_family(
+           m_worker_registry, "l2_worker_db_pool_connections",
+           "Current number of DB pool connections by database and state "
+           "(active/idle)"),
+       MetricsManager::create_counter_family(
+           m_worker_registry, "l2_worker_responses_total",
+           "Total number of worker NATS responses by HTTP status code"),
+       MetricsManager::create_gauge(
+           m_worker_registry, "l2_worker_in_flight_requests",
+           "Current number of in-flight worker requests"),
+       MetricsManager::create_gauge(
+           m_worker_registry, "l2_worker_queue_size",
+           "Current worker thread-pool queue depth"),
+       MetricsManager::create_gauge(
+           m_worker_registry, "l2_worker_nats_connected",
+           "NATS connection state (1 = connected, 0 = disconnected)"),
+       MetricsManager::create_gauge(
+           m_worker_registry, "l2_worker_health_ready",
+           "Readiness state (1 = ready, 0 = not ready) mirrored from "
+           "/health/ready")});
 
   // Initialize server metrics
   m_server.m_metrics = std::make_unique<ServerMetrics>(ServerMetrics{
@@ -179,7 +208,14 @@ AppContext::AppContext() {
       MetricsManager::create_histogram(
           m_server_registry, "l2_server_request_duration_seconds",
           "Histogram of request processing duration in seconds",
-          histogram_buckets::g_k_latency_5ms_to_10s)});
+          histogram_buckets::g_k_latency_5ms_to_10s),
+      MetricsManager::create_counter_family(
+          m_server_registry, "l2_server_responses_total",
+          "Total number of L2 server HTTP responses by HTTP status code"),
+      MetricsManager::create_gauge(
+          m_server_registry, "l2_server_health_ready",
+          "Readiness state (1 = ready, 0 = not ready) mirrored from "
+          "/health/ready")});
 
   // Initialize HTTP pool metrics
   m_proxy.m_http_pool_metrics =

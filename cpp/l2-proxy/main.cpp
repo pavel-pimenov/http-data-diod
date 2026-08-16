@@ -8,6 +8,7 @@
 #include <ctime>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -58,18 +59,35 @@ void configure_httplib_server(httplib::Server &server, const Config &config) {
 template <typename ServerType, typename HandlerType>
 void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
                 int port, const std::string &server_name,
-                bool use_in_flight_tracker = false) {
+                bool use_in_flight_tracker = false,
+                std::function<void()> on_request_start = {},
+                std::function<void(const httplib::Request &,
+                                   const httplib::Response &)>
+                    on_response = {}) {
 
   // Register request handlers
   server.Get(R"(/.*)",
              [&](const httplib::Request &req, httplib::Response &res) {
+               if (on_request_start) {
+                 on_request_start();
+               }
                handler.handle_get(req, res);
              });
 
   server.Post(R"(/.*)",
               [&](const httplib::Request &req, httplib::Response &res) {
+                if (on_request_start) {
+                  on_request_start();
+                }
                 handler.handle_post(req, res);
               });
+
+  if (on_response) {
+    server.set_post_routing_handler(
+        [&](const httplib::Request &req, httplib::Response &res) {
+          on_response(req, res);
+        });
+  }
 
   // Start server in a separate thread to allow signal handling
   std::thread server_thread([&]() {
@@ -174,19 +192,35 @@ void run_proxy(AppContext &app_ctx) {
                app_ctx.m_config.m_proxy_port);
   Logger::info("Prometheus metrics available at http://0.0.0.0:19090/metrics");
 
+  auto on_proxy_request_start = [&app_ctx]() {
+    app_ctx.m_proxy.m_metrics->m_in_flight_requests.Increment();
+  };
+  auto on_proxy_response =
+      [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
+        app_ctx.m_proxy.m_metrics->m_in_flight_requests.Decrement();
+        const std::string &path = req.path;
+        if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
+            path.rfind("/debug", 0) == 0) {
+          return;
+        }
+        app_ctx.m_proxy.m_metrics->m_responses_total
+            .Add({{"status", std::to_string(res.status)}})
+            .Increment();
+      };
+
   if (app_ctx.m_config.m_proxy_protocol == "https") {
     // HTTPS mode
     httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
                               app_ctx.m_config.m_ssl_server_key_file.c_str());
     configure_httplib_server(server, app_ctx.m_config);
     run_server(server, app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
-               "httplib proxy", true);
+               "httplib proxy", true, on_proxy_request_start, on_proxy_response);
   } else {
     // HTTP mode
     httplib::Server server;
     configure_httplib_server(server, app_ctx.m_config);
     run_server(server, app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
-               "httplib", true);
+               "httplib", true, on_proxy_request_start, on_proxy_response);
   }
 }
 
@@ -204,9 +238,11 @@ void run_worker(AppContext &app_ctx) {
                                        httplib::Response &res) {
     set_health_alive(res, "l2-worker");
   });
-  health_server.Get("/health/ready", [&worker](const httplib::Request & /*req*/,
-                                               httplib::Response &res) {
+  health_server.Get("/health/ready", [&worker, &app_ctx](const httplib::Request & /*req*/,
+                                                 httplib::Response &res) {
     const bool ready = worker.is_nats_connected();
+    app_ctx.m_worker.m_metrics->m_nats_connected.Set(ready ? 1.0 : 0.0);
+    app_ctx.m_worker.m_metrics->m_health_ready.Set(ready ? 1.0 : 0.0);
     if (ready) {
       res.status = 200;
       res.set_content(
@@ -253,19 +289,38 @@ void run_l2_server(AppContext &app_ctx) {
 
   Logger::info("Using cpp-httplib for L2 server");
 
+  auto on_server_response =
+      [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
+        const std::string &path = req.path;
+        if (path == "/metrics" || path.rfind("/health", 0) == 0) {
+          return;
+        }
+        app_ctx.m_server.m_metrics->m_responses_total
+            .Add({{"status", std::to_string(res.status)}})
+            .Increment();
+      };
+
+  // The L2 server has no external gating dependency (no NATS), so it is ready
+  // as soon as it starts listening. Mirror that into the gauge so the
+  // availability panel reflects serving state even before a /health/ready
+  // probe runs (the server healthcheck probes /metrics, not /health/ready).
+  app_ctx.m_server.m_metrics->m_health_ready.Set(1.0);
+
   if (app_ctx.m_config.m_l2_server_protocol == "https") {
     // HTTPS mode
     httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
                               app_ctx.m_config.m_ssl_server_key_file.c_str());
     configure_httplib_server(server, app_ctx.m_config);
     run_server(server, app_ctx, server_handler,
-               app_ctx.m_config.m_l2_server_port, "cpp-httplib SSL", false);
+               app_ctx.m_config.m_l2_server_port, "cpp-httplib SSL", false, {},
+               on_server_response);
   } else {
     // HTTP mode
     httplib::Server server;
     configure_httplib_server(server, app_ctx.m_config);
     run_server(server, app_ctx, server_handler,
-               app_ctx.m_config.m_l2_server_port, "cpp-httplib", false);
+               app_ctx.m_config.m_l2_server_port, "cpp-httplib", false, {},
+               on_server_response);
   }
 }
 

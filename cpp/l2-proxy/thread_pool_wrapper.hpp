@@ -47,6 +47,10 @@ public:
     }
   }
 
+  [[nodiscard]] size_t queue_size() const {
+    return m_custom_pool ? m_custom_pool->queue_size() : 0;
+  }
+
 private:
   Type m_type;
   std::unique_ptr<ThreadPool> m_custom_pool;

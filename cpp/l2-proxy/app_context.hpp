@@ -32,12 +32,22 @@ struct ProxyMetrics {
   prometheus::Counter &m_duplicate_requests_total;
   // Duplicate POST requests from clients (proxy-side detection)
   prometheus::Counter &m_duplicate_posts_detected;
+  // HTTP responses by status code (per-HTTP-status breakdown for error-rate /
+  // SLO panels). Labeled family: series created lazily on every response.
+  prometheus::Family<prometheus::Counter> &m_responses_total;
   // HTTP DB Gateway (/v1/sql/*) metrics. Labeled families: series are created
   // lazily by label set (db, type, status), so recording code just calls
   // Add() with the label map on every request.
   prometheus::Family<prometheus::Counter> &m_db_requests_total;
   prometheus::Family<prometheus::Histogram> &m_db_request_duration_seconds;
   prometheus::Family<prometheus::Histogram> &m_db_nats_request_duration_seconds;
+  // In-flight HTTP requests (saturation / backpressure visibility).
+  prometheus::Gauge &m_in_flight_requests;
+  // NATS connection state (1 = connected, 0 = disconnected) for availability
+  // panels and alerting.
+  prometheus::Gauge &m_nats_connected;
+  // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
+  prometheus::Gauge &m_health_ready;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
@@ -74,6 +84,16 @@ struct WorkerMetrics {
   prometheus::Family<prometheus::Counter> &m_db_requests_total;
   prometheus::Family<prometheus::Histogram> &m_db_query_duration_seconds;
   prometheus::Family<prometheus::Gauge> &m_db_pool_connections;
+  // HTTP responses sent back over NATS by status code (per-status breakdown).
+  prometheus::Family<prometheus::Counter> &m_responses_total;
+  // In-flight requests currently processed by the worker (saturation).
+  prometheus::Gauge &m_in_flight_requests;
+  // Worker thread-pool queue depth (backpressure early warning).
+  prometheus::Gauge &m_queue_size;
+  // NATS connection state (1 = connected, 0 = disconnected) for availability.
+  prometheus::Gauge &m_nats_connected;
+  // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
+  prometheus::Gauge &m_health_ready;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
@@ -85,6 +105,10 @@ struct ServerMetrics {
   prometheus::Counter &m_bytes_received;
   prometheus::Counter &m_bytes_sent;
   prometheus::Histogram &m_request_duration_seconds;
+  // HTTP responses by status code (per-HTTP-status breakdown).
+  prometheus::Family<prometheus::Counter> &m_responses_total;
+  // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
+  prometheus::Gauge &m_health_ready;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

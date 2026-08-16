@@ -123,6 +123,9 @@ void RequestHandler::handle_get(const httplib::Request &req,
       nats_healthy = false;
     }
 
+    m_ctx.m_proxy.m_metrics->m_nats_connected.Set(nats_healthy ? 1.0 : 0.0);
+    m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
+
     if (nats_healthy) {
       res.status = 200;
       res.set_content(

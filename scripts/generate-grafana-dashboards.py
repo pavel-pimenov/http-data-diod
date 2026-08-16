@@ -1956,6 +1956,102 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Row 9: Статус-коды, насыщенность и доступность (обогащение метрик)
+    panels.append(create_row_panel("Статус-коды, насыщенность и доступность", 90, y))
+    y += 1
+
+    # Panel 200: Ответы по HTTP-статусам (stacked area)
+    panels.append(create_timeseries_panel(
+        title="Ответы по HTTP-статусам",
+        id=200,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum by (status) (rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 201: Доля ошибочных ответов (4xx+5xx)
+    panels.append(create_timeseries_panel(
+        title="Доля ошибок (4xx/5xx)",
+        id=201,
+        x=12, y=y, w=12, h=8,
+        unit="percentunit",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 0.01},
+                {"color": "red", "value": 0.05}
+            ]
+        },
+        targets=[
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 202: In-flight запросы (насыщенность / backpressure)
+    panels.append(create_timeseries_panel(
+        title="In-flight запросы (насыщенность)",
+        id=202,
+        x=0, y=y, w=8, h=8,
+        unit="short",
+        targets=[
+            {"expr": "l2_proxy_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}
+        ]
+    ))
+
+    # Panel 203: NATS подключение (0/1) — для алертинга/доступности
+    panels.append(create_stat_panel(
+        title="NATS подключение",
+        id=203,
+        x=8, y=y, w=8, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_proxy_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}
+        ]
+    ))
+
+    # Panel 204: Готовность (health/ready) 0/1
+    panels.append(create_stat_panel(
+        title="Готовность (health/ready)",
+        id=204,
+        x=16, y=y, w=8, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_proxy_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 205: RPS успешные vs ошибки (Г: производные панели)
+    panels.append(create_timeseries_panel(
+        title="RPS: успешные vs ошибки",
+        id=205,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 
@@ -2234,6 +2330,101 @@ def create_worker_dashboard() -> Dict:
     ))
     y += 8
 
+    # Row 8: Статус-коды, насыщенность и доступность (обогащение метрик)
+    panels.append(create_row_panel("Статус-коды, насыщенность и доступность", 90, y))
+    y += 1
+
+    # Panel 200: Ответы воркера по HTTP-статусам
+    panels.append(create_timeseries_panel(
+        title="Ответы по HTTP-статусам",
+        id=200,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum by (status) (rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 201: Доля ошибочных ответов воркера (4xx+5xx)
+    panels.append(create_timeseries_panel(
+        title="Доля ошибок (4xx/5xx)",
+        id=201,
+        x=12, y=y, w=12, h=8,
+        unit="percentunit",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 0.01},
+                {"color": "red", "value": 0.05}
+            ]
+        },
+        targets=[
+            {"expr": "sum(rate(l2_worker_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 202: In-flight запросы воркера
+    panels.append(create_timeseries_panel(
+        title="In-flight запросы (насыщенность)",
+        id=202,
+        x=0, y=y, w=8, h=8,
+        unit="short",
+        targets=[
+            {"expr": "l2_worker_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}
+        ]
+    ))
+
+    # Panel 203: Глубина очереди воркера
+    panels.append(create_timeseries_panel(
+        title="Очередь воркера (глубина)",
+        id=203,
+        x=8, y=y, w=8, h=8,
+        unit="short",
+        targets=[
+            {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"}
+        ]
+    ))
+
+    # Panel 204: NATS подключение воркера (0/1)
+    panels.append(create_stat_panel(
+        title="NATS подключение",
+        id=204,
+        x=16, y=y, w=8, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_worker_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 205: Готовность воркера (health/ready) 0/1
+    panels.append(create_stat_panel(
+        title="Готовность (health/ready)",
+        id=205,
+        x=0, y=y, w=8, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 
@@ -2330,7 +2521,73 @@ def create_server_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.99, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
         ]
     ))
-    
+
+    # Row 4: Статус-коды и доступность (обогащение метрикости)
+    panels.append(create_row_panel("Статус-коды и доступность", 90, y))
+    y += 1
+
+    # Panel 200: Ответы сервера по HTTP-статусам
+    panels.append(create_timeseries_panel(
+        title="Ответы по HTTP-статусам",
+        id=200,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum by (status) (rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+        ]
+    ))
+
+    # Panel 201: Доля ошибочных ответов сервера (4xx+5xx)
+    panels.append(create_timeseries_panel(
+        title="Доля ошибок (4xx/5xx)",
+        id=201,
+        x=12, y=y, w=12, h=8,
+        unit="percentunit",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 0.01},
+                {"color": "red", "value": 0.05}
+            ]
+        },
+        targets=[
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 202: RPS успешные vs ошибки (Г)
+    panels.append(create_timeseries_panel(
+        title="RPS: успешные vs ошибки",
+        id=202,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}
+        ]
+    ))
+
+    # Panel 203: Готовность сервера (health/ready) 0/1
+    panels.append(create_stat_panel(
+        title="Готовность (health/ready)",
+        id=203,
+        x=12, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_server_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 

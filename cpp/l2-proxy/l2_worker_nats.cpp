@@ -250,12 +250,43 @@ void L2Worker::run_with_nats() {
   }
 }
 
+namespace {
+// RAII helper that tracks in-flight worker requests (a gauge incremented on
+// entry, decremented on exit — covering every return path) and records the
+// final HTTP status code of the NATS response into the per-status family.
+struct WorkerActivityGuard {
+  prometheus::Gauge &m_in_flight;
+  prometheus::Family<prometheus::Counter> *m_responses;
+  int m_status = 500;
+
+  WorkerActivityGuard(prometheus::Gauge &in_flight,
+                      prometheus::Family<prometheus::Counter> *responses)
+      : m_in_flight(in_flight), m_responses(responses) {
+    m_in_flight.Increment();
+  }
+
+  ~WorkerActivityGuard() {
+    m_in_flight.Decrement();
+    if (m_responses != nullptr) {
+      m_responses->Add({{"status", std::to_string(m_status)}}).Increment();
+    }
+  }
+};
+} // namespace
+
 void L2Worker::process_request_from_nats(const std::string &request_json,
                                          const std::string &reply_to) {
   Logger::debug("Processing NATS request, reply_to: {}", reply_to);
 
   m_ctx.m_worker.m_metrics->m_bytes_received.Increment(
       static_cast<double>(request_json.size()));
+
+  WorkerActivityGuard activity(m_ctx.m_worker.m_metrics->m_in_flight_requests,
+                               &m_ctx.m_worker.m_metrics->m_responses_total);
+  if (m_thread_pool) {
+    m_ctx.m_worker.m_metrics->m_queue_size.Set(
+        static_cast<double>(m_thread_pool->queue_size()));
+  }
 
   const std::string nats_consume_span_id =
       JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
@@ -271,6 +302,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     nlohmann::json request_data;
     if (!parse_request_data(request_json, request_data)) {
       Logger::error("Failed to parse request JSON for NATS request");
+      activity.m_status = 400;
       send_nats_response(reply_to,
                          make_error_json("Invalid request format").dump());
       return;
@@ -305,6 +337,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
             {{"dedup.cached", true}});
       }
 
+      activity.m_status = 200;
       send_nats_response(reply_to, *cached_response);
       m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
           static_cast<double>(cached_response->size()));
@@ -328,6 +361,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
     nlohmann::json response_json;
     response_json[NatsResponseContract::kStatus] = l2_response.m_status_code;
+    activity.m_status = l2_response.m_status_code;
 
     HttpResponse http_response;
     http_response.m_body = l2_response.m_body;
@@ -454,6 +488,13 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   std::string consume_span_id;
   const uint64_t start_us = get_current_timestamp_us();
 
+  WorkerActivityGuard activity(m_ctx.m_worker.m_metrics->m_in_flight_requests,
+                               &m_ctx.m_worker.m_metrics->m_responses_total);
+  if (m_thread_pool) {
+    m_ctx.m_worker.m_metrics->m_queue_size.Set(
+        static_cast<double>(m_thread_pool->queue_size()));
+  }
+
   // Correlate all DB gateway log lines of this NATS task via the thread-local
   // context; the scope restores the previous values on exit so one thread
   // cannot leak context into the next task.
@@ -526,6 +567,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
   }
 
+  activity.m_status = status;
   json envelope{{DbQueryContract::kStatus, status},
                 {DbQueryContract::kBody, body}};
   const std::string db_name =

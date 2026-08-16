@@ -68,7 +68,7 @@ services:
 
   nats-gui:
     container_name: nats-gui
-    image: docker-registry.dp.nlmk.com/sphqxe/nats-webui:latest
+    image: sphqxe/nats-webui:latest
     restart: unless-stopped
     ports:
       - "7779:80"
@@ -246,8 +246,8 @@ services:
       - "1521:1521"
     environment:
       - ORACLE_PASSWORD=${ORACLE_PASSWORD:-oracle_password}
-      - APP_USER=${ORACLE_APP_USER:-app_user}
-      - APP_USER_PASSWORD=${ORACLE_APP_PASSWORD:-app_password}
+      - APP_USER=${DB_ORACLE_USER:-app_user}
+      - APP_USER_PASSWORD=${DB_ORACLE_PASSWORD:-app_password}
       - ORACLE_CHARACTERSET=${ORACLE_CHARACTERSET:-AL32UTF8}
     volumes:
       - oracle-data:/opt/oracle/oradata
@@ -483,7 +483,12 @@ services:
     build:
       context: ./cpp/l2-proxy
       dockerfile: Dockerfile
-      target: ${L2_WORKER_DOCKER_TARGET:-runtime-db}
+      # Default build drops the Oracle Instant Client (no download from
+      # download.oracle.com) so local/test runs work with PostgreSQL only.
+      # Production: set L2_WORKER_DOCKER_TARGET=runtime-db to embed the
+      # Oracle client for the DB gateway (also enable the `oracle` profile
+      # and DB_ORACLE_ENABLED=true).
+      target: ${L2_WORKER_DOCKER_TARGET:-runtime}
       args:
         BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
         APT_MIRROR: "${APT_MIRROR:-}"
@@ -646,7 +651,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.0.0/16
+        - subnet: 172.20.0.0/16
 
 volumes:
   grafana-storage:
