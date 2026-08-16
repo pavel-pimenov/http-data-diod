@@ -426,6 +426,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
   } catch (const std::exception &e) {
     Logger::error("Error processing NATS request: {}", e.what());
+    activity.m_status = 500;
 
     nlohmann::json error_json = make_error_json("Internal server error");
     error_json["message"] = e.what();
@@ -564,6 +565,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     Logger::error("Error processing DB query (reply_to={}): {}", reply_to,
                   e.what());
     status = 500;
+    activity.m_status = 500;
     body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
   }
 

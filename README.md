@@ -149,6 +149,26 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_proxy_per_client_id_rejected_total{client_id="..."}` — отказы по каждому клиенту `X-DataHub-Client-Id` (counter; label `client_id`, кастомный коллектор).
 - `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, кастомный коллектор) — p50/p95/p99 по клиентам в Grafana.
 
+#### Насыщенность и доступность (observability-обогащение)
+
+- `l2_proxy_responses_total{status="..."}` — ответы прокси по HTTP-статусу (counter family). База для панелей error-rate / SLO.
+- `l2_proxy_in_flight_requests` — число одновременно обрабатываемых HTTP-запросов прокси (gauge, насыщенность).
+- `l2_proxy_nats_connected` — состояние связи прокси с NATS (1/0, gauge).
+- `l2_proxy_health_ready` — готовность прокси по `/health/ready` (1/0, gauge).
+- `l2_worker_responses_total{status="..."}` — ответы воркера, отданные по NATS, по HTTP-статусу (counter family).
+- `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
+- `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
+- `l2_worker_nats_connected` — состояние связи воркера с NATS (1/0, gauge).
+- `l2_worker_health_ready` — готовность воркера по `/health/ready` (1/0, gauge).
+- `l2_server_responses_total{status="..."}` — ответы L2-сервера по HTTP-статусу (counter family).
+- `l2_server_health_ready` — готовность L2-сервера (1/0, gauge; выставляется при старте, т.к. у сервера нет блокирующих зависимостей).
+
+В дашбордах `l2-proxy` / `l2-worker` / `l2-server` добавлен ряд «Статус-коды, насыщенность и доступность»: ответы по статусам (stacked), доля ошибок 4xx/5xx, in-flight, очередь воркера, NATS-связь и готовность (stat 0/1), а также производные панели RPS «успешные vs ошибки». Для алертинга (VictoriaMetrics/Prometheus) на базе этих метрик рекомендуется:
+
+- `error_rate = sum(rate(l2_*_responses_total{status=~"4..|5.."}[5m])) / clamp_min(sum(rate(l2_*_responses_total[5m])), 0.0001)` — пороги 5% (warning) / 20% (critical);
+- `nats_connected == 0` и `health_ready == 0` за >1м (недоступность/потеря связи);
+- рост `in_flight_requests` / `queue_size` выше нормы (backpressure до отказов).
+
 Панель «Хот-клиенты» в Grafana (bar gauge) показывает топ client-id с нагрузкой, нормированной к самому горячему клиенту (1.0): горячие клиенты красные, длинный хвост обычных — зелёный. Эмуляцию хот-клиентов в нагрузочном тесте включают `--hot-clients N --hot-share 0.8` (доля запросов от фиксированных id `hot-client-1..N`). Для непрерывной нагрузки заданной длительности (например, чтобы наполнить 5m-окно rate) вместо `--iterations` используют `--duration <секунды>` — тест шлёт запросы без пауз с конвейером «в полёте ≤ `--concurrent`», пока не истечёт время.
 
 ### Трейсинг отказов rate limiter

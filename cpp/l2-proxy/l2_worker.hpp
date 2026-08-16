@@ -11,9 +11,11 @@
 #include "nlohmann/json.hpp"
 #include "thread_pool_wrapper.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using json = nlohmann::json;
@@ -56,6 +58,10 @@ private:
   // HTTP DB Gateway: initialized only in NATS worker mode when
   // DB_QUERY_ENABLED=true.
   std::unique_ptr<DbQueryHandler> m_db_query_handler;
+  // Background ticker samples pool saturation so the queue-depth gauge stays
+  // meaningful between requests (otherwise it only moves on request arrival).
+  std::atomic<bool> m_metrics_ticker_running{false};
+  std::thread m_metrics_ticker;
 
 public:
   explicit L2Worker(AppContext &context);
@@ -101,6 +107,7 @@ private:
       const std::string &traceparent, const httplib::Headers &forwarded_headers,
       const std::string &method, int &final_attempt);
   void record_l2_call_metrics(uint64_t start_us);
+  void metrics_ticker_loop();
 
   struct RequestData {
     std::string m_request_id;

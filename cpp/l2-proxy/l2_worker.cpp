@@ -291,7 +291,17 @@ HttpResponse L2Worker::call_l2_server(
 void L2Worker::run() {
   Logger::info("C++ L2 Worker started. Waiting for requests...");
 
+  // Sample pool saturation in the background so the queue-depth gauge is not
+  // flat between requests.
+  m_metrics_ticker_running = true;
+  m_metrics_ticker = std::thread(&L2Worker::metrics_ticker_loop, this);
+
   run_with_nats();
+
+  m_metrics_ticker_running = false;
+  if (m_metrics_ticker.joinable()) {
+    m_metrics_ticker.join();
+  }
 
   Logger::info("Shutting down gracefully...");
 
@@ -299,6 +309,22 @@ void L2Worker::run() {
   Logger::info("Waiting for in-flight requests to complete...");
   if (m_thread_pool) {
     m_thread_pool.reset();
+  }
+}
+
+void L2Worker::metrics_ticker_loop() {
+  const auto step = std::chrono::milliseconds(100);
+  const int steps_per_sample = 50; // ~5s between samples
+  int step_count = 0;
+  while (m_metrics_ticker_running.load(std::memory_order_acquire)) {
+    if (++step_count >= steps_per_sample) {
+      step_count = 0;
+      if (m_thread_pool) {
+        m_ctx.m_worker.m_metrics->m_queue_size.Set(
+            static_cast<double>(m_thread_pool->queue_size()));
+      }
+    }
+    std::this_thread::sleep_for(step);
   }
 }
 

@@ -1,3 +1,38 @@
+# feat(observability): фоновый опрос насыщенности, явный статус ошибок, документация
+
+## Date: 2026-08-17
+
+### Контекст
+После обогащения метрик (per-status, in-flight, queue, NATS/health) выявились
+три недоработки: (1) gauge глубины очереди воркера обновлялся только внутри
+обработчиков запросов, поэтому между запросами график «плоский»; (2) на пути
+исключений per-status семейство могло зафиксировать неявный статус — добавлена
+явная установка 500; (3) новые метрики не описаны в README, нет рекомендаций
+по алертингу.
+
+### Что сделано
+- `l2_worker.cpp`: фоновый тикер `metrics_ticker_loop()` (std::thread) раз в ~5с
+  опрашивает `ThreadPoolWrapper::queue_size()` и обновляет `l2_worker_queue_size`.
+  Старт/стоп в `run()` (присоединяется перед дренингом пула). В `l2_worker.hpp`
+  добавлены `m_metrics_ticker_running` (atomic<bool>), `m_metrics_ticker`
+  (std::thread) и метод `metrics_ticker_loop()`.
+- `l2_worker_nats.cpp`: явный `activity.m_status = 500` в catch обоих обработчиков
+  NATS (`process_request_from_nats`, `process_db_query_from_nats`) — гарантирует
+  запись `l2_*_responses_total{status="500"}` при внутренней ошибке.
+- `README.md`: раздел «Насыщенность и доступность» — таблица новых метрик
+  (proxy/worker/server) + описание дашбордов и рекомендаций по алертингу
+  (error-rate, `nats_connected`/`health_ready == 0`, рост `in_flight`/`queue_size`).
+
+### Проверка
+- `docker compose build` (runtime) — успешно, юнит-тесты проходят.
+- `docker compose up -d` — сервисы healthy (Oracle за профилем, не поднят).
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅.
+- Резильентность: нагрузка `--concurrent 64` проходит; остановка `nats-server`
+  ведёт к `l2_*_nats_connected=0` и росту доли ошибок, после старта —
+  восстановление (новые метрики ловят деградацию).
+
+---
+
 # fix(docker-compose): Oracle только в продакшене, локальные тесты без него + сеть
 
 ## Date: 2026-08-17
