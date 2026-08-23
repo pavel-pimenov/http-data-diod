@@ -1,3 +1,27 @@
+# feat(stats): плиточная сетка /stats без вертикального скролла
+
+## Date: 2026-08-23
+
+### Контекст
+Страница `/stats` рендерила каждую metric-family полноширинной таблицей —
+получалось много вертикального скролла. Запрошен компактный вид «плитками»,
+влезающий на экран целиком.
+
+### Что сделано
+- `cpp/l2-proxy/stats_page.hpp`: `build_stats_html` теперь верстает CSS-grid
+  (`.grid`) из карточек `.tile` по одной на family; контейнер
+  `body{height:100vh;overflow:hidden}` — вертикальный скроллер отсутствует.
+  Каждая плитка: название family + help + до 6 серий (метки + значение);
+  у плотных family лишние серии скрываются пометкой `+N more`. Баннер
+  состояния + таймстемп вынесены в верхнюю полосу.
+
+### Проверка
+- `docker compose build l2-proxy` — успешно; `curl -s -o /dev/null -w "%{http_code}"
+  localhost:7777/stats` → 200, в DOM 26 `.tile`, `height:100vh;overflow:hidden`.
+- `./health-check.sh all` + `message_counter.py` — ✅.
+
+---
+
 # refactor(prologue): ScopedRequestContext и begin_request_trace
 
 ## Date: 2026-08-23

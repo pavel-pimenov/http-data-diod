@@ -113,55 +113,74 @@ inline std::string build_stats_html(
   html << "<meta http-equiv=\"refresh\" content=\"5\">\n";
   html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   html << "<title>" << escape_html(service_name) << " — status</title>\n";
-  html << "<style>\n";
-  html << "body{font-family:ui-monospace,Menlo,Consolas,monospace;"
-          "margin:0;background:#0d1117;color:#c9d1d9;}\n";
-  html << ".banner{padding:18px 24px;font-size:20px;font-weight:700;"
-          "letter-spacing:1px;color:#fff;background:"
-       << banner_color << ";}\n";
-  html << ".wrap{max-width:1100px;margin:0 auto;padding:20px;}\n";
-  html << "h1{font-size:18px;margin:0 0 4px;}\n";
-  html << ".ts{color:#8b949e;font-size:12px;margin-bottom:18px;}\n";
-  html << ".family{margin:0 0 18px;border:1px solid #21262d;border-radius:8px;"
-          "overflow:hidden;}\n";
-  html << ".fhead{background:#161b22;padding:8px 14px;font-size:14px;"
-          "font-weight:600;}\n";
-  html << ".fhelp{color:#8b949e;font-size:11px;font-weight:400;margin-top:2px;}\n";
-  html << "table{width:100%;border-collapse:collapse;font-size:13px;}\n";
-  html << "td{padding:5px 14px;border-top:1px solid #21262d;}\n";
-  html << ".val{text-align:right;color:#79c0ff;white-space:nowrap;}\n";
-  html << ".labels{color:#d2a8ff;}\n";
-  html << "tr:hover td{background:#1c2128;}\n";
-  html << "</style>\n</head>\n<body>\n";
-  html << "<div class=\"banner\">" << banner_text << " — "
-       << escape_html(service_name) << "</div>\n";
-  html << "<div class=\"wrap\">\n";
-  html << "<h1>" << escape_html(service_name) << " metrics</h1>\n";
-
   const std::time_t now = std::time(nullptr);
   char tsbuf[64];
   std::strftime(tsbuf, sizeof(tsbuf), "%Y-%m-%d %H:%M:%S UTC",
                 std::gmtime(&now));
-  html << "<div class=\"ts\">generated " << tsbuf
-       << " · auto-refresh 5s · source: Prometheus registry</div>\n";
+
+  html << "<style>\n";
+  html << "html,body{height:100%;}\n";
+  html << "body{font-family:ui-monospace,Menlo,Consolas,monospace;margin:0;"
+          "background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;"
+          "height:100vh;overflow:hidden;}\n";
+  html << ".banner{padding:10px 18px;font-size:17px;font-weight:700;"
+          "letter-spacing:1px;color:#fff;background:"
+       << banner_color
+       << ";flex:0 0 auto;display:flex;justify-content:space-between;"
+          "align-items:center;}\n";
+  html << ".banner .ts{font-size:11px;font-weight:400;opacity:.85;}\n";
+  // Tile grid: fills the viewport, no vertical scroll. Each metric family is a
+  // compact card; dense/labeled families are capped so the grid stays bounded.
+  html << ".grid{flex:1 1 auto;overflow:hidden;padding:12px;display:grid;gap:10px;"
+          "grid-template-columns:repeat(auto-fill,minmax(190px,1fr));"
+          "align-content:start;}\n";
+  html << ".tile{border:1px solid #21262d;border-radius:8px;background:#161b22;"
+          "padding:8px 10px;overflow:hidden;max-height:132px;"
+          "display:flex;flex-direction:column;}\n";
+  html << ".tname{font-size:12px;font-weight:600;color:#e6edf3;white-space:nowrap;"
+          "overflow:hidden;text-overflow:ellipsis;}\n";
+  html << ".thelp{font-size:10px;color:#8b949e;white-space:nowrap;overflow:hidden;"
+          "text-overflow:ellipsis;margin-top:1px;}\n";
+  html << ".vals{font-size:11px;margin-top:4px;overflow:hidden;}\n";
+  html << ".vrow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n";
+  html << ".vrow .labels{color:#d2a8ff;}\n";
+  html << ".vrow .val{color:#79c0ff;}\n";
+  html << ".more{color:#8b949e;font-style:italic;}\n";
+  html << "</style>\n</head>\n<body>\n";
+  html << "<div class=\"banner\"><span>" << banner_text << " — "
+       << escape_html(service_name) << "</span><span class=\"ts\">" << tsbuf
+       << " · 5s</span></div>\n";
+  html << "<div class=\"grid\">\n";
+
+  // Cap series per tile so labeled/dense families (per-IP, per-client-id) don't
+  // blow up the card height and break the no-scroll layout.
+  constexpr std::size_t kMaxSeriesPerTile = 6;
 
   for (const auto &family : families) {
     if (family.metric.empty()) {
       continue;
     }
-    html << "<div class=\"family\">\n";
-    html << "<div class=\"fhead\">" << escape_html(family.name);
+    html << "<div class=\"tile\">\n";
+    html << "<div class=\"tname\">" << escape_html(family.name) << "</div>\n";
     if (!family.help.empty()) {
-      html << "<div class=\"fhelp\">" << escape_html(family.help) << "</div>";
+      html << "<div class=\"thelp\">" << escape_html(family.help) << "</div>\n";
     }
-    html << "</div>\n";
-    html << "<table>\n";
-    for (const auto &metric : family.metric) {
+    html << "<div class=\"vals\">\n";
+    const std::size_t shown =
+        std::min<std::size_t>(family.metric.size(), kMaxSeriesPerTile);
+    for (std::size_t i = 0; i < shown; ++i) {
+      const auto &metric = family.metric[i];
       const std::string labels = format_labels(metric.label);
-      html << "<tr><td class=\"labels\">" << escape_html(labels) << "</td><td class=\"val\">"
-           << escape_html(format_metric_value(metric, family.type)) << "</td></tr>\n";
+      html << "<div class=\"vrow\"><span class=\"labels\">" << escape_html(labels)
+           << "</span> <span class=\"val\">"
+           << escape_html(format_metric_value(metric, family.type))
+           << "</span></div>\n";
     }
-    html << "</table>\n</div>\n";
+    if (family.metric.size() > shown) {
+      html << "<div class=\"vrow more\">+"
+           << (family.metric.size() - shown) << " more</div>\n";
+    }
+    html << "</div>\n</div>\n";
   }
 
   html << "</div>\n</body>\n</html>\n";

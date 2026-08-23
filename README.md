@@ -396,8 +396,12 @@ Rate limiter (прокси, режим `MODE=proxy`):
   выводится из gauge `*.health_ready` и `*.nats_connected` (1/0): если любой
   `health_ready != 1` или (при наличии) `nats_connected != 1` — страница
   помечается как DEGRADED.
-- **Таблица метрик** — все family реестра с текущими значениями gauge/counter
-  (для histogram/summary — `count`/`sum`), с метками (`ip`, `db`, `status`, …).
+- **Плиточная сетка (tiles)** — каждая family реестра отображается компактной
+  карточкой (название + help + до 6 серий значений gauge/counter, для
+  histogram/summary — `count`/`sum`, с метками `ip`, `db`, `status`, …).
+  Плитки свёрстаны через CSS-grid с `height:100vh; overflow:hidden`, поэтому
+  вся страница влезает на экран **без вертикального скроллера**; у плотных
+  family (per-IP, per-client-id) лишние серии скрываются пометкой `+N more`.
 - **Автообновление** каждые 5 c (`<meta http-equiv="refresh">`), офлайн-friendly
   (inline CSS, без внешних ресурсов).
 - Источник данных — тот же реестр, что и у `/metrics`, поэтому страница и
@@ -406,7 +410,9 @@ Rate limiter (прокси, режим `MODE=proxy`):
 > Сторонний доступ к `:19093` ограничьте сетью — на порту отдаётся только
 > `/health/*` и `/stats` (без аутентификации).
 
----## Grafana-дашборды (генерация скриптом)
+---
+
+## Grafana-дашборды (генерация скриптом)
 
 Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):
 
