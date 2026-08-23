@@ -1,6 +1,8 @@
 # HTTP DB Gateway — как это работает (пример)
 
-Полный контур: **HTTP → l2-proxy → NATS (`service.db.query`) → l2-worker → Oracle (ODPI-C pool) → обратно**.
+Полный контур: **HTTP → l2-proxy → NATS (`service.db.query`) → l2-worker → СУБД (PostgreSQL libpq / Oracle ODPI-C pool) → обратно**.
+
+По умолчанию подключён **PostgreSQL** (`DB_POSTGRES_ENABLED=true`), Oracle — опционально через profile `oracle` (`DB_ORACLE_ENABLED=true`).
 
 Схема запроса `POST /v1/sql/oracle/query`:
 
@@ -21,9 +23,10 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 
 | Сервис | Роль | Что задействовано |
 |--------|------|-------------------|
+| `postgres` | БД | `postgres:16-alpine`, демо-схема из `sql/init-postgres/`. Включён по умолчанию (`DB_POSTGRES_ENABLED=true`) |
 | `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/init/init.sql`. Запускается только через profile: `docker compose --profile oracle up -d` |
-| `l2-proxy` | HTTP-вход | регистрирует БД из `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
-| `l2-worker` | Исполнитель | образ `runtime-db` (Oracle Instant Client 21.13), держит пул сессий, отвечает на `service.db.query` |
+| `l2-proxy` | HTTP-вход | регистрирует БД из `DB_POSTGRES_*` / `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
+| `l2-worker` | Исполнитель | образ `runtime-db` (Oracle Instant Client 21.13 + libpq), держит пулы сессий, отвечает на `service.db.query` |
 | `nats-server` | Транспорт | subject `service.db.query`, queue group `db_workers` |
 
 ## Переменные окружения (docker-compose.yml)
@@ -42,6 +45,7 @@ DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
 - `DB_QUERY_NATS_TIMEOUT_MS` — таймаут ожидания ответа воркера (default `30000`)
 - `DB_QUERY_DEFAULT_TIMEOUT_MS` / `DB_QUERY_DEFAULT_MAX_ROWS` — дефолты запросов (5000 ms / 1000 строк)
 - `DB_ORACLE_ENABLED`, `DB_ORACLE_HOST`, `DB_ORACLE_PORT`, `DB_ORACLE_SERVICE`, `DB_ORACLE_USER`, `DB_ORACLE_PASSWORD`, `DB_ORACLE_POOL_MIN`, `DB_ORACLE_POOL_MAX`
+- `DB_POSTGRES_ENABLED`, `DB_POSTGRES_HOST`, `DB_POSTGRES_PORT`, `DB_POSTGRES_DB`, `DB_POSTGRES_USER`, `DB_POSTGRES_PASSWORD`, `DB_POSTGRES_POOL_MIN`, `DB_POSTGRES_POOL_MAX`
 
 ## Демо-данные
 
@@ -61,8 +65,10 @@ curl http://localhost:8888/v1/sql
 ```
 
 ```json
-{"databases":[{"driver":"oracle","enabled":true,"name":"oracle"}]}
+{"databases":[{"driver":"postgres","enabled":true,"name":"postgres"}]}
 ```
+> При включённом Oracle (`DB_ORACLE_ENABLED=true`, profile `oracle`) список
+> дополняется `{"driver":"oracle","enabled":true,"name":"oracle"}`.
 
 ### 2. Ping базы
 
@@ -121,6 +127,32 @@ curl -X POST http://localhost:8888/v1/sql/oracle/query \
 }
 ```
 
+### 4b. То же самое для PostgreSQL (включён по умолчанию)
+
+```bash
+curl -X POST http://localhost:8888/v1/sql/postgres/query \
+  -H 'Content-Type: application/json' \
+  -d '{"sql":"SELECT id, message FROM demo_messages ORDER BY id"}'
+```
+
+```json
+{
+  "status": "ok",
+  "db": "postgres",
+  "columns": [
+    {"name": "id", "type": "int4"},
+    {"name": "message", "type": "text"}
+  ],
+  "rows": [
+    [1, "Hello from PostgreSQL DB gateway"],
+    [2, "DB gateway works over NATS"]
+  ],
+  "row_count": 2,
+  "truncated": false,
+  "duration_ms": 12
+}
+```
+
 ### 5. Ошибки
 
 - `404 UNKNOWN_DATABASE` — неизвестная база (`/v1/sql/mssql/query`)
@@ -147,4 +179,4 @@ DB gateway is not ready yet (Oracle unavailable?), will retry
 ## Известные ограничения
 
 - Только read-only: текст запроса должен начинаться с `SELECT`/`WITH` (иначе 422).
-- Драйвер — Oracle (ODPI-C / Instant Client 21.13), другие БД пока не подключены.
+- Поддерживаемые драйверы: PostgreSQL (libpq, включён по умолчанию) и Oracle (ODPI-C / Instant Client 21.13, опционально через profile `oracle`).

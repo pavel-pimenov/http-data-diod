@@ -1,3 +1,42 @@
+# docs(readme): отразить HTTP DB Gateway (PostgreSQL/Oracle) на схемах интеграции
+
+## Date: 2026-08-23
+
+### Контекст
+Проект поддерживает HTTP DB Gateway (read-only SQL через NATS subject
+`service.db.query`, queue group `db_workers`): PostgreSQL включён по умолчанию,
+Oracle — опционально через profile `oracle`. В схемах интеграции в README.md
+и в примере `docs/http-db-gate-example.md` поддержка СУБД не была отражена
+(в примере утверждалось, что «другие БД пока не подключены»).
+
+### Что сделано
+- `README.md`:
+  - Визуальная схема (`flowchart TD`): добавлены узлы `postgres 16` и
+    `oracle-xe 21c`, подграф «HTTP DB Gateway», рёбра воркера к СУБД
+    (libpq 5432 / ODPI-C 1521).
+  - Сетевая схема сегментов (`flowchart LR`): добавлен подграф «Сегмент СУБД»
+    и рёбра воркера к postgres/oracle.
+  - Путь доставки запросов: добавлен маршрут HTTP DB Gateway (через
+    `service.db.query`).
+  - Новый раздел «HTTP DB Gateway (шлюз к базам данных)» — таблица СУБД,
+    статус по умолчанию и способ включения.
+- `docs/http-db-gate-example.md`:
+  - Вводная и топология: PostgreSQL + Oracle, корректные env-префиксы
+    `DB_POSTGRES_*` / `DB_ORACLE_*`, демо-схемы из `sql/init-postgres/` и
+    `sql/init/init.sql`.
+  - Обновлён пример `GET /v1/sql` (список postgres + oracle).
+  - Добавлен пример SELECT для PostgreSQL (`/v1/sql/postgres/query`).
+  - Список env-переменных дополнен `DB_POSTGRES_*`.
+  - Исправлено известное ограничение: поддерживаются PostgreSQL и Oracle
+    (не только Oracle).
+
+### Проверка
+- `docker compose up -d` — сервисы healthy (включая `postgres`).
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь.
+- `./health-check.sh all` — ✅ все проверки прошли.
+
+---
+
 # feat(observability): фоновый опрос насыщенности, явный статус ошибок, документация
 
 ## Date: 2026-08-17

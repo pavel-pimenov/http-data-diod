@@ -26,6 +26,8 @@ flowchart TD
     jaeger[jaeger]
     datahub-gantpool[DataHub-GantPool]
     server[l2-server]
+    postgres[postgres 16]
+    oracle[oracle-xe 21c]
 
     user -- "HTTPS 443" --> nginx
     nginx -- "HTTP" --> proxy
@@ -35,6 +37,11 @@ flowchart TD
 
     proxy -- "NATS TCP 4222" --> nats
     worker -- "NATS TCP 4222" --> nats
+
+    subgraph DBGATE ["HTTP DB Gateway (NATS subject service.db.query, queue group db_workers)"]
+        worker -- "libpq 5432" --> postgres
+        worker -- "ODPI-C 1521 (profile oracle)" --> oracle
+    end
 
     nginxExporter -- "metrics" --> nginx
     natsExporter -- "HTTP 8222 / metrics" --> nats
@@ -78,6 +85,12 @@ flowchart LR
         datahub-gantpool[DataHub-GantPool]
     end
 
+    %% Сегмент баз данных (HTTP DB Gateway)
+    subgraph DB_NET ["Сегмент СУБД (HTTP DB Gateway)"]
+        postgres[postgres 16]
+        oracle[oracle-xe 21c<br/>profile: oracle]
+    end
+
     %% Основной клиентский маршрут
     user -- "HTTPS →443" --> nginx
     nginx -- "HTTP" --> proxy
@@ -86,6 +99,10 @@ flowchart LR
     %% Messaging
     proxy -- "NATS TCP 4222" --> nats
     worker -- "NATS TCP 4222" --> nats
+
+    %% HTTP DB Gateway: воркер держит пулы соединений с СУБД
+    worker -- "libpq 5432" --> postgres
+    worker -- "ODPI-C 1521" --> oracle
 ```
 
 ---
@@ -95,6 +112,10 @@ flowchart LR
 ```text
 client -> nginx -> l2-proxy -> NATS -> l2-worker -> DataHub/GantPool
 client <- nginx <- l2-proxy <- NATS <- l2-worker <- DataHub/GantPool
+
+HTTP DB Gateway (read-only SQL over NATS):
+client -> nginx -> l2-proxy -> NATS (service.db.query) -> l2-worker -> PostgreSQL / Oracle
+client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQL / Oracle
 ```
 
 Особенности:
@@ -110,6 +131,23 @@ client <- nginx <- l2-proxy <- NATS <- l2-worker <- DataHub/GantPool
 
 Текущая реализация и деплой-конфигурация ориентированы на **NATS-only** сценарий.  
 Все упоминания ранее использовавшегося Redis/Valkey пути удалены из актуальной документации и конфигурации.
+
+---
+
+## HTTP DB Gateway (шлюз к базам данных)
+
+`l2-proxy` и `l2-worker` реализуют опциональный **HTTP DB Gateway**: SQL-запросы (read-only) к СУБД проксируются через тот же NATS-транспорт, что и основной трафик, но по отдельному subject `service.db.query` (queue group `db_workers`). Воркер держит пулы соединений с СУБД и исполняет запросы, не затрагивая основной HTTP-маршрут к DataHub/GantPool.
+
+Поддерживаемые СУБД:
+
+| Драйвер | Образ / протокол | Статус по умолчанию | Включение |
+|---|---|---|---|
+| PostgreSQL | `postgres:16-alpine`, libpq, порт 5432 | **включён** (`DB_POSTGRES_ENABLED=true`) | поднят в `docker-compose.yml` |
+| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / Instant Client 21.13, порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `oracle` + `DB_ORACLE_ENABLED=true` |
+
+Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
+
+Ключевые переменные окружения см. в `docker-compose.yml` (`DB_QUERY_*`, `DB_POSTGRES_*`, `DB_ORACLE_*`); метрики воркера по шлюзу эмитируются через `l2_worker_*` (см. дашборд `L2 Воркер`).
 
 ---
 
