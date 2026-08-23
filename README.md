@@ -265,6 +265,120 @@ python3 rate_limit_test.py --expect-zero
 
 ---
 
+## Метрики Prometheus (полный каталог)
+
+Все метрики имеют префикс `l2_`. Ниже — полный перечень эмитируемых метрик
+сгруппированный по сервисам (имена совпадают с теми, что генерирует
+`scripts/generate-grafana-dashboards.py`). Типы: `counter` (нарастающий итог),
+`gauge` (мгновенное значение), `histogram` (с _bucket/_sum/_count).
+
+### Распределённая трассировка (воркер, реестр `l2_worker`)
+
+| Метрика | Тип | Описание |
+|---|---|---|
+| `l2_tracing_spans_sent_total` | counter | Спаны, отправленные в Jaeger |
+| `l2_tracing_spans_failed_total` | counter | Спаны, не отправленные в Jaeger |
+| `l2_tracing_queue_size` | gauge | Текущий размер очереди спанов |
+| `l2_tracing_last_send_duration_seconds` | gauge | Длительность последней отправки партии спанов |
+| `l2_tracing_send_latency_seconds` | histogram | Латентность отправки партии спанов |
+| `l2_tracing_queue_time_seconds` | histogram | Время спана в очереди перед отправкой |
+
+### l2-proxy
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_proxy_client_requests_total` | counter | — | Клиентские запросы, полученные прокси |
+| `l2_proxy_nats_requests_total` | counter | — | NATS-запросы, отправленные прокси |
+| `l2_proxy_client_request_errors_total` | counter | — | Ошибки входных клиентских запросов |
+| `l2_proxy_nats_errors_total` | counter | — | Ошибки операций NATS |
+| `l2_proxy_nats_connection_creates_total` | counter | — | Созданные NATS-соединения |
+| `l2_proxy_nats_connection_errors_total` | counter | — | Ошибки создания NATS-соединений |
+| `l2_proxy_nats_request_duration_seconds` | histogram | — | Длительность NATS request/reply |
+| `l2_proxy_bytes_received_total` | counter | — | Байт, получено от клиентов |
+| `l2_proxy_bytes_sent_total` | counter | — | Байт, отправлено клиентам |
+| `l2_proxy_request_duration_seconds` | histogram | — | Длительность обработки запроса |
+| `l2_proxy_request_size_bytes` | histogram | — | Размер тела запроса |
+| `l2_proxy_response_size_bytes` | histogram | — | Размер тела ответа |
+| `l2_proxy_duplicate_requests_total` | counter | — | Перепосылки NATS-запроса после потери ответа (reconnect) |
+| `l2_proxy_duplicate_posts_detected_total` | counter | — | Дубликаты POST-тел от клиентов (тот же хэш) |
+| `l2_proxy_responses_total` | counter | `status` | HTTP-ответы прокси по статусу |
+| `l2_proxy_db_requests_total` | counter | `db`,`type`,`status` | Запросы HTTP DB Gateway по БД/типу/статусу |
+| `l2_proxy_db_request_duration_seconds` | histogram | `db` | Длительность запроса DB Gateway (прокси) |
+| `l2_proxy_db_nats_request_duration_seconds` | histogram | `db` | NATS round-trip DB Gateway (прокси) |
+| `l2_proxy_in_flight_requests` | gauge | — | Одновременно обрабатываемые HTTP-запросы |
+| `l2_proxy_nats_connected` | gauge | — | Связь с NATS (1/0) |
+| `l2_proxy_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
+
+HTTP-пул клиентов (gauge/counter, реестр прокси):
+
+| Метрика | Тип | Описание |
+|---|---|---|
+| `l2_http_pool_active_clients` | gauge | Активные HTTP/SSL-клиенты в пуле |
+| `l2_http_pool_available_clients` | gauge | Свободные HTTP/SSL-клиенты в пуле |
+| `l2_http_pool_client_acquisitions_total` | counter | Взятий клиента из пула |
+| `l2_http_pool_client_releases_total` | counter | Возвратов клиента в пул |
+| `l2_http_pool_stale_evictions_total` | counter | Вытеснено устаревших соединений |
+
+Rate limiter (прокси, режим `MODE=proxy`):
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_rate_limiter_tokens` | gauge | — | Доступные токены глобального бакета |
+| `l2_rate_limiter_rejected_total` | counter | — | Отказы глобального лимитера |
+| `l2_per_ip_rate_limiter_rejected_total` | counter | — | Отказы per-IP лимитера |
+| `l2_proxy_per_ip_rate_limiter_ips_tracked` | gauge | — | Число отслеживаемых IP |
+| `l2_proxy_per_ip_requests_total` | counter | `ip` | Запросы по IP |
+| `l2_proxy_per_ip_rejected_total` | counter | `ip` | Отказы по IP |
+| `l2_proxy_per_client_id_requests_total` | counter | `client_id` | Запросы по `X-DataHub-Client-Id` |
+| `l2_proxy_per_client_id_rejected_total` | counter | `client_id` | Отказы по `X-DataHub-Client-Id` |
+| `l2_proxy_per_client_id_latency_seconds` | histogram | `client_id` | Латентность по `X-DataHub-Client-Id` |
+| `l2_proxy_per_client_id_duplicate_requests_total` | counter | `client_id` | Дубликаты POST-тел по `X-DataHub-Client-Id` |
+| `l2_proxy_per_client_id_duplicate_rejected_total` | counter | `client_id` | Отказы дублей (зарезервировано) |
+
+### l2-worker
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_worker_requests_processed_total` | counter | — | Обработано запросов воркером |
+| `l2_worker_l2_calls_total` | counter | — | Вызовы L2-сервера |
+| `l2_worker_l2_errors_total` | counter | — | Ошибки вызовов L2-сервера |
+| `l2_worker_bytes_received_total` | counter | — | Байт, получено воркером |
+| `l2_worker_bytes_sent_total` | counter | — | Байт, отправлено воркером |
+| `l2_worker_request_duration_seconds` | histogram | — | Длительность обработки запроса |
+| `l2_worker_l2_call_duration_seconds` | histogram | — | Длительность вызова L2-сервера |
+| `l2_worker_processing_json_errors_total` | counter | — | Ошибки разбора JSON |
+| `l2_worker_processing_validation_errors_total` | counter | — | Ошибки валидации запроса |
+| `l2_worker_l2_response_size_bytes` | histogram | — | Размер ответа L2 |
+| `l2_worker_circuit_breaker_state` | gauge | — | Состояние CB (0=closed,1=open,2=half-open) |
+| `l2_worker_duplicate_requests_total` | counter | — | Ответы из кэша дедупликации |
+| `l2_worker_db_requests_total` | counter | `db`,`type`,`status` | Запросы DB Gateway (воркер) |
+| `l2_worker_db_query_duration_seconds` | histogram | `db` | Длительность SQL-запроса (воркер) |
+| `l2_worker_db_pool_connections` | gauge | `db`,`state` | Соединения пула СУБД (active/idle) |
+| `l2_worker_responses_total` | counter | `status` | Ответы воркера по NATS по статусу |
+| `l2_worker_in_flight_requests` | gauge | — | Обрабатываемые запросы |
+| `l2_worker_queue_size` | gauge | — | Глубина очереди пула потоков |
+| `l2_worker_nats_connected` | gauge | — | Связь с NATS (1/0) |
+| `l2_worker_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
+
+### l2-server
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_server_requests_total` | counter | — | Запросы, полученные сервером |
+| `l2_server_request_errors_total` | counter | — | Ошибки запросов сервера |
+| `l2_server_bytes_received_total` | counter | — | Байт, получено сервером |
+| `l2_server_bytes_sent_total` | counter | — | Байт, отправлено сервером |
+| `l2_server_request_duration_seconds` | histogram | — | Длительность обработки |
+| `l2_server_responses_total` | counter | `status` | Ответы сервера по статусу |
+| `l2_server_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
+
+> Метрики наблюдаемости уровня «насыщенность и доступность» (per-status
+> ответы, in-flight, очередь, NATS-связь, health-готовность) и метрики
+> rate limiter подробно разобраны в разделах выше — они являются базой для
+> алертинга (см. «Насыщенность и доступность» в разделе Rate limiting).
+
+---
+
 ## Grafana-дашборды (генерация скриптом)
 
 Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):

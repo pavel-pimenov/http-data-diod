@@ -1,3 +1,28 @@
+# docs(readme): полный каталог метрик Prometheus
+
+## Date: 2026-08-23
+
+### Контекст
+В `README.md` были документированы только метрики наблюдаемости
+(per-status/in-flight/queue/NATS/health) и rate limiter. Основная масса
+эмитируемых C++ метрик (`l2_proxy_*`, `l2_worker_*`, `l2_server_*`,
+`l2_http_pool_*`, `l2_tracing_*`, DB Gateway, circuit breaker и др.) в README
+отсутствовала, хотя дашборды их генерируют.
+
+### Что сделано
+- `README.md`: добавлен раздел «Метрики Prometheus (полный каталог)» со
+  всеми метриками из `cpp/l2-proxy/app_context.cpp`, сгруппированными по
+  сервисам (tracing / l2-proxy / l2-worker / l2-server) и по подсистемам
+  прокси (HTTP-пул, rate limiter). Для family-метрик указаны метки
+  (`status`, `db`, `type`, `ip`, `client_id`, `state`).
+
+### Проверка
+- Сверено по исходникам (`app_context.cpp`, `request_handler.cpp`,
+  `l2_worker_nats.cpp`): имена, типы и метки совпадают с кодом.
+- Сборка не требуется (только документация).
+
+---
+
 # docs(readme): отразить HTTP DB Gateway (PostgreSQL/Oracle) на схемах интеграции
 
 ## Date: 2026-08-23
