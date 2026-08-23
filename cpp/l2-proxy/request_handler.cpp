@@ -137,7 +137,7 @@ void RequestHandler::handle_get(const httplib::Request &req,
       error_body["status"] = "not_ready";
       error_body["service"] = "l2-proxy";
       error_body["error"] = error_msg;
-      res.set_content(error_body.dump(), "application/json");
+      send_json_response(res, res.status, error_body);
     }
     return;
   }
@@ -518,8 +518,8 @@ void RequestHandler::handle_request(const httplib::Request &req,
               client_id);
         }
         res.status = 409;
-        res.set_content(make_error_json("duplicate request").dump(),
-                        "application/json");
+        send_json_response(res, res.status,
+                          make_error_json("duplicate request"));
         return;
       }
     }
@@ -610,7 +610,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                            {"enabled", true}});
     }
     res.status = 200;
-    res.set_content(json{{"databases", names}}.dump(), "application/json");
+    send_json_response(res, res.status, json{{"databases", names}});
     return;
   }
 
@@ -818,7 +818,7 @@ void RequestHandler::route_db_request(
     response_body = (*envelope)[DbQueryContract::kBody];
   }
   res.status = status;
-  res.set_content(response_body.dump(), "application/json");
+  send_json_response(res, res.status, response_body);
 
   m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
       {{"db", db_name}}, latency_buckets_ms_to_10s())

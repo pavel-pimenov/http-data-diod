@@ -85,14 +85,23 @@ inline std::string shorten_user_agent(const std::string &ua) {
 }
 
 inline void set_json_error_response(httplib::Response &res, int status,
-                                    const std::string &message,
-                                    const std::string &request_id = "") {
+                                     const std::string &message,
+                                     const std::string &request_id = "") {
   res.status = status;
   nlohmann::json body;
   body["error"] = message;
   if (!request_id.empty()) {
     body["request_id"] = request_id;
   }
+  res.set_content(body.dump(), "application/json");
+}
+
+// Serializes a JSON body and sets the application/json content type. Replaces
+// the repeated `res.status = s; res.set_content(body.dump(), "application/json")`
+// idiom so the status+content-type pairing lives in one place.
+inline void send_json_response(httplib::Response &res, int status,
+                              const nlohmann::json &body) {
+  res.status = status;
   res.set_content(body.dump(), "application/json");
 }
 

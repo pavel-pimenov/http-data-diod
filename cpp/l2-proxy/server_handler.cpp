@@ -76,7 +76,7 @@ void ServerHandler::send_response_with_trace(const httplib::Request &req,
   increment_and_log_response_sent(m_ctx.m_server.m_metrics->m_bytes_sent,
                                   "Server", "", 200);
 
-  res.set_content(response_str, "application/json");
+  send_json_response(res, 200, response_json);
   set_traceparent_response_header(res, trace_ctx);
 }
 
