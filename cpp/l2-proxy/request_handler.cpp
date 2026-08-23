@@ -714,15 +714,11 @@ void RequestHandler::route_db_request(
   auto record_db_metrics = [this, &request, &db_name, start_us](int status) {
     const std::string type =
         JsonUtils::safe_get_string(request, DbQueryContract::kType);
-    m_ctx.m_proxy.m_metrics->m_db_requests_total.Add(
-        {{"db", db_name},
-         {"type", type.empty() ? "unknown" : type},
-         {"status", std::to_string(status)}})
-        .Increment();
-    m_ctx.m_proxy.m_metrics->m_db_request_duration_seconds.Add(
-        {{"db", db_name}}, latency_buckets_ms_to_10s())
-        .Observe(
-            TimeUtils::duration_seconds(start_us, get_current_timestamp_us()));
+    record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total,
+                             db_name, type, status);
+    observe_db_request_duration(
+        m_ctx.m_proxy.m_metrics->m_db_request_duration_seconds, db_name,
+        start_us, get_current_timestamp_us());
   };
 
   if (!m_ctx.m_nats_client) {
@@ -779,9 +775,9 @@ void RequestHandler::route_db_request(
                             start_us, trace_ctx, request_id);
       record_db_metrics(504);
     }
-    m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
-        {{"db", db_name}}, latency_buckets_ms_to_10s())
-        .Observe(TimeUtils::duration_seconds(nats_start_us, nats_end_us));
+    observe_db_request_duration(
+        m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
+        nats_start_us, nats_end_us);
     return;
   }
 
@@ -820,9 +816,9 @@ void RequestHandler::route_db_request(
   res.status = status;
   send_json_response(res, res.status, response_body);
 
-  m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds.Add(
-      {{"db", db_name}}, latency_buckets_ms_to_10s())
-      .Observe(TimeUtils::duration_seconds(nats_start_us, nats_end_us));
+  observe_db_request_duration(
+      m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
+      nats_start_us, nats_end_us);
   record_db_metrics(status);
 
   JaegerSpanLogger::log_proxy_response(

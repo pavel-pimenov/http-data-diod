@@ -82,4 +82,26 @@ public:
   }
 };
 
+// Records a DB-gateway request counter labelled by db/type/status. Shared by the
+// proxy (route_db_request) and the worker (process_db_query_from_nats) so the
+// label set stays in one place instead of being hand-written at every exit path.
+inline void record_db_request_metrics(
+    prometheus::Family<prometheus::Counter> &total_family,
+    const std::string &db, const std::string &type, int status) {
+  total_family
+      .Add({{"db", db},
+            {"type", type.empty() ? "unknown" : type},
+            {"status", std::to_string(status)}})
+      .Increment();
+}
+
+// Observes a DB-gateway duration histogram (seconds) for the given db label.
+// The family does not remember bucket bounds, hence latency_buckets_ms_to_10s().
+inline void observe_db_request_duration(
+    prometheus::Family<prometheus::Histogram> &duration_family,
+    const std::string &db, uint64_t start_us, uint64_t end_us) {
+  duration_family.Add({{"db", db}}, latency_buckets_ms_to_10s())
+      .Observe(static_cast<double>(end_us - start_us) / 1'000'000.0);
+}
+
 #endif // METRICS_MANAGER_HPP

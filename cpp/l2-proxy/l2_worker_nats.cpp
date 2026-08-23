@@ -540,10 +540,9 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
         const uint64_t db_end_us = get_current_timestamp_us();
         const std::string db_name = JsonUtils::safe_get_string(
             request_data, DbQueryContract::kDb);
-        m_ctx.m_worker.m_metrics->m_db_query_duration_seconds.Add(
-            {{"db", db_name.empty() ? "unknown" : db_name}},
-            latency_buckets_ms_to_10s())
-            .Observe(TimeUtils::duration_seconds(db_start_us, db_end_us));
+        observe_db_request_duration(
+            m_ctx.m_worker.m_metrics->m_db_query_duration_seconds,
+            db_name.empty() ? "unknown" : db_name, db_start_us, db_end_us);
         if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
           const std::string db_span_id =
               JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
@@ -576,11 +575,10 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kType);
-  m_ctx.m_worker.m_metrics->m_db_requests_total.Add(
-      {{"db", db_name.empty() ? "unknown" : db_name},
-       {"type", type.empty() ? "unknown" : type},
-       {"status", std::to_string(status)}})
-      .Increment();
+  record_db_request_metrics(
+      m_ctx.m_worker.m_metrics->m_db_requests_total,
+      db_name.empty() ? "unknown" : db_name,
+      type.empty() ? "unknown" : type, status);
   const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
   send_nats_response(reply_to, envelope.dump(), response_headers);
   m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
