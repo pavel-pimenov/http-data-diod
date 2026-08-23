@@ -569,8 +569,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   }
 
   activity.m_status = status;
-  json envelope{{DbQueryContract::kStatus, status},
-                {DbQueryContract::kBody, body}};
+  json envelope = make_db_response_envelope(status, body);
   const std::string db_name =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =

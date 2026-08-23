@@ -198,10 +198,43 @@ inline json make_db_query_response(const std::string &db,
 
 // Builds the DbResponseContract success body of a ping.
 inline json make_db_ping_response(const std::string &db,
-                                  uint64_t latency_ms) {
+                                   uint64_t latency_ms) {
   return json{{DbResponseContract::kStatus, DbResponseContract::kStatusOk},
               {DbResponseContract::kDb, db},
               {DbResponseContract::kLatencyMs, latency_ms}};
+}
+
+// Builds a DbQueryContract request JSON sent by the proxy over NATS to the
+// worker. Shared by the `query` and `ping` actions so the key set (type/request_id/
+// db/sql + optional params/timeout_ms/max_rows) is defined in one place. `payload`
+// is the parsed client JSON (for query it carries `sql` and optional fields).
+inline json build_db_query_request(const std::string &type,
+                                  const std::string &request_id,
+                                  const std::string &db,
+                                  const json &payload = json::object()) {
+  json request{{DbQueryContract::kType, type},
+               {DbQueryContract::kRequestId, request_id},
+               {DbQueryContract::kDb, db}};
+  if (type == DbQueryContract::kTypeQuery) {
+    request[DbQueryContract::kSql] =
+        JsonUtils::safe_get_string(payload, DbQueryContract::kSql);
+  }
+  for (const char *key :
+       {DbQueryContract::kParams, DbQueryContract::kTimeoutMs,
+        DbQueryContract::kMaxRows}) {
+    if (payload.contains(key)) {
+      request[key] = payload[key];
+    }
+  }
+  return request;
+}
+
+// Wraps a DB-gateway result into the {status, body} envelope the proxy expects.
+// Mirrors the hand-built `json{{kStatus, status},{kBody, body}}` used by the
+// worker; the proxy extracts `body` on the other side.
+inline json make_db_response_envelope(int status, const json &body) {
+  return json{{DbQueryContract::kStatus, status},
+              {DbQueryContract::kBody, body}};
 }
 
 // Accumulates result rows up to max_rows and remembers whether the limit cut

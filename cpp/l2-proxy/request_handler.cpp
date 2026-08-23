@@ -651,23 +651,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                             method, req.path, start_us, trace_ctx, request_id);
       return;
     }
-    json request{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
-                 {DbQueryContract::kRequestId, request_id},
-                 {DbQueryContract::kDb, db_name},
-                 {DbQueryContract::kSql,
-                  JsonUtils::safe_get_string(*parsed_body,
-                                             DbQueryContract::kSql)}};
-    if (parsed_body->contains(DbQueryContract::kParams)) {
-      request[DbQueryContract::kParams] = (*parsed_body)[DbQueryContract::kParams];
-    }
-    if (parsed_body->contains(DbQueryContract::kTimeoutMs)) {
-      request[DbQueryContract::kTimeoutMs] =
-          (*parsed_body)[DbQueryContract::kTimeoutMs];
-    }
-    if (parsed_body->contains(DbQueryContract::kMaxRows)) {
-      request[DbQueryContract::kMaxRows] =
-          (*parsed_body)[DbQueryContract::kMaxRows];
-    }
+    json request = build_db_query_request(DbQueryContract::kTypeQuery,
+                                          request_id, db_name, *parsed_body);
     add_trace_fields(request);
     const auto validated = parse_db_query_request(request);
     if (!validated) {
@@ -681,9 +666,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   }
 
   if (action == "ping" && method == "GET") {
-    json request{{DbQueryContract::kType, DbQueryContract::kTypePing},
-                 {DbQueryContract::kRequestId, request_id},
-                 {DbQueryContract::kDb, db_name}};
+    json request = build_db_query_request(DbQueryContract::kTypePing,
+                                          request_id, db_name);
     add_trace_fields(request);
     route_db_request(res, request, method, req.path, start_us, trace_ctx,
                      request_id, inlet_span_id);
