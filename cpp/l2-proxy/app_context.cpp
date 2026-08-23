@@ -21,6 +21,15 @@ AppContext::AppContext() {
   m_worker_registry = std::make_shared<prometheus::Registry>();
   m_server_registry = std::make_shared<prometheus::Registry>();
 
+  // Start the ring-buffer samplers that feed /stats sparklines. Cheap: one
+  // background thread per registry, independent of how often /stats is opened.
+  m_proxy_stats_history = std::make_unique<MetricsHistory>(m_proxy_registry);
+  m_worker_stats_history = std::make_unique<MetricsHistory>(m_worker_registry);
+  m_server_stats_history = std::make_unique<MetricsHistory>(m_server_registry);
+  m_proxy_stats_history->start();
+  m_worker_stats_history->start();
+  m_server_stats_history->start();
+
   // Initialize tracing metrics (shared across modes)
   m_tracing_metrics = std::make_unique<TracingMetrics>(TracingMetrics{
       MetricsManager::create_counter(m_worker_registry,
@@ -378,6 +387,17 @@ AppContext::AppContext() {
 }
 
 AppContext::~AppContext() {
+  // Stop the ring-buffer samplers before the prometheus registries (which they
+  // sample) and the JaegerLogger are destroyed in reverse member order.
+  if (m_proxy_stats_history) {
+    m_proxy_stats_history->stop();
+  }
+  if (m_worker_stats_history) {
+    m_worker_stats_history->stop();
+  }
+  if (m_server_stats_history) {
+    m_server_stats_history->stop();
+  }
   // Stop the JaegerLogger sender thread before the prometheus registries
   // (which own the traced metrics) are destroyed in reverse member order.
   m_tracer.reset();

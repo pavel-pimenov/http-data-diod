@@ -20,6 +20,7 @@
 #include "tracing_helpers.hpp"
 #include <algorithm>
 #include <chrono>
+#include <string>
 #include <cstdlib>
 #include <format>
 #include <nlohmann/json.hpp>
@@ -70,9 +71,22 @@ void RequestHandler::handle_get(const httplib::Request &req,
   }
 
   // Lightweight HTML status page (no Grafana needed) sourced from the Prometheus
-  // registry. Lets operators assess service health directly.
+  // registry. Lets operators assess service health directly. Optional ?window=N
+  // (minutes, default 30) controls the sparkline lookback.
   if (req.path == "/stats") {
-    res.set_content(build_stats_html("l2-proxy", m_ctx.m_proxy_registry),
+    int window_min = 30;
+    const auto wit = req.params.find("window");
+    if (wit != req.params.end()) {
+      const std::string raw = wit->second;
+      const std::string digits =
+          raw.substr(0, raw.find_first_not_of("0123456789"));
+      if (!digits.empty()) {
+        window_min = std::clamp(std::stoi(digits), 1, 120);
+      }
+    }
+    res.set_content(build_stats_html("l2-proxy", m_ctx.m_proxy_registry,
+                                     m_ctx.m_proxy_stats_history.get(),
+                                     window_min),
                     "text/html; charset=utf-8");
     return;
   }

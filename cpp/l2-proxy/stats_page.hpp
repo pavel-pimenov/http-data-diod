@@ -12,6 +12,8 @@
 #include <prometheus/metric_family.h>
 #include <prometheus/registry.h>
 
+#include "metrics_history.hpp"
+
 // Builds a self-contained HTML status page from a Prometheus registry so service
 // health can be assessed without Grafana. Pulls current gauge/counter values via
 // Registry::Collect(); histograms/summaries are summarized by count+sum. The page
@@ -75,9 +77,73 @@ inline std::string format_labels(const std::vector<prometheus::ClientMetric::Lab
 
 } // namespace
 
+// Renders a tiny inline-SVG sparkline (Grafana-like "activity") for the last
+// `window_minutes` of samples. For rate metrics the polyline shows the
+// per-second delta between consecutive samples; for gauges the raw value.
+// Returns empty string if there are not enough samples to draw a line.
+inline std::string build_sparkline_svg(
+    const std::vector<std::pair<std::time_t, double>> &raw_pts, bool as_rate,
+    int window_minutes, int width = 188, int height = 26) {
+  const std::time_t cutoff =
+      (raw_pts.empty() ? 0 : raw_pts.back().first) - window_minutes * 60;
+  std::vector<std::pair<std::time_t, double>> pts;
+  for (const auto &p : raw_pts) {
+    if (p.first >= cutoff) {
+      pts.push_back(p);
+    }
+  }
+  if (pts.size() < 2) {
+    return "";
+  }
+  std::vector<double> vals;
+  vals.reserve(pts.size());
+  if (as_rate) {
+    for (size_t i = 1; i < pts.size(); ++i) {
+      const double dt = static_cast<double>(pts[i].first - pts[i - 1].first);
+      double r = (pts[i].second - pts[i - 1].second) / (dt > 0.0 ? dt : 1.0);
+      if (r < 0.0) {
+        r = 0.0; // counter reset between samples
+      }
+      vals.push_back(r);
+    }
+  } else {
+    for (const auto &p : pts) {
+      vals.push_back(p.second);
+    }
+  }
+  double min_v = vals[0];
+  double max_v = vals[0];
+  for (const double v : vals) {
+    if (v < min_v) {
+      min_v = v;
+    }
+    if (v > max_v) {
+      max_v = v;
+    }
+  }
+  const double range = (max_v - min_v) > 1e-12 ? (max_v - min_v) : 1.0;
+  const double w = static_cast<double>(width);
+  const double h = static_cast<double>(height);
+  std::ostringstream pts_attr;
+  for (size_t i = 0; i < vals.size(); ++i) {
+    const double x = vals.size() == 1
+                         ? 0.0
+                         : (static_cast<double>(i) / (vals.size() - 1)) * w;
+    const double y = h - ((vals[i] - min_v) / range) * (h - 2.0) - 1.0;
+    pts_attr << (i ? " " : "") << x << "," << y;
+  }
+  std::ostringstream svg;
+  svg << "<svg class=\"spark\" viewBox=\"0 0 " << width << " " << height
+      << "\" preserveAspectRatio=\"none\" width=\"100%\" height=\"" << height
+      << "\"><polyline fill=\"none\" stroke=\"#79c0ff\" stroke-width=\"1.5\" points=\""
+      << pts_attr.str() << "\"/></svg>";
+  return svg.str();
+}
+
 inline std::string build_stats_html(
     const std::string &service_name,
-    const std::shared_ptr<prometheus::Registry> &registry) {
+    const std::shared_ptr<prometheus::Registry> &registry,
+    const MetricsHistory *history = nullptr, int window_minutes = 30) {
   const auto families = registry->Collect();
 
   // Derive an overall readiness banner from the *_health_ready gauges and the
@@ -134,19 +200,22 @@ inline std::string build_stats_html(
   html << ".grid{flex:1 1 auto;overflow:hidden;padding:12px;display:grid;gap:10px;"
           "grid-template-columns:repeat(auto-fill,minmax(190px,1fr));"
           "align-content:start;}\n";
-  html << ".tile{border:1px solid #21262d;border-radius:8px;background:#161b22;"
-          "padding:8px 10px;overflow:hidden;max-height:132px;"
-          "display:flex;flex-direction:column;}\n";
+   html << ".tile{border:1px solid #21262d;border-radius:8px;background:#161b22;"
+           "padding:8px 10px;overflow:hidden;max-height:192px;"
+           "display:flex;flex-direction:column;}\n";
   html << ".tname{font-size:12px;font-weight:600;color:#e6edf3;white-space:nowrap;"
           "overflow:hidden;text-overflow:ellipsis;}\n";
   html << ".thelp{font-size:10px;color:#8b949e;white-space:nowrap;overflow:hidden;"
           "text-overflow:ellipsis;margin-top:1px;}\n";
   html << ".vals{font-size:11px;margin-top:4px;overflow:hidden;}\n";
   html << ".vrow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n";
-  html << ".vrow .labels{color:#d2a8ff;}\n";
-  html << ".vrow .val{color:#79c0ff;}\n";
-  html << ".more{color:#8b949e;font-style:italic;}\n";
-  html << "</style>\n</head>\n<body>\n";
+   html << ".vrow .labels{color:#d2a8ff;}\n";
+   html << ".vrow .val{color:#79c0ff;}\n";
+   html << ".more{color:#8b949e;font-style:italic;}\n";
+   html << ".sparkwrap{margin-top:5px;border-top:1px solid #21262d;padding-top:4px;}\n";
+   html << ".sparkwrap .cap{font-size:9px;color:#8b949e;}\n";
+   html << ".spark{display:block;width:100%;}\n";
+   html << "</style>\n</head>\n<body>\n";
   html << "<div class=\"banner\"><span>" << banner_text << " — "
        << escape_html(service_name) << "</span><span class=\"ts\">" << tsbuf
        << " · 5s</span></div>\n";
@@ -180,7 +249,40 @@ inline std::string build_stats_html(
       html << "<div class=\"vrow more\">+"
            << (family.metric.size() - shown) << " more</div>\n";
     }
-    html << "</div>\n</div>\n";
+    html << "</div>\n";
+
+    // One compact sparkline per tile: the family's representative series
+    // (unlabeled/total if present, else the most active labeled series).
+    if (history && history->has_family(family.name)) {
+      const bool as_rate =
+          (family.type == prometheus::MetricType::Counter ||
+           family.type == prometheus::MetricType::Histogram ||
+           family.type == prometheus::MetricType::Summary);
+      const auto series = history->get_series(family.name, 16);
+      const MetricsHistory::Series *repr = nullptr;
+      double best = -1.0;
+      for (const auto &s : series) {
+        if (s.labels.empty()) {
+          repr = &s;
+          break;
+        }
+        const double last = s.points.empty() ? 0.0 : s.points.back().second;
+        if (last > best) {
+          best = last;
+          repr = &s;
+        }
+      }
+      if (repr) {
+        const std::string svg =
+            build_sparkline_svg(repr->points, as_rate, window_minutes);
+        if (!svg.empty()) {
+          html << "<div class=\"sparkwrap\"><div class=\"cap\">last "
+               << window_minutes << "m</div>" << svg << "</div>\n";
+        }
+      }
+    }
+
+    html << "</div>\n";
   }
 
   html << "</div>\n</body>\n</html>\n";

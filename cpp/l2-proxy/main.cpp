@@ -1,6 +1,7 @@
 #include "crash_handler.hpp"
 #include "logger.hpp"
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
@@ -259,10 +260,23 @@ void run_worker(AppContext &app_ctx) {
 
   // Lightweight HTML status page (no Grafana needed) sourced from the Prometheus
   // registry, served alongside the health endpoints on the worker's health port.
-  health_server.Get("/stats", [&app_ctx](const httplib::Request & /*req*/,
+  // Optional ?window=N (minutes, default 30) controls the sparkline lookback.
+  health_server.Get("/stats", [&app_ctx](const httplib::Request &req,
                                          httplib::Response &res) {
-    res.set_content(build_stats_html("l2-worker", app_ctx.m_worker_registry),
-                    "text/html; charset=utf-8");
+    int window_min = 30;
+    const auto wit = req.params.find("window");
+    if (wit != req.params.end()) {
+      const std::string raw = wit->second;
+      const std::string digits =
+          raw.substr(0, raw.find_first_not_of("0123456789"));
+      if (!digits.empty()) {
+        window_min = std::clamp(std::stoi(digits), 1, 120);
+      }
+    }
+    res.set_content(
+        build_stats_html("l2-worker", app_ctx.m_worker_registry,
+                         app_ctx.m_worker_stats_history.get(), window_min),
+        "text/html; charset=utf-8");
   });
 
   std::thread health_thread([&health_server]() {

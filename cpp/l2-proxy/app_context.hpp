@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "in_flight_tracker.hpp"
+#include "metrics_history.hpp"
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -204,6 +205,13 @@ public:
   ProxyContext m_proxy;
   WorkerContext m_worker;
   ServerContext m_server;
+
+  // In-process ring buffers feeding the /stats sparklines. One sampler thread
+  // per registry; cheap and independent of /stats request rate. Held by
+  // unique_ptr because MetricsHistory is non-movable (atomic + thread).
+  std::unique_ptr<MetricsHistory> m_proxy_stats_history;
+  std::unique_ptr<MetricsHistory> m_worker_stats_history;
+  std::unique_ptr<MetricsHistory> m_server_stats_history;
 
   AppContext();
   ~AppContext();

@@ -1,3 +1,41 @@
+# feat(stats): спарклайны активности в /stats (внутрипроцессный ring buffer)
+
+## Date: 2026-08-23
+
+### Контекст
+К плиткам `/stats` хотелось добавить «мелкие графики активности по аналогии с
+Grafana» за последние X минут (X — параметр, по умолчанию 30). Чтобы это не
+было дорогой операцией, история хранится **внутри процесса**, а не через
+запросы к VictoriaMetrics на каждое открытие страницы.
+
+### Что сделано
+- `cpp/l2-proxy/metrics_history.hpp` (новый, header-only): класс
+  `MetricsHistory` — фоновый сэмплер (1 поток на registry, интервал 15 с)
+  пишет текущие значения family в `std::deque` (ring buffer, 240 samples ≈ 60
+  мин, до 8 серий на family). Потокобезопасно (mutex); `start()`/`stop()`
+  управляют жизненным циклом.
+- `app_context.hpp`/`.cpp`: `AppContext` держит 3 `unique_ptr<MetricsHistory>`
+  (proxy/worker/server registry) и стартует их в конструкторе, останавливает в
+  деструкторе. Доступно и в прокси-, и в воркер-процессе (общий AppContext).
+- `cpp/l2-proxy/stats_page.hpp`: `build_stats_html` принимает
+  `const MetricsHistory*` и `window_minutes` (default 30); добавлен
+  `build_sparkline_svg` (inline-SVG polyline). Для counter/histogram/summary —
+  скорость (дельта/сек, с защитой от сброса счётчика), для gauge — сырое
+  значение. На плитку — один спарклайн представительной серии (ненаклейменная
+  «total» либо самая активная размеченная).
+- `request_handler.cpp` (proxy `:8888/stats`) и `main.cpp` (worker `:19093/stats`):
+  читают `?window=N` (1..120, default 30) и передают соответствующий
+  `m_*_stats_history`.
+
+### Проверка
+- `docker compose build l2-proxy l2-worker` — успешно.
+- `curl -s "localhost:7777/stats?window=30"` → 200, в DOM ~26 `.sparkwrap` с
+  `<polyline>`; аналогично `localhost:19093/stats` (~23). История копится с
+  момента старта (первые точки через ~15 с).
+- `./health-check.sh all` + `message_counter.py` — ✅.
+
+---
+
 # feat(stats): плиточная сетка /stats без вертикального скролла
 
 ## Date: 2026-08-23
