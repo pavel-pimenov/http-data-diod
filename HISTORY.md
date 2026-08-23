@@ -1,3 +1,36 @@
+# feat(stats): HTML страница /stats для l2-proxy и l2-worker без Grafana
+
+## Date: 2026-08-23
+
+### Контекст
+Наблюдение за сервисами требовало Grafana. Для быстрой оценки состояния
+«на коленке» добавлена лёгкая HTML-страница `/stats`, генерируемая прямо из
+Prometheus-реестра процесса (текущие значения gauge/counter), без внешних
+зависимостей.
+
+### Что сделано
+- `cpp/l2-proxy/stats_page.hpp` (новый, header-only): `build_stats_html(
+  service_name, registry)` — собирает `registry->Collect()`, строит
+  самодостаточную HTML-страницу (inline CSS, auto-refresh 5s, экранирование
+  HTML). Баннер OPERATIONAL/DEGRADED выводится по gauge `*.health_ready` и
+  `*.nats_connected`.
+- `cpp/l2-proxy/request_handler.cpp`: `GET /stats` на порту 8888 прокси
+  отдаёт `build_stats_html("l2-proxy", m_ctx.m_proxy_registry)`.
+- `cpp/l2-proxy/main.cpp`: `GET /stats` на health-порту воркера 19093 отдаёт
+  `build_stats_html("l2-worker", m_ctx.m_worker_registry)`.
+- `README.md`: раздел «Статус-страница сервисов (/stats, без Grafana)» с
+  URL/портами и описанием баннера/таблицы.
+
+### Проверка
+- `docker compose build l2-proxy l2-worker` — успешно (c++23).
+- `curl -s -o /dev/null -w "%{http_code}" localhost:8888/stats` → 200.
+- `curl -s -o /dev/null -w "%{http_code}" localhost:19093/stats` → 200.
+- Контент содержит баннер OPERATIONAL и таблицу метрик с метками
+  (`status=200`, `db=...`).
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь.
+
+---
+
 # docs(readme): полный каталог метрик Prometheus
 
 ## Date: 2026-08-23

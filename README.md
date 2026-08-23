@@ -379,7 +379,34 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 ---
 
-## Grafana-дашборды (генерация скриптом)
+## Статус-страница сервисов (`/stats`, без Grafana)
+
+Для оперативной оценки состояния без Grafana у `l2-proxy` и `l2-worker`
+есть самодостаточная HTML-страница, сгенерированная прямо из Prometheus-
+реестра текущего процесса (`build_stats_html` в `cpp/l2-proxy/stats_page.hpp`):
+
+| Сервис | URL | Порт |
+|---|---|---|
+| `l2-proxy` | `http://localhost:8888/stats` (или через nginx `:7777/stats`) | 8888 |
+| `l2-worker` | `http://localhost:19093/stats` | 19093 |
+
+Особенности:
+
+- **Баннер состояния** — `OPERATIONAL` (зелёный) / `DEGRADED` (красный),
+  выводится из gauge `*.health_ready` и `*.nats_connected` (1/0): если любой
+  `health_ready != 1` или (при наличии) `nats_connected != 1` — страница
+  помечается как DEGRADED.
+- **Таблица метрик** — все family реестра с текущими значениями gauge/counter
+  (для histogram/summary — `count`/`sum`), с метками (`ip`, `db`, `status`, …).
+- **Автообновление** каждые 5 c (`<meta http-equiv="refresh">`), офлайн-friendly
+  (inline CSS, без внешних ресурсов).
+- Источник данных — тот же реестр, что и у `/metrics`, поэтому страница и
+  дашборды Grafana никогда не расходятся.
+
+> Сторонний доступ к `:19093` ограничьте сетью — на порту отдаётся только
+> `/health/*` и `/stats` (без аутентификации).
+
+---## Grafana-дашборды (генерация скриптом)
 
 Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):
 
