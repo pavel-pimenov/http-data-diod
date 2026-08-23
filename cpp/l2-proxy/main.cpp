@@ -23,6 +23,7 @@
 #include <prometheus/exposer.h>
 
 #include "nlohmann/json.hpp"
+#include "stats_page.hpp"
 
 #include "app_context.hpp"
 #include "l2_worker.hpp"
@@ -254,6 +255,14 @@ void run_worker(AppContext &app_ctx) {
           R"({"status": "not_ready", "service": "l2-worker", "error": "NATS not connected"})",
           "application/json");
     }
+  });
+
+  // Lightweight HTML status page (no Grafana needed) sourced from the Prometheus
+  // registry, served alongside the health endpoints on the worker's health port.
+  health_server.Get("/stats", [&app_ctx](const httplib::Request & /*req*/,
+                                         httplib::Response &res) {
+    res.set_content(build_stats_html("l2-worker", app_ctx.m_worker_registry),
+                    "text/html; charset=utf-8");
   });
 
   std::thread health_thread([&health_server]() {

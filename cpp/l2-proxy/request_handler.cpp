@@ -1,6 +1,7 @@
 #include "request_handler.hpp"
 #include "common_utils.hpp"
 #include "db_query_utils.hpp"
+#include "stats_page.hpp"
 #include "duplicate_detector.hpp"
 #include "exceptions.hpp"
 #include "http_client.hpp"
@@ -65,6 +66,14 @@ void RequestHandler::handle_get(const httplib::Request &req,
   if (req.path == kHealthLivePath || req.path == kHealthPath) {
     // Liveness probe - just check if process is running
     set_health_alive(res, "l2-proxy");
+    return;
+  }
+
+  // Lightweight HTML status page (no Grafana needed) sourced from the Prometheus
+  // registry. Lets operators assess service health directly.
+  if (req.path == "/stats") {
+    res.set_content(build_stats_html("l2-proxy", m_ctx.m_proxy_registry),
+                    "text/html; charset=utf-8");
     return;
   }
 
