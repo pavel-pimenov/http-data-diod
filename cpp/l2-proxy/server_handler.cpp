@@ -87,12 +87,8 @@ void ServerHandler::handle_post(const httplib::Request &req,
                 req.params.size());
 
   // Correlate log lines for this request via the thread-local context
-  LogContextScope log_scope;
-  std::string client_ip = extract_client_ip(req);
-  if (client_ip.empty()) {
-    client_ip = "unknown";
-  }
-  Logger::set_client_ip(client_ip);
+  ScopedRequestContext req_ctx(req);
+  const std::string &client_ip = req_ctx.client_ip();
 
   const RequestScopedTiming request_timing(
       m_ctx.m_server.m_metrics->m_request_duration_seconds,
@@ -175,12 +171,8 @@ void ServerHandler::handle_get(const httplib::Request &req,
   }
 
   // Correlate log lines for this request via the thread-local context
-  LogContextScope log_scope;
-  std::string client_ip = extract_client_ip(req);
-  if (client_ip.empty()) {
-    client_ip = "unknown";
-  }
-  Logger::set_client_ip(client_ip);
+  ScopedRequestContext req_ctx(req);
+  const std::string &client_ip = req_ctx.client_ip();
 
   const RequestScopedTiming request_timing(
       m_ctx.m_server.m_metrics->m_request_duration_seconds,

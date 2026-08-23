@@ -485,11 +485,8 @@ void RequestHandler::handle_request(const httplib::Request &req,
                                     const std::string &method,
                                     const std::string &body) {
   // Extract client IP (X-Real-IP/X-Forwarded-For from the trusted nginx).
-  // Used consistently for per-IP rate limiting and the correlation context.
-  std::string client_ip = extract_client_ip(req);
-  if (client_ip.empty()) {
-    client_ip = "unknown";
-  }
+  // Used consistently for per-IP rate limiting and the correlation context; the
+  // value lives in the ScopedRequestContext created below.
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
   // clients that share one IP (e.g. behind NAT) in Grafana.
@@ -543,8 +540,8 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // Correlate every log line of this request via the thread-local context.
   // request_id/trace_id are set later in process_request once they exist;
   // the scope restores the previous values on exit (covers keep-alive reuse).
-  LogContextScope log_scope;
-  Logger::set_client_ip(client_ip);
+  ScopedRequestContext req_ctx(req);
+  const std::string &client_ip = req_ctx.client_ip();
 
   // Phase 1: Rate limiting
   if (!check_rate_limits(client_ip, client_id, req, res)) {
@@ -565,20 +562,14 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   // generate) the trace context, log the INCOMING span and correlate all DB
   // gateway log lines via the thread-local request context.
   const uint64_t start_us = get_current_timestamp_us();
-  const std::string traceparent_raw = get_traceparent_header(req.headers);
-  const TraceContext trace_ctx =
-      handle_trace_context(traceparent_raw, m_ctx.m_tracer.get());
   const std::string request_id = m_id_generator.generate_uuid();
 
-  LogContextScope log_scope;
+  ScopedRequestContext req_ctx(req);
   Logger::set_request_id(request_id);
-  Logger::set_trace_id(trace_ctx.m_trace_id);
-  Logger::set_client_ip(extract_client_ip(req));
-
   std::string inlet_span_id;
-  inlet_span_id =
-      log_incoming_span(m_ctx.m_tracer.get(), req.path, start_us, request_id,
-                        trace_ctx);
+  const TraceContext trace_ctx = begin_request_trace(
+      m_ctx.m_tracer.get(), req.headers, request_id, req.path, start_us,
+      inlet_span_id);
 
   // Attach the proxy's tracing context to the DB request so the worker can
   // extend the same trace (analogous to NatsPushService on the main path).

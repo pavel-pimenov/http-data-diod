@@ -19,6 +19,32 @@ inline std::string get_traceparent_header(const httplib::Headers &headers) {
   return (traceparent_it != headers.end()) ? traceparent_it->second : "";
 }
 
+// Forward declaration: defined further below, but used by begin_request_trace.
+inline std::string log_incoming_span(JaegerLogger *tracer,
+                                    const std::string &path, uint64_t start_us,
+                                    const std::string &request_id,
+                                    const TraceContext &trace_ctx);
+
+// Shared proxy trace-start for an inbound HTTP request: extract the traceparent,
+// build the TraceContext, set the thread-local trace_id and log the INCOMING
+// span. The client IP and request_id are set by the caller (client IP via
+// ScopedRequestContext, request_id already generated). Returns the TraceContext
+// and fills inlet_span_id. Mirrors the prologue duplicated between the main
+// request path and the DB-gateway path.
+inline TraceContext begin_request_trace(JaegerLogger *tracer,
+                                      const httplib::Headers &headers,
+                                      const std::string &request_id,
+                                      const std::string &path,
+                                      uint64_t start_us,
+                                      std::string &inlet_span_id) {
+  const std::string traceparent_raw = get_traceparent_header(headers);
+  const TraceContext trace_ctx = handle_trace_context(traceparent_raw, tracer);
+  Logger::set_trace_id(trace_ctx.m_trace_id);
+  inlet_span_id =
+      log_incoming_span(tracer, path, start_us, request_id, trace_ctx);
+  return trace_ctx;
+}
+
 // Service-name prefix used as the Jaeger operation/service label, e.g.
 // "l2-proxy-proxy" / "l2-proxy-worker". Centralises the "l2-proxy-" prefix so
 // span loggers don't recompose it by hand in each call site.

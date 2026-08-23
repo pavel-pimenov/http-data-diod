@@ -105,6 +105,27 @@ inline void send_json_response(httplib::Response &res, int status,
   res.set_content(body.dump(), "application/json");
 }
 
+// RAII request prologue shared by every HTTP handler: snapshots the thread-local
+// logger context (LogContextScope) and sets the client IP extracted from the
+// trusted proxy headers (defaulting to "unknown"). Replaces the repeated
+// `LogContextScope log_scope; client_ip = extract_client_ip(...); if empty="unknown";
+// Logger::set_client_ip(...)` block at the top of each handler.
+class ScopedRequestContext {
+public:
+  explicit ScopedRequestContext(const httplib::Request &req)
+      : m_scope(), m_client_ip(extract_client_ip(req)) {
+    if (m_client_ip.empty()) {
+      m_client_ip = "unknown";
+    }
+    Logger::set_client_ip(m_client_ip);
+  }
+  const std::string &client_ip() const { return m_client_ip; }
+
+private:
+  LogContextScope m_scope;
+  std::string m_client_ip;
+};
+
 // Logs the error, increments the prometheus counter (if set), writes a JSON
 // error response and returns false — the standard failure-exit idiom for
 // request handlers. log_message defaults to message, allowing a detailed log
