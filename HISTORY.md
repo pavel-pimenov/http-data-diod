@@ -1,3 +1,59 @@
+# refactor(prologue): ScopedRequestContext и begin_request_trace
+
+## Date: 2026-08-23
+
+### Контекст
+Повторяющийся пролог каждого HTTP-обработчика (извлечение client_ip из
+заголовков доверенного nginx + LogContextScope + установка thread-local
+контекста логгера, а также извлечение trace-контекста и лог INCOMING-спана)
+был размножен в `request_handler.cpp` (handle_request, handle_db_gateway),
+`server_handler.cpp` (handle_post, handle_get) и расходился между путями.
+
+### Что сделано
+- `cpp/l2-proxy/common_utils.hpp`: класс `ScopedRequestContext` (RAII) —
+  снимок thread-local контекста (LogContextScope) + установка client_ip
+  (`extract_client_ip`, default `"unknown"`). Заменяет блок
+  `LogContextScope log_scope; client_ip=extract...; if empty="unknown";
+  Logger::set_client_ip(...)` во всех обработчиках.
+- `cpp/l2-proxy/tracing_helpers.hpp`: `begin_request_trace(tracer, headers,
+  request_id, path, start_us, inlet_span_id)` — извлекает traceparent,
+  строит `TraceContext` через `handle_trace_context`, ставит thread-local
+  `trace_id` и логирует INCOMING-спан. Используется в `handle_db_gateway`.
+- Применено в `request_handler.cpp` (handle_request, handle_db_gateway) и
+  `server_handler.cpp` (handle_post, handle_get).
+
+### Проверка
+- `docker compose build l2-proxy` (l2-server переиспользует тот же image) —
+  успешно.
+- `./health-check.sh all` — ✅.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь.
+
+---
+
+# refactor(db): build_db_query_request и make_db_response_envelope
+
+## Date: 2026-08-23
+
+### Контекст
+Построение DbQueryContract-запроса (query/ping) и конверта DB-ответа
+(`{status, body}`) были размножены в прокси и воркере.
+
+### Что сделано
+- `cpp/l2-proxy/db_query_utils.hpp`: `build_db_query_request(type, request_id,
+  db, payload)` — собирает JSON-запрос (type/request_id/db/sql + опционально
+  params/timeout_ms/max_rows); `make_db_response_envelope(status, body)` —
+  оборачивает ответ в `{kStatus, kBody}`.
+- `request_handler.cpp`: query/ping строятся через `build_db_query_request`.
+- `l2_worker_nats.cpp`: конверт ответа собирается через
+  `make_db_response_envelope`.
+
+### Проверка
+- `docker compose build l2-proxy l2-worker` — успешно.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅.
+- `curl -X POST .../v1/sql/postgres/query` — корректный ответ (row_count=2).
+
+---
+
 # feat(stats): HTML страница /stats для l2-proxy и l2-worker без Grafana
 
 ## Date: 2026-08-23
