@@ -7,6 +7,7 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace header_utils {
@@ -59,33 +60,32 @@ public:
     return header_utils::g_sensitive_header_fragments;
   }
 
-  static bool is_sensitive_header(const std::string &header_name) {
-    const std::string lower = to_lower(header_name);
-    if (get_sensitive_headers().find(lower) != get_sensitive_headers().end()) {
+  static bool is_sensitive_header(std::string_view header_name) {
+    const auto lower = to_lower(header_name);
+    if (get_sensitive_headers().contains(lower)) {
       return true;
     }
-    for (const std::string &fragment : get_sensitive_header_fragments()) {
-      if (lower.find(fragment) != std::string::npos) {
-        return true;
-      }
-    }
-    return false;
+    return std::ranges::any_of(get_sensitive_header_fragments(),
+                               [&](const auto &fragment) {
+                                 return lower.contains(fragment);
+                               });
   }
 
   // True for content types carrying opaque binary payloads (images, audio,
   // video, octet-stream). Shared by the worker (which base64-encodes such
   // responses) and the response path that decodes them.
-  static bool is_binary_content_type(const std::string &content_type) {
-    return content_type.find("image/") != std::string::npos ||
-           content_type.find("application/octet-stream") != std::string::npos ||
-           content_type.find("audio/") != std::string::npos ||
-           content_type.find("video/") != std::string::npos;
+  static bool is_binary_content_type(std::string_view content_type) {
+    return content_type.contains("image/") ||
+           content_type.contains("application/octet-stream") ||
+           content_type.contains("audio/") ||
+           content_type.contains("video/");
   }
 
   // Replace the value of sensitive headers in log lines with "***"
-  static std::string redact_header_value(const std::string &header_name,
-                                         const std::string &value) {
-    return is_sensitive_header(header_name) ? "***" : value;
+  static std::string redact_header_value(std::string_view header_name,
+                                         std::string_view value) {
+    return is_sensitive_header(header_name) ? "***"
+                                            : std::string(value);
   }
 
   // Shared core of the filter_headers family: visits every (name, value) pair
@@ -97,7 +97,7 @@ public:
                                   const std::string &log_context,
                                   VisitFn &&visit, EmitFn &&emit) {
     visit([&](const std::string &name, const std::string &value) {
-      const std::string lower_key = to_lower(name);
+      const auto lower_key = to_lower(name);
       if (skip_headers.find(lower_key) != skip_headers.end()) {
         Logger::debug("{} - Skipping header: {}", log_context, name);
       } else {
@@ -175,12 +175,12 @@ public:
   }
 
   static bool should_skip_header(
-      const std::string &header_name,
+      std::string_view header_name,
       const std::set<std::string> &skip_headers = get_default_skip_headers()) {
     return skip_headers.find(to_lower(header_name)) != skip_headers.end();
   }
 
-  static std::string to_lower(const std::string &header_name) {
+  static std::string to_lower(std::string_view header_name) {
     return header_name | std::views::transform([](unsigned char c) {
              return static_cast<char>(std::tolower(c));
            }) |

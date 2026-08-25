@@ -1,5 +1,10 @@
 #include "request_handler.hpp"
 #include "common_utils.hpp"
+#include "crash_handler.hpp"
+#include <execinfo.h>
+#if __has_include(<stacktrace>)
+#include <stacktrace>
+#endif
 #include "db_query_utils.hpp"
 #include "stats_page.hpp"
 #include "duplicate_detector.hpp"
@@ -75,10 +80,9 @@ void RequestHandler::handle_get(const httplib::Request &req,
   // (minutes, default 30) controls the sparkline lookback.
   if (req.path == "/stats") {
     int window_min = 30;
-    const auto wit = req.params.find("window");
-    if (wit != req.params.end()) {
-      const std::string raw = wit->second;
-      const std::string digits =
+    if (const auto wit = req.params.find("window"); wit != req.params.end()) {
+      const auto raw = wit->second;
+      const auto digits =
           raw.substr(0, raw.find_first_not_of("0123456789"));
       if (!digits.empty()) {
         window_min = std::clamp(std::stoi(digits), 1, 120);
@@ -108,6 +112,34 @@ void RequestHandler::handle_get(const httplib::Request &req,
     *bad_ptr = 42; // NOLINT //-V522 triggers SIGSEGV for crash handler test
     // unreachable
     res.status = 200;
+    return;
+  }
+
+  if (req.path == "/debug/stacktrace") {
+#if __has_include(<stacktrace>)
+    auto trace = std::stacktrace::current();
+    nlohmann::json j = nlohmann::json::array();
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+      const auto &e = trace[i];
+      j.push_back({{"index", i},
+                   {"description", e.description()},
+                   {"source_file", e.source_file()},
+                   {"source_line", e.source_line()}});
+    }
+    CrashHandler::log_current_stacktrace();
+    send_json_response(res, 200, {{"stacktrace", j}, {"frames", trace.size()}});
+#else
+    void *callstack[32];
+    int frames = backtrace(callstack, 32);
+    nlohmann::json j = nlohmann::json::array();
+    for (int i = 0; i < frames; ++i) {
+      char buf[32];
+      snprintf(buf, sizeof(buf), "%p", callstack[i]);
+      j.push_back({{"index", i}, {"address", buf}});
+    }
+    CrashHandler::log_current_stacktrace();
+    send_json_response(res, 200, {{"stacktrace", j}, {"frames", frames}});
+#endif
     return;
   }
 
@@ -225,7 +257,7 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
                                        httplib::Response &res) {
   // Trace context is extracted here (before setup_tracing) so that 429
   // rejections get their own span in Jaeger.
-  const std::string traceparent_raw = get_traceparent_header(req.headers);
+  const auto traceparent_raw = get_traceparent_header(req.headers);
 
   // Check global rate limiter first
   if (m_ctx.m_proxy.m_rate_limiter &&
@@ -333,7 +365,7 @@ std::string RequestHandler::push_to_backend(
   Logger::debug("Proxy queueing request via NATS: request_id={} size={}",
                 request_id, request_data.size());
 
-  std::string request_json = m_push_service.push_request(
+  auto request_json = m_push_service.push_request(
       std::move(request_data), trace_id, backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
     Logger::error("Failed to push request to backend: request_id={}",
@@ -410,12 +442,12 @@ bool RequestHandler::process_request(const std::string &method,
   Logger::debug("Proxy received request body ({} bytes): {}", req.body.size(),
                 log_body_preview(req.body));
 
-  const std::string request_id = m_id_generator.generate_uuid();
+  const auto request_id = m_id_generator.generate_uuid();
   Logger::set_request_id(request_id);
 
   // Extract IPs for logging
-  std::string effective_client_ip = extract_client_ip(req);
-  const std::string proxy_ip = extract_proxy_ip(req);
+  auto effective_client_ip = extract_client_ip(req);
+  const auto proxy_ip = extract_proxy_ip(req);
 
   Logger::info("Proxy received {} request client_ip={} proxy_ip={} path={} "
                "request_id={}",
@@ -428,7 +460,7 @@ bool RequestHandler::process_request(const std::string &method,
       setup_tracing(req, request_id, request_timing.start_us(), inlet_span_id,
                     backend_push_span_id, traceparent_for_backend);
   Logger::set_trace_id(trace_ctx.m_trace_id);
-  const std::string trace_id =
+  const auto trace_id =
       resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
 
   // Prepare request data for backend
@@ -437,13 +469,13 @@ bool RequestHandler::process_request(const std::string &method,
 
   // Add proxy span info for tracing chain
   if (m_ctx.m_tracer) {
-    const std::string nats_push_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_push_span_id = m_ctx.m_tracer->generate_span_id();
     add_proxy_trace_fields(request_data, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_push_span_id);
   }
 
   // Push to backend
-  std::string request_json =
+  auto request_json =
       push_to_backend(std::move(request_data), request_id, trace_id,
                       backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
@@ -504,7 +536,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
   // clients that share one IP (e.g. behind NAT) in Grafana.
-  const std::string client_id =
+  const auto client_id =
       get_header_value(req.headers, "X-DataHub-Client-Id", "unknown");
   if (m_ctx.m_proxy.m_per_client_id_metrics_collector) {
     m_ctx.m_proxy.m_per_client_id_metrics_collector->record_request(client_id);
@@ -516,7 +548,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
   if (method == "POST" && !body.empty() &&
       m_ctx.m_config.m_duplicate_detection_enabled &&
       m_ctx.m_proxy.m_duplicate_detector) {
-    const std::string body_hash = compute_sha256_hex(body);
+    const auto body_hash = compute_sha256_hex(body);
     if (m_ctx.m_proxy.m_duplicate_detector->record(client_id, body_hash,
                                                    body)) {
       m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
@@ -576,7 +608,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   // generate) the trace context, log the INCOMING span and correlate all DB
   // gateway log lines via the thread-local request context.
   const uint64_t start_us = get_current_timestamp_us();
-  const std::string request_id = m_id_generator.generate_uuid();
+  const auto request_id = m_id_generator.generate_uuid();
 
   ScopedRequestContext req_ctx(req);
   Logger::set_request_id(request_id);
@@ -591,7 +623,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!m_ctx.m_tracer) {
       return;
     }
-    const std::string nats_db_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_db_span_id = m_ctx.m_tracer->generate_span_id();
     add_proxy_trace_fields(request_json, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_db_span_id,
                            trace_ctx.m_sampled);
@@ -603,7 +635,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     return;
   }
 
-  std::string path_rest = req.path.substr(std::string(kDbGatewayPath).size());
+  auto path_rest = req.path.substr(std::string(kDbGatewayPath).size());
   while (!path_rest.empty() && path_rest.front() == '/') {
     path_rest.erase(0, 1);
   }
@@ -629,8 +661,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   }
 
   const size_t slash = path_rest.find('/');
-  const std::string db_name = path_rest.substr(0, slash);
-  const std::string action =
+  const auto db_name = path_rest.substr(0, slash);
+  const auto action =
       slash == std::string::npos ? "" : path_rest.substr(slash + 1);
   if (db_name.empty() || action.empty() ||
       action.find('/') != std::string::npos) {
@@ -703,14 +735,14 @@ void RequestHandler::route_db_request(
     httplib::Response &res, const json &request, const std::string &method,
     const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
     const std::string &request_id, const std::string &inlet_span_id) {
-  const std::string db_name =
+  const auto db_name =
       JsonUtils::safe_get_string(request, DbQueryContract::kDb);
 
   // Records the gateway counters/histograms on every exit path (success and
   // each failure branch) so a stuck/erroring DB gateway is visible in
   // Prometheus, not just in traces.
   auto record_db_metrics = [this, &request, &db_name, start_us](int status) {
-    const std::string type =
+    const auto type =
         JsonUtils::safe_get_string(request, DbQueryContract::kType);
     record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total,
                              db_name, type, status);
@@ -727,12 +759,12 @@ void RequestHandler::route_db_request(
     return;
   }
 
-  const std::string request_json = request.dump();
+  const auto request_json = request.dump();
   const int64_t nats_start_us = TimeUtils::epoch_us();
-  const std::string trace_id = resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
-  std::string nats_db_span_id =
+  const auto trace_id = resolve_trace_id(m_ctx.m_tracer.get(), trace_ctx);
+  auto nats_db_span_id =
       JsonUtils::safe_get_string(request, NatsContract::kProxySpanId);
-  std::string nats_parent_id =
+  auto nats_parent_id =
       resolve_parent_id(inlet_span_id, trace_ctx.m_parent_id);
 
   // request_with_consume_span_id also returns the worker's consume span id
@@ -745,7 +777,7 @@ void RequestHandler::route_db_request(
   const int64_t nats_end_us = TimeUtils::epoch_us();
 
   if (reply.m_data.empty()) {
-    const std::string last_error =
+    const auto last_error =
         m_ctx.m_nats_client->get_last_error().value_or("");
     if (m_ctx.m_tracer && !trace_id.empty()) {
       nlohmann::json attrs = {

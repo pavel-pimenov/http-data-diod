@@ -49,14 +49,14 @@ std::string JaegerLogger::generate_trace_id() { return random_hex_fast(32); }
 std::string JaegerLogger::generate_span_id() { return random_hex_fast(16); }
 
 // W3C Trace Context helpers
-std::string JaegerLogger::generate_traceparent(const std::string &trace_id,
-                                               const std::string &span_id,
+std::string JaegerLogger::generate_traceparent(std::string_view trace_id,
+                                               std::string_view span_id,
                                                bool sampled) {
   return std::format("00-{}-{}-{}", trace_id, span_id, sampled ? "01" : "00");
 }
 
 // Simplified validation - check key positions only
-bool JaegerLogger::validate_traceparent(const std::string &traceparent) {
+bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   // Format: 00-{32hex}-{16hex}-{2hex} = 55 chars
   if (traceparent.size() != 55)
     return false;
@@ -93,7 +93,7 @@ bool JaegerLogger::validate_traceparent(const std::string &traceparent) {
   return true;
 }
 
-bool JaegerLogger::parse_traceparent(const std::string &traceparent,
+bool JaegerLogger::parse_traceparent(std::string_view traceparent,
                                      std::string &trace_id,
                                      std::string &parent_span_id,
                                      bool &sampled) {
@@ -103,11 +103,11 @@ bool JaegerLogger::parse_traceparent(const std::string &traceparent,
   }
 
   // Extract trace-id (32 chars after "00-")
-  trace_id = traceparent.substr(3, 32);
+  trace_id = std::string(traceparent.substr(3, 32));
   // Extract parent-id (16 chars after trace-id and "-")
-  parent_span_id = traceparent.substr(36, 16);
+  parent_span_id = std::string(traceparent.substr(36, 16));
   // Extract flags (2 chars at end)
-  std::string flags = traceparent.substr(53, 2);
+  auto flags = traceparent.substr(53, 2);
 
   sampled = (flags == "01");
 
@@ -117,7 +117,7 @@ bool JaegerLogger::parse_traceparent(const std::string &traceparent,
 // Extract trace_id and parent_span_id from traceparent header
 // Delegate to JaegerLogger::parse_traceparent so the "00-{32}-{16}-{2}"
 // format (positions, lengths, hex/flags validation) lives in one place.
-TraceInfo extract_trace_info(const std::string &traceparent) {
+TraceInfo extract_trace_info(std::string_view traceparent) {
   TraceInfo info;
   if (JaegerLogger::parse_traceparent(traceparent, info.m_trace_id,
                                       info.m_parent_span_id, info.m_sampled)) {
@@ -153,7 +153,7 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                 uint64_t end_us,
                                 const std::string &service_name,
                                 const nlohmann::json &attributes) {
-  std::unique_lock<std::mutex> lock(m_queue_mutex);
+  std::unique_lock lock(m_queue_mutex);
 
   // Check queue size limit - drop if full
   if (m_span_queue.size() >= g_tracing_max_queue_size) {
@@ -184,9 +184,9 @@ void JaegerLogger::log_request(
     return;
   }
 
-  std::string actual_trace_id =
+  auto actual_trace_id =
       trace_id.empty() ? generate_trace_id() : trace_id;
-  std::string actual_span_id = span_id.empty() ? generate_span_id() : span_id;
+  auto actual_span_id = span_id.empty() ? generate_span_id() : span_id;
 
   Logger::debug(
       "Logging span: trace_id={} span_id={} operation=HTTP {} {} service={}",
@@ -234,7 +234,7 @@ void JaegerLogger::sender_loop() {
     batch.reserve(m_batch_size);
 
     {
-      std::unique_lock<std::mutex> lock(m_queue_mutex);
+      std::unique_lock lock(m_queue_mutex);
       while (!m_span_queue.empty() && batch.size() < m_batch_size) {
         batch.push_back(std::move(m_span_queue.front()));
         m_span_queue.pop_front();
@@ -301,7 +301,7 @@ void JaegerLogger::sender_loop() {
   // Flush remaining spans on shutdown (quick, non-blocking)
   std::vector<SpanData> final_batch;
   {
-    std::unique_lock<std::mutex> lock(m_queue_mutex);
+    std::unique_lock lock(m_queue_mutex);
     while (!m_span_queue.empty()) {
       final_batch.push_back(std::move(m_span_queue.front()));
       m_span_queue.pop_front();
@@ -339,15 +339,16 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
     batch_json.push_back(span_json);
   }
 
-  std::string payload_str = batch_json.dump();
+  auto payload_str = batch_json.dump();
 
-  // Fire-and-forget: never block, never throw, never fail main logic
+  // Fire-and-forget: never block, never throw, never fail main logic.
+  // Counter is incremented only by the caller (sender_loop / flush) to avoid
+  // double-counting: send_batch returns false and the caller decides.
   try {
     // Use very short timeout for tracing (don't block on Jaeger issues)
     auto client = m_http_client_pool->acquire_connection();
     if (!client) {
       // Pool exhausted - drop spans silently (tracing is not critical)
-      m_tracing_spans_failed_counter.Increment(batch.size());
       return false;
     }
 
@@ -364,12 +365,10 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
     // Log at debug level - tracing failures are not critical
     Logger::debug("Jaeger batch send failed (non-critical): {} spans dropped",
                   batch.size());
-    m_tracing_spans_failed_counter.Increment(batch.size());
     return false;
   } catch (...) {
     // Catch all exceptions - tracing must never crash
     Logger::debug("Jaeger batch send failed with unknown error (non-critical)");
-    m_tracing_spans_failed_counter.Increment(batch.size());
     return false;
   }
 }
@@ -383,7 +382,7 @@ bool JaegerLogger::send_span(const std::string &trace_id,
   const auto span_json =
       build_span_json(trace_id, span_id, parent_id, name, start_us, end_us,
                       service_name, attributes);
-  std::string payload_str = span_json.dump();
+  auto payload_str = span_json.dump();
 
   // Fire-and-forget: never block main logic
   try {

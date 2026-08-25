@@ -103,7 +103,7 @@ struct Baggage {
 
 // Extract trace_id, parent_span_id from traceparent header
 // Returns empty TraceInfo if parsing fails
-TraceInfo extract_trace_info(const std::string &traceparent);
+TraceInfo extract_trace_info(std::string_view traceparent);
 
 class JaegerLogger {
 private:
@@ -194,13 +194,13 @@ public:
   std::string generate_span_id();
 
   // W3C Trace Context helpers
-  std::string generate_traceparent(const std::string &trace_id,
-                                   const std::string &span_id,
+  std::string generate_traceparent(std::string_view trace_id,
+                                   std::string_view span_id,
                                    bool sampled = true);
 
   // Parse traceparent header: "00-{trace-id}-{parent-id}-{flags}"
   // Pure function: also available to the static extract_trace_info() helper.
-  static bool parse_traceparent(const std::string &traceparent,
+  static bool parse_traceparent(std::string_view traceparent,
                                 std::string &trace_id,
                                 std::string &parent_span_id, bool &sampled);
 
@@ -220,7 +220,7 @@ public:
                    const nlohmann::json &additional_attributes = {});
 
   // Simplified validation
-  static bool validate_traceparent(const std::string &traceparent);
+  static bool validate_traceparent(std::string_view traceparent);
 
   void sender_loop();
   bool send_span(const std::string &trace_id, const std::string &span_id,

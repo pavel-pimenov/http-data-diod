@@ -166,7 +166,7 @@ public:
                             msg.time.time_since_epoch())
                             .count() %
                         1000;
-    std::string ts = std::format("{:%Y-%m-%d %H:%M:%S}.{:03}", now_s, millis);
+    auto ts = std::format("{:%Y-%m-%d %H:%M:%S}.{:03}", now_s, millis);
     append(dest, ts);
 
     // Level (optionally colored in a real terminal)
@@ -261,7 +261,7 @@ public:
   // Initialize logger (call once at startup)
   static void init() {
     std::call_once(s_init_flag, []() {
-      const std::string logger_name = default_logger_name();
+      const auto logger_name = default_logger_name();
 
       // Check if logger already exists globally
       const auto existing_logger = spdlog::get(logger_name);
@@ -274,7 +274,7 @@ public:
 
       // Check log format (text or json). Uses the silent helper: Logger::init
       // runs inside std::call_once, so it must not trigger any logging.
-      const std::string log_format =
+      const auto log_format =
           Config::get_env_string_silent("LOG_FORMAT", "text");
       bool use_json_format = log_format == "json" || log_format == "JSON";
 
@@ -328,7 +328,7 @@ public:
       // Check LOG_LEVEL environment variable (from docker-compose)
       const char *log_level_env = std::getenv("LOG_LEVEL");
       if (log_level_env) {
-        std::string log_level = std::string(log_level_env);
+        auto log_level = std::string(log_level_env);
         // Convert to uppercase for comparison
         std::transform(log_level.begin(), log_level.end(), log_level.begin(),
                        ::toupper);
@@ -499,7 +499,7 @@ private:
   // back to msg.logger_name when the thread-local context is empty), so it is
   // derived from MODE to distinguish the three services in aggregated logs.
   static std::string default_logger_name() {
-    const std::string mode = Config::get_env_string_silent("MODE", "proxy");
+    const auto mode = Config::get_env_string_silent("MODE", "proxy");
     if (mode == "worker") {
       return "l2-worker";
     }

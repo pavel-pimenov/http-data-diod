@@ -5,7 +5,7 @@
 #
 # Services:
 #   proxy  - L2 Service Proxy (port 8888)
-#   worker - L2 Service Worker (port 19091)
+#   worker - L2 Service Worker (health 19093, metrics 19091)
 #   server - L2 Server (port 8088 or 3333)
 #   all    - Check all services (default)
 #   watch  - Continuous monitoring mode
@@ -29,6 +29,7 @@ RETRY_DELAY=5
 # Service ports
 PROXY_PORT="${PROXY_PORT:-8888}"
 WORKER_METRICS_PORT="${WORKER_METRICS_PORT:-19091}"
+WORKER_HEALTH_PORT="${WORKER_HEALTH_PORT:-19093}"
 SERVER_PORT="${SERVER_PORT:-8088}"
 PROXY_METRICS_PORT="${PROXY_METRICS_PORT:-19090}"
 
@@ -164,10 +165,14 @@ run_health_checks() {
         unhealthy_services+=("l2-proxy-metrics")
     fi
 
-    # Check worker
-    if ! check_and_restart "l2-worker" "$WORKER_METRICS_PORT" "/metrics"; then
-        unhealthy_services+=("l2-worker")
-        exit_code=1
+    # Check worker — health/ready (19093) is the source of truth; /metrics
+    # (19091) stays up even when NATS is disconnected.
+    if ! check_health "l2-worker" "$WORKER_HEALTH_PORT" "/health/ready"; then
+        # fallback: at least metrics should respond
+        if ! check_metrics "l2-worker" "$WORKER_METRICS_PORT"; then
+            unhealthy_services+=("l2-worker")
+            exit_code=1
+        fi
     fi
 
     # Check L2 Server (prometheus metrics port 19092)
@@ -229,9 +234,11 @@ main() {
             ;;
 
         worker)
-            if ! check_and_restart "l2-worker" "$WORKER_METRICS_PORT" "/metrics"; then
-                unhealthy_services+=("l2-worker")
-                exit_code=1
+            if ! check_health "l2-worker" "$WORKER_HEALTH_PORT" "/health/ready"; then
+                if ! check_and_restart "l2-worker" "$WORKER_METRICS_PORT" "/metrics"; then
+                    unhealthy_services+=("l2-worker")
+                    exit_code=1
+                fi
             fi
             ;;
 

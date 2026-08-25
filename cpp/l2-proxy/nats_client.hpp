@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -67,22 +68,23 @@ public:
 
   void disconnect();
 
-  // IConnectableClient interface
-  bool is_connected() const override { return m_connected; }
+  // IConnectableClient interface — checks atomic flag plus live NATS status
+  // (RECONNECTING/CLOSED is not "connected" even if the callback hasn't fired).
+  bool is_connected() const override;
 
   // NATS-specific methods
 
   // Send request and wait for response (synchronous)
   // Returns nullopt on connection/error, empty string on valid empty reply
-  std::optional<std::string> request(const std::string &subject,
-                                     const std::string &data,
+  std::optional<std::string> request(std::string_view subject,
+                                     std::string_view data,
                                      int timeout_ms = 0);
 
   // Send request with headers, receive reply with headers
   // reply_header_keys: list of header keys to extract from the reply (if empty,
   // extracts none)
   NatsReply
-  request_with_headers(const std::string &subject, const std::string &data,
+  request_with_headers(std::string_view subject, std::string_view data,
                        const NatsHeaders &headers = {},
                        const std::vector<std::string> &reply_header_keys = {},
                        int timeout_ms = 0);
@@ -92,24 +94,24 @@ public:
   // service and the DB gateway, which repeated request_with_headers + header
   // lookup.
   std::pair<NatsReply, std::string>
-  request_with_consume_span_id(const std::string &subject,
-                               const std::string &data, int timeout_ms = 0);
+  request_with_consume_span_id(std::string_view subject,
+                               std::string_view data, int timeout_ms = 0);
 
   // Publish message (fire-and-forget)
-  bool publish(const std::string &subject, const std::string &data);
+  bool publish(std::string_view subject, std::string_view data);
 
   // Publish message with headers
-  bool publish_with_headers(const std::string &subject, const std::string &data,
+  bool publish_with_headers(std::string_view subject, std::string_view data,
                             const NatsHeaders &headers);
 
   // Subscribe to subject with callback
   // Callback arguments: subject, data, reply_to
-  bool subscribe(const std::string &subject, NatsMessageCallback callback,
-                 const std::string &queue_group = "");
+  bool subscribe(std::string_view subject, NatsMessageCallback callback,
+                 std::string_view queue_group = "");
 
   // Subscribe with queue group for load balancing
-  bool subscribe_queue(const std::string &subject,
-                       const std::string &queue_group,
+  bool subscribe_queue(std::string_view subject,
+                       std::string_view queue_group,
                        NatsMessageCallback callback);
 
   // Unsubscribes (and destroys) all active subscriptions.
@@ -161,7 +163,7 @@ private:
   // connection-level callback can dereference `this` after the object dies.
   std::atomic<uint64_t> m_connected_instances{0};
   std::atomic<uint64_t> m_closed_callbacks_delivered{0};
-  std::mutex m_conn_mutex;
+  mutable std::mutex m_conn_mutex;
   mutable std::mutex m_error_mutex;
   std::string m_last_error;
 
@@ -183,7 +185,7 @@ private:
   natsConnection *acquire_connection(const std::string &operation);
   // Shared request path used by request()/request_with_headers()
   std::optional<NatsReply>
-  request_impl(const std::string &subject, const std::string &data,
+  request_impl(std::string_view subject, std::string_view data,
                const NatsHeaders &headers,
                const std::vector<std::string> &reply_header_keys,
                int timeout_ms);

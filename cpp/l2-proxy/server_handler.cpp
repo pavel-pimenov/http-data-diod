@@ -98,15 +98,14 @@ void ServerHandler::handle_post(const httplib::Request &req,
   increment_and_log_request_received(m_ctx.m_server.m_metrics->m_bytes_received,
                                      "Server", body.size());
 
-  const auto parse_result = validate_and_parse_json(body, "Server");
-  if (!parse_result) {
+  // C++23 expected monadic: transform JSON → value, or_else logs & fails
+  auto json_exp = validate_and_parse_json(body, "Server");
+  if (!json_exp) {
     fail_request(res, 400, "Invalid JSON",
-                 &m_ctx.m_server.m_metrics->m_request_errors, "",
-                 parse_result.error());
+                 &m_ctx.m_server.m_metrics->m_request_errors, "", json_exp.error());
     return;
   }
-
-  const int value = parse_result->value("value", 0);
+  const int value = json_exp.transform([](const json &j) { return j.value("value", 0); }).value();
 
   // Test-mode delay: sleep a random amount before replying so response order
   // diverges from request arrival order. Used by the correlation test to
@@ -120,7 +119,7 @@ void ServerHandler::handle_post(const httplib::Request &req,
   if (correlation_test) {
     // Correlation-test echo: only message_counter.py sets the marker header,
     // so ordinary clients get a plain value echo with no SHA-256 overhead.
-    response_json["req_id"] = parse_result->value("req_id", std::string{});
+    response_json["req_id"] = json_exp->value("req_id", std::string{});
     // SHA-256 of the raw request body so the client can verify it received
     // exactly the response for its own (unique) body, not another request's.
     response_json["req_hash"] = compute_sha256_hex(body);

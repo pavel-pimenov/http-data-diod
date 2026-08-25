@@ -129,7 +129,7 @@ private:
     // wake up any thread waiting for completion (notify under the mutex to
     // avoid a lost-wakeup race with wait_for_completion).
     if (prev == 1 && m_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      std::lock_guard<std::mutex> lock(m_mutex);
+      std::lock_guard lock(m_mutex);
       m_cv.notify_all();
     }
   }
@@ -146,7 +146,7 @@ public:
   // Wait for all in-flight requests to complete (with timeout)
   bool wait_for_completion(std::chrono::seconds timeout,
                            bool log_issues = true) {
-    std::unique_lock<std::mutex> lock(m_mutex);
+    std::unique_lock lock(m_mutex);
 
     bool completed =
         m_cv.wait_for(lock, timeout, [this] { return in_flight_sum() == 0; });

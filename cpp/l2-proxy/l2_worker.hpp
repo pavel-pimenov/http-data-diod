@@ -60,8 +60,7 @@ private:
   std::unique_ptr<DbQueryHandler> m_db_query_handler;
   // Background ticker samples pool saturation so the queue-depth gauge stays
   // meaningful between requests (otherwise it only moves on request arrival).
-  std::atomic<bool> m_metrics_ticker_running{false};
-  std::thread m_metrics_ticker;
+  std::jthread m_metrics_ticker;
 
 public:
   explicit L2Worker(AppContext &context);
@@ -107,7 +106,7 @@ private:
       const std::string &traceparent, const httplib::Headers &forwarded_headers,
       const std::string &method, int &final_attempt);
   void record_l2_call_metrics(uint64_t start_us);
-  void metrics_ticker_loop();
+  void metrics_ticker_loop(std::stop_token st);
 
   struct RequestData {
     std::string m_request_id;

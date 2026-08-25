@@ -46,11 +46,12 @@ flowchart TD
     nginxExporter -- "metrics" --> nginx
     natsExporter -- "HTTP 8222 / metrics" --> nats
 
-    prometheus -- "scrape 19090" --> proxy
-    prometheus -- "scrape 19092" --> server
-    prometheus -- "scrape 19091" --> worker
-    prometheus -- "scrape 9113" --> nginxExporter
-    prometheus -- "scrape 7778" --> natsExporter
+    vmagent -- "scrape 19090" --> proxy
+    vmagent -- "scrape 19092" --> server
+    vmagent -- "scrape 19091" --> worker
+    vmagent -- "scrape 9113" --> nginxExporter
+    vmagent -- "scrape 7778" --> natsExporter
+    vmagent -- "remoteWrite" --> victoria-metrics
 
     proxy -- "tracing" --> jaeger
     worker -- "tracing" --> jaeger

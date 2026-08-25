@@ -20,7 +20,7 @@ LabeledCounterCollector::LabeledCounterCollector(
 
 template <uint64_t LabeledCounterCollector::Stats::*Member>
 void LabeledCounterCollector::record_impl(const std::string &label_value) {
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   auto &entry = m_entries[label_value];
   entry.m_stats.*Member += 1;
   entry.m_last_seen = std::chrono::steady_clock::now();
@@ -41,7 +41,7 @@ std::vector<prometheus::MetricFamily> LabeledCounterCollector::Collect() const {
   // mutex is taken.
   if (m_stats_provider) {
     const auto provided = m_stats_provider();
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     m_entries.clear();
     const auto now = std::chrono::steady_clock::now();
     for (const auto &[label_value, stats] : provided) {
@@ -49,7 +49,7 @@ std::vector<prometheus::MetricFamily> LabeledCounterCollector::Collect() const {
     }
   }
 
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   evict_stale_and_trim(m_entries, m_ttl_seconds, m_max_entries);
 
   std::vector<prometheus::MetricFamily> result;

@@ -137,6 +137,7 @@ services:
       - '--remoteWrite.url=http://victoria-metrics:8428/api/v1/write'
       - '--httpListenAddr=:8429'
       - '--promscrape.streamParse=true'
+      - '--envflag.enable=true'
     environment:
       - VM_NAME=${VM_NAME:-hostname}
     networks:
@@ -161,6 +162,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
+      - ./logs:/root/logs
       - ./docker-memory-analysis:/memory-logs
       - ./crash-dumps:/crash-dumps
     environment:
@@ -333,6 +335,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
+      - ./logs:/root/logs
       - ./docker-memory-analysis:/memory-logs
       - ./certs_nats:/etc/nats/certs_nats:ro
       - ./crash-dumps:/crash-dumps
@@ -513,6 +516,7 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - ./logs:/root/logs
       - ./docker-memory-analysis:/memory-logs
       - ./certs_nats:/etc/nats/certs_nats:ro
       - ./crash-dumps:/crash-dumps

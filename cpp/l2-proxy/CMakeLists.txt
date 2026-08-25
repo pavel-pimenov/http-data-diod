@@ -251,9 +251,10 @@ set_source_files_properties(
     l2_worker.cpp l2_worker_nats.cpp trace_logger.cpp nats_client.cpp
     nats_push_service.cpp nats_poll_service.cpp metrics_manager.cpp
     http_client.cpp http_client_pool.cpp stats_logger.cpp
-    db_query_handler.cpp db_query_executor_oracle.cpp
-    db_query_executor_postgres.cpp db_query_executor_factory.cpp
-    labeled_counter_collector.cpp labeled_histogram_collector.cpp
+    db_query_handler.cpp db_query_executor_base.cpp
+    db_query_executor_oracle.cpp db_query_executor_postgres.cpp
+    db_query_executor_factory.cpp labeled_counter_collector.cpp
+    labeled_histogram_collector.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
 # Include directories
@@ -287,6 +288,35 @@ if(ENABLE_PROFILER)
     )
 endif()
 target_link_libraries(l2-proxy PRIVATE ${NATS_C_LIBRARY})
+
+# C++23 std::stacktrace / std::print may need -lstdc++exp on GCC 13-16
+find_library(STDCXX_EXP_LIBRARY stdc++exp
+    PATHS /usr/lib/gcc/x86_64-linux-gnu/15
+          /usr/lib/gcc/x86_64-linux-gnu/16
+          /usr/lib/gcc/x86_64-linux-gnu/14
+          /usr/lib/gcc/aarch64-linux-gnu/15
+          /usr/lib/gcc/aarch64-linux-gnu/16
+          /usr/local/lib
+          /usr/lib
+    NO_DEFAULT_PATH)
+if(NOT STDCXX_EXP_LIBRARY)
+    find_library(STDCXX_EXP_LIBRARY stdc++exp)
+endif()
+if(STDCXX_EXP_LIBRARY)
+    target_link_libraries(l2-proxy PRIVATE ${STDCXX_EXP_LIBRARY})
+    message(STATUS "Linking with stdc++exp for C++23 stacktrace/print: ${STDCXX_EXP_LIBRARY}")
+else()
+    # Fallback: try direct link flag (works if lib is in compiler's default search path)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES "-lstdc++exp")
+    check_cxx_source_compiles("#include <stacktrace>\nint main(){auto s=std::stacktrace::current(); return s.size();}" HAVE_STDCXXEXP_LINK)
+    if(HAVE_STDCXXEXP_LINK)
+        target_link_libraries(l2-proxy PRIVATE -lstdc++exp)
+        message(STATUS "Linking with -lstdc++exp via direct flag")
+    else()
+        message(STATUS "stdc++exp not found - stacktrace will use backtrace fallback")
+    endif()
+endif()
 
 # Use static libstdc++/libgcc only for non-sanitized builds.
 # Sanitizer runtimes work more reliably with dynamic runtime linkage.

@@ -320,7 +320,7 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
             GRAFANA_URL="$GRAFANA_URL" \
             GRAFANA_USER="${GRAFANA_USER:-admin}" \
             GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-admin}" \
-            PROMETHEUS_URL="${PROMETHEUS_URL:-http://host.docker.internal:9090}" \
+            PROMETHEUS_URL="${PROMETHEUS_URL:-http://victoria-metrics:8428}" \
             bash scripts/setup-grafana-datasource.sh
         fi
 

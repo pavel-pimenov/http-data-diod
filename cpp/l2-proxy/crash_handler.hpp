@@ -10,6 +10,10 @@
 #include <execinfo.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if __has_include(<stacktrace>)
+#include <print>
+#include <stacktrace>
+#endif
 
 // Crash dump directory (overridable via CRASH_DUMP_DIR env var)
 constexpr const char *g_default_crash_dump_dir = "/crash-dumps";
@@ -163,6 +167,22 @@ private:
     signal(signum, SIG_DFL);
     raise(signum);
   }
+
+public:
+#if __has_include(<stacktrace>)
+  // C++23 std::stacktrace + std::print: non-signal-safe, for on-demand
+  // diagnostics (e.g. GET /debug/stacktrace). Dumps current thread trace via
+  // std::stacktrace::current() + std::println — now links with -lstdc++exp on
+  // GCC 15/16 (see CMakeLists.txt).
+  static void log_current_stacktrace() {
+    auto trace = std::stacktrace::current();
+    std::println(stderr, "=== C++23 stacktrace ({} frames) ===", trace.size());
+    for (std::size_t i = 0; i < trace.size(); ++i) {
+      std::println(stderr, "#{} {} [{}:{}]", i, trace[i].description(),
+                   trace[i].source_file(), trace[i].source_line());
+    }
+  }
+#endif
 };
 
 #endif // CRASH_HANDLER_HPP

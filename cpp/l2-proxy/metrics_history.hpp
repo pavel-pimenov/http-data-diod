@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <ctime>
 #include <deque>
 #include <map>
@@ -60,19 +61,15 @@ public:
   ~MetricsHistory() { stop(); }
 
   void start() {
-    bool expected = false;
-    if (!m_running.compare_exchange_strong(expected, true)) {
+    if (m_thread.joinable()) {
       return;
     }
-    m_thread = std::thread([this]() { run(); });
+    m_thread = std::jthread([this](std::stop_token st) { run(st); });
   }
 
   void stop() {
-    bool expected = true;
-    if (!m_running.compare_exchange_strong(expected, false)) {
-      return;
-    }
     if (m_thread.joinable()) {
+      m_thread.request_stop();
       m_thread.join();
     }
   }
@@ -83,7 +80,7 @@ public:
   };
 
   bool has_family(const std::string &family) const {
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard lk(m_mutex);
     return m_data.find(family) != m_data.end();
   }
 
@@ -91,7 +88,7 @@ public:
   std::vector<Series> get_series(const std::string &family,
                                  std::size_t limit) const {
     std::vector<Series> out;
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard lk(m_mutex);
     const auto it = m_data.find(family);
     if (it == m_data.end()) {
       return out;
@@ -109,10 +106,11 @@ public:
   }
 
 private:
-  void run() {
-    while (m_running.load()) {
+  void run(std::stop_token st) {
+    while (!st.stop_requested()) {
       sample();
-      std::this_thread::sleep_for(m_interval);
+      std::unique_lock lk(m_cv_mutex);
+      m_cv.wait_for(lk, st, m_interval, [&] { return st.stop_requested(); });
     }
   }
 
@@ -122,7 +120,7 @@ private:
     }
     const auto families = m_registry->Collect();
     const std::time_t now = std::time(nullptr);
-    std::lock_guard<std::mutex> lk(m_mutex);
+    std::lock_guard lk(m_mutex);
     for (const auto &family : families) {
       if (family.metric.empty()) {
         continue;
@@ -174,8 +172,9 @@ private:
            std::map<std::string,
                     std::deque<std::pair<std::time_t, double>>>>
       m_data;
-  std::atomic<bool> m_running{false};
-  std::thread m_thread;
+  std::jthread m_thread;
+  std::mutex m_cv_mutex;
+  std::condition_variable_any m_cv;
 };
 
 #endif // METRICS_HISTORY_HPP

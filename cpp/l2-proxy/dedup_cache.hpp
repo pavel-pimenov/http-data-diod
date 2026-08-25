@@ -36,17 +36,27 @@ public:
 
   // Returns the cached response for request_id if it was produced within the
   // TTL window, nullopt otherwise. Does not extend the entry lifetime.
+  // Expired entries are eagerly erased to avoid unbounded growth.
   std::optional<std::string> find(std::string_view request_id) const {
     if (!m_enabled) {
       return std::nullopt;
     }
     const uint64_t now_ms = now_ms_since_epoch();
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     const auto it = m_entries.find(std::string(request_id));
     if (it == m_entries.end()) {
       return std::nullopt;
     }
     if (it->second.m_expires_at_ms <= now_ms) {
+      m_entries.erase(it);
+      // Remove from order deque (linear scan, but TTL path is rare).
+      const std::string key(request_id);
+      for (auto q = m_order.begin(); q != m_order.end(); ++q) {
+        if (*q == key) {
+          m_order.erase(q);
+          break;
+        }
+      }
       return std::nullopt;
     }
     return it->second.m_response;
@@ -59,7 +69,7 @@ public:
       return;
     }
     const uint64_t now_ms = now_ms_since_epoch();
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     evict_expired_locked(now_ms);
 
     const std::string key(request_id);
@@ -67,6 +77,15 @@ public:
     if (it != m_entries.end()) {
       it->second.m_response = std::move(response_json);
       it->second.m_expires_at_ms = now_ms + m_ttl_ms;
+      // Move refreshed entry to the back to preserve expiry order for
+      // evict_expired_locked() (front == oldest).
+      for (auto q = m_order.begin(); q != m_order.end(); ++q) {
+        if (*q == key) {
+          m_order.erase(q);
+          break;
+        }
+      }
+      m_order.push_back(key);
       return;
     }
 
@@ -105,8 +124,8 @@ private:
   }
 
   mutable std::mutex m_mutex;
-  std::unordered_map<std::string, Entry> m_entries;
-  std::deque<std::string> m_order; // request_ids in insertion order
+  mutable std::unordered_map<std::string, Entry> m_entries;
+  mutable std::deque<std::string> m_order; // request_ids in insertion order
   bool m_enabled;
   size_t m_max_entries;
   uint64_t m_ttl_ms;

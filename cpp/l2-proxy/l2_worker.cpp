@@ -70,10 +70,22 @@ L2Worker::L2Worker(AppContext &context)
     Logger::info("NATS client connected successfully");
   }
 
-  // Initialize thread pool with more worker threads for better concurrency
+  // Initialize thread pool with more worker threads for better concurrency.
+  // NONE (inline execution) would run the entire NATS handler - including
+  // blocking L2 HTTP calls - on the NATS delivery thread and stall the broker.
+  // Force CUSTOM for worker/NATS mode even if config requests NONE.
   ThreadPoolWrapper::Type pool_type;
   if (m_ctx.m_config.m_thread_pool_type == "none") {
-    pool_type = ThreadPoolWrapper::Type::NONE;
+    if (m_ctx.m_config.m_mode == "worker") {
+      Logger::warn(
+          "THREAD_POOL_TYPE=none is unsafe for NATS worker (blocks delivery "
+          "thread); forcing custom pool (threads={}, queue={})",
+          m_ctx.m_config.m_l2_worker_threads,
+          m_ctx.m_config.m_l2_worker_queue_size);
+      pool_type = ThreadPoolWrapper::Type::CUSTOM;
+    } else {
+      pool_type = ThreadPoolWrapper::Type::NONE;
+    }
   } else {
     pool_type = ThreadPoolWrapper::Type::CUSTOM;
   }
@@ -173,31 +185,47 @@ bool L2Worker::is_l2_server_allowed(const std::string &path,
     Logger::error("{}", "No L2 server URLs configured - add L2_SERVER_URLS");
     return false;
   }
-  // Allow common paths that are safe to proxy
-  if (path == "/metrics" || path == "/" || path == "/favicon.ico") {
-    // Use the first configured URL for common paths
+  // Canonicalize incoming path (removes dot-segments, ensures leading '/')
+  const auto normalized_path = normalize_path(path);
+  // Allow common paths that are safe to proxy on any configured backend
+  if (normalized_path == "/metrics" || normalized_path == "/" ||
+      normalized_path == "/favicon.ico") {
     selected_url = m_l2_server_urls[0];
     return true;
   }
 
-  bool allowed = false;
   for (const auto &allowed_base : m_l2_server_urls) {
-    const std::string &normalized_path = path;
-    if (allowed_base.length() >= normalized_path.length() &&
-        allowed_base.compare(allowed_base.length() - normalized_path.length(),
-                             normalized_path.length(), normalized_path) == 0) {
-      allowed = true;
-      selected_url = allowed_base;
-      break;
+    try {
+      const ParsedUrl parsed = parse_url(allowed_base);
+      const auto base_path = normalize_path(parsed.m_path);
+      // Base "/" matches any absolute path; otherwise require prefix match
+      // with segment boundary ("/api" matches "/api/v1" but not "/apiv2")
+      if (base_path == "/") {
+        selected_url = allowed_base;
+        return true;
+      }
+      if (normalized_path == base_path ||
+          (normalized_path.rfind(base_path, 0) == 0 &&
+           (normalized_path.size() == base_path.size() ||
+            normalized_path[base_path.size()] == '/'))) {
+        selected_url = allowed_base;
+        return true;
+      }
+    } catch (const std::exception &) {
+      // Fallback: legacy prefix check on raw allowed_base string
+      if (normalized_path.rfind(allowed_base, 0) == 0) {
+        selected_url = allowed_base;
+        return true;
+      }
     }
   }
 
-  return allowed;
+  return false;
 }
 
 std::string L2Worker::construct_l2_url(const std::string &selected_url,
                                        const std::string &path) {
-  const std::string base_url = extract_scheme_host_port(selected_url);
+  const auto base_url = extract_scheme_host_port(selected_url);
 
   // Pre-allocate URL string to avoid multiple allocations
   std::string url;
@@ -205,7 +233,7 @@ std::string L2Worker::construct_l2_url(const std::string &selected_url,
               1); // +1 for potential leading slash
 
   // Ensure path starts with "/" for proper URL construction
-  const std::string normalized_path = normalize_path(path);
+  const auto normalized_path = normalize_path(path);
 
   // normalize_path() guarantees a non-empty path starting with '/', so only
   // the base_url trailing slash decides whether a double slash would occur.
@@ -259,15 +287,17 @@ HttpResponse L2Worker::call_l2_server(
   // url is path-only: query string is appended only for the actual HTTP call
   // so that INFO logs and Jaeger http.url stay free of query parameters
   // (they may contain credentials/tokens).
-  const std::string url = construct_l2_url(selected_url, path);
+  const auto url = construct_l2_url(selected_url, path);
   Logger::debug("Calling L2 server: URL={}", url);
 
   int final_attempt = 0;
   HttpResponse http_response =
       execute_l2_call_with_retry(url, query, body, traceparent_result,
                                  forwarded_headers, method, final_attempt);
-  const bool success =
-      (http_response.m_status != 500 || !http_response.m_headers.empty());
+  // 5xx from L2 is a server failure (circuit-breaker/retry signal) even
+  // when the response carries headers (e.g. JSON error). 4xx is client error
+  // and does not trip the breaker.
+  const bool success = http_response.m_status < 500;
 
   if (m_ctx.m_tracer && !l2_trace_ctx.m_trace_id.empty()) {
     const auto end_us = get_current_timestamp_us();
@@ -292,14 +322,15 @@ void L2Worker::run() {
   Logger::info("C++ L2 Worker started. Waiting for requests...");
 
   // Sample pool saturation in the background so the queue-depth gauge is not
-  // flat between requests.
-  m_metrics_ticker_running = true;
-  m_metrics_ticker = std::thread(&L2Worker::metrics_ticker_loop, this);
+  // flat between requests. jthread auto-joins and respects stop_token.
+  m_metrics_ticker = std::jthread([this](std::stop_token st) {
+    metrics_ticker_loop(st);
+  });
 
   run_with_nats();
 
-  m_metrics_ticker_running = false;
   if (m_metrics_ticker.joinable()) {
+    m_metrics_ticker.request_stop();
     m_metrics_ticker.join();
   }
 
@@ -312,11 +343,11 @@ void L2Worker::run() {
   }
 }
 
-void L2Worker::metrics_ticker_loop() {
+void L2Worker::metrics_ticker_loop(std::stop_token st) {
   const auto step = std::chrono::milliseconds(100);
   const int steps_per_sample = 50; // ~5s between samples
   int step_count = 0;
-  while (m_metrics_ticker_running.load(std::memory_order_acquire)) {
+  while (!st.stop_requested()) {
     if (++step_count >= steps_per_sample) {
       step_count = 0;
       if (m_thread_pool) {
@@ -369,7 +400,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
            &method](HttpClient *client) {
             // Append the query string only to the request URL; the `url`
             // variable (used for logging) stays clean.
-            std::string request_url = url;
+            auto request_url = url;
             if (!query.empty()) {
               request_url += "?";
               request_url += query;
@@ -384,11 +415,11 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
 
       size_t response_size = http_response.m_body.size();
 
-      const std::string x_real_ip =
+      const auto x_real_ip =
           get_header_value(forwarded_headers, "X-Real-IP");
-      const std::string x_datahub_client_id =
+      const auto x_datahub_client_id =
           get_header_value(forwarded_headers, "X-DataHub-Client-Id");
-      const std::string user_agent =
+      const auto user_agent =
           shorten_user_agent(get_header_value(forwarded_headers, "User-Agent"));
 
       Logger::info("L2 server call completed: method={} url={} status={} "
@@ -595,7 +626,7 @@ L2Worker::extract_request_metadata(const json &request_data) {
   metadata.m_traceparent =
       request_data.value(NatsContract::kTraceparent, std::string{});
 
-  const std::string effective_traceparent =
+  const auto effective_traceparent =
       !metadata.m_proxy_traceparent.empty() ? metadata.m_proxy_traceparent
                                             : metadata.m_traceparent;
   metadata.m_trace_ctx =

@@ -16,7 +16,7 @@ bool DuplicateDetector::record(std::string_view client_id,
     return false;
   }
   const uint64_t now_ms = TimeUtils::steady_ms();
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   evict_expired_locked(now_ms);
 
   const std::string key(body_hash);
@@ -48,14 +48,14 @@ bool DuplicateDetector::record(std::string_view client_id,
 }
 
 size_t DuplicateDetector::duplicate_bodies() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   return static_cast<size_t>(
       std::count_if(m_entries.begin(), m_entries.end(),
                     [](const auto &kv) { return kv.second.m_count >= 2; }));
 }
 
 nlohmann::json DuplicateDetector::report() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   nlohmann::json result;
   result["enabled"] = m_options.m_enabled; //-V601 nlohmann::json handles bool
 

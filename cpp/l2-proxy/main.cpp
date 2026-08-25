@@ -119,7 +119,7 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
   // Wait for shutdown signal — check flag every 100ms via condition_variable
   Logger::info("Main thread waiting for shutdown signal...");
   {
-    std::unique_lock<std::mutex> lock(g_shutdown_mutex);
+    std::unique_lock lock(g_shutdown_mutex);
     // Poll for the shutdown flag every 100ms. Nothing notifies the condition
     // variable, so each wait_for must re-check the predicate after the timeout
     // (the while-loop retries until the flag is actually set).

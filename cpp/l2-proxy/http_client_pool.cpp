@@ -54,7 +54,7 @@ void HttpClientPool::update_metrics() {
 
 std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
   const auto start_time = std::chrono::steady_clock::now();
-  std::unique_lock<std::mutex> lock(m_pool_mutex);
+  std::unique_lock lock(m_pool_mutex);
 
   // Try to get a connection from the pool first
   auto acquired = try_acquire_from_queue(start_time);
@@ -183,7 +183,7 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
   m_active_clients--;
 
   if (!client->is_valid()) {
-    std::lock_guard<std::mutex> lock(m_pool_mutex);
+    std::lock_guard lock(m_pool_mutex);
     m_total_clients--;
     Logger::warn(
         "HttpClientPool: released invalid connection, destroying (active={})",
@@ -192,7 +192,7 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
     return;
   }
 
-  std::lock_guard<std::mutex> lock(m_pool_mutex);
+  std::lock_guard lock(m_pool_mutex);
 
   if (m_available_connections.size() < m_max_pool_size) {
     client->touch();
@@ -217,6 +217,6 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 }
 
 size_t HttpClientPool::available_count() const {
-  std::lock_guard<std::mutex> lock(m_pool_mutex);
+  std::lock_guard lock(m_pool_mutex);
   return m_available_connections.size();
 }

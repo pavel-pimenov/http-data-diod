@@ -49,8 +49,7 @@ private:
   std::atomic<uint64_t> m_unique_ips{0};
   std::atomic<uint64_t> m_evictions{0};
 
-  std::thread m_cleanup_thread;
-  std::atomic<bool> m_running{false};
+  std::jthread m_cleanup_thread;
 
 public:
   PerIPRateLimiter(uint64_t max_tokens_per_ip,
@@ -81,11 +80,16 @@ public:
     std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
     if (!limiter) {
       m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+      size_t tracked = 0;
+      {
+        std::lock_guard lock(m_mutex);
+        tracked = m_ip_entries.size();
+      }
       Logger::warn(
           "PerIPRateLimiter: too many IPs tracked ({} >= max_ips={}), "
           "rejecting request from {}. Consider increasing PER_IP_MAX_IPS "
           "and/or lowering PER_IP_CLEANUP_TTL_SECONDS to free stale entries",
-          m_ip_entries.size(), m_max_ips, client_ip);
+          tracked, m_max_ips, client_ip);
       return false;
     }
 
@@ -108,7 +112,7 @@ public:
 
   std::shared_ptr<RateLimiter>
   get_or_create_limiter(const std::string &client_ip) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
 
     auto it = m_ip_entries.find(client_ip);
     if (it != m_ip_entries.end()) {
@@ -166,7 +170,7 @@ public:
   Stats get_stats() const {
     uint64_t total = m_total_requests.load();
     uint64_t rejected = m_rejected_requests.load();
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     return Stats{total,
                  m_allowed_requests.load(),
                  rejected,
@@ -178,11 +182,16 @@ public:
 
   // Snapshot of per-IP counters for the metrics collector. Entries are
   // ordered most-recently-used first (back of the LRU list = newest).
+  // Capped to 1000 most-recent IPs to bound Prometheus scrape time and lock
+  // hold (p99 mitigation for max_ips=10000, see M4).
   std::vector<std::pair<std::string, IPStats>> get_per_ip_stats() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
+    constexpr size_t kMaxExpose = 1000;
     std::vector<std::pair<std::string, IPStats>> result;
-    result.reserve(m_ip_entries.size());
+    result.reserve(std::min(m_ip_entries.size(), kMaxExpose));
+    size_t count = 0;
     for (const std::string &ip : std::views::reverse(m_lru_list)) {
+      if (count >= kMaxExpose) break;
       const auto entry_it = m_ip_entries.find(ip);
       if (entry_it != m_ip_entries.end()) {
         result.emplace_back(
@@ -190,19 +199,20 @@ public:
             IPStats{
                 entry_it->second.m_requests.load(std::memory_order_relaxed),
                 entry_it->second.m_rejected.load(std::memory_order_relaxed)});
+        ++count;
       }
     }
     return result;
   }
 
   size_t cleanup_expired_ips() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     return do_cleanup_expired();
   }
 
 private:
   void record_rejection(const std::string &client_ip) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     const auto it = m_ip_entries.find(client_ip);
     if (it != m_ip_entries.end()) {
       it->second.m_rejected.fetch_add(1, std::memory_order_relaxed);
@@ -210,32 +220,25 @@ private:
   }
 
   void start_background_cleanup() {
-    m_cleanup_thread = std::thread([this]() {
-      m_running.store(true, std::memory_order_release);
+    m_cleanup_thread = std::jthread([this](std::stop_token st) {
       Logger::debug("PerIPRateLimiter: background cleanup thread started");
       const int cleanup_every_seconds = m_cleanup_interval_seconds / 2 + 1;
-      while (m_running.load(std::memory_order_acquire)) {
-        // Sleep in 1-second steps so shutdown (m_running=false) is observed
-        // promptly instead of waiting out the whole cleanup interval.
-        for (int i = 0; i < cleanup_every_seconds &&
-                        m_running.load(std::memory_order_acquire);
+      while (!st.stop_requested()) {
+        for (int i = 0; i < cleanup_every_seconds && !st.stop_requested();
              ++i) {
           std::this_thread::sleep_for(std::chrono::seconds(1));
+          if (st.stop_requested()) break;
         }
-        if (!m_running.load(std::memory_order_acquire))
-          break;
+        if (st.stop_requested()) break;
         cleanup_expired_ips();
       }
       Logger::debug("PerIPRateLimiter: background cleanup thread stopped");
     });
-    while (!m_running.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
   }
 
   void stop_background_cleanup() {
-    m_running.store(false, std::memory_order_release);
     if (m_cleanup_thread.joinable()) {
+      m_cleanup_thread.request_stop();
       m_cleanup_thread.join();
     }
   }

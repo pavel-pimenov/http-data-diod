@@ -16,7 +16,7 @@ LabeledHistogramCollector::LabeledHistogramCollector(
 
 void LabeledHistogramCollector::observe(const std::string &label_value,
                                         double value) {
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   auto &entry = m_entries[label_value];
   entry.m_sum += value;
   ++entry.m_count;
@@ -36,7 +36,7 @@ void LabeledHistogramCollector::observe(const std::string &label_value,
 
 std::vector<prometheus::MetricFamily>
 LabeledHistogramCollector::Collect() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
+  std::lock_guard lock(m_mutex);
   evict_stale_and_trim(m_entries, m_ttl_seconds, m_max_entries);
 
   std::vector<prometheus::MetricFamily> result;

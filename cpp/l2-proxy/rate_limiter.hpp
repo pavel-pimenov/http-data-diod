@@ -58,36 +58,50 @@ public:
     return false;
   }
 
-  uint64_t available_tokens() const {
-    return m_tokens.load(std::memory_order_acquire);
+  // C++23 deducing this: one overload handles const/non-const, lvalue/rvalue
+  template <typename Self>
+  auto available_tokens(this Self &&self) -> uint64_t {
+    return self.m_tokens.load(std::memory_order_acquire);
   }
 
-  uint64_t max_tokens() const { return m_max_tokens; }
+  template <typename Self>
+  auto max_tokens(this Self &&self) -> uint64_t {
+    return self.m_max_tokens;
+  }
 
-  uint64_t refill_rate() const { return m_refill_tokens_per_second; }
+  template <typename Self>
+  auto refill_rate(this Self &&self) -> uint64_t {
+    return self.m_refill_tokens_per_second;
+  }
 
 private:
   void refill() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard lock(m_mutex);
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                              now - m_last_refill)
                              .count();
 
     if (elapsed >= 1000) {
-      uint64_t tokens_to_add = (elapsed / 1000) * m_refill_tokens_per_second;
-      uint64_t new_tokens =
-          m_tokens.load(std::memory_order_relaxed) + tokens_to_add;
-
-      if (new_tokens > m_max_tokens) {
-        new_tokens = m_max_tokens;
-      }
-
-      m_tokens.store(new_tokens, std::memory_order_release);
-      m_last_refill = now;
+      const uint64_t ticks = static_cast<uint64_t>(elapsed / 1000);
+      const uint64_t tokens_to_add = ticks * m_refill_tokens_per_second;
+      // CAS loop so concurrent acquire() decrements are not lost.
+      uint64_t cur = m_tokens.load(std::memory_order_relaxed);
+      uint64_t desired = 0;
+      do {
+        uint64_t new_tokens = cur + tokens_to_add;
+        if (new_tokens > m_max_tokens) {
+          new_tokens = m_max_tokens;
+        }
+        desired = new_tokens;
+      } while (!m_tokens.compare_exchange_weak(cur, desired,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_relaxed));
+      // Advance by whole seconds only, keep leftover ms to avoid drift.
+      m_last_refill += std::chrono::milliseconds(ticks * 1000);
 
       Logger::debug("RateLimiter refilled: +{} tokens, total={}", tokens_to_add,
-                    new_tokens);
+                    desired);
     }
   }
 };

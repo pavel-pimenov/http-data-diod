@@ -1898,10 +1898,10 @@ def create_proxy_dashboard() -> Dict:
     panels.append(create_row_panel("DB Gateway", 70, y))
     y += 1
 
-    # Panel 67: DB requests by db/type/status
+    # Panel 76: DB requests by db/type/status
     panels.append(create_timeseries_panel(
         title="DB запросы (по статусу)",
-        id=67,
+        id=76,
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
@@ -1909,10 +1909,10 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
 
-    # Panel 68: DB request duration
+    # Panel 77: DB request duration
     panels.append(create_timeseries_panel(
         title="DB длительность запроса",
-        id=68,
+        id=77,
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
@@ -1923,10 +1923,10 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
-    # Panel 69: DB NATS round-trip duration
+    # Panel 78: DB NATS round-trip duration
     panels.append(create_timeseries_panel(
         title="DB NATS round-trip",
-        id=69,
+        id=78,
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
@@ -1936,10 +1936,10 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
 
-    # Panel 70: DB errors (4xx/5xx)
+    # Panel 79: DB errors (4xx/5xx)
     panels.append(create_timeseries_panel(
         title="DB ошибки",
-        id=70,
+        id=79,
         x=12, y=y, w=12, h=8,
         unit="reqps",
         thresholds={

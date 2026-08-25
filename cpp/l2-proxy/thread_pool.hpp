@@ -69,7 +69,7 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
         batch.reserve(g_dequeue_batch);
 
         {
-          std::unique_lock<std::mutex> lock(this->m_queue_mutex);
+          std::unique_lock lock(this->m_queue_mutex);
           this->m_condition.wait(
               lock, [this] { return this->m_stop || !this->m_tasks.empty(); });
           if (this->m_stop && this->m_tasks.empty())
@@ -108,7 +108,7 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
 
   std::future<return_type> res = task->get_future();
   {
-    std::unique_lock<std::mutex> lock(this->m_queue_mutex);
+    std::unique_lock lock(this->m_queue_mutex);
 
     // Wait for a free queue slot (backpressure). Wakes up if the pool stops.
     this->m_not_full.wait(lock, [this] {
@@ -130,7 +130,7 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
 // fail with std::runtime_error.
 inline void ThreadPool::shutdown() {
   {
-    std::unique_lock<std::mutex> lock(m_queue_mutex);
+    std::unique_lock lock(m_queue_mutex);
     if (m_stop.exchange(true))
       return;
   }
@@ -145,7 +145,7 @@ inline void ThreadPool::shutdown() {
 inline ThreadPool::~ThreadPool() { shutdown(); }
 
 inline size_t ThreadPool::queue_size() const {
-  std::lock_guard<std::mutex> lock(m_queue_mutex);
+  std::lock_guard lock(m_queue_mutex);
   return m_tasks.size();
 }
 

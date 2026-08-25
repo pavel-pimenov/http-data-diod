@@ -3,6 +3,7 @@
 
 #include "httplib/httplib.h"
 #include <string>
+#include <string_view>
 
 struct ParsedUrl {
   std::string m_host;
@@ -16,19 +17,19 @@ inline constexpr const char *kHealthLivePath = "/health/live";
 inline constexpr const char *kHealthPath = "/health";
 inline constexpr const char *kHealthReadyPath = "/health/ready";
 
-ParsedUrl parse_url(const std::string &url);
-std::string extract_client_ip(const httplib::Request &req);
-std::string extract_query_string(const httplib::Request &req);
+[[nodiscard]] ParsedUrl parse_url(std::string_view url);
+[[nodiscard]] std::string extract_client_ip(const httplib::Request &req);
+[[nodiscard]] std::string extract_query_string(const httplib::Request &req);
 
 inline std::string extract_proxy_ip(const httplib::Request &req) {
   return req.local_addr;
 }
 
-inline std::string normalize_path(const std::string &path) {
+[[nodiscard]] inline std::string normalize_path(std::string_view path) {
   if (path.empty()) {
     return "/";
   }
-  return (path[0] == '/') ? path : "/" + path;
+  return (path[0] == '/') ? std::string(path) : std::format("/{}", path);
 }
 
 #endif // URL_UTILS_HPP

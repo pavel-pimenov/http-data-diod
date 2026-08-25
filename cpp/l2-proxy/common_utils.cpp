@@ -12,7 +12,7 @@
 #include <sstream>
 #include <string_view>
 
-std::string compute_sha256_hex(const std::string &data) {
+std::string compute_sha256_hex(std::string_view data) {
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
          hash);
@@ -24,29 +24,29 @@ std::string compute_sha256_hex(const std::string &data) {
   return oss.str();
 }
 
-std::string log_body_preview(const std::string &body, size_t max_len) {
+std::string log_body_preview(std::string_view body, size_t max_len) {
   if (body.size() <= max_len) {
-    return body;
+    return std::string(body);
   }
   return std::format("{}... ({} bytes total)", body.substr(0, max_len),
                      body.size());
 }
 
-std::expected<json, std::string> parse_json(const std::string &body) {
-  const auto result = JsonUtils::try_parse(body);
+std::expected<json, std::string> parse_json(std::string_view body) {
+  const auto result = JsonUtils::try_parse(std::string(body));
   if (result) {
     return result;
   }
-  std::string body_preview = body;
+  auto body_preview = std::string(body);
   if (body_preview.length() > 100) {
-    body_preview = body.substr(0, 100) + "...";
+    body_preview = std::string(body.substr(0, 100)) + "...";
   }
   return std::unexpected(
       std::format("Failed to parse JSON: {}\nBody preview: {}", result.error(),
                   body_preview));
 }
 
-TraceContext handle_trace_context(const std::string &traceparent_raw,
+TraceContext handle_trace_context(std::string_view traceparent_raw,
                                   JaegerLogger *tracer) {
   TraceContext ctx;
   ctx.m_sampled = true;
@@ -91,7 +91,7 @@ void handle_error(const std::string &error_msg,
 void handle_exception(const std::exception &e,
                       prometheus::Counter *metrics_counter,
                       const std::string &prefix_msg) {
-  const std::string error_msg =
+  const auto error_msg =
       prefix_msg.empty() ? std::string(e.what())
                          : std::format("{}: {}", prefix_msg, e.what());
   handle_error(error_msg, metrics_counter, true);
@@ -347,11 +347,11 @@ void handle_processing_error_with_category(
 }
 
 std::expected<json, std::string>
-validate_and_parse_json(const std::string &body, const std::string &context,
-                        const std::string &request_id) {
+validate_and_parse_json(std::string_view body, std::string_view context,
+                        std::string_view request_id) {
   const auto result = parse_json(body);
   if (!result) {
-    const std::string log_msg = std::format(
+    const auto log_msg = std::format(
         "{} failed to parse JSON{}: {}", context,
         request_id.empty() ? ""
                            : std::format(" for request_id: {}", request_id),
@@ -391,7 +391,7 @@ void increment_and_log_response_sent(prometheus::Counter &metrics_counter,
   log_response_sent(context, request_id, status_code);
 }
 
-ParsedUrl parse_url(const std::string &url) {
+ParsedUrl parse_url(std::string_view url) {
   ParsedUrl result;
   result.m_host.clear();
   result.m_path = "/";
@@ -402,44 +402,44 @@ ParsedUrl parse_url(const std::string &url) {
   }
 
   const size_t protocol_end = url.find("://");
-  if (protocol_end != std::string::npos) {
-    const std::string protocol = url.substr(0, protocol_end);
+  if (protocol_end != std::string_view::npos) {
+    const auto protocol = url.substr(0, protocol_end);
     result.m_is_https = (protocol == "https");
     const size_t host_start = protocol_end + 3;
 
     if (host_start >= url.length()) {
-      throw std::runtime_error("Invalid URL: no host after protocol - " + url);
+      throw std::runtime_error(std::format("Invalid URL: no host after protocol - {}", url));
     }
 
-    const size_t port_start = url.find(':', host_start);
-    const size_t path_start = url.find('/', host_start);
+    const auto port_start = url.find(':', host_start);
+    const auto path_start = url.find('/', host_start);
 
-    if (port_start != std::string::npos &&
-        (path_start == std::string::npos || port_start < path_start)) {
-      result.m_host = url.substr(host_start, port_start - host_start);
-      const std::string port_str =
-          url.substr(port_start + 1, path_start != std::string::npos
+    if (port_start != std::string_view::npos &&
+        (path_start == std::string_view::npos || port_start < path_start)) {
+      result.m_host = std::string(url.substr(host_start, port_start - host_start));
+      const auto port_str = std::string(
+          url.substr(port_start + 1, path_start != std::string_view::npos
                                          ? path_start - port_start - 1
-                                         : std::string::npos);
+                                         : std::string_view::npos));
       try {
         result.m_port = std::stoi(port_str);
       } catch (...) {
         result.m_port = result.m_is_https ? 443 : 80;
       }
       result.m_path =
-          (path_start != std::string::npos) ? url.substr(path_start) : "/";
+          (path_start != std::string_view::npos) ? std::string(url.substr(path_start)) : "/";
     } else {
-      result.m_host = url.substr(host_start, path_start != std::string::npos
+      result.m_host = std::string(url.substr(host_start, path_start != std::string_view::npos
                                                  ? path_start - host_start
-                                                 : std::string::npos);
+                                                 : std::string_view::npos));
       result.m_port = result.m_is_https ? 443 : 80;
       result.m_path =
-          (path_start != std::string::npos) ? url.substr(path_start) : "/";
+          (path_start != std::string_view::npos) ? std::string(url.substr(path_start)) : "/";
     }
   }
 
   if (result.m_host.empty() || result.m_path.empty()) {
-    throw std::runtime_error("Invalid URL: " + url);
+    throw std::runtime_error(std::format("Invalid URL: {}", url));
   }
 
   return result;
@@ -447,7 +447,7 @@ ParsedUrl parse_url(const std::string &url) {
 
 std::string format_http_error(httplib::Error error, int timeout_seconds,
                               const std::string &operation) {
-  std::string error_msg =
+  auto error_msg =
       std::format("HTTP {} failed: {}", operation, std::to_underlying(error));
 
   if (error == httplib::Error::Read || error == httplib::Error::Write) {
@@ -513,7 +513,7 @@ std::string extract_client_ip(const httplib::Request &req) {
     // Take the last address: the one appended by the trusted proxy closest to
     // the backend (leftmost entries may be client-supplied).
     const size_t comma_pos = xff.rfind(',');
-    const std::string client_ip =
+    const auto client_ip =
         comma_pos == std::string::npos ? xff : xff.substr(comma_pos + 1);
     const size_t start = client_ip.find_first_not_of(" \t");
     const size_t end = client_ip.find_last_not_of(" \t");

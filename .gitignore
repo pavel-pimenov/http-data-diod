@@ -66,6 +66,8 @@ pvs-studio.log
 *.pvs.raw
 reports/
 crash-dumps/
+logs/
+!logs/.gitkeep
 CMakeFiles
 makefile
 CMakeCache.txt 

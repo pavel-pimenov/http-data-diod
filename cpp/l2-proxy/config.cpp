@@ -87,8 +87,7 @@ void Config::load_from_env() {
 
 void Config::load_l2_server_config() {
   m_mode = get_env_string("MODE", "proxy");
-  const std::string l2_server_host =
-      get_env_string("L2_SERVER_HOST", "l2-server");
+  const auto l2_server_host = get_env_string("L2_SERVER_HOST", "l2-server");
   m_l2_server_port = get_env_int("L2_SERVER_PORT", 8088);
   m_l2_server_protocol = get_env_protocol("L2_SERVER_PROTOCOL", "http");
 
@@ -107,7 +106,7 @@ void Config::load_l2_server_config() {
   m_l2_server_url = std::format("{}://{}:{}", m_l2_server_protocol,
                                 l2_server_host, m_l2_server_port);
 
-  const std::string l2_urls_env = get_env_string("L2_SERVER_URLS", "");
+  const auto l2_urls_env = get_env_string("L2_SERVER_URLS", "");
   if (!l2_urls_env.empty()) {
     try {
       const auto urls_result = JsonUtils::try_parse(l2_urls_env);
@@ -340,7 +339,7 @@ int Config::get_env_int(const std::string &env_name, int default_val) {
     return default_val;
   }
   try {
-    int val = std::stoi(value);
+    auto val = std::stoi(value);
     if (val >= 0) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
@@ -357,7 +356,7 @@ int Config::get_env_int(const std::string &env_name, int default_val) {
 }
 
 std::string Config::get_env_string_silent(const std::string &env_name,
-                                          const std::string &default_val) {
+                                           const std::string &default_val) {
   std::string value;
   if (get_env_raw(env_name, value)) {
     return value;
@@ -398,7 +397,7 @@ double Config::get_env_double(const std::string &env_name, double default_val) {
     return default_val;
   }
   try {
-    double val = std::stod(value);
+    auto val = std::stod(value);
     if (val >= 0.0 && val <= 1.0) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;

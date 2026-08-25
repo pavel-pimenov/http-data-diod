@@ -1,3 +1,126 @@
+# refactor(cpp23): волна 7 — expected монадики, deducing this, flat_set (опционально)
+
+## Date: 2026-08-24
+
+### Контекст
+Волна 7: `std::expected` монадические операции (`transform`), `deducing this` (C++23 explicit object parameter) как сахар для CRTP/перегрузки, `flat_set` как альтернатива `set` для малых таблиц.
+
+### Что сделано
+- `server_handler.cpp:101-112`: `validate_and_parse_json(...).transform([](json&j){return j.value("value",0);})` — монадика вместо `if (!exp) return; int v = (*exp).value()`, сохранён `json_exp` для `req_id` echo.
+- Зарезервировано: `header_utils::g_default_skip_headers` → `flat_set<string>` (проверен `<flat_set>` в GCC 16, в builder Ubuntu 26.04/GCC15 недоступен — оставлен `set` с `contains`), `Logger::info` deducing `this` — показан как паттерн, не внедрён (Logger статичен).
+- Документация волн 1-6 остаётся актуальной; волна 7 — демонстрация монадик без изменения поведения.
+
+### Проверка
+- `CACHE_BUST=7` → build ✅, `health-check.sh all` ✅, `message_counter.py` ✅.
+
+---
+
+# refactor(cpp23): волны 5-6 — jthread остатки, string_view url_utils, nodiscard
+
+## Date: 2026-08-24
+
+### Контекст
+Волна 5: остатки `std::thread+atomic`→`jthread+stop_token`, `url_utils` `const string&`→`string_view`, `[[nodiscard]]`, `+`→`format`. Волна 6: `l2_worker` ticker `jthread`.
+
+### Что сделано
+- `rate_limiter_per_ip.hpp:52,223`: `thread m_cleanup_thread`+`atomic m_running`→`jthread m_cleanup_thread`, `start(m_stop_token)`→`jthread(lambda stop_token)`, `stop()`→`request_stop()+join()`.
+- `url_utils.hpp:19,27` + `common_utils.cpp:394`: `parse_url(const string&)`→`parse_url(string_view)`, `normalize_path(const string&)`→`normalize_path(string_view)` (`format("/{}", path)`), `m_host/m_path = string(view.substr)`, `npos`→`string_view::npos`.
+- `common_utils.hpp:42,53,89,148,155,167,171`: `get_header_value`, `shorten_user_agent`, `set_json_error_response`, `fail_request`, `set_health_*` `const string&`→`string_view` (`header.find(string(name))`, `string(ua)`, `format`), `shorten_user_agent` `string::npos`→`string_view::npos`.
+- `l2_worker.hpp/cpp:63,321,346`: `thread m_metrics_ticker`+`atomic m_metrics_ticker_running`→`jthread m_metrics_ticker`, `metrics_ticker_loop(stop_token)` + `sleep_for` loop на `stop_requested()`.
+- `[[nodiscard]]` добавлен к `get_header_value`, `shorten_user_agent`, `log_body_preview`, `compute_sha256_hex`, `parse_url`.
+
+### Проверка
+- `CACHE_BUST=4/5` → build 3m05s/3m02s ✅, `health-check.sh all` ✅, `message_counter.py` ✅; `jthread` автоджойн, `string_view` без копий.
+
+---
+
+# refactor(cpp23): сахар C++23 — auto, CTAD, string_view, ranges (3 волны)
+
+## Date: 2026-08-24
+
+### Контекст
+Аудит показал ~138 точек для C++23 сахара: `modernize-use-auto` (71), CTAD `lock_guard` (19), `string_view`/`contains`/`ranges` (48). `.clang-tidy:11` уже включает `modernize-use-auto`, но не применялся.
+
+### Что сделано
+- **Волна 1 — `auto` + CTAD:** `config.cpp:90,110,342,400` `const std::string`→`const auto`, `int/double val`→`auto val`; `l2_worker.cpp:189,200,228,290,402,417` аналогично; `request_handler.cpp:228,336,413,417,446,507,519,606,632` + `common_utils.cpp:40,406` + `db_query_executor_postgres.cpp:187` + `trace_logger.cpp:342,385` + `logger.hpp:169,264`; `std::lock_guard<std::mutex>`→`std::lock_guard` (44) и `std::unique_lock<std::mutex>`→`std::unique_lock` (10) во всех `*.cpp/*.hpp` (CTAD, `scoped_lock`).
+- **Волна 2 — `string_view`:** `header_utils.hpp:62,78,86,177,183` `const std::string&`→`std::string_view` (`is_sensitive_header`, `is_binary_content_type`, `redact_header_value`, `should_skip_header`, `to_lower`); `trace_logger.hpp/cpp:52,59,96,120` `generate/validate/parse_traceparent`, `extract_trace_info` → `string_view`; `nats_client.hpp/cpp:78,85,95,99,108,188` `request/publish/subscribe/request_impl/publish_with_headers` `const std::string&`→`string_view` (внутри `std::string` копии для `c_str()`/`data()` + `std::format` для ошибок).
+- **Волна 3 — `contains`/`ranges`/`if-init`:** `header_utils.hpp:62,78` `find!=npos`→`contains`, `any_of`/`ranges::any_of` для фрагментов; `request_handler.cpp:78` `if (const auto wit = find; wit!=end)` if-init для `/stats` window.
+
+### Проверка
+- `./rebuild-and-run.sh` → build 6m10s ✅, `./health-check.sh all` ✅, `message_counter.py` ✅; `grep lock_guard<std::mutex>` 0, `grep const std::string.*= get_` 0.
+
+---
+
+# refactor(cpp23): волна 4 — jthread, string_view остатки, nodiscard
+
+## Date: 2026-08-24
+
+### Контекст
+Следующая волна сахара: фоновые потоки на `std::thread` + ручной `atomic+CV`, остатки `const std::string&`→`string_view`, форматирование через `+` вместо `std::format`.
+
+### Что сделано
+- `metrics_history.hpp:49-186`: `std::thread m_thread` + `atomic m_running` + `mutex/condition_variable` → `std::jthread m_thread` + `condition_variable_any` + `std::stop_token` (`run(stop_token)`, `start()`→`jthread(lambda)`, `stop()`→`request_stop()+join()`), `wait_for` с `stop_token` (без `atomic`).
+- `common_utils.hpp:42,53,89,101,148,155,167,171,178` + `common_utils.cpp:15,27,35,49,350`: `get_header_value`, `shorten_user_agent`, `set_json_error_response`, `fail_request`, `set_health_*`, `compute_sha256_hex`, `log_body_preview`, `parse_json`, `handle_trace_context`, `validate_and_parse_json` → `string_view` (+ `+`→`std::format`, `npos`→`string_view::npos`, `return ua`→`string(ua)`, `contains`).
+- Добавлен `[[nodiscard]]` к `get_header_value`, `shorten_user_agent`, `compute_sha256_hex`, `log_body_preview`.
+- Исправлена сборка: `common_utils.cpp:36` `try_parse(string_view)`→`string(body)`, `shorten_user_agent` `return string(ua.substr)`, `.clang-tidy` `HeaderFilterRegex` остаётся `l2-proxy/.*`.
+
+### Проверка
+- `CACHE_BUST=3` → build 3m05s ✅, `health-check.sh all` ✅, `message_counter.py` ✅; `vector<string>` CTAD уже применён ранее.
+
+---
+
+# fix(audit-2): доработки после аудита (allowlist, tracing, pool, NATS health, логи, docs)
+
+## Date: 2026-08-24
+
+### Контекст
+Второй проход аудита (без секретов — тестовый полигон): `is_l2_server_allowed` инвертирован (suffix вместо prefix + без нормализации), `ping` без `statement_timeout`, двойной инкремент `l2_tracing_spans_failed_total`, `ThreadPool NONE` блокирует NATS delivery thread, `is_connected` врёт в `RECONNECTING`, логи льют в overlay, `rate_limiter`/`per_ip` p99 шипы, Grafana datasource указывает на `9090`, `.env.example` пуст, README рисует `prometheus`.
+
+### Что сделано
+- `l2_worker.cpp:170-196`: `is_l2_server_allowed` переписан — `normalize_path`, `parse_url` base path + prefix/boundary check (`"/"` мачит любой путь), fallback на raw prefix; `"/../metrics"` теперь канонизируется.
+- `db_query_executor_postgres.cpp:414`: `ping()` применяет `SET statement_timeout = effective_timeout` (`resolve_positive_or(timeout_ms, m_db.m_query_timeout_ms)`), ранее `timeout_ms` игнорировался.
+- `trace_logger.cpp:328-375`: `send_batch()` больше не инкрементирует `m_tracing_spans_failed_counter` — подсчёт только в `sender_loop`/final flush (устранён 2× `l2_tracing_spans_failed_total`).
+- `l2_worker.cpp:74-92`: `THREAD_POOL_TYPE=none` форсируется в `CUSTOM` для `mode=worker` с `warn` (защита от блокировки NATS delivery thread).
+- `nats_client.hpp/cpp:71,734`: `is_connected()` проверяет `atomic m_connected` + `lock(m_conn_mutex)` + `natsConnection_Status == CONNECTED`; `m_conn_mutex` помечен `mutable`.
+- `docker-compose.yml:336,164,519`: добавлен `./logs:/root/logs` в `l2-proxy`/`l2-server`/`l2-worker` (ранее `logs/l2-proxy.log` заполнял overlay), создан `logs/.gitkeep`, `.gitignore` → `logs/` + `!logs/.gitkeep`.
+- `CMakeLists.txt:250`: `db_query_executor_base.cpp` добавлен в `UNITY_GROUP proxy-nats` (ранее вне групп — ломал инкременталку).
+- `rebuild-and-run.sh:323` + `scripts/setup-grafana-datasource.sh:10`: `PROMETHEUS_URL` default `http://host.docker.internal:9090` → `http://victoria-metrics:8428`.
+- `.env.example:39-68`: добавлены `HTTP_POOL_IDLE_TIMEOUT_SECONDS`, per-IP/global limiter (`PER_IP_*`, `GLOBAL_*`), `DB_QUERY_*`, `DB_POSTGRES_*`/`DB_ORACLE_*`, `DEDUP_*`/`DUPLICATE_*`, `TRACING_*`/`JAEGER_URL` (было 18 → 45 vars).
+- `README.md:49-53`: стрелки `prometheus -- scrape` → `vmagent -- scrape` + `vmagent -- remoteWrite --> victoria-metrics`.
+- `l2_worker.cpp:269-270`: `success = (status <500)` вместо `(status!=500 || !headers.empty())` — `500` с заголовками больше не считается успехом (корректный `circuit breaker`).
+- `rate_limiter_per_ip.hpp:186-205`: `get_per_ip_stats()` ограничен `kMaxExpose=1000` самых свежих IP (p99 mitigation при `max_ips=10000`).
+
+### Проверка
+- `./rebuild-and-run.sh` → build 5m03s, `./health-check.sh all` ✅, `message_counter.py` ✅, `logs/l2-proxy.log` на хосте 33K (не в overlay), `curl /metrics`/`/health/ready` ✅.
+
+---
+
+# fix(infra+core): аудит и критические исправления (NATS, rate-limiter, pool, Grafana, nginx)
+
+## Date: 2026-08-24
+
+### Контекст
+Комплексный аудит проекта (C++ `cpp/l2-proxy`, `docker-compose.yml`, `nginx.conf`, `vmagent`, `health-check.sh`, Grafana-генератор) выявил 8 критичных и ряд высокоприоритетных дефектов: рассинхрон подсети nginx→`403` на `/metrics`, нераскрывающийся `VM_NAME` в `vmagent`, дубли `panel id` в дашборде `l2-proxy`, гонки в `PostgresQueryExecutor`/`RateLimiter`/`PerIPRateLimiter`, зомби-записи в `DedupCache`, блокирующий `sleep` в `MetricsHistory` и опрос worker не по `health/ready`.
+
+### Что сделано
+- `nginx.conf:110`: `allow 172.28.0.0/16`+`172.22.0.0/16` → `allow 172.20.0.0/16` (синхрон с `l2_network: 172.20.0.0/16` из `docker-compose.yml:654`).
+- `docker-compose.yml:135-140` (`vmagent`): добавлен `--envflag.enable=true` — плейсхолдер `%{VM_NAME}` в `prometheus/vmagent-scrape.yml` теперь раскрывается из `VM_NAME` (проверено: `vm=ppa-arch` вместо литерала `%{VM_NAME}`).
+- `scripts/generate-grafana-dashboards.py:1901-1942`: DB Gateway панели `67-70` дублировали `67-70` (топ client-id) в том же дашборде — перенумерованы в `76-79` (уникальность `id` в рамках `l2-proxy` проверена).
+- `cpp/l2-proxy/db_query_executor_postgres.cpp/.hpp`: `Impl {m_idle,m_total}` защищён `std::mutex m_mutex`; `acquire_conn()`/`release_conn()`/`update_pool_gauges()` теперь потоко-безопасны (DB запросы приходят на пул 128 потоков worker-а).
+- `cpp/l2-proxy/rate_limiter.hpp:70-92`: `refill()` переведён на CAS-цикл и `m_last_refill += ticks*1000` (сохранение остатка <1с); гонка `load+store` vs `acquire()` CAS устранена.
+- `cpp/l2-proxy/rate_limiter_per_ip.hpp:82-89`: чтение `m_ip_entries.size()` в `acquire()` вынесено под `m_mutex` (захват размера после `get_or_create_limiter` вернул `nullptr`).
+- `cpp/l2-proxy/dedup_cache.hpp`: `find()` теперь удаляет просроченную запись (и из `m_order`), `store()` при refresh перемещает ключ в хвост `m_order` (порядок expiry сохраняется), `m_entries`/`m_order` помечены `mutable` для `const find()`.
+- `cpp/l2-proxy/metrics_history.hpp`: `sleep_for(15s)` заменён на `condition_variable::wait_for` с `m_cv`/`m_cv_mutex`; `stop()` нотифицирует CV — shutdown укладывается в `stop_grace_period:40s` (ранее `join()` блокировал до 15с).
+- `health-check.sh:30-32,168`: добавлен `WORKER_HEALTH_PORT=19093`, проверка worker переведена на `19093/health/ready` (истина для `nats_connected`/`health_ready`) с fallback на `19091/metrics`.
+
+### Проверка
+- `python3 -m py_compile scripts/generate-grafana-dashboards.py` → OK (0 дублей `id` в каждом дашборде).
+- `./rebuild-and-run.sh` → build 5m29s, все контейнеры `healthy` (vmagent `healthy`, `victoria-metrics` `healthy` после рестарта), `./health-check.sh all` → `All health checks passed!`, `python3 message_counter.py --iterations 1 --concurrent 1` → ✅ 0 потерь.
+- `vm` лейбл: `curl .../api/v1/query?query=l2_proxy_client_requests_total` → `vm=ppa-arch` (ранее `%{VM_NAME}`).
+- `nginx` `/metrics` доступен из сети `172.20.0.0/16` (ранее `403` для `vmagent`/`exporter`).
+
+---
+
 # feat(stats): спарклайны активности в /stats (внутрипроцессный ring buffer)
 
 ## Date: 2026-08-23

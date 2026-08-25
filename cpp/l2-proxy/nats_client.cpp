@@ -72,7 +72,7 @@ NatsClient::~NatsClient() {
     // connection resources are being torn down.
     m_shutdown.store(true, std::memory_order_release);
     {
-      std::lock_guard<std::mutex> lock(m_conn_mutex);
+      std::lock_guard lock(m_conn_mutex);
       cleanup();
     }
     // natsConnection_Destroy() fires the Closed callback asynchronously on the
@@ -120,7 +120,7 @@ bool NatsClient::connect() {
       return false;
     }
 
-    std::lock_guard<std::mutex> lock(m_conn_mutex);
+    std::lock_guard lock(m_conn_mutex);
 
     if (m_connected && m_conn != nullptr) {
       return true;
@@ -353,7 +353,7 @@ bool NatsClient::connect() {
 }
 
 void NatsClient::disconnect() {
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
   disconnect_locked();
   Logger::info("Disconnected from NATS server");
 }
@@ -413,8 +413,8 @@ void NatsClient::cleanup() {
   }
 }
 
-std::optional<std::string> NatsClient::request(const std::string &subject,
-                                               const std::string &data,
+std::optional<std::string> NatsClient::request(std::string_view subject,
+                                               std::string_view data,
                                                int timeout_ms) {
   const auto reply = request_impl(subject, data, {}, {}, timeout_ms);
   if (!reply) {
@@ -429,7 +429,7 @@ std::optional<std::string> NatsClient::request(const std::string &subject,
 }
 
 std::optional<NatsReply>
-NatsClient::request_impl(const std::string &subject, const std::string &data,
+NatsClient::request_impl(std::string_view subject, std::string_view data,
                          const NatsHeaders &headers,
                          const std::vector<std::string> &reply_header_keys,
                          int timeout_ms) {
@@ -442,12 +442,13 @@ NatsClient::request_impl(const std::string &subject, const std::string &data,
     return std::nullopt;
   }
 
+  const std::string subject_str(subject);
   natsMsg *msg = nullptr;
-  natsStatus s = natsMsg_Create(&msg, subject.c_str(), nullptr, data.c_str(),
-                                static_cast<int>(data.size()));
+  natsStatus s = natsMsg_Create(&msg, subject_str.c_str(), nullptr, data.data(),
+                                 static_cast<int>(data.size()));
   if (s != NATS_OK) {
-    set_error("Failed to create NATS request message for subject '" + subject +
-              "'");
+    set_error("Failed to create NATS request message for subject '" +
+              std::string(subject) + "'");
     return std::nullopt;
   }
 
@@ -461,16 +462,16 @@ NatsClient::request_impl(const std::string &subject, const std::string &data,
   natsMsg_Destroy(msg);
 
   if (s != NATS_OK) {
-    const std::string error_text = nats_status_text(s);
+    const auto error_text = nats_status_text(s);
 
     if (s == NATS_NO_RESPONDERS) {
-      set_last_error("request failed for subject '" + subject +
-                     "': " + error_text);
+      set_last_error(std::format("request failed for subject '{}': {}",
+                                 subject, error_text));
       return std::nullopt;
     }
 
-    mark_disconnected("request failed for subject '" + subject +
-                      "': " + error_text);
+    mark_disconnected(
+        std::format("request failed for subject '{}': {}", subject, error_text));
     return std::nullopt;
   }
 
@@ -495,8 +496,8 @@ NatsClient::request_impl(const std::string &subject, const std::string &data,
 }
 
 std::pair<NatsReply, std::string>
-NatsClient::request_with_consume_span_id(const std::string &subject,
-                                         const std::string &data,
+NatsClient::request_with_consume_span_id(std::string_view subject,
+                                         std::string_view data,
                                          int timeout_ms) {
   NatsReply reply = request_with_headers(
       subject, data, {}, {NatsContract::kConsumeSpanIdHeader}, timeout_ms);
@@ -508,7 +509,7 @@ NatsClient::request_with_consume_span_id(const std::string &subject,
   return {std::move(reply), std::move(consume_span_id)};
 }
 
-bool NatsClient::publish(const std::string &subject, const std::string &data) {
+bool NatsClient::publish(std::string_view subject, std::string_view data) {
   if (!ensure_connected()) {
     return false;
   }
@@ -518,10 +519,12 @@ bool NatsClient::publish(const std::string &subject, const std::string &data) {
     return false;
   }
 
+  const std::string subject_str(subject);
+  const std::string data_str(data);
   natsStatus s =
-      natsConnection_PublishString(conn, subject.c_str(), data.c_str());
+      natsConnection_PublishString(conn, subject_str.c_str(), data_str.c_str());
   if (s != NATS_OK) {
-    mark_disconnected("publish failed for subject '" + subject +
+    mark_disconnected("publish failed for subject '" + std::string(subject) +
                       "': " + nats_status_text(s));
     return false;
   }
@@ -529,14 +532,14 @@ bool NatsClient::publish(const std::string &subject, const std::string &data) {
   return true;
 }
 
-bool NatsClient::subscribe(const std::string &subject,
+bool NatsClient::subscribe(std::string_view subject,
                            NatsMessageCallback callback,
-                           const std::string &queue_group) {
+                           std::string_view queue_group) {
   if (!ensure_connected()) {
     return false;
   }
 
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
 
   if (!m_conn) {
     mark_disconnected("subscribe: connection is null");
@@ -547,43 +550,45 @@ bool NatsClient::subscribe(const std::string &subject,
   subscription.m_callback =
       std::make_unique<std::shared_ptr<NatsMessageCallback>>(
           std::make_shared<NatsMessageCallback>(std::move(callback)));
-  subscription.m_subject = subject;
+  subscription.m_subject = std::string(subject);
 
+  const std::string subject_str(subject);
+  const std::string queue_group_str(queue_group);
   natsSubscription *sub = nullptr;
   natsStatus s;
   if (queue_group.empty()) {
-    s = natsConnection_Subscribe(&sub, m_conn, subject.c_str(),
+    s = natsConnection_Subscribe(&sub, m_conn, subject_str.c_str(),
                                  nats_message_callback,
                                  subscription.m_callback.get());
   } else {
     s = natsConnection_QueueSubscribe(
-        &sub, m_conn, subject.c_str(), queue_group.c_str(),
+        &sub, m_conn, subject_str.c_str(), queue_group_str.c_str(),
         nats_message_callback, subscription.m_callback.get());
   }
 
   if (s != NATS_OK) {
-    set_error("NATS subscribe failed for subject: " + subject + ": " +
-              nats_status_text(s));
+    set_error("NATS subscribe failed for subject: " + std::string(subject) +
+              ": " + nats_status_text(s));
     return false;
   }
 
   subscription.m_sub = sub;
   m_subscriptions.push_back(std::move(subscription));
 
-  std::string queue_group_info =
-      queue_group.empty() ? "" : " queue_group=" + queue_group;
+  auto queue_group_info =
+      queue_group.empty() ? std::string{} : std::format(" queue_group={}", queue_group);
   Logger::info("Subscribed to NATS subject: {}{}", subject, queue_group_info);
   return true;
 }
 
-bool NatsClient::subscribe_queue(const std::string &subject,
-                                 const std::string &queue_group,
+bool NatsClient::subscribe_queue(std::string_view subject,
+                                 std::string_view queue_group,
                                  NatsMessageCallback callback) {
   return subscribe(subject, std::move(callback), queue_group);
 }
 
 void NatsClient::unsubscribe() {
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
   if (m_subscriptions.empty()) {
     return;
   }
@@ -595,7 +600,7 @@ void NatsClient::unsubscribe() {
 }
 
 bool NatsClient::drain(int timeout_ms) {
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
 
   // Drain subscription: waits for in-flight message handlers to complete
   drain_subscription_locked(true);
@@ -625,7 +630,7 @@ bool NatsClient::check_connection() {
     return false;
   }
 
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
 
   if (!m_conn) {
     mark_disconnected("health check: connection is null");
@@ -655,7 +660,7 @@ std::optional<std::string> NatsClient::ping() {
 }
 
 std::optional<std::string> NatsClient::get_last_error() const {
-  std::lock_guard<std::mutex> lock(m_error_mutex);
+  std::lock_guard lock(m_error_mutex);
   return m_last_error.empty() ? std::nullopt : std::optional(m_last_error);
 }
 
@@ -676,8 +681,8 @@ bool NatsClient::set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
   return true;
 }
 
-bool NatsClient::publish_with_headers(const std::string &subject,
-                                      const std::string &data,
+bool NatsClient::publish_with_headers(std::string_view subject,
+                                      std::string_view data,
                                       const NatsHeaders &headers) {
   if (!ensure_connected()) {
     return false;
@@ -688,11 +693,13 @@ bool NatsClient::publish_with_headers(const std::string &subject,
     return false;
   }
 
+  const std::string subject_str(subject);
   natsMsg *msg = nullptr;
-  natsStatus s = natsMsg_Create(&msg, subject.c_str(), nullptr, data.c_str(),
-                                static_cast<int>(data.size()));
+  natsStatus s = natsMsg_Create(&msg, subject_str.c_str(), nullptr, data.data(),
+                                 static_cast<int>(data.size()));
   if (s != NATS_OK) {
-    set_error("Failed to create NATS message for subject '" + subject + "'");
+    set_error("Failed to create NATS message for subject '" +
+              std::string(subject) + "'");
     return false;
   }
 
@@ -704,8 +711,8 @@ bool NatsClient::publish_with_headers(const std::string &subject,
   natsMsg_Destroy(msg);
 
   if (s != NATS_OK) {
-    mark_disconnected("publish_with_headers failed for subject '" + subject +
-                      "': " + nats_status_text(s));
+    mark_disconnected("publish_with_headers failed for subject '" +
+                      std::string(subject) + "': " + nats_status_text(s));
     return false;
   }
 
@@ -713,7 +720,7 @@ bool NatsClient::publish_with_headers(const std::string &subject,
 }
 
 NatsReply NatsClient::request_with_headers(
-    const std::string &subject, const std::string &data,
+    std::string_view subject, std::string_view data,
     const NatsHeaders &headers,
     const std::vector<std::string> &reply_header_keys, int timeout_ms) {
   const auto reply =
@@ -727,12 +734,12 @@ void NatsClient::set_error(const std::string &error) {
 }
 
 void NatsClient::set_last_error(const std::string &error) {
-  std::lock_guard<std::mutex> lock(m_error_mutex);
+  std::lock_guard lock(m_error_mutex);
   m_last_error = error;
 }
 
 natsConnection *NatsClient::acquire_connection(const std::string &operation) {
-  std::lock_guard<std::mutex> lock(m_conn_mutex);
+  std::lock_guard lock(m_conn_mutex);
   if (!m_conn) {
     mark_disconnected(operation + ": connection is null");
     return nullptr;
@@ -740,11 +747,25 @@ natsConnection *NatsClient::acquire_connection(const std::string &operation) {
   return m_conn;
 }
 
+bool NatsClient::is_connected() const {
+  if (!m_connected.load(std::memory_order_acquire)) {
+    return false;
+  }
+  std::lock_guard lock(m_conn_mutex);
+  if (!m_conn) {
+    return false;
+  }
+  // natsConnection_IsConnected would require extra call; rely on status if
+  // available — RECONNECTING/CLOSED/DRAINING are not "connected".
+  const natsConnStatus status = natsConnection_Status(m_conn);
+  return status == NATS_CONN_STATUS_CONNECTED;
+}
+
 bool NatsClient::ensure_connected() {
   if (m_shutdown.load(std::memory_order_acquire)) {
     return false;
   }
-  if (m_connected && m_conn != nullptr) {
+  if (is_connected()) {
     return true;
   }
 

@@ -7,7 +7,7 @@ set -e
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 GRAFANA_USER="${GRAFANA_USER:-admin}"
 GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-admin}"
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://host.docker.internal:9090}"
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://victoria-metrics:8428}"
 
 echo "=========================================="
 echo "Grafana Datasource Setup"

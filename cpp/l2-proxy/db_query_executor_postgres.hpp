@@ -6,8 +6,9 @@
 #include <memory>
 
 // PostgreSQL implementation of DbQueryExecutor built on libpq and a small
-// connection pool. Instances are owned by the DB gateway handler and are not
-// shared between threads: all pool access happens from one thread.
+// connection pool. Instances are owned by the DB gateway handler and may be
+// accessed from multiple worker threads (NATS DB requests run on the thread
+// pool), so pool state is guarded by a mutex.
 class PostgresQueryExecutor final : public DbExecutorBase {
 public:
   explicit PostgresQueryExecutor(DbConfig db);
