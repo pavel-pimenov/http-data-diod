@@ -8,6 +8,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -127,7 +128,8 @@ private:
       }
       auto &smap = m_data[family.name];
       std::size_t stored = 0;
-      for (const auto &metric : family.metric) {
+      std::span<const prometheus::ClientMetric> view(family.metric);
+      for (const auto &metric : view) {
         if (stored >= m_max_series_per_family) {
           break;
         }

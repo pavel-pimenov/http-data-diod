@@ -444,6 +444,22 @@ python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выро�
 
 Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка покрытия: `python3 scripts/test-grafana-generator.sh` (поднимает временный Grafana и прогоняет генератор).
 
+### Алерты (vmalert)
+
+Правила в `prometheus/alerts.yml` оцениваются `vmalert` (`victoriametrics/vmalert:v1.97.0`, `:8880`, `-notifier.blackhole` — логи без Alertmanager):
+
+| Группа | Алерт | `expr` | `for` | Severity |
+|---|---|---|---|---|
+| `l2_availability` | `L2NATSDown` | `l2_proxy_nats_connected==0 or l2_worker_nats_connected==0` | 1m | critical |
+|  | `L2NotReady` | `l2_*_health_ready==0` | 1m | critical |
+| `l2_error_rate` | `L2HighErrorRate` | `rate(l2_proxy_responses_total{5m} 4..|5..)/rate(total) >0.05` | 2m | warning |
+|  | `L2CriticalErrorRate` | `rate(5..)/rate(total) >0.20` | 1m | critical |
+| `l2_saturation` | `L2WorkerQueueSaturation` | `l2_worker_queue_size >50` | 1m | warning |
+|  | `L2ProxyInFlightHigh` | `l2_proxy_in_flight_requests >100` | 2m | warning |
+|  | `L2PerIPRateLimitHigh` | `rate(l2_per_ip_rate_limiter_rejected_total[1m])>10` | 2m | warning |
+
+Проверка: `curl -s http://localhost:8880/api/v1/rules | jq` (группы `l2_availability`/`l2_error_rate`/`l2_saturation`). Дашборды и алерты используют один `vm` лейбл (`%{VM_NAME}`).
+
 ### Выбор виртуальных машин
 
 Стек может разворачиваться на нескольких ВМ. Во всех дашбордах есть одна переменная **Виртуальная машина** (`$vm`): на каждой ВМ развёрнут один экземпляр каждого сервиса (proxy/worker/nats/nginx), поэтому **метрики на всех досках показываются только одной ВМ** — выбор узла обязателен (по умолчанию — первая ВМ из списка), мультиселекта нет.

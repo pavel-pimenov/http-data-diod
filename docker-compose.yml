@@ -151,6 +151,36 @@ services:
       retries: 3
       start_period: 15s
 
+  # VictoriaMetrics Alerting - evaluates prometheus/alerts.yml against victoria-metrics
+  vmalert:
+    container_name: vmalert
+    image: victoriametrics/vmalert:v1.97.0
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./prometheus/alerts.yml:/etc/vmalert/alerts.yml:ro
+    command:
+      - '-datasource.url=http://victoria-metrics:8428'
+      - '-remoteRead.url=http://victoria-metrics:8428'
+      - '-remoteWrite.url=http://victoria-metrics:8428'
+      - '-rule=/etc/vmalert/alerts.yml'
+      - '-external.label=vm=${VM_NAME:-hostname}'
+      - '-httpListenAddr=:8880'
+      - '-notifier.blackhole'
+    environment:
+      - VM_NAME=${VM_NAME:-hostname}
+    networks:
+      - l2_network
+    depends_on:
+      - victoria-metrics
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8880/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   l2-server:
     container_name: l2-server
     image: http-data-diod-l2-proxy:latest
@@ -532,8 +562,8 @@ services:
       - L2_WORKER_THREADS=${L2_WORKER_THREADS:-128}
       - L2_WORKER_QUEUE_SIZE=${L2_WORKER_QUEUE_SIZE:-0}
       - MAX_RETRIES=1
-      # Dedup cache for duplicate NATS requests (DEDUP_ENABLED=false disables it)
-      - DEDUP_ENABLED=${DEDUP_ENABLED:-false}
+      # Dedup cache for duplicate NATS requests (DEDUP_ENABLED=true enables at-most-once L2)
+      - DEDUP_ENABLED=${DEDUP_ENABLED:-true}
       - DEDUP_MAX_ENTRIES=${DEDUP_MAX_ENTRIES:-4096}
       - DEDUP_TTL_MS=${DEDUP_TTL_MS:-60000}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans

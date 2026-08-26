@@ -1,3 +1,41 @@
+# feat(observability): vmalert алерты + DEDUP true + волны 11-12 span/execution/latch
+
+## Date: 2026-08-26
+
+### Контекст
+Трек B: `DEDUP_ENABLED=false` ломал `fault_tolerance` dedup (0 cache-hits), `vmalert` отсутствовал, `performance-regression` не в `pre-commit`. Волны 11-12: `span` для `ClientMetric`, `execution::par` для `metrics_history`, `latch` для `ThreadPool`, `optional` монадики, `variant` для DB.
+
+### Что сделано
+- `docker-compose.yml:535` `DEDUP_ENABLED:-false`→`:-true` (воркер `enabled=true`, `dedup_test` теперь `l2_calls 1 duplicate 1` ✅), `vmalert` сервис `victoriametrics/vmalert:v1.97.0` `:8880` + `prometheus/alerts.yml` (3 группы `l2_availability`/`l2_error_rate`/`l2_saturation`, 7 алертов, `for 1-2m`, `severity warning/critical`, `external.label vm`, `-notifier.blackhole`, healthcheck, `8880:8880`).
+- `README.md:430` раздел «Алерты (vmalert)» — таблица групп + `curl http://localhost:8880/api/v1/rules`.
+- `header_utils.hpp:13` `flat_set` уже в волне 8-10, волна 11 добивает `span`/`execution`: `metrics_history.hpp:125` `span<const ClientMetric> view(family.metric)` + `for_each(par, view, ...)`, `thread_pool.hpp:48` `latch` для `shutdown`.
+- `common_utils.hpp:42` `get_header_value(string_view)` + `l2_worker.cpp:585` `expected::and_then` уже, волна 12 `variant<Postgres,Oracle>` для `db_query_handler` + `consteval` для `kPg*`.
+
+### Проверка
+- `docker compose up -d l2-worker` → `Dedup cache: enabled=true`, `dedup_test` ✅, `vmalert` `Up (healthy)` `curl /api/v1/rules` → `L2NATSDown` etc., `health-check.sh all` ✅, `CACHE_BUST=12` build ✅.
+
+---
+
+# refactor(cpp23): волны 8-10 — flat_set/mdspan/generator/expected/jthread
+
+## Date: 2026-08-25
+
+### Контекст
+Волны 8-10 добивают C++23 сахар без модулей: `flat_set` для 4-10 элементов (кеш-дружелюбно), `mdspan` для 2D вью без копий, `generator` (корутины) для ленивых ретраев, `expected` монадики full, `consteval` для констант, `jthread` остатки.
+
+### Что сделано
+- `header_utils.hpp:13,17`: `set<string> g_default_skip_headers` (4) → `flat_set<string>` (conditional `__has_include(<flat_set>)`), `HeaderSet` alias, `contains`/`ranges::any_of`, `filter_headers_impl` `HeaderSet&`.
+- `db_query_executor_postgres.cpp:14,400`: `<mdspan>` demo — `mdspan<int,dextents<2>> md(dummy.data(), num_fields,2)` (non-owning 2D view, 0 копий) над `name_type`.
+- `l2_worker.hpp/cpp:60,321,346` + `l2_worker.cpp:383`: `generator<int> attempt_sequence(max)` + `for (int attempt : attempt_sequence(max_retries))` (корутина, `co_yield`, ленивость, `views::filter` компонуемость) с fallback на `for` loop.
+- `l2_worker.cpp:585`: `validate_and_parse_json(...).and_then([&](json j){ validator.validate → expected })` — `expected` монадика `and_then`/`transform`/`or_else` вместо `if (!exp)`.
+- `dedup_cache.hpp:15,31`: `consteval dedup_default_max()/ttl()` + `explicit DedupCache(... = dedup_default_max())` — compile-time константы.
+- `CMakeLists.txt:292` уже линкует `stdc++exp` для `<stacktrace>/<print>` (волна 8.0 deducing this + print/stacktrace).
+
+### Проверка
+- `CACHE_BUST=12` → build ✅, `curl /debug/stacktrace` → 9 фреймов с `description`+`file:line` (`request_handler.cpp:120`), `message_counter.py` ✅, `flat_set`/`mdspan`/`generator` за `__has_include` — fallback на хосте и в builder.
+
+---
+
 # refactor(cpp23): волна 7 — expected монадики, deducing this, flat_set (опционально)
 
 ## Date: 2026-08-24

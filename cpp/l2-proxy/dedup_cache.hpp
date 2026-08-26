@@ -28,10 +28,13 @@
 // When disabled the cache is a no-op: find() never hits and store() is
 // skipped, so a re-delivered request is processed again (at-least-once L2
 // side effects instead of at-most-once).
+consteval std::size_t dedup_default_max() { return 4096; }
+consteval std::uint64_t dedup_default_ttl() { return 60000; }
+
 class DedupCache {
 public:
-  explicit DedupCache(bool enabled = true, size_t max_entries = 4096,
-                      uint64_t ttl_ms = 60000)
+  explicit DedupCache(bool enabled = true, size_t max_entries = dedup_default_max(),
+                      uint64_t ttl_ms = dedup_default_ttl())
       : m_enabled(enabled), m_max_entries(max_entries), m_ttl_ms(ttl_ms) {}
 
   // Returns the cached response for request_id if it was produced within the

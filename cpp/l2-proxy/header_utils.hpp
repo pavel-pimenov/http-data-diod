@@ -9,16 +9,25 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#if __has_include(<flat_set>)
+#include <flat_set>
+#endif
 
 namespace header_utils {
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+using HeaderSet = std::flat_set<std::string>;
+#else
+using HeaderSet = std::set<std::string>;
+#endif
 // Inline namespace-scope singletons: guaranteed to be a single object across
 // all translation units (C++17 inline variables), unlike function-local statics
 // inside implicitly-inline member functions.
-inline const std::set<std::string> g_default_skip_headers = {
+// flat_set for 4-10 elements: sorted vector, 0 allocations for find, cache-friendly
+inline const HeaderSet g_default_skip_headers = {
     "host", "content-length", "connection", "transfer-encoding"};
-inline const std::set<std::string> g_response_skip_headers = {
+inline const HeaderSet g_response_skip_headers = {
     "content-length", "transfer-encoding", "content-encoding"};
-inline const std::set<std::string> g_sensitive_headers = {
+inline const HeaderSet g_sensitive_headers = {
     "authorization", "proxy-authorization",
     "cookie",        "set-cookie",
     "x-api-key",     "api-key",
@@ -42,17 +51,17 @@ inline const std::vector<std::string> g_sensitive_header_fragments = {
 
 class HeaderUtils {
 public:
-  static const std::set<std::string> &get_default_skip_headers() {
+  static const header_utils::HeaderSet &get_default_skip_headers() {
     return header_utils::g_default_skip_headers;
   }
 
-  static const std::set<std::string> &get_response_skip_headers() {
+  static const header_utils::HeaderSet &get_response_skip_headers() {
     return header_utils::g_response_skip_headers;
   }
 
   // Header names whose values must never appear in logs (credentials, tokens,
   // cookies). Values are still forwarded, only log lines are redacted.
-  static const std::set<std::string> &get_sensitive_headers() {
+  static const header_utils::HeaderSet &get_sensitive_headers() {
     return header_utils::g_sensitive_headers;
   }
 
@@ -93,12 +102,12 @@ public:
   // hands the non-skipped pairs to the emit callback. skip_headers is matched
   // case-insensitively.
   template <typename VisitFn, typename EmitFn>
-  static void filter_headers_impl(const std::set<std::string> &skip_headers,
+  static void filter_headers_impl(const header_utils::HeaderSet &skip_headers,
                                   const std::string &log_context,
                                   VisitFn &&visit, EmitFn &&emit) {
     visit([&](const std::string &name, const std::string &value) {
       const auto lower_key = to_lower(name);
-      if (skip_headers.find(lower_key) != skip_headers.end()) {
+      if (skip_headers.contains(lower_key)) {
         Logger::debug("{} - Skipping header: {}", log_context, name);
       } else {
         emit(name, value);
@@ -112,7 +121,7 @@ public:
   template <typename SourceHeaders, typename DestHeaders>
   static void filter_headers(
       const SourceHeaders &source_headers, DestHeaders &dest_headers,
-      const std::set<std::string> &skip_headers = get_default_skip_headers(),
+      const header_utils::HeaderSet &skip_headers = get_default_skip_headers(),
       const std::string &log_context = "HeaderFilter") {
     filter_headers_impl(
         skip_headers, log_context,
@@ -129,7 +138,7 @@ public:
   template <typename DestHeaders>
   static void filter_headers_from_json(
       const nlohmann::json &headers_json, DestHeaders &dest_headers,
-      const std::set<std::string> &skip_headers = get_default_skip_headers(),
+      const header_utils::HeaderSet &skip_headers = get_default_skip_headers(),
       const std::string &log_context = "HeaderFilter") {
     if (!headers_json.is_object()) {
       return;
@@ -149,7 +158,7 @@ public:
 
   static void filter_headers_to_json(
       const httplib::Headers &source_headers, nlohmann::json &dest_json,
-      const std::set<std::string> &skip_headers = get_default_skip_headers(),
+      const header_utils::HeaderSet &skip_headers = get_default_skip_headers(),
       const std::string &log_context = "HeaderFilter") {
     dest_json = nlohmann::json::object();
 
@@ -176,8 +185,8 @@ public:
 
   static bool should_skip_header(
       std::string_view header_name,
-      const std::set<std::string> &skip_headers = get_default_skip_headers()) {
-    return skip_headers.find(to_lower(header_name)) != skip_headers.end();
+      const header_utils::HeaderSet &skip_headers = get_default_skip_headers()) {
+    return skip_headers.contains(to_lower(header_name));
   }
 
   static std::string to_lower(std::string_view header_name) {

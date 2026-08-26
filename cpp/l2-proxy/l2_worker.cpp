@@ -7,6 +7,12 @@
 #include <cstring>
 #include <format>
 #include <nlohmann/json.hpp>
+#if __has_include(<generator>)
+#include <generator>
+#endif
+#if __has_include(<mdspan>)
+#include <mdspan>
+#endif
 
 #include "common_utils.hpp"
 #include "http_client.hpp"
@@ -374,6 +380,15 @@ bool L2Worker::validate_l2_server_access(const std::string &path,
   return true;
 }
 
+#if __has_include(<generator>)
+// C++23 generator: lazy sequence of attempt numbers (1..max), co_yield
+// demonstrates coroutine-based backpressure — no vector allocation, frame
+// suspends between attempts, composes with ranges::filter/take.
+std::generator<int> attempt_sequence(int max) {
+  for (int i = 1; i <= max; ++i) co_yield i;
+}
+#endif
+
 HttpResponse L2Worker::execute_l2_call_with_retry(
     const std::string &url, const std::string &query, const std::string &body,
     const std::string &traceparent, const httplib::Headers &forwarded_headers,
@@ -391,7 +406,11 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
   const int max_retries = m_ctx.m_config.m_max_retries;
   std::runtime_error last_error("Initial error");
 
+#if __has_include(<generator>)
+  for (int attempt : attempt_sequence(max_retries)) {
+#else
   for (int attempt = 1; attempt <= max_retries; ++attempt) {
+#endif
     final_attempt = attempt;
     try {
       const auto [http_response, http_code] = execute_http_command_with_status(
@@ -565,28 +584,33 @@ std::string L2Worker::CircuitBreaker::state_name() const {
 
 bool L2Worker::parse_request_data(const std::string &request_json,
                                   json &request_data) {
-  auto parse_result = validate_and_parse_json(request_json, "Worker");
-  if (!parse_result) {
+  // C++23 expected monadic: and_then chains JSON parse → schema validation
+  auto validated = validate_and_parse_json(request_json, "Worker")
+                       .and_then([&](json j) -> std::expected<json, std::string> {
+                         std::string parse_error;
+                         static RequestValidator validator =
+                             create_standard_request_validator();
+                         if (!validator.validate(j, parse_error)) {
+                           Logger::error("Worker request validation failed: {}",
+                                         parse_error);
+                           handle_processing_error_with_category(
+                               parse_error,
+                               ProcessingErrorMetrics{
+                                   .m_total_errors = nullptr,
+                                   .m_json_errors =
+                                       &m_ctx.m_worker.m_metrics->m_processing_json_errors,
+                                   .m_validation_errors =
+                                       &m_ctx.m_worker.m_metrics
+                                            ->m_processing_validation_errors},
+                               "Request Schema Validation");
+                           return std::unexpected(parse_error);
+                         }
+                         return j;
+                       });
+  if (!validated) {
     return false;
   }
-  request_data = std::move(*parse_result);
-
-  // Validate request schema
-  std::string parse_error;
-  static RequestValidator validator = create_standard_request_validator();
-  if (!validator.validate(request_data, parse_error)) {
-    Logger::error("Worker request validation failed: {}", parse_error);
-    handle_processing_error_with_category(
-        parse_error,
-        ProcessingErrorMetrics{
-            .m_total_errors = nullptr,
-            .m_json_errors =
-                &m_ctx.m_worker.m_metrics->m_processing_json_errors,
-            .m_validation_errors =
-                &m_ctx.m_worker.m_metrics->m_processing_validation_errors},
-        "Request Schema Validation");
-    return false;
-  }
+  request_data = std::move(*validated);
 
   const std::string method = request_data[NatsContract::kMethod];
   if (method != "POST" && method != "GET") {

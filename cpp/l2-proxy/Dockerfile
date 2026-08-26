@@ -146,7 +146,8 @@ RUN --mount=type=cache,target=/root/.ccache \
     fi && \
     echo "=== cmake configure done ===" && \
     _T1=$(date +%s) && \
-    ninja -j$(nproc) && \
+    NINJA_JOBS=$(nproc); if [ "$ENABLE_ASAN" = "true" ]; then NINJA_JOBS=2; fi; echo "ninja jobs: $NINJA_JOBS (nproc $(nproc))" && \
+    ninja -j$NINJA_JOBS && \
     _T2=$(date +%s) && \
     ninja test_components && \
     _T3=$(date +%s) && \
