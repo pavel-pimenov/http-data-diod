@@ -15,6 +15,9 @@
 #if __has_include(<latch>)
 #include <latch>
 #endif
+#if __has_include(<barrier>)
+#include <barrier>
+#endif
 #if __has_include(<stop_token>)
 #include <stop_token>
 #endif
@@ -71,31 +74,27 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
       for (;;) {
         std::vector<std::function<void()>> batch;
         batch.reserve(g_dequeue_batch);
-
         {
           std::unique_lock lock(this->m_queue_mutex);
-          // wait with stop_token: wakes instantly on request_stop()
           this->m_condition.wait(lock, st, [this, &st] {
             return st.stop_requested() || this->m_stop.load() || !this->m_tasks.empty();
           });
           if ((st.stop_requested() || this->m_stop.load()) && this->m_tasks.empty())
             return;
-
-          const size_t to_take =
-              std::min(g_dequeue_batch, this->m_tasks.size());
+          const size_t to_take = std::min(g_dequeue_batch, this->m_tasks.size());
           for (size_t n = 0; n < to_take; ++n) {
             batch.emplace_back(std::move(this->m_tasks.front()));
             this->m_tasks.pop();
           }
         }
-
         this->m_not_full.notify_all();
-
-        for (const std::function<void()> &task : batch) {
-          task();
-        }
+        for (const std::function<void()> &task : batch) task();
       }
     });
+#if __has_include(<barrier>) && defined(__cpp_lib_barrier)
+  // barrier demo (non-blocking): иллюстрация, не блокирует конструктор
+  // std::barrier<> barrier(threads+1); barrier.arrive_and_wait();
+#endif
 }
 
 // add new work item to the pool

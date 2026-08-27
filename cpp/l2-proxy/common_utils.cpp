@@ -11,16 +11,21 @@
 #include <span>
 #include <sstream>
 #include <string_view>
+#if __has_include(<print>)
+#include <print>
+#endif
 
 std::string compute_sha256_hex(std::string_view data) {
   unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
-         hash);
+  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
   std::ostringstream oss;
   oss << std::hex << std::setfill('0');
-  for (const unsigned char byte : hash) {
-    oss << std::setw(2) << static_cast<int>(byte);
-  }
+  for (const unsigned char byte : hash) oss << std::setw(2) << static_cast<int>(byte);
+#if __has_include(<print>) && defined(__cpp_lib_print)
+  // std::print demo — fire-and-forget debug (no-op в prod, guarded)
+  // std::println("sha256 {} bytes -> {}...", data.size(), oss.str().substr(0,8));
+  (void)data;
+#endif
   return oss.str();
 }
 

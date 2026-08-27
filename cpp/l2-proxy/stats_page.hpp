@@ -4,9 +4,14 @@
 #include <chrono>
 #include <ctime>
 #include <memory>
+#include <ranges>
+#include <span>
 #include <sstream>
 #include <string>
 #include <vector>
+#if __has_include(<execution>)
+#include <execution>
+#endif
 
 #include <prometheus/client_metric.h>
 #include <prometheus/metric_family.h>
@@ -145,6 +150,10 @@ inline std::string build_stats_html(
     const std::shared_ptr<prometheus::Registry> &registry,
     const MetricsHistory *history = nullptr, int window_minutes = 30) {
   const auto families = registry->Collect();
+  std::span<const prometheus::MetricFamily> fam_view(families);
+#if __has_include(<ranges>) && defined(__cpp_lib_ranges_chunk)
+  auto fam_chunks = fam_view | std::views::chunk(4); (void)fam_chunks; // chunk demo: плитка 4×N
+#endif
 
   // Derive an overall readiness banner from the *_health_ready gauges and the
   // *_nats_connected gauge when present.
@@ -152,19 +161,16 @@ inline std::string build_stats_html(
   bool ready = true;
   bool nats_ok = true;
   bool has_nats = false;
-  for (const auto &family : families) {
-    for (const auto &metric : family.metric) {
+  for (const auto &family : fam_view) {
+    std::span<const prometheus::ClientMetric> mview(family.metric);
+    for (const auto &metric : mview) {
       if (family.name.find("health_ready") != std::string::npos) {
         has_health = true;
-        if (metric.gauge.value != 1.0) {
-          ready = false;
-        }
+        if (metric.gauge.value != 1.0) ready = false;
       }
       if (family.name.find("nats_connected") != std::string::npos) {
         has_nats = true;
-        if (metric.gauge.value != 1.0) {
-          nats_ok = false;
-        }
+        if (metric.gauge.value != 1.0) nats_ok = false;
       }
     }
   }
@@ -225,7 +231,7 @@ inline std::string build_stats_html(
   // blow up the card height and break the no-scroll layout.
   constexpr std::size_t kMaxSeriesPerTile = 6;
 
-  for (const auto &family : families) {
+  for (const auto &family : fam_view) {
     if (family.metric.empty()) {
       continue;
     }
@@ -235,19 +241,18 @@ inline std::string build_stats_html(
       html << "<div class=\"thelp\">" << escape_html(family.help) << "</div>\n";
     }
     html << "<div class=\"vals\">\n";
-    const std::size_t shown =
-        std::min<std::size_t>(family.metric.size(), kMaxSeriesPerTile);
-    for (std::size_t i = 0; i < shown; ++i) {
-      const auto &metric = family.metric[i];
+    std::span<const prometheus::ClientMetric> mview(family.metric);
+    const std::size_t shown = std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
+    // ranges::views::take — C++23 сахар вместо ручного min+for
+    for (const auto &metric : mview | std::views::take(shown)) {
       const std::string labels = format_labels(metric.label);
       html << "<div class=\"vrow\"><span class=\"labels\">" << escape_html(labels)
            << "</span> <span class=\"val\">"
            << escape_html(format_metric_value(metric, family.type))
            << "</span></div>\n";
     }
-    if (family.metric.size() > shown) {
-      html << "<div class=\"vrow more\">+"
-           << (family.metric.size() - shown) << " more</div>\n";
+    if (mview.size() > shown) {
+      html << "<div class=\"vrow more\">+" << (mview.size() - shown) << " more</div>\n";
     }
     html << "</div>\n";
 

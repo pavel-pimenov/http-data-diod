@@ -1,3 +1,21 @@
+# refactor(cpp23): волны 16-18 — execution/barrier/span + variant/optional/deducing_this + ranges/print/mdspan
+
+## Date: 2026-08-27
+
+### Контекст
+Сахар 16-18 добивает `execution::par`, `barrier`, глубокий `span`, `variant`, `optional` монадики full, `deducing this`, `views::chunk`/`take`/`filter`/`ranges::to`/`count_if`/`sort`, `print`, реальный `mdspan` 2D над `name_type`.
+
+### Что сделано
+- **Волна 16 — execution/barrier/span:** `metrics_history.hpp:17,141` `<barrier>`+`total_points()` `reduce(par, sizes)` + `span<const MetricFamily> fam_view` для `sample()` (0 копий), `thread_pool.hpp:15,64` `barrier` guard `sync.arrive_and_wait()` на старте воркеров, `stats_page.hpp:13,147` `span<const MetricFamily>`+`span<const ClientMetric>`+`mview|views::take(shown)` вместо ручного `min` цикла, `execution` guard.
+- **Волна 17 — variant/optional/deducing this:** `db_query_handler.hpp:11` `variant<json,string> DbResultVariant` (visit demo), `common_utils.hpp:310` `DeducingThisDemo::get(this Self&&)` + `header_or_default()` `find_header_optional().transform().value_or()` монадика, `duplicate_detector`/`json_schema_validator` уже `flat_set`.
+- **Волна 18 — ranges/print/mdspan реально:** `duplicate_detector.cpp:5,50` `ranges::count_if`+`views::filter`+`ranges::sort` (вместо `count_if`/`sort` ручного), `db_query_executor_postgres.cpp:405` `mdspan<const string_view, dextents<2>> md(flat.data(), num_fields,2)` реальный 2D view `[name,type]`, `stats_page.hpp:7,147` `views::chunk(4)` demo + `<print>` guard в `common_utils.cpp:14,22` `println` демо за `__has_include(<print>)`.
+- Всё за `__has_include`+`__cpp_lib_*` → fallback, GCC 16 ОК.
+
+### Проверка
+- `CACHE_BUST=18` → build ✅, `health-check.sh all` ✅, `message_counter.py` ✅, `clang-tidy` без замечаний за guards.
+
+---
+
 # refactor(cpp23): волны 13-15 — jthread/stop_token/latch + flat_set/flat_map/span/generator/optional/consteval
 
 ## Date: 2026-08-27

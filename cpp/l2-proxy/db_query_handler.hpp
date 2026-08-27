@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <variant>
 #if __has_include(<flat_map>)
 #include <flat_map>
 #endif
@@ -45,6 +46,9 @@ public:
   // init(). Safe to call before init(); executors already created keep their
   // current pointer.
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
+
+  // variant<int,string> demo for DB dispatch: visit вместо if/else
+  using DbResultVariant = std::variant<json, std::string>;
 
 private:
 #if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)

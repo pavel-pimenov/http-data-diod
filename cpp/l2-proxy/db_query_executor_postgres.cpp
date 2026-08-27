@@ -403,11 +403,14 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
     name_type.emplace_back(PQfname(res, c), pg_type_name(PQftype(res, c)));
   }
 #if __has_include(<mdspan>)
-  // C++23 mdspan demo: non-owning 2D view over name_type (num_fields × 2) without copy
+  // C++23 mdspan — реальный 2D non-owning view над (num_fields × 2) строки [name,type] без копий
   if (!name_type.empty()) {
-    std::vector<int> dummy(num_fields * 2, 0);
-    std::mdspan<int, std::dextents<std::size_t, 2>> md(dummy.data(), num_fields, 2);
-    md[0, 0] = 42;
+    // Flatten names/types в contiguous буфер для mdspan демонстрации
+    std::vector<std::string_view> flat;
+    flat.reserve(num_fields * 2);
+    for (const auto &[n,t] : name_type) { flat.emplace_back(n); flat.emplace_back(t); }
+    std::mdspan<const std::string_view, std::dextents<std::size_t, 2>> md(flat.data(), num_fields, 2);
+    (void)md[0,0]; // md[i,0]=name, md[i,1]=type
     (void)md;
   }
 #endif

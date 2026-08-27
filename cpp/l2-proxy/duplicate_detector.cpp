@@ -2,7 +2,11 @@
 #include "time_utils.hpp"
 #include <algorithm>
 #include <chrono>
+#include <ranges>
 #include <utility>
+#if __has_include(<print>)
+#include <print>
+#endif
 
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 
@@ -49,9 +53,8 @@ bool DuplicateDetector::record(std::string_view client_id,
 
 size_t DuplicateDetector::duplicate_bodies() const {
   std::lock_guard lock(m_mutex);
-  return static_cast<size_t>(
-      std::count_if(m_entries.begin(), m_entries.end(),
-                    [](const auto &kv) { return kv.second.m_count >= 2; }));
+  return static_cast<size_t>(std::ranges::count_if(
+      m_entries, [](const auto &kv) { return kv.second.m_count >= 2; }));
 }
 
 nlohmann::json DuplicateDetector::report() const {
@@ -63,24 +66,16 @@ nlohmann::json DuplicateDetector::report() const {
   size_t duplicate_occurrences = 0;
   size_t same_client = 0;
   size_t cross_client = 0;
-  for (const auto &[hash, entry] : m_entries) {
-    if (entry.m_count < 2) {
-      continue;
-    }
+  // ranges::filter + ranges::to — C++23 сахар вместо ручного цикла
+  for (const auto &[hash, entry] : m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
     duplicates.push_back(&entry);
     duplicate_occurrences += entry.m_count - 1;
-    if (entry.m_client_ids.size() <= 1) {
-      ++same_client;
-    } else {
-      ++cross_client;
-    }
+    if (entry.m_client_ids.size() <= 1) ++same_client; else ++cross_client;
   }
 
-  std::sort(duplicates.begin(), duplicates.end(),
+  std::ranges::sort(duplicates,
             [](const Entry *a, const Entry *b) {
-              if (a->m_count != b->m_count) {
-                return a->m_count > b->m_count;
-              }
+              if (a->m_count != b->m_count) return a->m_count > b->m_count;
               return a->m_first_seen_ms < b->m_first_seen_ms;
             });
 
