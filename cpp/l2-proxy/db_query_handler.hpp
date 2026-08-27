@@ -7,6 +7,9 @@
 #include <map>
 #include <memory>
 #include <string>
+#if __has_include(<flat_map>)
+#include <flat_map>
+#endif
 
 using json = nlohmann::json;
 
@@ -44,7 +47,12 @@ public:
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
 
 private:
+#if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
+  // 2 базы (postgres/oracle) — flat_map(sorted vector) кэш-дружелюбнее map(rb-tree)
+  std::flat_map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+#else
   std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+#endif
   size_t m_expected_count = 0;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 };

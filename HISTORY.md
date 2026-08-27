@@ -1,3 +1,21 @@
+# refactor(cpp23): волны 13-15 — jthread/stop_token/latch + flat_set/flat_map/span/generator/optional/consteval
+
+## Date: 2026-08-27
+
+### Контекст
+Продолжение C++23 волн после 11-12: добить `jthread` остатки, показать `latch`/`stop_token`/`condition_variable_any`, `flat_set`/`flat_map` для малых таблиц (2-7 элементов), `span`/`mdspan`/`generator`, `optional` монадики, `consteval`/`print` без изменения поведения.
+
+### Что сделано
+- **Волна 13 — jthread+stop_token+latch:** `stats_logger.hpp/cpp:23,27` `thread m_log_thread`+`for 600×sleep(1)`→`jthread`+`condition_variable_any::wait_for(stop_token, 600s)` (мгновенный `request_stop` на shutdown), `trace_logger.hpp/cpp:130,37` `thread m_sender_thread`+`atomic m_stop_sender`→`jthread`+`sender_loop(stop_token)`+`m_queue_cv` (`enqueue_span` `notify_one`, `wait_for` с `stop_token` вместо `sleep 100ms` poll), `thread_pool.hpp:48,61` `vector<thread>`+`condition_variable`→`vector<jthread>`+`condition_variable_any`+`wait(stop_token)`+`request_stop()` в `shutdown()`, `latch` хедер guard + комментарий барьер.
+- **Волна 14 — flat_set/flat_map+span:** `duplicate_detector.hpp:7,15` `set<string> m_client_ids`→`flat_set` alias `ClientIdSet` (2-20 id, `__has_include`), `json_schema_validator.hpp:9,30,136` `unordered_set`→`SmallStringSet`/`SmallIntSet` `flat_set` с `contains`+`ranges::any_of` для `m_allowed_paths` (6 required, 2 methods, 2-4 статуса — кэш-дружелюбно), `db_query_handler.hpp:9,47` `map<string,unique_ptr>`→`flat_map` (2 БД, conditional `__has_include(<flat_map>)`), `common_utils.hpp:12,43,53` `find_header_optional()->optional<string_view>` монадика + `shorten_user_agent` `span<const BrowserPattern> pat_view(patterns)` (0 копий).
+- **Волна 15 — ranges/generator/optional/consteval/print:** `metrics_history.hpp:17,88` `<generator>`+`<execution>` guards + `generator<Series> series_view(family, limit)` корутина `co_yield` (ленивая итерация без `vector` аллокации), `common_utils.hpp:22,310` `consteval stats_log_interval()/dedup_cache_default_max()` + `<print>` guard, `common_utils.hpp:42` `optional`/`span` хедеры, `l2_worker.cpp:383` `generator<int> attempt_sequence` уже.
+- Все за `__has_include`+`defined(__cpp_lib_*)` → fallback на хосте и в builder (GCC 15/16 OK, хост GCC 16 — есть).
+
+### Проверка
+- `CACHE_BUST=15` → build ✅, `health-check.sh all` ✅, `message_counter.py` ✅, `flat_set`/`flat_map`/`generator`/`jthread` за guards — строгая сборка.
+
+---
+
 # feat(observability): vmalert алерты + DEDUP true + волны 11-12 span/execution/latch
 
 ## Date: 2026-08-26

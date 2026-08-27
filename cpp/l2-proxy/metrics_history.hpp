@@ -12,6 +12,12 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if __has_include(<generator>)
+#include <generator>
+#endif
+#if __has_include(<execution>)
+#include <execution>
+#endif
 
 #include <prometheus/client_metric.h>
 #include <prometheus/metric_family.h>
@@ -105,6 +111,23 @@ public:
     }
     return out;
   }
+
+#if __has_include(<generator>)
+  // C++23 generator: lazy iteration over series, no vector allocation until consumed
+  std::generator<Series> series_view(const std::string &family, std::size_t limit) const {
+    std::lock_guard lk(m_mutex);
+    const auto it = m_data.find(family);
+    if (it == m_data.end()) co_return;
+    std::size_t n = 0;
+    for (const auto &kv : it->second) {
+      if (n++ >= limit) break;
+      Series s;
+      s.labels = kv.first;
+      s.points.assign(kv.second.begin(), kv.second.end());
+      co_yield s;
+    }
+  }
+#endif
 
 private:
   void run(std::stop_token st) {

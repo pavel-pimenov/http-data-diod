@@ -4,6 +4,7 @@
 #include "nlohmann/json.hpp"
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <iomanip>
 #include <mutex>
@@ -13,6 +14,9 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#if __has_include(<stop_token>)
+#include <stop_token>
+#endif
 
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
@@ -128,8 +132,8 @@ private:
 
   std::deque<SpanData> m_span_queue;
   std::mutex m_queue_mutex;
-  std::thread m_sender_thread;
-  std::atomic<bool> m_stop_sender{false};
+  std::condition_variable_any m_queue_cv;
+  std::jthread m_sender_thread;
 
   // Configuration
   size_t m_batch_size;
@@ -222,7 +226,7 @@ public:
   // Simplified validation
   static bool validate_traceparent(std::string_view traceparent);
 
-  void sender_loop();
+  void sender_loop(std::stop_token st);
   bool send_span(const std::string &trace_id, const std::string &span_id,
                  const std::string &parent_id, const std::string &name,
                  uint64_t start_us, uint64_t end_us,

@@ -4,8 +4,11 @@
 #include "app_context.hpp"
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <memory>
-#include <thread>
+#if __has_include(<stop_token>)
+#include <stop_token>
+#endif
 
 class StatsLogger {
 private:
@@ -17,7 +20,9 @@ private:
   std::atomic<uint64_t> m_total_requests{0};
   std::chrono::steady_clock::time_point m_start_time;
 
-  std::thread m_log_thread;
+  std::jthread m_log_thread;
+  std::condition_variable_any m_cv;
+  std::mutex m_cv_mutex;
 
 public:
   StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag);

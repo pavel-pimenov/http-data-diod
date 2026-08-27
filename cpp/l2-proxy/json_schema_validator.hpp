@@ -7,6 +7,9 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#if __has_include(<flat_set>)
+#include <flat_set>
+#endif
 
 using json = nlohmann::json;
 
@@ -27,9 +30,14 @@ using json = nlohmann::json;
 
 class RequestValidator {
 private:
-  std::unordered_set<std::string> m_required_fields;
-  std::unordered_set<std::string> m_allowed_methods;
-  std::unordered_set<std::string> m_allowed_paths;
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+  using SmallStringSet = std::flat_set<std::string>;
+#else
+  using SmallStringSet = std::unordered_set<std::string>;
+#endif
+  SmallStringSet m_required_fields;
+  SmallStringSet m_allowed_methods;
+  SmallStringSet m_allowed_paths;
   size_t m_max_body_size;
   size_t m_max_path_length;
 
@@ -66,7 +74,6 @@ public:
   }
 
   bool validate(const json &request, std::string &error) const {
-    // Check required fields
     for (const auto &field : m_required_fields) {
       if (request.find(field) == request.end()) {
         error = "Missing required field: " + field;
@@ -74,11 +81,14 @@ public:
       }
     }
 
-    // Check method if present
     if (request.contains("method")) {
       const std::string &method = request["method"];
       if (!m_allowed_methods.empty() &&
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+          !m_allowed_methods.contains(method)) {
+#else
           m_allowed_methods.find(method) == m_allowed_methods.end()) {
+#endif
         error = "Method not allowed: " + method;
         return false;
       }
@@ -95,13 +105,10 @@ public:
       }
 
       if (!m_allowed_paths.empty()) {
-        bool path_allowed = false;
-        for (const auto &prefix : m_allowed_paths) {
-          if (path.starts_with(prefix)) {
-            path_allowed = true;
-            break;
-          }
-        }
+        // ranges::any_of — C++23 сахар вместо ручного цикла
+        const bool path_allowed = std::ranges::any_of(m_allowed_paths, [&](const auto &prefix) {
+          return path.starts_with(prefix);
+        });
         if (!path_allowed) {
           error = "Path not allowed: " + path;
           return false;
@@ -134,7 +141,12 @@ public:
 // Validates L2 server responses
 class ResponseValidator {
 private:
-  std::unordered_set<int> m_allowed_status_codes;
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+  using SmallIntSet = std::flat_set<int>;
+#else
+  using SmallIntSet = std::unordered_set<int>;
+#endif
+  SmallIntSet m_allowed_status_codes;
   bool m_require_body;
   size_t m_max_body_size;
 
@@ -160,11 +172,14 @@ public:
   }
 
   bool validate(const json &response, std::string &error) const {
-    // Check status code
     if (response.contains("status_code")) {
       int status = response["status_code"];
       if (!m_allowed_status_codes.empty() &&
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+          !m_allowed_status_codes.contains(status)) {
+#else
           m_allowed_status_codes.find(status) == m_allowed_status_codes.end()) {
+#endif
         error = std::format("Status code not allowed: {}", status);
         return false;
       }

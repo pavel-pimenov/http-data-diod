@@ -34,12 +34,13 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
   Logger::info("JaegerLogger initialized: batch_size={} flush_interval={}ms "
                "sample_rate={}",
                m_batch_size, m_flush_interval_ms, m_sample_rate);
-  m_sender_thread = std::thread(&JaegerLogger::sender_loop, this);
+  m_sender_thread = std::jthread([this](std::stop_token st) { sender_loop(st); });
 }
 
 JaegerLogger::~JaegerLogger() {
-  m_stop_sender = true;
   if (m_sender_thread.joinable()) {
+    m_sender_thread.request_stop();
+    m_queue_cv.notify_all();
     m_sender_thread.join();
   }
 }
@@ -147,29 +148,27 @@ bool JaegerLogger::should_sample(bool is_error) const {
 }
 
 void JaegerLogger::enqueue_span(const std::string &trace_id,
-                                const std::string &span_id,
-                                const std::string &parent_id,
-                                const std::string &name, uint64_t start_us,
-                                uint64_t end_us,
-                                const std::string &service_name,
-                                const nlohmann::json &attributes) {
-  std::unique_lock lock(m_queue_mutex);
-
-  // Check queue size limit - drop if full
-  if (m_span_queue.size() >= g_tracing_max_queue_size) {
-    m_tracing_spans_failed_counter.Increment();
-    Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
-    return;
+                                 const std::string &span_id,
+                                 const std::string &parent_id,
+                                 const std::string &name, uint64_t start_us,
+                                 uint64_t end_us,
+                                 const std::string &service_name,
+                                 const nlohmann::json &attributes) {
+  {
+    std::unique_lock lock(m_queue_mutex);
+    if (m_span_queue.size() >= g_tracing_max_queue_size) {
+      m_tracing_spans_failed_counter.Increment();
+      Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
+      return;
+    }
+    uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+    m_span_queue.push_back({trace_id, span_id, parent_id, name, service_name,
+                            start_us, end_us, now_us, attributes});
+    m_tracing_queue_size_gauge.Set(m_span_queue.size());
   }
-
-  // Calculate queue time for spans that were waiting
-  uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-
-  m_span_queue.push_back({trace_id, span_id, parent_id, name, service_name,
-                          start_us, end_us, now_us, attributes});
-  m_tracing_queue_size_gauge.Set(m_span_queue.size());
+  m_queue_cv.notify_one();
 }
 
 void JaegerLogger::log_request(
@@ -228,13 +227,20 @@ std::string JaegerLogger::random_hex_fast(size_t len) {
   return res;
 }
 
-void JaegerLogger::sender_loop() {
-  while (!m_stop_sender) {
+void JaegerLogger::sender_loop(std::stop_token st) {
+  while (!st.stop_requested()) {
     std::vector<SpanData> batch;
     batch.reserve(m_batch_size);
 
     {
       std::unique_lock lock(m_queue_mutex);
+      // Wait for work or stop — replaces poll sleep 100ms
+      if (m_span_queue.empty()) {
+        m_queue_cv.wait_for(lock, st, std::chrono::milliseconds(m_flush_interval_ms / 10),
+                            [&] { return st.stop_requested() || !m_span_queue.empty(); });
+        if (st.stop_requested()) break;
+        if (m_span_queue.empty()) continue;
+      }
       while (!m_span_queue.empty() && batch.size() < m_batch_size) {
         batch.push_back(std::move(m_span_queue.front()));
         m_span_queue.pop_front();
@@ -244,8 +250,6 @@ void JaegerLogger::sender_loop() {
 
     if (!batch.empty()) {
       const auto start_time = std::chrono::steady_clock::now();
-
-      // Calculate queue time for metrics
       uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now().time_since_epoch())
                             .count();
@@ -256,24 +260,22 @@ void JaegerLogger::sender_loop() {
       avg_queue_time_s /= batch.size();
       m_tracing_queue_time_histogram.Observe(avg_queue_time_s);
 
-      // Send with retry logic
       bool success = false;
       int retries = 0;
       int delay_ms = g_tracing_retry_base_delay_ms;
 
-      while (!success && retries < g_tracing_max_retries && !m_stop_sender) {
+      while (!success && retries < g_tracing_max_retries && !st.stop_requested()) {
         if (send_batch(batch)) {
           success = true;
-          m_consecutive_failures = 0; // Reset failure counter
+          m_consecutive_failures = 0;
         } else {
           retries++;
           m_consecutive_failures++;
           Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
                        g_tracing_max_retries, delay_ms);
-
           if (retries < g_tracing_max_retries) {
             std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-            delay_ms *= 2; // Exponential backoff
+            delay_ms *= 2;
           }
         }
       }
@@ -292,9 +294,6 @@ void JaegerLogger::sender_loop() {
           std::chrono::duration<double>(end_time - start_time).count();
       m_tracing_last_send_duration_gauge.Set(duration);
       m_tracing_send_latency_histogram.Observe(duration);
-    } else {
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(m_flush_interval_ms / 10));
     }
   }
 

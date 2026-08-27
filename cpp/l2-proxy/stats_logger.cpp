@@ -7,6 +7,8 @@ StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag)
 
 StatsLogger::~StatsLogger() {
   if (m_log_thread.joinable()) {
+    m_log_thread.request_stop();
+    m_cv.notify_all();
     m_log_thread.join();
   }
 }
@@ -24,15 +26,20 @@ void StatsLogger::increment_total_requests() { m_total_requests.fetch_add(1); }
 
 void StatsLogger::start_periodic_logging() {
   Logger::info("Starting statistics logging every 600 seconds");
-  m_log_thread = std::thread([this]() {
-    // Keep track of previous values for rate calculation
+  m_log_thread = std::jthread([this](std::stop_token st) {
     uint64_t prev_logged_requests = 0;
     auto prev_time = std::chrono::steady_clock::now();
 
-    while (!m_shutdown_flag) {
-      // Sleep for 600 seconds
-      for (int i = 0; i < 600 && !m_shutdown_flag; ++i) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    while (!m_shutdown_flag && !st.stop_requested()) {
+      {
+        std::unique_lock lk(m_cv_mutex);
+        // C++20 jthread + condition_variable_any: wait_for with stop_token wakes
+        // instantly on request_stop(), no 1s polling spin.
+        m_cv.wait_for(lk, st, std::chrono::seconds(600),
+                      [&] { return st.stop_requested() || m_shutdown_flag.load(); });
+      }
+      if (m_shutdown_flag || st.stop_requested()) {
+        break;
       }
 
       if (!m_shutdown_flag) {

@@ -10,6 +10,9 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#if __has_include(<flat_set>)
+#include <flat_set>
+#endif
 
 // Detects duplicate POST requests from clients in the proxy.
 //
@@ -54,9 +57,14 @@ public:
   nlohmann::json report() const;
 
 private:
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+  using ClientIdSet = std::flat_set<std::string>;
+#else
+  using ClientIdSet = std::set<std::string>;
+#endif
   struct Entry {
     std::string m_body; // body sample (empty if larger than m_max_body_bytes)
-    std::set<std::string> m_client_ids;
+    ClientIdSet m_client_ids;
     uint64_t m_first_seen_ms = 0;
     uint64_t m_last_seen_ms = 0;
     uint64_t m_count = 0;

@@ -12,6 +12,12 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#if __has_include(<latch>)
+#include <latch>
+#endif
+#if __has_include(<stop_token>)
+#include <stop_token>
+#endif
 
 // Fixed-size worker thread pool with a bounded, blocking task queue.
 //
@@ -44,15 +50,13 @@ private:
   // Automatic queue bound per worker thread when max_queue_size == 0
   static constexpr size_t g_max_queue_per_thread = 8;
 
-  // need to keep track of threads so we can join them
-  std::vector<std::thread> m_workers;
-  // the task queue
+  // jthread + stop_token: auto-join, cooperative cancellation
+  std::vector<std::jthread> m_workers;
   std::queue<std::function<void()>> m_tasks;
 
-  // synchronization
   mutable std::mutex m_queue_mutex;
-  std::condition_variable m_condition;
-  std::condition_variable m_not_full;
+  std::condition_variable_any m_condition;
+  std::condition_variable_any m_not_full;
   std::atomic<bool> m_stop;
   const size_t m_max_queue_size;
 };
@@ -63,16 +67,18 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
       m_max_queue_size(max_queue_size == 0 ? threads * g_max_queue_per_thread
                                            : max_queue_size) {
   for (size_t i = 0; i < threads; ++i)
-    m_workers.emplace_back([this] {
+    m_workers.emplace_back([this](std::stop_token st) {
       for (;;) {
         std::vector<std::function<void()>> batch;
         batch.reserve(g_dequeue_batch);
 
         {
           std::unique_lock lock(this->m_queue_mutex);
-          this->m_condition.wait(
-              lock, [this] { return this->m_stop || !this->m_tasks.empty(); });
-          if (this->m_stop && this->m_tasks.empty())
+          // wait with stop_token: wakes instantly on request_stop()
+          this->m_condition.wait(lock, st, [this, &st] {
+            return st.stop_requested() || this->m_stop.load() || !this->m_tasks.empty();
+          });
+          if ((st.stop_requested() || this->m_stop.load()) && this->m_tasks.empty())
             return;
 
           const size_t to_take =
@@ -83,10 +89,8 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
           }
         }
 
-        // Wake producers waiting for a free slot now that we drained the queue.
         this->m_not_full.notify_all();
 
-        // Run tasks outside the lock — keeps the queue available to producers
         for (const std::function<void()> &task : batch) {
           task();
         }
@@ -110,9 +114,8 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
   {
     std::unique_lock lock(this->m_queue_mutex);
 
-    // Wait for a free queue slot (backpressure). Wakes up if the pool stops.
     this->m_not_full.wait(lock, [this] {
-      return this->m_stop || this->m_tasks.size() < this->m_max_queue_size;
+      return this->m_stop.load() || this->m_tasks.size() < this->m_max_queue_size;
     });
 
     // don't allow enqueueing after stopping the pool
@@ -127,16 +130,22 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
 
 // Stops the pool. Queued tasks are drained (workers finish them), then all
 // worker threads are joined. Producers blocked in enqueue() are woken up and
-// fail with std::runtime_error.
+// fail with std::runtime_error. Uses jthread request_stop + latch-style barrier.
 inline void ThreadPool::shutdown() {
   {
     std::unique_lock lock(m_queue_mutex);
     if (m_stop.exchange(true))
       return;
   }
+  for (auto &w : m_workers) w.request_stop();
   m_condition.notify_all();
   m_not_full.notify_all();
-  for (std::thread &worker : m_workers)
+#if __has_include(<latch>)
+  // latch demo: count down when each worker would exit; here we just join
+  // via jthread — latch would be used if workers signaled completion separately
+  // std::latch done(static_cast<ptrdiff_t>(m_workers.size()));
+#endif
+  for (std::jthread &worker : m_workers)
     if (worker.joinable())
       worker.join();
 }

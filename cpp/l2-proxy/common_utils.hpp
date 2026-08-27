@@ -10,11 +10,16 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
+#if __has_include(<print>)
+#include <print>
+#endif
 
 #include "base64_utils.hpp"
 #include "error_types.hpp"
@@ -50,24 +55,34 @@ get_header_value(const httplib::Headers &headers, std::string_view name,
   return std::string(default_value);
 }
 
+// C++23 optional монадики: возвращает optional<string_view>, chain via and_then/transform/or_else
+[[nodiscard]] inline std::optional<std::string_view>
+find_header_optional(const httplib::Headers &headers, std::string_view name) {
+  const auto it = headers.find(std::string(name));
+  if (it != headers.end() && !it->second.empty()) {
+    return std::string_view(it->second);
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] inline std::string shorten_user_agent(std::string_view ua) {
   constexpr size_t max_len = 80;
   if (ua.size() <= max_len) {
     return std::string(ua);
   }
 
-  // Extract browser name+version from long UA strings
   struct BrowserPattern {
     const char *m_marker;
     const char *m_name;
   };
-  // Order matters: check Edg (Edge) before generic "e" patterns
   constexpr BrowserPattern patterns[] = {
       {"Edg/", "Edge/"},    {"Chrome/", "Chrome/"}, {"Firefox/", "Firefox/"},
       {"Opera/", "Opera/"}, {"OPR/", "Opera/"},     {"Version/", "Safari/"},
   };
+  // span<const BrowserPattern> — non-owning view, 0 копий
+  std::span<const BrowserPattern> pat_view(patterns);
 
-  for (const auto &p : patterns) {
+  for (const auto &p : pat_view) {
     const auto pos = ua.find(p.m_marker);
     if (pos == std::string_view::npos) {
       continue;
@@ -279,6 +294,9 @@ inline bool validate_positive(const T &value, const std::string &name) {
   }
   return true;
 }
+
+consteval std::chrono::seconds stats_log_interval() { return std::chrono::seconds(600); }
+consteval size_t dedup_cache_default_max() { return 4096; }
 
 class RetryHandler {
 public:
