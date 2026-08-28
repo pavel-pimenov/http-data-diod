@@ -61,17 +61,26 @@ done
 # automatically when free space drops below the threshold.
 ensure_free_disk_space() {
     local threshold_mb=1024
+    local docker_root
+    docker_root=$(docker system info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
+    local check_path="/"
+    if [ -d "$docker_root" ]; then
+        check_path="$docker_root"
+    fi
     local avail_mb
-    avail_mb=$(df -P / | awk 'NR==2 {print int($4/1024)}')
-    if [ "$avail_mb" -lt "$threshold_mb" ]; then
-        echo "⚠️  Low disk space: ${avail_mb} MB available (threshold ${threshold_mb} MB)."
-        echo "Pruning Docker build cache and dangling images..."
-        docker builder prune -a -f 2>/dev/null || true
-        docker image prune -f 2>/dev/null || true
+    avail_mb=$(df -P "$check_path" 2>/dev/null | awk 'NR==2 {print int($4/1024)}')
+    if [ -z "$avail_mb" ]; then
         avail_mb=$(df -P / | awk 'NR==2 {print int($4/1024)}')
-        echo "Free space after prune: ${avail_mb} MB"
+    fi
+    if [ "$avail_mb" -lt "$threshold_mb" ]; then
+        echo "⚠️  Low disk space: ${avail_mb} MB available on $check_path (threshold ${threshold_mb} MB)."
+        echo "Pruning Docker build cache (until=24h) and dangling images..."
+        docker builder prune --filter "until=24h" -f 2>/dev/null || docker builder prune -f 2>/dev/null || true
+        docker image prune -f 2>/dev/null || true
+        avail_mb=$(df -P "$check_path" 2>/dev/null | awk 'NR==2 {print int($4/1024)}')
+        echo "Free space after prune: ${avail_mb} MB on $check_path"
     else
-        echo "Disk space OK: ${avail_mb} MB available"
+        echo "Disk space OK: ${avail_mb} MB available on $check_path"
     fi
 }
 

@@ -51,78 +51,47 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check health endpoint for a service
-check_health() {
+# Unified HTTP check — DRY для health/metrics, с ретраями
+check_http() {
     local name="$1"
     local port="$2"
     local endpoint="${3:-/metrics}"
     local retries=0
-
     while [ $retries -lt $MAX_RETRIES ]; do
-        # Try to get metrics endpoint (lighter than health)
         if curl -sf --connect-timeout 5 --max-time 10 "http://localhost:${port}${endpoint}" > /dev/null 2>&1; then
-            log_info "✓ $name metrics endpoint OK (port $port)"
+            log_info "✓ $name endpoint OK (port $port$endpoint)"
             return 0
         fi
-
         retries=$((retries + 1))
         if [ $retries -lt $MAX_RETRIES ]; then
-            log_warn "$name metrics check failed (attempt $retries/$MAX_RETRIES), retrying in ${RETRY_DELAY}s..."
+            log_warn "$name $endpoint check failed (attempt $retries/$MAX_RETRIES), retrying in ${RETRY_DELAY}s..."
             sleep $RETRY_DELAY
         fi
     done
-
-    log_error "✗ $name metrics endpoint unavailable after $MAX_RETRIES attempts (port $port)"
+    log_error "✗ $name endpoint unavailable after $MAX_RETRIES attempts (port $port$endpoint)"
     return 1
 }
+check_health() { check_http "$1" "$2" "${3:-/metrics}"; }
+check_metrics() { check_http "$1" "$2" "/metrics"; }
 
-# Check metrics endpoint (fallback if no /health)
-check_metrics() {
-    local name="$1"
-    local port="$2"
-    local retries=0
-
-    while [ $retries -lt $MAX_RETRIES ]; do
-        if curl -sf --connect-timeout 5 --max-time 10 "http://localhost:${port}/metrics" > /dev/null 2>&1; then
-            log_info "✓ $name metrics endpoint OK (port $port)"
-            return 0
-        fi
-
-        retries=$((retries + 1))
-        if [ $retries -lt $MAX_RETRIES ]; then
-            log_warn "$name metrics check failed (attempt $retries/$MAX_RETRIES), retrying in ${RETRY_DELAY}s..."
-            sleep $RETRY_DELAY
-        fi
-    done
-
-    log_error "✗ $name metrics endpoint unavailable after $MAX_RETRIES attempts (port $port)"
-    return 1
-}
-
-# Restart a service
+# Restart a service — точное совпадение имени, без подстрок (grep -w)
 restart_service() {
     local name="$1"
-
     log_warn "Attempting to restart $name..."
-
-    # Check if we're in docker-compose context
     if [ -f "docker-compose.yml" ]; then
-        if docker compose ps | grep -q "$name"; then
+        if docker compose ps 2>/dev/null | grep -wq "$name"; then
             docker compose restart "$name" 2>/dev/null || docker-compose restart "$name" 2>/dev/null || true
             log_info "Waiting for $name to restart (10 seconds)..."
             sleep 10
             return 0
         fi
     fi
-
-    # Check if running as Docker container
-    if docker ps | grep -q "$name"; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -wq "$name" || docker ps 2>/dev/null | grep -wq "$name"; then
         docker restart "$name" 2>/dev/null || true
         log_info "Waiting for $name to restart (10 seconds)..."
         sleep 10
         return 0
     fi
-
     log_warn "Could not find $name in Docker - manual restart may be required"
     return 1
 }

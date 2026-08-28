@@ -35,6 +35,7 @@ import logging
 import random
 import json
 import hashlib
+import signal
 from typing import Optional, Tuple, Any, List, Dict
 
 # Set up logging
@@ -56,11 +57,14 @@ LOG_PROGRESS_INTERVAL = 10
 # Default body size for generated JSON (in megabytes)
 DEFAULT_BODY_SIZE_MB = 0.01
 
-# Request timeout in seconds
+# Request timeout in seconds (overridable via --timeout)
 REQUEST_TIMEOUT = 30
 
 # SSL verification (set to False for self-signed certificates)
 SSL_VERIFY = False
+
+# Graceful shutdown flag set by SIGINT/SIGTERM
+g_shutdown = False
 
 # JSON size limits (in megabytes)
 MAX_JSON_SIZE_MB = 1.0      # Warning threshold
@@ -312,6 +316,18 @@ def compute_latency_stats(latencies: List[float]) -> Dict[str, float]:
     return stats
 
 
+def _install_signal_handlers() -> None:
+    def _handler(signum, frame):
+        global g_shutdown
+        if not g_shutdown:
+            g_shutdown = True
+            logger.warning(f"Received signal {signum}, draining in-flight requests...")
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _handler)
+        except ValueError:
+            pass  # not in main thread (e.g. pytest)
+
 async def run_test(url: str, iterations: int, concurrent: int, base_payload: dict,
                    body_sizes_kb: Optional[List[int]] = None,
                    client_id: Optional[str] = None,
@@ -376,12 +392,15 @@ async def run_test(url: str, iterations: int, concurrent: int, base_payload: dic
         # Dynamic submission loop: keep up to `concurrent` requests in flight.
         # In fixed mode stop launching once `iterations` are sent; in duration
         # mode once the deadline passes (then drain the in-flight ones).
+        # SIGTERM/SIGINT sets g_shutdown — stop launching and drain.
         while True:
+            if g_shutdown:
+                stop_launching = True
             if not stop_launching:
                 if deadline is not None and time.monotonic() >= deadline:
                     stop_launching = True
                 else:
-                    while len(tasks) < concurrent and (max_requests is None or total_sent < max_requests):
+                    while len(tasks) < concurrent and (max_requests is None or total_sent < max_requests) and not g_shutdown:
                         total_sent += 1
                         tasks.add(asyncio.create_task(
                             limited_request(session, semaphore, url, base_payload,
@@ -535,6 +554,10 @@ def parse_args():
     parser.add_argument("--hot-share", type=float, default=0.8,
                         help="Fraction of requests assigned to the hot clients "
                              "(default: 0.8)")
+    parser.add_argument("--timeout", type=float, default=REQUEST_TIMEOUT,
+                        help="HTTP request timeout in seconds (default: %(default)s)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed for reproducible bodies/client-ids (default: random)")
     return parser.parse_args()
 
 
@@ -718,6 +741,17 @@ def print_get_results(results: dict) -> bool:
 async def main():
     """Main function to run the message consistency test."""
     args = parse_args()
+
+    # Reproducibility
+    if args.seed is not None:
+        random.seed(args.seed)
+        logger.info(f"Random seed: {args.seed}")
+
+    # Override global timeout before any request
+    global REQUEST_TIMEOUT
+    REQUEST_TIMEOUT = args.timeout
+
+    _install_signal_handlers()
 
     # Set logging level
     logging.getLogger().setLevel(getattr(logging, args.log_level))
