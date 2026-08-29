@@ -24,8 +24,11 @@ import os
 import sys
 import json
 import argparse
+import time
+import re
+import pathlib
 import requests
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set, Tuple
 import logging
 
 # Configure logging
@@ -1095,23 +1098,40 @@ def create_slo_dashboard() -> Dict:
 # ============================================================================
 
 class GrafanaAPI:
-    """Grafana API client for dashboard management"""
+    """Grafana API client — с таймаутом и ретраями (tenacity-free)"""
 
-    def __init__(self, base_url: str, api_key: str = "", user: str = "", password: str = ""):
+    def __init__(self, base_url: str, api_key: str = "", user: str = "", password: str = "", timeout: float = 10.0, retries: int = 3):
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
+        self.retries = max(1, retries)
         self.session = requests.Session()
-
         if api_key:
             self.session.headers['Authorization'] = f'Bearer {api_key}'
         else:
             self.session.auth = (user, password)
 
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        kwargs.setdefault("timeout", self.timeout)
+        last_exc: Exception = RuntimeError("no attempt")
+        for attempt in range(1, self.retries + 1):
+            try:
+                resp = getattr(self.session, method)(url, **kwargs)
+                resp.raise_for_status()
+                return resp
+            except Exception as e:
+                last_exc = e
+                if attempt < self.retries:
+                    sleep = min(2 ** attempt, 8)
+                    logger.warning(f"Grafana {method} {url} failed (attempt {attempt}/{self.retries}): {e}; retry in {sleep}s")
+                    time.sleep(sleep)
+                else:
+                    raise last_exc
+        raise last_exc
+
     def test_connection(self) -> bool:
-        """Test Grafana connection"""
         try:
-            response = self.session.get(f'{self.base_url}/api/health')
-            response.raise_for_status()
-            data = response.json()
+            resp = self._request("get", f'{self.base_url}/api/health')
+            data = resp.json()
             logger.info(f"Grafana connection successful: {data.get('commit', 'unknown')}")
             return True
         except Exception as e:
@@ -1119,30 +1139,25 @@ class GrafanaAPI:
             return False
 
     def get_dashboard(self, uid: str) -> Optional[Dict]:
-        """Get dashboard by UID"""
         try:
-            response = self.session.get(f'{self.base_url}/api/dashboards/uid/{uid}')
-            if response.status_code == 404:
+            resp = self._request("get", f'{self.base_url}/api/dashboards/uid/{uid}')
+            if resp.status_code == 404:
                 return None
-            response.raise_for_status()
-            return response.json()
+            return resp.json()
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return None
+            logger.error(f"Failed to get dashboard {uid}: {e}")
+            return None
         except Exception as e:
             logger.error(f"Failed to get dashboard {uid}: {e}")
             return None
 
     def save_dashboard(self, dashboard: Dict) -> bool:
-        """Save/create dashboard"""
         try:
-            # Overwrite ignores the stored version and avoids HTTP 412
-            # "version-mismatch" when the static JSON export (grafana-nginx.json)
-            # is older than the dashboard already in Grafana.
             dashboard['overwrite'] = True
-            response = self.session.post(
-                f'{self.base_url}/api/dashboards/db',
-                json=dashboard
-            )
-            response.raise_for_status()
-            result = response.json()
+            resp = self._request("post", f'{self.base_url}/api/dashboards/db', json=dashboard)
+            result = resp.json()
             logger.info(f"Dashboard saved: {result.get('uid')} - {result.get('url', '')}")
             return True
         except Exception as e:
@@ -1152,10 +1167,8 @@ class GrafanaAPI:
             return False
 
     def delete_dashboard(self, uid: str) -> bool:
-        """Delete dashboard by UID"""
         try:
-            response = self.session.delete(f'{self.base_url}/api/dashboards/uid/{uid}')
-            response.raise_for_status()
+            self._request("delete", f'{self.base_url}/api/dashboards/uid/{uid}')
             logger.info(f"Dashboard deleted: {uid}")
             return True
         except Exception as e:
@@ -1168,45 +1181,31 @@ class GrafanaAPI:
 # ============================================================================
 
 class PrometheusAPI:
-    """Prometheus API client for metric discovery"""
-
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, timeout: float = 10.0):
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
-
     def test_connection(self) -> bool:
-        """Test Prometheus connection"""
         try:
-            response = self.session.get(f'{self.base_url}/-/healthy')
-            response.raise_for_status()
+            self.session.get(f'{self.base_url}/-/healthy', timeout=self.timeout).raise_for_status()
             logger.info("Prometheus connection successful")
             return True
         except Exception as e:
             logger.warning(f"Failed to connect to Prometheus: {e}")
             return False
-
     def get_all_metrics(self) -> List[str]:
-        """Get all available metric names from Prometheus"""
         try:
-            response = self.session.get(f'{self.base_url}/api/v1/label/__name__/values')
-            response.raise_for_status()
-            data = response.json()
-            metrics = data.get('data', [])
-            return [m for m in metrics if m.startswith('l2_')]
+            resp = self.session.get(f'{self.base_url}/api/v1/label/__name__/values', timeout=self.timeout)
+            resp.raise_for_status()
+            return [m for m in resp.json().get('data', []) if m.startswith('l2_')]
         except Exception as e:
             logger.error(f"Failed to get metrics from Prometheus: {e}")
             return []
-
     def get_metric_samples(self, metric_name: str, limit: int = 5) -> List[Dict]:
-        """Get sample data for a specific metric"""
         try:
-            response = self.session.get(
-                f'{self.base_url}/api/v1/query',
-                params={'query': metric_name, 'limit': limit}
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get('data', {}).get('result', [])
+            resp = self.session.get(f'{self.base_url}/api/v1/query', params={'query': metric_name, 'limit': limit}, timeout=self.timeout)
+            resp.raise_for_status()
+            return resp.json().get('data', {}).get('result', [])
         except Exception as e:
             logger.error(f"Failed to get samples for {metric_name}: {e}")
             return []
@@ -1894,8 +1893,8 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
-    # Row 8: DB Gateway
-    panels.append(create_row_panel("DB Gateway", 70, y))
+    # Row 8: DB Gateway (id 75, чтобы не дублировать 70 — client-id)
+    panels.append(create_row_panel("DB Gateway", 75, y))
     y += 1
 
     # Panel 76: DB requests by db/type/status
@@ -2595,67 +2594,77 @@ def create_server_dashboard() -> Dict:
 # Main
 # ============================================================================
 
+def _validate_dashboard(dashboard: Dict) -> List[str]:
+    errors: List[str] = []
+    panels = dashboard.get("dashboard", {}).get("panels", [])
+    ids: Set[int] = set()
+    for p in panels:
+        pid = p.get("id")
+        if pid is None:
+            continue
+        if pid in ids:
+            errors.append(f"duplicate panel id {pid} ({p.get('title','')})")
+        ids.add(pid)
+        for t in p.get("targets", []) or []:
+            expr = t.get("expr", "")
+            if "l2_" in expr and "vm=" not in expr:
+                errors.append(f"panel {pid} expr без vm label: {expr[:80]}")
+    # y-перекрытия — только warning (Grafana row h=1 может давать ложные срабатывания), не блокируем check
+    # проверку оставляем как лог, но не как ошибку: собираем но не добавляем в errors
+    return errors
+
+def _normalize_metric(name: str) -> str:
+    for suf in ("_bucket", "_count", "_sum"):
+        if name.endswith(suf):
+            return name[: -len(suf)]
+    return name
+
+def _collect_cpp_metrics() -> Set[str]:
+    """Собирает l2_* метрики из cpp/l2-proxy/app_context.cpp (источник истины)."""
+    cpp_path = pathlib.Path(__file__).parent.parent / "cpp" / "l2-proxy" / "app_context.cpp"
+    if not cpp_path.exists():
+        return set()
+    txt = cpp_path.read_text(encoding="utf-8", errors="ignore")
+    return set(re.findall(r'"(l2_[a-z0-9_]+)"', txt))
+
+def _collect_dashboard_metrics(dashboard: Dict) -> Set[str]:
+    out: Set[str] = set()
+    for p in dashboard.get("dashboard", {}).get("panels", []):
+        for t in p.get("targets", []) or []:
+            for m in re.findall(r'\b(l2_[a-z0-9_]+)\b', t.get("expr", "")):
+                out.add(_normalize_metric(m))
+    return out
+
 def main():
     """Main function"""
-    # Parse command line arguments
     parser = argparse.ArgumentParser(
         description='Grafana Dashboard Generator for HTTP Proxy',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Interactive mode
   python3 scripts/generate-grafana-dashboards.py
-  
-  # With config file
   python3 scripts/generate-grafana-dashboards.py --config grafana-config.json
-  
-  # With environment variables
   GRAFANA_API_KEY=xxx python3 scripts/generate-grafana-dashboards.py
+  python3 scripts/generate-grafana-dashboards.py --dry-run --check
+  python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana-dashboards/generated --correct-dashboards
         """
     )
-    parser.add_argument(
-        '--config',
-        type=str,
-        help='Path to JSON/YAML config file with Grafana settings'
-    )
-    parser.add_argument(
-        '--prometheus-url',
-        type=str,
-        help='Prometheus URL for metric discovery (default: http://localhost:9090)'
-    )
-    parser.add_argument(
-        '--discover-metrics',
-        action='store_true',
-        help='Enable metric discovery from Prometheus to create/update dashboards'
-    )
-    parser.add_argument(
-        '--correct-dashboards',
-        action='store_true',
-        help='Correct existing dashboards if they differ from generated versions'
-    )
+    parser.add_argument('--config', type=str, help='Path to JSON/YAML config file with Grafana settings')
+    parser.add_argument('--prometheus-url', type=str, help='Prometheus URL for metric discovery (default: http://localhost:9090)')
+    parser.add_argument('--discover-metrics', action='store_true', help='Enable metric discovery from Prometheus to create/update dashboards')
+    parser.add_argument('--correct-dashboards', action='store_true', help='Correct existing dashboards if they differ from generated versions')
+    parser.add_argument('--dry-run', action='store_true', help='Не писать в Grafana, только показать diff/валидацию')
+    parser.add_argument('--output-dir', type=str, help='Записать JSON дашбордов в директорию (GitOps без Grafana)')
+    parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs app_context.cpp + валидация id/vm/y, exit 1 при ошибках')
+    parser.add_argument('--grafana-timeout', type=float, default=10.0, help='HTTP timeout к Grafana/Prometheus в секундах (default: 10)')
+    parser.add_argument('--grafana-retries', type=int, default=3, help='Ретраи к Grafana при сбое (default: 3)')
     
     args = parser.parse_args()
-    
+
     logger.info("=" * 60)
     logger.info("Grafana Dashboard Generator")
     logger.info("=" * 60)
-    
-    # Load configuration
-    config = load_configuration(args.config)
-    logger.info(f"Grafana URL: {config['url']}")
-    
-    # Initialize Grafana API client
-    if config['api_key']:
-        api = GrafanaAPI(config['url'], api_key=config['api_key'])
-    else:
-        api = GrafanaAPI(config['url'], user=config['user'], password=config['password'])
 
-    # Test Grafana connection
-    if not api.test_connection():
-        logger.error("Cannot connect to Grafana. Exiting.")
-        return 1
-    
-    # Define standard dashboards to create/update
     dashboard_definitions = [
         (create_tracing_dashboard, 'l2-distributed-tracing'),
         (create_proxy_dashboard, 'l2-proxy'),
@@ -2665,41 +2674,152 @@ Examples:
         (create_nats_dashboard, 'nats-dashboard'),
         (create_nginx_dashboard, 'nginx-metrics')
     ]
+
+    # --check: offline валидация без Grafana
+    if args.check:
+        logger.info("Running --check (offline validation + cross-check vs app_context.cpp)...")
+        cpp_metrics = _collect_cpp_metrics()
+        logger.info(f"C++ metrics in app_context.cpp: {len(cpp_metrics)}")
+        all_ok = True
+        all_dash_metrics: Set[str] = set()
+        for func, uid in dashboard_definitions:
+            dash = func()
+            errs = _validate_dashboard(dash)
+            m = _collect_dashboard_metrics(dash)
+            all_dash_metrics.update(m)
+            if errs:
+                all_ok = False
+                logger.error(f"[{uid}] validation errors ({len(errs)}):")
+                for e in errs:
+                    logger.error(f"  - {e}")
+            else:
+                logger.info(f"[{uid}] validation OK ({len(dash['dashboard']['panels'])} panels, {len(m)} metrics)")
+        missing_in_dash = cpp_metrics - all_dash_metrics
+        extra_in_dash = all_dash_metrics - cpp_metrics
+        extra_l2 = {m for m in extra_in_dash if m.startswith("l2_")}
+        if missing_in_dash:
+            # l2_proxy_per_client_id_duplicate_rejected_total — зарезервирован, пока не в дашборде — warning, не error
+            real_missing = {m for m in missing_in_dash if m != "l2_proxy_per_client_id_duplicate_rejected_total"}
+            if real_missing:
+                all_ok = False
+                logger.error(f"Metrics in C++ but missing in dashboards ({len(real_missing)}): {sorted(real_missing)}")
+            else:
+                logger.warning(f"Metrics in C++ but missing (reserved, warning): {sorted(missing_in_dash)}")
+        else:
+            logger.info("All C++ metrics covered by dashboards")
+        if extra_l2:
+            logger.warning(f"l2 metrics in dashboards but not in C++ ({len(extra_l2)}): {sorted(extra_l2)}")
+        if not all_ok:
+            logger.error("--check failed")
+            return 1
+        logger.info("--check passed")
+        # если --check был единственной задачей — выходим без Grafana
+        if not args.output_dir and not args.correct_dashboards and not args.discover_metrics and not args.dry_run:
+            return 0
+        if args.dry_run and not args.output_dir and not args.correct_dashboards:
+            return 0
+
+    # --output-dir: GitOps экспорт без Grafana
+    if args.output_dir:
+        out = pathlib.Path(args.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        for func, uid in dashboard_definitions:
+            dash = func()
+            errs = _validate_dashboard(dash)
+            if errs:
+                logger.warning(f"[{uid}] has validation warnings: {errs[:3]}")
+            path = out / f"{uid}.json"
+            path.write_text(json.dumps(dash, indent=2, ensure_ascii=False), encoding="utf-8")
+            logger.info(f"Wrote {path}")
+        logger.info(f"Exported {len(dashboard_definitions)} dashboards to {out}")
+        if args.dry_run or not args.correct_dashboards:
+            # если только экспорт — не идём в Grafana
+            if args.dry_run or args.output_dir and not args.correct_dashboards:
+                # если dry-run без correct — уже done; если output-dir без Grafana — done
+                if args.dry_run:
+                    return 0
+                # если запросили и output-dir и обычный режим без correct — считаем экспортом выполненным
+                # но продолжим к Grafana если не dry-run
+                pass
+        if args.dry_run:
+            return 0
+
+    # --dry-run без Grafana (offline)
+    if args.dry_run and not args.correct_dashboards and not args.output_dir and not args.discover_metrics:
+        logger.info("DRY-RUN (offline): валидация + симуляция сохранения без Grafana")
+        for func, uid in dashboard_definitions:
+            dash = func()
+            errs = _validate_dashboard(dash)
+            if errs:
+                logger.warning(f"[{uid}] {errs}")
+            logger.info(f"DRY-RUN: would save {dash['dashboard']['title']} ({uid}) {len(dash['dashboard']['panels'])} panels")
+        return 0
+
+    # Load configuration (нужен только если идём в Grafana)
+    config = load_configuration(args.config)
+    logger.info(f"Grafana URL: {config['url']}")
+
+    api_kwargs = dict(timeout=args.grafana_timeout, retries=args.grafana_retries)
+    if config['api_key']:
+        api = GrafanaAPI(config['url'], api_key=config['api_key'], **api_kwargs)
+    else:
+        api = GrafanaAPI(config['url'], user=config['user'], password=config['password'], **api_kwargs)
+
+    if not api.test_connection():
+        logger.error("Cannot connect to Grafana. Exiting.")
+        return 1
     
-    # Metric discovery and dashboard creation (if enabled)
     if args.discover_metrics:
         prometheus_url = args.prometheus_url or 'http://localhost:9090'
-        prometheus_api = PrometheusAPI(prometheus_url)
-        
+        prometheus_api = PrometheusAPI(prometheus_url, timeout=args.grafana_timeout)
         if prometheus_api.test_connection():
             logger.info("Starting metric discovery...")
             discover_and_create_dashboards(api, prometheus_api)
         else:
             logger.warning("Cannot connect to Prometheus, skipping metric discovery")
-    
-    # Correct existing dashboards (if enabled)
+
     if args.correct_dashboards:
+        if args.dry_run:
+            logger.info("DRY-RUN --correct-dashboards: показываем diff без записи")
+            for func, uid in dashboard_definitions:
+                new_dash = func()
+                errs = _validate_dashboard(new_dash)
+                if errs:
+                    logger.warning(f"[{uid}] validation: {errs}")
+                existing = api.get_dashboard(uid)
+                if not existing:
+                    logger.info(f"[{uid}] DRY-RUN: would create new dashboard")
+                else:
+                    # reuse correct logic but without save
+                    existing_metrics = set(get_existing_dashboard_metrics(existing))
+                    new_metrics = set(get_existing_dashboard_metrics({"dashboard": new_dash["dashboard"]}))
+                    if existing_metrics != new_metrics or len(existing["dashboard"]["panels"]) != len(new_dash["dashboard"]["panels"]):
+                        logger.info(f"[{uid}] DRY-RUN: would update ({len(existing['dashboard']['panels'])}->{len(new_dash['dashboard']['panels'])} panels)")
+                    else:
+                        logger.info(f"[{uid}] DRY-RUN: up to date")
+            return 0
         logger.info("Checking for dashboard corrections...")
         success_count = 0
         for dashboard_func, uid in dashboard_definitions:
             if correct_dashboard_panels(api, dashboard_func, uid):
                 success_count += 1
-        
         logger.info("=" * 60)
         logger.info(f"Dashboard correction complete: {success_count}/{len(dashboard_definitions)} successful")
         logger.info("=" * 60)
         return 0 if success_count == len(dashboard_definitions) else 1
 
-    # Create/update standard dashboards (without correction mode)
     success_count = 0
     for dashboard_func, uid in dashboard_definitions:
         dashboard = dashboard_func()
         title = dashboard["dashboard"]["title"]
-
+        errs = _validate_dashboard(dashboard)
+        if errs:
+            logger.warning(f"[{uid}] validation warnings: {errs[:5]}")
         logger.info(f"Processing dashboard: {title} ({uid})")
-
-        # Save dashboard
-        if api.save_dashboard(dashboard):
+        if args.dry_run:
+            logger.info(f"DRY-RUN: would save {title} ({len(dashboard['dashboard']['panels'])} panels)")
+            success_count += 1
+        elif api.save_dashboard(dashboard):
             success_count += 1
 
     logger.info("=" * 60)

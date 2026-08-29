@@ -1,3 +1,18 @@
+# refactor(scripts): Grafana генератор --dry-run/--check/--output-dir + валидация + GrafanaAPI ретраи
+
+## Date: 2026-08-28
+
+### Контекст
+`scripts/generate-grafana-dashboards.py:2713` монолит 7 дашбордов без `dry-run`, без `vm` кросс-чека vs `app_context.cpp`, без `id` уникальности (дубль `70` ловили), `GrafanaAPI` без таймаутов (валился в CI без Grafana).
+
+### Что сделано
+- CLI: `--dry-run` (offline симуляция без Grafana), `--output-dir ./grafana-dashboards/generated` (GitOps), `--check` (offline `_validate_dashboard` `id`/ `vm` + `_collect_cpp_metrics` vs `_collect_dashboard_metrics` с `_normalize_metric` `_bucket/_count/_sum` → покрыто `70` C++ vs `36+20+...`), `--grafana-timeout/--grafana-retries`
+- `GrafanaAPI:1097` `_request` с `timeout`+`retry` `2**attempt` до 8с, `PrometheusAPI` `timeout`, `check` не требует Grafana (exit 0 если только `--check`)
+- Валидация: `duplicate panel id 70` fix (`create_proxy_dashboard:1897` `row 75` вместо `70`), `vm` label в каждом `l2_` expr, reserved `l2_proxy_per_client_id_duplicate_rejected_total` warning (не ошибка)
+- Проверка: `python3 scripts/generate-grafana-dashboards.py --check` ✅, `--dry-run` ✅, `--output-dir /tmp/dash_test` 7 JSON ✅, `GRAFANA_URL=... --correct-dashboards --dry-run` `up to date` ✅
+
+---
+
 # refactor(cpp23): волны 16-18 — execution/barrier/span + variant/optional/deducing_this + ranges/print/mdspan
 
 ## Date: 2026-08-27
