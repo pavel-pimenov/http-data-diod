@@ -440,7 +440,7 @@ python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выро�
 | L2 Сервер | `l2-server` | все `l2_server_*` |
 | SLO (уровень обслуживания) | `l2-slo-tracking` | availability / error budget |
 | NATS-сервер | `nats-dashboard` | `gnatsd_*` (генерируется скриптом) |
-| NGINX Метрики | `nginx-metrics` | nginx `stub_status` (из `grafana-dashboards/grafana-nginx.json`) |
+| NGINX Метрики | `nginx-metrics` | nginx `stub_status` (из `grafana-nginx.json`) |
 
 Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка покрытия: `python3 scripts/test-grafana-generator.sh` (поднимает временный Grafana и прогоняет генератор).
 

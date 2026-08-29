@@ -455,7 +455,7 @@ def create_nats_dashboard() -> Dict:
 
 def create_nginx_dashboard() -> Dict:
     """Load NGINX dashboard from JSON file"""
-    json_path = _os.path.join(_os.path.dirname(__file__), 'grafana-dashboards', 'grafana-nginx.json')
+    json_path = _os.path.join(_os.path.dirname(__file__), 'grafana-nginx.json')
     dashboard = load_dashboard_from_json(json_path)
     if dashboard is None:
         dashboard = create_dashboard_base(
@@ -2646,7 +2646,7 @@ Examples:
   python3 scripts/generate-grafana-dashboards.py --config grafana-config.json
   GRAFANA_API_KEY=xxx python3 scripts/generate-grafana-dashboards.py
   python3 scripts/generate-grafana-dashboards.py --dry-run --check
-  python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana-dashboards/generated --correct-dashboards
+  python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana/generated --correct-dashboards
         """
     )
     parser.add_argument('--config', type=str, help='Path to JSON/YAML config file with Grafana settings')
