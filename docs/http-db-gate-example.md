@@ -23,8 +23,8 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 
 | Сервис | Роль | Что задействовано |
 |--------|------|-------------------|
-| `postgres` | БД | `postgres:16-alpine`, демо-схема из `sql/init-postgres/`. Включён по умолчанию (`DB_POSTGRES_ENABLED=true`) |
-| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/init/init.sql`. Запускается только через profile: `docker compose --profile oracle up -d` |
+| `postgres` | БД | `postgres:16-alpine`, демо-схема из `sql/postgres.sql`. Включён по умолчанию (`DB_POSTGRES_ENABLED=true`) |
+| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/oracle.sql`. Запускается только через profile: `docker compose --profile oracle up -d` |
 | `l2-proxy` | HTTP-вход | регистрирует БД из `DB_POSTGRES_*` / `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
 | `l2-worker` | Исполнитель | образ `runtime-db` (Oracle Instant Client 21.13 + libpq), держит пулы сессий, отвечает на `service.db.query` |
 | `nats-server` | Транспорт | subject `service.db.query`, queue group `db_workers` |
@@ -49,7 +49,7 @@ DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
 
 ## Демо-данные
 
-`sql/init/init.sql` создаёт таблицу `app_user.demo_messages` (id/message/created_at) и заполняет её:
+`sql/oracle.sql` (и `sql/postgres.sql` для PostgreSQL) создаёт таблицу `app_user.demo_messages` / `demo_messages` и заполняет её:
 
 ```
 1 | Hello from Oracle DB gateway

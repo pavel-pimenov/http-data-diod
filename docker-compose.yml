@@ -253,7 +253,7 @@ services:
       - ORACLE_CHARACTERSET=${ORACLE_CHARACTERSET:-AL32UTF8}
     volumes:
       - oracle-data:/opt/oracle/oradata
-      - ./sql/init:/docker-entrypoint-initdb.d:ro
+      - ./sql/oracle.sql:/docker-entrypoint-initdb.d/01-oracle.sql:ro
     networks:
       - l2_network
     healthcheck:
@@ -278,7 +278,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-app_db}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./sql/init-postgres:/docker-entrypoint-initdb.d:ro
+      - ./sql/postgres.sql:/docker-entrypoint-initdb.d/01-postgres.sql:ro
     networks:
       - l2_network
     healthcheck:
