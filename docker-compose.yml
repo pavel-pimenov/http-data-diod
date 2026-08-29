@@ -122,7 +122,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # VictoriaMetrics Agent - scrapes metrics from services
+  # VictoriaMetrics Agent - scrapes metrics (VictoriaMetrics, без Prometheus)
   vmagent:
     container_name: vmagent
     image: victoriametrics/vmagent:v1.97.0
@@ -130,10 +130,10 @@ services:
     ports:
       - "8429:8429"
     volumes:
-      - ./prometheus/vmagent-scrape.yml:/etc/vmagent/prometheus.yml:ro
+      - ./vmagent/vmagent.yml:/etc/vmagent/config.yml:ro
       - vmagent-data:/tmp/vmagent-remotewrite
     command:
-      - '--promscrape.config=/etc/vmagent/prometheus.yml'
+      - '--promscrape.config=/etc/vmagent/config.yml'
       - '--remoteWrite.url=http://victoria-metrics:8428/api/v1/write'
       - '--httpListenAddr=:8429'
       - '--promscrape.streamParse=true'
@@ -146,36 +146,6 @@ services:
       - victoria-metrics
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8429/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
-  # VictoriaMetrics Alerting - evaluates prometheus/alerts.yml against victoria-metrics
-  vmalert:
-    container_name: vmalert
-    image: victoriametrics/vmalert:v1.97.0
-    restart: unless-stopped
-    ports:
-      - "8880:8880"
-    volumes:
-      - ./prometheus/alerts.yml:/etc/vmalert/alerts.yml:ro
-    command:
-      - '-datasource.url=http://victoria-metrics:8428'
-      - '-remoteRead.url=http://victoria-metrics:8428'
-      - '-remoteWrite.url=http://victoria-metrics:8428'
-      - '-rule=/etc/vmalert/alerts.yml'
-      - '-external.label=vm=${VM_NAME:-hostname}'
-      - '-httpListenAddr=:8880'
-      - '-notifier.blackhole'
-    environment:
-      - VM_NAME=${VM_NAME:-hostname}
-    networks:
-      - l2_network
-    depends_on:
-      - victoria-metrics
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8880/-/healthy || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
