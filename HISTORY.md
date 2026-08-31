@@ -1,3 +1,62 @@
+# perf(NATS): сравнение пропускной способности и задержки SSL vs plaintext (end-to-end)
+
+## Date: 2026-08-31
+
+### Контекст
+Нужно измерить влияние TLS на скорость NATS-части. Сделан end-to-end замер полного HTTP-пути
+(nginx 7777 → l2-proxy → NATS `service.proxy` → l2-worker → l2-server → обратно), где единственная
+изменяемая переменная — `NATS_ENABLE_TLS`. Генерация сертификатов в `certs_nats/` и параметры
+окружения в `.env` (оба gitignored) по рецепту из `.env.example`.
+
+### Методика
+- `message_counter.py --duration 20 --concurrent 20 --test post` через `http://localhost:7777`
+  (body ~10 КБ), 10 прогонов на конфигурацию, разнесённые по времени для учёта дрейфа нагрузки.
+- Хост перегружен внешними процессами (4 CPU, load average ~15) — абсолютные RPS низкие,
+  сравнивается относительная разница на медианах 10 прогонов.
+- TLS 1.3 / `TLS_AES_128_GCM_SHA256` (server-only, CA verification, без mTLS).
+
+### Результаты (медиана 10×20s прогонов, concurrency 20)
+
+| Метрика | Плэйнтекст (без SSL) | SSL | Δ |
+|---------|----------------------|-----|------|
+| RPS median | 372.3 | 353.3 | **-5.1%** |
+| RPS mean | 375.4 | 357.9 | -4.7% |
+| latency avg, median | 43.92 ms | 46.26 ms | **+5.3%** |
+| p50, median | 39.47 ms | 41.37 ms | +4.8% |
+| p95, median | 84.76 ms | 91.77 ms | +8.3% |
+| p99, median | 117.58 ms | 126.36 ms | +7.5% |
+
+Вывод: на end-to-end пути включение TLS на NATS даёт **~5% просадки пропускной способности и
+~5-8% рост задержки**. Разница стабильна по всем выборкам и ожидаемо невелика — TLS-накладные
+расходы (~2-3 KB на рукопожатие + симметричное шифрование) малы относительно 10 КБ тела и
+маршрутизации. При concurrency 20 TLS-рукопожатия выполняются на старте соединений и не
+создают узкого места при длинных keep-alive соединениях. Для NATS PHY-безопасность рекомендована.
+
+### Проверка
+- `./rebuild-and-run.sh` для `NATS_ENABLE_TLS=false` и `=true` ✅, `health-check.sh all` ✅
+- `curl http://localhost:8222/varz` подтверждает `tls_required` вкл/выкл ✅
+- Все прогоны: 100% успеха, 0 ошибок, 0 crossed responses ✅
+
+---
+
+# fix(docker-compose): сдвинуть subnet l2_network 172.20.0.0/16 → 172.22.0.0/16
+
+## Date: 2026-08-31
+
+### Контекст
+`docker compose up` падал с `invalid pool request: Pool overlaps with other one on this address space`.
+Подсеть `172.20.0.0/16` уже занята другой сетью на хосте (`clickhouse-kafka_default`), поэтому
+создание `l2_network` с тем же диапазоном блокировало сборку.
+
+### Что сделано
+- `docker-compose.yml:658` `l2_network.ipam.config.subnet` → `172.22.0.0/16` (свободный диапазон).
+- Поведение не меняется: сервисы по-прежнему изолированы в bridge-сети `l2_network`.
+
+### Проверка
+- `./rebuild-and-run.sh` ✅, `health-check.sh all` ✅
+
+---
+
 # refactor(scripts): Grafana генератор --dry-run/--check/--output-dir + валидация + GrafanaAPI ретраи
 
 ## Date: 2026-08-28
