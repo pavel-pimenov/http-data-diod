@@ -1,3 +1,37 @@
+# refactor(cpp): план выноса дублирующего кода в методы-хелперы (WIP, доработка на другом компе)
+
+## Date: 2026-08-31
+
+### Контекст
+Проведён аудит кода `cpp/l2-proxy/` на дублирование (сторонние либы httplib исключены).
+План действий — вынести подтверждённые дубликаты в методы-хелперы. Реализация будет
+выполнена на другом компьютере; здесь зафиксирован только план.
+
+### План (по приоритету)
+- [ ] **Подписки NATS** (`l2_worker_nats.cpp:76-100 subscribe_worker`, `:116-134 subscribe_db`)
+  — общий приватный `L2Worker::subscribe_nats_subject(subject, queue_group, error_context, handler)`
+  с валидацией `reply_to`, `enqueue` + catch.
+- [ ] **Пролог обработки NATS-задачи** (`:281-299 process_request_from_nats`, `:487-502 process_db_query_from_nats`)
+  — `WorkerActivityGuard activity` + `queue_size.Set` + `LogContextScope log_scope` → структура
+  `WorkerTaskContext { WorkerActivityGuard; LogContextScope; uint64_t start_us; }` + `begin_worker_task()`.
+- [ ] **Метрика очереди** (`:286-289`, `:494-497`, `l2_worker.cpp:359-362`)
+  — `void L2Worker::update_queue_size_metric();`.
+- [ ] **Метрика исходящих байт + span** (`:342-343`, `:408-409`, `:583-584`, и `:330-338`/`:411-418`)
+  — `record_bytes_sent(size_t)` и `log_worker_span(...)` в `tracing_helpers.hpp`.
+- [ ] **Настройка HTTP-клиента** (`http_client.cpp:58-68` vs `common_utils.cpp:469-488 setup_ssl_client`)
+  — общий `setup_http_connection(httplib::Client&, timeout, reuse)` для `Client` и `SSLClient`.
+- [ ] **DB-gateway метрики** (`request_handler.cpp:744-752` + `l2_worker_nats.cpp:573-580`)
+  — свободная `record_db_gateway_metrics(...)` в `metrics_manager.hpp`.
+- [ ] **Envelope NATS-ответа** (`l2_worker_nats.cpp:362-398`) — `build_nats_response_envelope(...)`
+  в `json_utils.hpp` (37 строк построения JSON-контракта, для читаемости/тестируемости).
+
+### Проверка (обязательно после реализации)
+- `./rebuild-and-run.sh` ✅, `health-check.sh all` ✅
+- `clang-tidy` без замечаний
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅
+
+---
+
 # perf(NATS): сравнение пропускной способности и задержки SSL vs plaintext (end-to-end)
 
 ## Date: 2026-08-31
