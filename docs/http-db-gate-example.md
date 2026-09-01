@@ -77,33 +77,56 @@ Stage `runtime-db` регистрирует его в динамическом �
 - ставит пакеты `libaio1t64`, `libnsl2`
 - создаёт compat-symlink `libaio.so.1` → `libaio.so.1t64` (Ubuntu t64-переход)
 
-### Вариант 2 — вручную (offline-сборка / нет доступа к download.oracle.com)
+### Вариант 2 — вручную (offline, нет доступа к интернету)
 
-1. Скачайте **Basic Package (ZIP)** с официальной страницы Instant Client for Linux x86-64:
-   <https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html>
+Все действия можно выполнить без интернета, если заранее (на машине с сетью) подготовить три вещи:
+**zip Instant Client**, **`.deb` для `libaio`** и (при необходимости) `unzip`. Подробно про ld.so
+регистрацию — в отдельном разделе ниже.
 
-2. Занесите архив в контейнер и распакуйте в `/opt/oracle`:
+**Важно про текущий runtime-образ l2-worker (сборка `target=runtime`):** в нём **нет** `unzip`,
+`dpkg` и `apt` (урезанный образ), зато `ldconfig` есть. Поэтому `.deb` распаковываются **на хосте**
+(`dpkg -x`), а не ставятся внутри контейнера, и zip тоже распаковывается на хосте.
+
+1. Скачайте **Basic Package (ZIP)** с официальной страницы Instant Client for Linux x86-64
+   (на машине с интернетом): <https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html>
+   Версия, совпадающая с Dockerfile: `instantclient-basic-linux.x64-21.13.0.0.0dbru.zip`.
+
+2. Распакуйте zip на хосте и занесите каталог в контейнер:
 
    ```bash
-   docker cp instantclient-basic-linux.x64-<ver>.zip l2-worker:/tmp/
-   docker compose exec l2-worker bash -c \
-     'cd /opt/oracle && unzip /tmp/instantclient-basic-linux.x64-<ver>.zip && rm -f /tmp/*.zip'
+   mkdir -p /tmp/ic-src && cd /tmp/ic-src
+   unzip /path/to/instantclient-basic-linux.x64-<ver>.zip    # → instantclient_21_13/
+   docker cp /tmp/ic-src/instantclient_21_13 l2-worker:/opt/oracle/instantclient_<ver>
    ```
 
-3. Зарегистрируйте каталог в загрузчике и доставьте недостающие пакеты:
+   (Каталог внутри должен называться так же, как распаковалось из zip — обычно `instantclient_21_13`.)
+
+3. Доставьте `libaio`. Нужен только `.deb` (на Ubuntu 26.04/24.04 amd64 это `libaio1t64`), который
+   содержит настоящую библиотеку `libaio.so.1t64`. `libnsl.so.1` в runtime-образе **уже есть**
+   (проверено), отдельный `libnsl2` ставить не нужно. Распакуйте `.deb` на хосте:
+
+   ```bash
+   dpkg -x /path/to/libaio1t64_*.deb /tmp/libaio-root
+   # внутри появится usr/lib/x86_64-linux-gnu/libaio.so.1t64
+   docker cp /tmp/libaio-root/usr/lib/x86_64-linux-gnu/libaio.so.1t64 \
+     l2-worker:/usr/lib/x86_64-linux-gnu/
+   ```
+
+4. Соберите `libaio.so.1` (SONAME, который ищет `libclntsh.so.21.1`) и зарегистрируйте каталог
+   клиента в загрузчике:
 
    ```bash
    docker compose exec l2-worker bash -c \
-     'echo /opt/oracle/instantclient_<ver> > /etc/ld.so.conf.d/oracle-instantclient.conf && \
-      apt-get update && apt-get install -y libaio1t64 libnsl2 && ldconfig'
+     'ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 && \
+      echo /opt/oracle/instantclient_<ver> > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+      ldconfig'
    ```
 
-   На Ubuntu c t64-переходом убедитесь, что доступен `libaio.so.1` (иначе `libaio.so.1t64`).
-
-4. Перезапустите l2-worker, чтобы ODPI-C нашёл `libclntsh.so`:
+5. Перезапустите l2-worker и проверьте, что ODPI-C нашёл `libclntsh.so`:
 
    ```bash
    docker compose restart l2-worker
+   docker compose logs l2-worker | grep -i oracle   # ждать "DB executor 'oracle': pool ready"
    ```
 
 Примечания:
@@ -112,6 +135,120 @@ Stage `runtime-db` регистрирует его в динамическом �
 - Имя каталога зависит от версии (`instantclient_21_13`, `instantclient_21_23`, ...) — используйте тот, что распаковался.
 - SQL*Plus/Tools/SDK не нужны — шлюзу достаточно Basic-пакета.
 - Если используете `tnsnames.ora`/`sqlnet.ora`, положите их в `network/admin` внутри каталога клиента (или задайте `TNS_ADMIN`); пулу шлюза это не нужно (он ходит по host:port/service).
+- Изменения, сделанные командами в **живом** контейнере, **эфемерны** — исчезают при `docker compose up`/recreate. Для постоянной offline-инсталляции собирайте образ (см. «Офлайн-сборка образа» ниже).
+
+## ld.so регистрация подробно (offline)
+
+### Как ODPI-C вообще находит `libclntsh.so`
+
+Встраиваемый ODPI-C не линкуется с клиентом напрямую — он делает `dlopen("libclntsh.so")` и потом,
+по цепочке, `libclntsh.so.19.1`, `.18.1`, ..., вплоть до `.21.1` (`dpiOci.c`, массив `dpiOciLibNames`).
+Динамический загрузчик glibc ищет библиотеку в таком порядке:
+
+1. `$LD_LIBRARY_PATH` (если задан);
+2. кэш `/etc/ld.so.cache`, который строит `ldconfig` из каталогов, перечисленных в
+   `/etc/ld.so.conf` (+ всё из `/etc/ld.so.conf.d/*.conf`);
+3. системные каталоги по умолчанию (`/lib`, `/usr/lib`).
+
+Поэтому задача ld.so-регистрации — сделать так, чтобы `<каталог клиента>` попал в п.2 (кэш
+`ldconfig`). Альтернатива — п.1 (`LD_LIBRARY_PATH`), см. ниже.
+
+### Что делает каждый шаг ldconfig
+
+- `/etc/ld.so.conf.d/oracle-instantclient.conf` — текстовый файл, обычно **одна строка** — путь к
+  каталогу с `.so`: `/opt/oracle/instantclient_21_13`. Имена конфигов в этом каталоге должны иметь
+  суффикс `.conf` (иначе `ldconfig` их не прочитает).
+- `ldconfig`:
+  - сканирует каталоги из `/etc/ld.so.conf` и `/etc/ld.so.conf.d/*.conf`;
+  - смотрит **SONAME** каждой `.so` (например `libclntsh.so.21.1`) и создаёт/поправляет симлинки в
+    самих каталогах под это имя;
+  - пишет бинарный кэш `/etc/ld.so.cache`, по которому `dlopen` находит библиотеку по имени без
+    сканирования диска.
+  В кэш попадает как минимум запись по **SONAME** (`libclntsh.so.21.1`). Более короткое
+  `libclntsh.so` — это symlink, который уже лежит внутри Basic-zip; ODPI-C перебирает имена
+  по цепочке `libclntsh.so`, `.19.1`, ..., `.21.1`, поэтому даже если bare-имя не попадёт в кэш,
+  финальное имя `.21.1` из списка в кэше есть — `dlopen` гарантированно находит клиент.
+
+### Проверка, что регистрация сработала
+
+```bash
+# 1) клиент виден в кэше загрузчика
+docker compose exec l2-worker sh -c 'ldconfig -p | grep -iE "clntsh|aio"'
+
+# 2) симлинки на месте: bare-имя libclntsh.so указывает на SONAME-файл
+docker compose exec l2-worker sh -c 'ls -l /opt/oracle/instantclient_21_13/libclntsh.so; ls -l /usr/lib/x86_64-linux-gnu/libaio.so.1'
+
+# 3) ODPI-C реально загрузил клиент — в логах воркера появилось
+docker compose logs l2-worker | grep -i "DB executor 'oracle'"
+```
+
+Ожидаемый результат п.1 (ключевые строки; bare-имя `libclntsh.so` может подтянуться в кэш
+дополнительной записью из-за symlink):
+
+```
+libclntsh.so.21.1       => /opt/oracle/instantclient_21_13/libclntsh.so.21.1
+libclntshcore.so.21.1   => /opt/oracle/instantclient_21_13/libclntshcore.so.21.1
+libaio.so.1             => /usr/lib/x86_64-linux-gnu/libaio.so.1
+```
+
+### t64-нюанс `libaio` (SONAME vs. файл)
+
+`libclntsh.so.21.1` линкуется против SONAME **`libaio.so.1`**. На Ubuntu 26.04/24.04 (t64-переход)
+пакет `libaio1t64` кладёт **`libaio.so.1t64`**, а привычного `libaio.so.1` нет. Абсолютно необходимый
+мост — symlink `libaio.so.1 → libaio.so.1t64` (без него `dlopen` клиента упадёт с `libaio.so.1:
+cannot open shared object file`). В Dockerfile этот symlink создаёт `runtime-db`:
+`ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1`.
+
+### Альтернатива без ld.so — `LD_LIBRARY_PATH`
+
+Если менять `/etc` не хочется, можно добавить каталог клиента в `LD_LIBRARY_PATH` процесса.
+Задать его нужно **до старта** процесса l2-worker — например, в `docker-compose.yml` секции
+l2-worker:
+
+```yaml
+environment:
+  - LD_LIBRARY_PATH=/opt/oracle/instantclient_21_13
+```
+
+после чего `docker compose up -d --force-recreate l2-worker`. Внутри работающего контейнера
+`export LD_LIBRARY_PATH=...` эффекта не даст — это переменная запущенного процесса, а не его
+родителя.
+
+Работает для `dlopen`, но менее «правильно»: `LD_LIBRARY_PATH` переопределяет системные пути для
+всех lib, кэш `ldconfig` быстрее и надёжнее, а `ld.so.conf` покрывает и случаи, когда каталог
+клиента подключается как volume.
+
+### Почему правки в живом контейнере эфемерны → офлайн-сборка образа
+
+`docker compose` (re)create контейнера пересобирает его из образа, и все ручные изменения
+(`ld.so.conf.d`, симлинки, сам каталог `/opt/oracle`) теряются. Для постоянной установки лучше
+положить клиент в образ при сборке. Офлайн-вариант: держать zip и `.deb` в контексте сборки и
+заменить онлайн-скачивание на `COPY` + `unzip`/`dpkg-deb -x` (без `apt-get` из интернета):
+
+```dockerfile
+# docker build offline: кладём рядом с Dockerfile:
+#   offline/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip
+#   offline/libaio1t64_*.deb
+# (unzip может понадобиться и в runtime-образе, либо распакуйте zip заранее и COPY каталогом)
+FROM ubuntu-base AS oracle-client-offline
+COPY offline/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip /tmp/ic.zip
+COPY offline/*.deb /tmp/debs/
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends unzip libnsl2 && \
+    dpkg -i /tmp/debs/*.deb && \
+    unzip -q /tmp/ic.zip -d /opt/oracle && \
+    rm -rf /tmp/ic.zip /tmp/debs /var/lib/apt/lists/*
+
+# далее — как в штатном stage runtime-db: COPY --from=oracle-client-offline /opt/oracle /opt/oracle
+# + /etc/ld.so.conf.d/oracle-instantclient.conf + ldconfig + symlink libaio.so.1
+```
+
+В штатном `cpp/l2-proxy/Dockerfile` эти шаги выполняют stage `oracle-client` (онлайн-скачивание
+zip, строки с `curl ... otn_software ...`) и `runtime-db` (`apt-get install libaio1t64 libnsl2`).
+Для офлайн-сборки замените `curl`-шаг на `COPY offline/*.zip` + `unzip`, а `apt-get install
+libaio1t64` — на `dpkg -i <libaio1t64.deb>`. Проще всего собрать и выгрузить образ один раз на
+«онлайн-машине» (`docker save`/`docker load`), если контур разворачивается на offline-хосте без
+прав на сборку.
 
 ## Демо-данные
 

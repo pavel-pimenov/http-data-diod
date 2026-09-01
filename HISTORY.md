@@ -1,3 +1,40 @@
+# docs(db-gate): ld.so регистрация Oracle Instant Client подробно (offline)
+
+## Date: 2026-09-01
+
+### Что сделано
+`docs/http-db-gate-example.md` — раздел «Oracle Instant Client» расширен под **offline-установку**
+(нет доступа к интернету):
+
+- **Вариант 2 переписан под offline**: учтено, что runtime-образ l2-worker урезанный — в нём нет
+  `unzip`, `dpkg`, `apt` (есть только `ldconfig`). Поэтому zip и `.deb` распаковываются **на хосте**
+  (`unzip`, `dpkg -x`), а в контейнер заносятся готовые файлы через `docker cp`.
+- Уточнено, что `libnsl.so.1` в runtime-образе **уже присутствует** (проверено в контейнере),
+  из `.deb` нужен только `libaio1t64` (`libaio.so.1t64`).
+- Новый раздел **«ld.so регистрация подробно (offline)»**:
+  - как ODPI-C находит `libclntsh.so` (цепочка `dpiOciLibNames` в `dpiOci.c`: `libclntsh.so` →
+    `.19.1` … `.21.1`) и порядок поиска загрузчика glibc (`LD_LIBRARY_PATH` → `/etc/ld.so.cache` →
+    системные каталоги);
+  - что делает каждый шаг: `/etc/ld.so.conf.d/oracle-instantclient.conf` (одна строка — путь),
+    `ldconfig` (сканирует каталоги, правит symlink по SONAME, пишет кэш);
+  - проверка регистрации: `ldconfig -p | grep -iE "clntsh|aio"`, `ls -l` на symlink-цепочку,
+    лог воркера `DB executor 'oracle': pool ready`;
+  - t64-нюанс: SONAME `libaio.so.1` vs файл `libaio.so.1t64` → обязательный symlink
+    `libaio.so.1 → libaio.so.1t64`;
+  - альтернатива — `LD_LIBRARY_PATH` через env в `docker-compose.yml` (+ `--force-recreate`);
+    исправлен неверный пример `export` в живой контейнер;
+  - почему правки в живом контейнере эфемерны (теряются при recreate) и офлайн-сборка образа:
+    Dockerfile-snippet `COPY offline/*.zip` + `COPY offline/*.deb` + `dpkg -i` (без apt-get из сети).
+
+### Файлы
+- `docs/http-db-gate-example.md`
+
+### Проверка
+- Чисто документационное изменение; факты сверены с контейнером (отсутствие `unzip`/`dpkg`,
+  наличие `ldconfig` и `libnsl.so.1`) и с `cpp/l2-proxy/odpi/src/dpiOci.c` (имена `libclntsh.so*`).
+
+---
+
 # docs(db-gate): где скачать Oracle Instant Client и куда подложить в контейнер
 
 ## Date: 2026-09-01
