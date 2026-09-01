@@ -1,3 +1,36 @@
+# fix(cpp): 400 на /v1/sql/* для не-JSON тела попадают в l2_proxy_db_requests_total
+
+## Date: 2026-09-01
+
+### Что сделано
+Доработка фикса «метрика считает весь трафик DB-gateway»: выяснилось, что не-JSON тело POST на
+`/v1/sql/*` перехватывалось общим JSON-фильтром в `RequestHandler::handle_post`
+(`nlohmann::json::accept`, ответ «Invalid JSON in request body», 400) ДО диспетчеризации на
+`handle_db_gateway`. Из-за этого такие 400 не попадали в `l2_proxy_db_requests_total` (в отличие от
+400 для валидного JSON, но невалидного контракта, например `{}`), и счётчик 400/type=query рос
+несимметрично относительно фактических HTTP-400.
+
+Изменение в `cpp/l2-proxy/request_handler.cpp::handle_post`: ветка `req.path.starts_with(kDbGatewayPath)`
+перенесена ПЕРЕД глобальной JSON-валидацией — DB-gateway сам парсит тело (`JsonUtils::try_parse`)
+и считает свои 400 через `record_gateway_metrics` (`db`, type, status=400). Общий путь (`/`)
+по-прежнему проходит JSON-фильтр (невалидный JSON → 400, валидный → нормальный контур).
+
+### Проверка (в контейнере, после `./rebuild-and-run.sh`)
+```
+POST /v1/sql/oracle/query -d 'nope' → 400 l2_proxy_db_requests_total{db="oracle",status="400",type="query"} +1
+POST /v1/sql/oracle/query -d '{}'    → 400 +1
+POST /v1/sql/oracle/query -d ''      → 400 +1
+POST / (main path) 'not-json'        → 400 (общий фильтр не тронут)
+POST / валидный JSON                 → 200
+python3 message_counter.py --iterations 1 --concurrent 1 → ✅
+```
+После 3 тестовых 400 счётчик `{db="oracle",status="400",type="query"}` = 3 (раньше был 1 при таком
+же трафике — терялись не-JSON тела).
+
+### Файлы
+- `cpp/l2-proxy/request_handler.cpp`
+- `HISTORY.md`
+
 # refactor(docker-compose): удалены мёртвые env-переменные по режимам работы l2-сервисов
 
 ## Date: 2026-09-01

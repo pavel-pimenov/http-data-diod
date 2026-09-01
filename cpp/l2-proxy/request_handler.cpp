@@ -233,15 +233,18 @@ void RequestHandler::handle_post(const httplib::Request &req,
       static_cast<double>(body.size()));
 
   // Validate that the body is valid JSON (lightweight syntax check without DOM
-  // allocation)
-  if (!body.empty() && !nlohmann::json::accept(body)) {
-    fail_request(res, 400, "Invalid JSON in request body",
-                 &m_ctx.m_proxy.m_metrics->m_client_errors);
+  // allocation). The DB gateway is dispatched first: it owns its body parsing
+  // and request metrics, so its 400s (invalid/empty JSON, bad contract) are
+  // counted in l2_proxy_db_requests_total instead of the generic client-error
+  // path.
+  if (req.path.starts_with(kDbGatewayPath)) {
+    handle_db_gateway(req, res, "POST", body);
     return;
   }
 
-  if (req.path.starts_with(kDbGatewayPath)) {
-    handle_db_gateway(req, res, "POST", body);
+  if (!body.empty() && !nlohmann::json::accept(body)) {
+    fail_request(res, 400, "Invalid JSON in request body",
+                 &m_ctx.m_proxy.m_metrics->m_client_errors);
     return;
   }
 
