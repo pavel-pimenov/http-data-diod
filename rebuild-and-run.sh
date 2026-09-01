@@ -150,7 +150,7 @@ else
     # set to false (not unset): the `set -u` above trips on unbound vars
     export ENABLE_ASAN=false
     export L2_PROXY_DOCKER_TARGET=runtime
-    # Default worker build skips the Oracle Instant Client download so local
+    # Default worker build drops the Oracle OCI client so local
     # and test runs work with PostgreSQL only. Production: set
     # L2_WORKER_DOCKER_TARGET=runtime-db (and the `oracle` profile +
     # DB_ORACLE_ENABLED=true) to embed the Oracle client for the DB gateway.

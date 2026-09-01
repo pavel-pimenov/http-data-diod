@@ -144,7 +144,7 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 | Драйвер | Образ / протокол | Статус по умолчанию | Включение |
 |---|---|---|---|
 | PostgreSQL | `postgres:16-alpine`, libpq, порт 5432 | **включён** (`DB_POSTGRES_ENABLED=true`) | поднят в `docker-compose.yml` |
-| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / Instant Client 21.13, порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `oracle` + `DB_ORACLE_ENABLED=true` |
+| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `oracle` + `DB_ORACLE_ENABLED=true` |
 
 Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
 

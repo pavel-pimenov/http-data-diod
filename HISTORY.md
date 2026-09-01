@@ -1,3 +1,37 @@
+# docs: актуализация описания Oracle OCI client после перехода на COPY из XE-образа
+
+## Date: 2026-09-01
+
+### Что сделано
+Документация и комментарии приведены в соответствие с новым способом поставки Oracle OCI-клиента
+(из `gvenzl/oracle-xe:21.3.0-slim`, а не скачиванием Instant Client с `download.oracle.com`):
+
+- `docs/http-db-gate-example.md`:
+  - раздел «Oracle Instant Client: где скачать и куда подложить» → «Oracle OCI client: откуда
+    библиотеки в образе» (multi-stage `COPY --from=oracle-libs`; таблица компонентов:
+    `libclntsh*.21.1`, `libnnz21.so`, `oracore/zoneinfo` (без него ORA-01804), `nls/` (без него
+    ORA-12715); `ENV ORACLE_HOME`; symlink; `libaio` t64);
+  - удалён «Вариант 2 — вручную (offline)» и офлайн-сборка через zip/`.deb`
+    (больше не нужны — источником является XE-образ сервиса `oracle`);
+  - раздел ld.so переименован в «(что делает runtime-db)», упоминание Basic-zip убрано;
+  - таблица сервисов и «Известные ограничения» актуализированы;
+- `docker-compose.yml`: комментарии «(no download from download.oracle.com)» актуализированы под
+  новый источник (libs from XE image at build time); «Instant Client» → «Oracle OCI client».
+- `rebuild-and-run.sh`: комментарий про default build («skips the Oracle Instant Client download» →
+  «drops the Oracle OCI client»).
+- `README.md`: таблица БД — «Instant Client 21.13» → «OCI client (из XE-образа)».
+
+### Файлы
+- `docs/http-db-gate-example.md`
+- `docker-compose.yml`
+- `rebuild-and-run.sh`
+- `README.md`
+
+### Проверка
+- Чисто документационные правки; фактически проверено ранее (pool ready, ping/query Oracle).
+
+---
+
 # build: Oracle OCI client в образе без скачивания с download.oracle.com
 
 ## Date: 2026-09-01
