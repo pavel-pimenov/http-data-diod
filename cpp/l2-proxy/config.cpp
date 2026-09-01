@@ -267,14 +267,43 @@ void Config::load_db_query_config() {
   if (!m_db_query_enabled) {
     return;
   }
-  if (!get_env_bool("DB_ORACLE_ENABLED", false) &&
-      !get_env_bool("DB_POSTGRES_ENABLED", false)) {
+  const bool oracle_enabled = get_env_bool("DB_ORACLE_ENABLED", false);
+  const bool postgres_enabled = get_env_bool("DB_POSTGRES_ENABLED", false);
+  if (!oracle_enabled && !postgres_enabled) {
     Logger::warn("DB_QUERY_ENABLED=true but no database driver enabled "
                  "(DB_ORACLE_ENABLED/DB_POSTGRES_ENABLED are false): no "
                  "databases configured");
     return;
   }
-  if (get_env_bool("DB_ORACLE_ENABLED", false)) {
+
+  // Proxy mode only registers the enabled database names/drivers, which is all
+  // it needs for the /v1/sql/* listing and route validation. The driver
+  // connection config (host/port/credentials/pool) is owned solely by the
+  // worker, so it is not read here.
+  if (m_mode == "proxy") {
+    if (oracle_enabled) {
+      DbConfig db;
+      db.m_name = "oracle";
+      db.m_driver = "oracle";
+      m_databases.push_back(db);
+      Logger::info("DB Gateway: registered database '{}' (driver={}) "
+                   "[proxy routing only]",
+                   db.m_name, db.m_driver);
+    }
+    if (postgres_enabled) {
+      DbConfig db;
+      db.m_name = "postgres";
+      db.m_driver = "postgres";
+      m_databases.push_back(db);
+      Logger::info("DB Gateway: registered database '{}' (driver={}) "
+                   "[proxy routing only]",
+                   db.m_name, db.m_driver);
+    }
+    return;
+  }
+
+  // Worker mode: full connection config for building the driver pools.
+  if (oracle_enabled) {
     DbConfig db;
     db.m_name = "oracle";
     db.m_driver = "oracle";
@@ -292,7 +321,7 @@ void Config::load_db_query_config() {
                  "service={})",
                  db.m_name, db.m_driver, db.m_host, db.m_port, db.m_service);
   }
-  if (get_env_bool("DB_POSTGRES_ENABLED", false)) {
+  if (postgres_enabled) {
     DbConfig db;
     db.m_name = "postgres";
     db.m_driver = "postgres";
@@ -555,6 +584,11 @@ bool Config::validate(bool log_issues) const {
         check(db.m_driver == "oracle" || db.m_driver == "postgres",
               std::format("DB '{}': unknown driver '{}'", db.m_name,
                           db.m_driver));
+        // Proxy mode registers DBs for routing/validation only; the connection
+        // fields are checked by the worker (which owns the pools).
+        if (m_mode == "proxy") {
+          continue;
+        }
         check(!db.m_host.empty(),
               std::format("DB '{}': host cannot be empty", db.m_name));
         check(in_range(db.m_port, 1, 65535),

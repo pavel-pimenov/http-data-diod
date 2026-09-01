@@ -1,34 +1,149 @@
-# refactor(cpp): план выноса дублирующего кода в методы-хелперы (WIP, доработка на другом компе)
+# docs(db-gate): где скачать Oracle Instant Client и куда подложить в контейнер
+
+## Date: 2026-09-01
+
+### Что сделано
+- `docs/http-db-gate-example.md`: добавлен раздел «Oracle Instant Client: где скачать и куда
+  подложить в контейнер»:
+  - **Вариант 1 (авто)**: Dockerfile (stage `oracle-client`) сам качает Basic 21.13 с login-free CDN
+    `https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip`;
+    включение через `L2_WORKER_DOCKER_TARGET=runtime-db` + profile `oracle` + `DB_ORACLE_ENABLED=true`;
+    распаковка в `/opt/oracle/instantclient_21_13`, регистрация через
+    `/etc/ld.so.conf.d/oracle-instantclient.conf` + `libaio1t64`/`libnsl2` + symlink `libaio.so.1`.
+  - **Вариант 2 (offline)**: пошаговый `docker cp` архива в l2-worker → unzip в `/opt/oracle` →
+    ld.so-регистрация → `docker compose restart l2-worker`.
+  - Примечания: версия клиента не обязана совпадать с версией СУБД; имя каталога зависит от
+    версии; SQL*Plus/Tools/SDK не нужны; про `TNS_ADMIN` для `tnsnames.ora`.
+
+### Файлы
+- `docs/http-db-gate-example.md`
+
+### Проверка
+- Чисто документационное изменение (сборка/тесты не затронуты); референсы на пути и URL сверены
+  с `cpp/l2-proxy/Dockerfile` (stage `oracle-client`, `runtime-db`) и `docker-compose.yml`
+  (`L2_WORKER_DOCKER_TARGET`).
+
+---
+
+# refactor(cpp): удаление DB-connection env у l2-proxy (proxy держит только name/driver)
+
+## Date: 2026-09-01
+
+### Контекст
+Прокси в режиме proxy использует из DB-конфигурации только `name`/`driver` (листинг `/v1/sql/*`
+и валидация маршрутов), а весь список DB-connection полей (host/port/service|db/user/password/
+pool) нужен только воркеру, который владеет пулами соединений. Ранее общий `Config` читал и
+валидировал все connection-поля в обоих режимах, из-за чего прокси требовал неиспользуемые
+env-переменные (иначе падал `Configuration validation failed`).
+
+### Что сделано
+- **docker-compose.yml**: у сервиса `l2-proxy` из `environment` удалены DB-connection переменные
+  `DB_ORACLE_HOST/PORT/SERVICE/USER/PASSWORD/POOL_MIN/POOL_MAX` и
+  `DB_POSTGRES_HOST/PORT/DB/USER/PASSWORD/POOL_MIN/POOL_MAX`. Оставлены только флаги и routing:
+  `DB_ORACLE_ENABLED`, `DB_POSTGRES_ENABLED`, `DB_QUERY_ENABLED`, `DB_QUERY_NATS_SUBJECT`,
+  `DB_QUERY_NATS_QUEUE_GROUP`, `DB_QUERY_NATS_TIMEOUT_MS`, `DB_QUERY_DEFAULT_TIMEOUT_MS`,
+  `DB_QUERY_DEFAULT_MAX_ROWS`. Блок `l2-worker` не изменён (владеет пулами).
+- **config.cpp `load_db_query_config()`**: при `m_mode == "proxy"` регистрирует БД только по
+  name/driver из флагов `*_ENABLED` (без чтения connection-полей) и логирует
+  `[proxy routing only]`; полная загрузка connection-конфигурации осталась в ветке воркера.
+- **config.cpp `validate()`**: блок проверки connection-полей БД (host/port/service|db/user/pool)
+  выполняется только в worker-режиме; в proxy-режиме проверяется лишь допустимость name/driver.
+- **test_components.cpp**: тесту загрузки полной postgres-конфигурации и тесту «both drivers»
+  добавлен `MODE=worker` (полная загрузка теперь worker-only); тестам connection-валидации
+  (oracle service, pool range) добавлен `config.m_mode = "worker"`. Добавлен тест
+  `Config: proxy mode registers DB for routing only` — name/driver заполнены, connection-поля пусты.
+
+### Файлы
+- `docker-compose.yml` — убраны DB-connection env у l2-proxy
+- `cpp/l2-proxy/config.cpp` — ветка proxy в `load_db_query_config()` + guard в `validate()`
+- `cpp/l2-proxy/test_components.cpp` — правки тестов + новый proxy-тест
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, `./test_components` прошёл (без упавших ассертов)
+- `health-check.sh all` ✅ (все сервисы healthy)
+- `clang-tidy` на `config.cpp`: без диагностик в коде файла (только пре-существующий шум
+  системных заголовков spdlog/fmt)
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅ (без потерь, GET binary OK)
+- `GET /v1/sql/` у l2-proxy корректно листит БД:
+  `{"databases":[{"driver":"postgres","enabled":true,"name":"postgres"}]}`
+- `docker compose config` валиден, `docker-compose.ratelimit.yml` override не затронут
+
+---
+
+# refactor(cpp): вынос дублирующего кода в методы-хелперы (реализация плана)
+
+## Date: 2026-09-01
+
+### Контекст
+Реализован план выноса подтверждённых дубликатов кода `cpp/l2-proxy/` в методы-хелперы
+(сторонние либы httplib исключены). Все 7 пунктов плана закрыты.
+
+### Что сделано (по пунктам плана)
+- **Item 1 — Подписки NATS**: приватный шаблон `L2Worker::subscribe_nats_subject(subject,
+  queue_group, error_context, handler)` (в `l2_worker_nats.cpp`) инкапсулирует валидацию
+  `reply_to`, `enqueue` + catch. Лямбды `subscribe_worker`/`subscribe_db` в `run_with_nats`
+  сокращены до вызова хелпера с конкретным обработчиком.
+- **Item 2 — Пролог NATS-задачи**: локальная структура `WorkerTaskContext { WorkerActivityGuard;
+  LogContextScope; uint64_t m_start_us; }` (неименованное пространство `l2_worker_nats.cpp`)
+  объединяет пролог `process_request_from_nats` и `process_db_query_from_nats`.
+- **Item 3 — Метрика очереди**: `void L2Worker::update_queue_size_metric();` используется в обоих
+  NATS-обработчиках и в `metrics_ticker_loop` (`l2_worker.cpp`).
+- **Item 4 — Исходящие байты + span**: `void L2Worker::record_bytes_sent(size_t)` (оборачивает
+  `m_bytes_sent.Increment`) и свободный `log_worker_span(...)` в `tracing_helpers.hpp` — общий для
+  обычного и dedup-cached путей ответа.
+- **Item 5 — Настройка HTTP-клиента**: шаблон `setup_http_connection(ClientT&, timeout, reuse)`
+  в `common_utils.hpp` — общие timeouts/keep-alive для `httplib::Client` и `SSLClient`;
+  `setup_ssl_client` и plaintext-ветка `HttpClient::setup_client` переведены на него.
+- **Item 6 — DB-gateway метрики**: уже были реализованы в `metrics_manager.hpp`
+  (`record_db_request_metrics`/`observe_db_request_duration`), изменений не потребовалось.
+- **Item 7 — Envelope NATS-ответа**: `build_nats_response_envelope(...)` в `json_utils.hpp`
+  (сборка 30-строчного JSON-контракта `NatsResponseContract`); вызов в `process_request_from_nats`
+  заменён на хелпер. Добавлены unit-тесты (с полными и опциональными полями).
+
+### Файлы
+- `l2_worker.hpp`, `l2_worker_nats.cpp` — items 1,2,3,4,7
+- `l2_worker.cpp` — `update_queue_size_metric`, `record_bytes_sent`
+- `json_utils.hpp` — `build_nats_response_envelope` (+`<cstdint>`)
+- `test_components.cpp` — тесты envelope
+- `tracing_helpers.hpp` — `log_worker_span`
+- `common_utils.hpp`, `common_utils.cpp`, `http_client.cpp` — `setup_http_connection`
+
+### Проверка
+- `./rebuild-and-run.sh`, `docker compose build l2-worker l2-proxy`: сборка успешна, `./test_components`
+  прошёл (компиляция без ошибок; любые упавшие ассерты оборвали бы сборку)
+- `health-check.sh all` ✅ (все сервисы healthy)
+- `clang-tidy` на изменённых файлах: без ошибок (exit 0), только пре-существующие warning'и
+  в незатронутых файлах (`metrics_history.hpp`, `rate_limiter*`, пре-существующие `st` warnings)
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅ (без потерь, GET binary OK)
+
+---
+
+# refactor(cpp): план выноса дублирующего кода в методы-хелперы (WIP, выполнен)
 
 ## Date: 2026-08-31
 
 ### Контекст
 Проведён аудит кода `cpp/l2-proxy/` на дублирование (сторонние либы httplib исключены).
-План действий — вынести подтверждённые дубликаты в методы-хелперы. Реализация будет
-выполнена на другом компьютере; здесь зафиксирован только план.
+План действий — вынести подтверждённые дубликаты в методы-хелперы. Реализация была
+выполнена 2026-09-01 (см. запись выше).
 
 ### План (по приоритету)
-- [ ] **Подписки NATS** (`l2_worker_nats.cpp:76-100 subscribe_worker`, `:116-134 subscribe_db`)
+- [x] **Подписки NATS** (`l2_worker_nats.cpp:76-100 subscribe_worker`, `:116-134 subscribe_db`)
   — общий приватный `L2Worker::subscribe_nats_subject(subject, queue_group, error_context, handler)`
   с валидацией `reply_to`, `enqueue` + catch.
-- [ ] **Пролог обработки NATS-задачи** (`:281-299 process_request_from_nats`, `:487-502 process_db_query_from_nats`)
+- [x] **Пролог обработки NATS-задачи** (`:281-299 process_request_from_nats`, `:487-502 process_db_query_from_nats`)
   — `WorkerActivityGuard activity` + `queue_size.Set` + `LogContextScope log_scope` → структура
   `WorkerTaskContext { WorkerActivityGuard; LogContextScope; uint64_t start_us; }` + `begin_worker_task()`.
-- [ ] **Метрика очереди** (`:286-289`, `:494-497`, `l2_worker.cpp:359-362`)
+- [x] **Метрика очереди** (`:286-289`, `:494-497`, `l2_worker.cpp:359-362`)
   — `void L2Worker::update_queue_size_metric();`.
-- [ ] **Метрика исходящих байт + span** (`:342-343`, `:408-409`, `:583-584`, и `:330-338`/`:411-418`)
+- [x] **Метрика исходящих байт + span** (`:342-343`, `:408-409`, `:583-584`, и `:330-338`/`:411-418`)
   — `record_bytes_sent(size_t)` и `log_worker_span(...)` в `tracing_helpers.hpp`.
-- [ ] **Настройка HTTP-клиента** (`http_client.cpp:58-68` vs `common_utils.cpp:469-488 setup_ssl_client`)
+- [x] **Настройка HTTP-клиента** (`http_client.cpp:58-68` vs `common_utils.cpp:469-488 setup_ssl_client`)
   — общий `setup_http_connection(httplib::Client&, timeout, reuse)` для `Client` и `SSLClient`.
-- [ ] **DB-gateway метрики** (`request_handler.cpp:744-752` + `l2_worker_nats.cpp:573-580`)
-  — свободная `record_db_gateway_metrics(...)` в `metrics_manager.hpp`.
-- [ ] **Envelope NATS-ответа** (`l2_worker_nats.cpp:362-398`) — `build_nats_response_envelope(...)`
+- [x] **DB-gateway метрики** (`request_handler.cpp:744-752` + `l2_worker_nats.cpp:573-580`)
+  — свободная `record_db_gateway_metrics(...)` в `metrics_manager.hpp` (уже была реализована).
+- [x] **Envelope NATS-ответа** (`l2_worker_nats.cpp:362-398`) — `build_nats_response_envelope(...)`
   в `json_utils.hpp` (37 строк построения JSON-контракта, для читаемости/тестируемости).
-
-### Проверка (обязательно после реализации)
-- `./rebuild-and-run.sh` ✅, `health-check.sh all` ✅
-- `clang-tidy` без замечаний
-- `python3 message_counter.py --iterations 1 --concurrent 1` ✅
 
 ---
 

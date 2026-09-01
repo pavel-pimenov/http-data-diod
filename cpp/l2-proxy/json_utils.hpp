@@ -1,6 +1,7 @@
 #ifndef JSON_UTILS_HPP
 #define JSON_UTILS_HPP
 
+#include <cstdint>
 #include <expected>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -128,5 +129,30 @@ public:
 
   static bool is_array(const json &j) { return j.is_array(); }
 };
+
+// Builds the worker->proxy NATS response envelope (the JSON contract in
+// NatsResponseContract). Centralises the 30-line JSON assembly from the
+// l2_worker response path so the shape stays in one, testable place.
+inline json build_nats_response_envelope(
+    int status_code, const std::string &request_id,
+    const std::string &response, uint64_t timestamp_us, bool is_binary,
+    const std::string &content_type, const json &headers_json,
+    const std::string &traceparent_header) {
+  json envelope;
+  envelope[NatsResponseContract::kStatus] = status_code;
+  if (!headers_json.empty()) {
+    envelope[NatsResponseContract::kHeaders] = headers_json;
+  }
+  json &body = envelope[NatsResponseContract::kBody];
+  body[NatsResponseContract::kBodyRequestId] = request_id;
+  body[NatsResponseContract::kBodyResponse] = response;
+  body[NatsResponseContract::kBodyTimestamp] = timestamp_us;
+  body[NatsResponseContract::kBodyIsBinary] = nlohmann::json(is_binary);
+  body[NatsResponseContract::kBodyContentType] = content_type;
+  if (!traceparent_header.empty()) {
+    body[NatsResponseContract::kBodyTraceparent] = traceparent_header;
+  }
+  return envelope;
+}
 
 #endif

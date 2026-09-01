@@ -58,13 +58,8 @@ void HttpClient::setup_client(const ParsedUrl &parsed_url) {
   } else {
     m_client =
         std::make_unique<httplib::Client>(parsed_url.m_host, parsed_url.m_port);
-    m_client->set_connection_timeout(5, 0);
-    m_client->set_read_timeout(m_timeout_seconds, 0);
-    m_client->set_write_timeout(m_timeout_seconds, 0);
-    if (m_enable_connection_reuse) {
-      m_client->set_keep_alive(true);
-      m_client->set_tcp_nodelay(true);
-    }
+    setup_http_connection(*m_client, m_timeout_seconds,
+                          m_enable_connection_reuse);
   }
 }
 

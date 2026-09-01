@@ -471,19 +471,12 @@ void setup_ssl_client(httplib::SSLClient &client, int timeout_seconds,
                       bool enable_hostname_verification,
                       const std::string &ca_cert_path,
                       bool enable_connection_reuse) {
-  client.set_connection_timeout(5, 0);
-  client.set_read_timeout(timeout_seconds, 0);
-  client.set_write_timeout(timeout_seconds, 0);
+  setup_http_connection(client, timeout_seconds, enable_connection_reuse);
   client.enable_server_certificate_verification(enable_cert_verification);
   client.enable_server_hostname_verification(enable_hostname_verification);
 
   if (!ca_cert_path.empty()) {
     client.set_ca_cert_path(ca_cert_path);
-  }
-
-  if (enable_connection_reuse) {
-    client.set_keep_alive(true);
-    client.set_tcp_nodelay(true);
   }
 }
 

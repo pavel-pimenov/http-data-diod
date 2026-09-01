@@ -383,6 +383,7 @@ TEST_CASE("Config: DB unknown driver fails validation", "[config]") {
 
 TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
   Config config;
+  config.m_mode = "worker"; // connection checks apply only to the worker
   config.m_db_query_enabled = true;
   DbConfig db;
   db.m_name = "oracle";
@@ -397,6 +398,7 @@ TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
 
 TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   Config config;
+  config.m_mode = "worker"; // connection checks apply only to the worker
   config.m_db_query_enabled = true;
   DbConfig db;
   db.m_name = "postgres";
@@ -590,6 +592,9 @@ TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
 
 TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
           "[config]") {
+  // Full connection config (host/user/password/pool) is loaded only in worker
+  // mode, which owns the driver connection pools.
+  EnvVarGuard mode("MODE", "worker");
   EnvVarGuard qe("DB_QUERY_ENABLED", "true");
   EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
   EnvVarGuard host("DB_POSTGRES_HOST", "pg.example");
@@ -616,6 +621,7 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
 
 TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
           "[config]") {
+  EnvVarGuard mode("MODE", "worker");
   EnvVarGuard qe("DB_QUERY_ENABLED", "true");
   EnvVarGuard oe("DB_ORACLE_ENABLED", "true");
   EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
@@ -624,6 +630,25 @@ TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
   REQUIRE(config.m_databases.size() == 2);
   REQUIRE(config.m_databases[0].m_name == "oracle");
   REQUIRE(config.m_databases[1].m_name == "postgres");
+}
+
+TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
+  // Proxy registers DB names/drivers for /v1/sql/* listing & validation, but
+  // reads no connection fields (host/user/password) — those belong to worker.
+  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
+  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
+  EnvVarGuard host("DB_POSTGRES_HOST", "pg.example");
+  EnvVarGuard user("DB_POSTGRES_USER", "alice");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_databases.size() == 1);
+  const auto &dbcfg = config.m_databases[0];
+  REQUIRE(dbcfg.m_name == "postgres");
+  REQUIRE(dbcfg.m_driver == "postgres");
+  // Connection fields are NOT populated in proxy mode.
+  REQUIRE(dbcfg.m_host.empty());
+  REQUIRE(dbcfg.m_user.empty());
+  REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
@@ -743,6 +768,35 @@ TEST_CASE("JsonUtils: is_array", "[json-utils]") {
   REQUIRE(JsonUtils::is_array(json::array()));
   REQUIRE_FALSE(JsonUtils::is_array(json::object()));
   REQUIRE_FALSE(JsonUtils::is_array("string"));
+}
+
+TEST_CASE("JsonUtils: build_nats_response_envelope full fields", "[json-utils]") {
+  json headers = {{"content-type", "application/json"}};
+  json env = build_nats_response_envelope(
+      200, "req-123", "response body", 1234567890, false, "application/json",
+      headers, "traceparent-value");
+  REQUIRE(env[NatsResponseContract::kStatus] == 200);
+  REQUIRE(env[NatsResponseContract::kHeaders] == headers);
+  const json &body = env[NatsResponseContract::kBody];
+  REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-123");
+  REQUIRE(body[NatsResponseContract::kBodyResponse] == "response body");
+  REQUIRE(body[NatsResponseContract::kBodyTimestamp] == 1234567890);
+  REQUIRE(body[NatsResponseContract::kBodyIsBinary] == false);
+  REQUIRE(body[NatsResponseContract::kBodyContentType] == "application/json");
+  REQUIRE(body[NatsResponseContract::kBodyTraceparent] == "traceparent-value");
+}
+
+TEST_CASE("JsonUtils: build_nats_response_envelope optional fields omitted",
+          "[json-utils]") {
+  json env = build_nats_response_envelope(500, "req-2", "boom", 0, true, "",
+                                          json::object(), "");
+  REQUIRE(env[NatsResponseContract::kStatus] == 500);
+  REQUIRE_FALSE(env.contains(NatsResponseContract::kHeaders));
+  const json &body = env[NatsResponseContract::kBody];
+  REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-2");
+  REQUIRE(body[NatsResponseContract::kBodyResponse] == "boom");
+  REQUIRE(body[NatsResponseContract::kBodyIsBinary] == true);
+  REQUIRE_FALSE(body.contains(NatsResponseContract::kBodyTraceparent));
 }
 
 // ============================================================================

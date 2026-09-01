@@ -307,4 +307,26 @@ inline void set_traceparent_response_header(
   }
 }
 
+// Logs the worker's processing response span for a NATS request. Shared by the
+// main request path (normal and dedup-cached responses), which duplicated the
+// log_span_to_jaeger call with the worker service name and the request's
+// method/path/trace context.
+inline void log_worker_span(JaegerLogger *tracer, const std::string &method,
+                            const std::string &path, int status_code,
+                            uint64_t start_us, uint64_t end_us,
+                            const std::string &mode,
+                            const std::string &request_id,
+                            const std::string &trace_id,
+                            const std::string &span_id,
+                            const std::string &parent_span_id,
+                            const nlohmann::json &attrs =
+                                nlohmann::json::object()) {
+  if (!tracer || trace_id.empty()) {
+    return;
+  }
+  log_span_to_jaeger(tracer, method, path, status_code, start_us, end_us,
+                     proxy_service_name(mode), request_id, trace_id, span_id,
+                     parent_span_id, attrs);
+}
+
 #endif // TRACING_HELPERS_HPP

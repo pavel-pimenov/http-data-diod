@@ -51,6 +51,33 @@ NatsHeaders make_consume_span_headers(const std::string &consume_span_id) {
 
 extern std::atomic<bool> g_shutdown_flag;
 
+template <typename Fn>
+bool L2Worker::subscribe_nats_subject(const std::string &subject,
+                                      const std::string &queue_group,
+                                      const std::string &error_context,
+                                      Fn &&fn) {
+  const bool subscribed = m_nats_client->subscribe_queue(
+      subject, queue_group,
+      [this, error_context, fn](const std::string &, const std::string &data,
+                                const std::string &reply_to) {
+        if (reply_to.empty()) {
+          Logger::error("Invalid {}: missing reply subject", error_context);
+          return;
+        }
+        try {
+          m_thread_pool->enqueue(
+              [this, data, reply_to, fn]() { fn(data, reply_to); });
+        } catch (const std::exception &e) {
+          // Pool is shutting down (enqueue throws on stopped pool). The
+          // callback runs on the NATS delivery thread, so an exception must
+          // never escape into the C library (undefined behavior).
+          Logger::error("Failed to enqueue {} (reply_to={}): {}", error_context,
+                        reply_to, e.what());
+        }
+      });
+  return subscribed;
+}
+
 void L2Worker::run_with_nats() {
   Logger::info("Starting NATS worker mode. Subscribing to subject: {} with "
                "queue group: {}",
@@ -72,39 +99,18 @@ void L2Worker::run_with_nats() {
     Logger::info("Subscribing worker to NATS subject: {} queue group: {}",
                  m_ctx.m_config.m_nats_subject,
                  m_ctx.m_config.m_nats_queue_group);
-
-    const bool subscribed = m_nats_client->subscribe_queue(
-        m_ctx.m_config.m_nats_subject, m_ctx.m_config.m_nats_queue_group,
-        [this](const std::string &subject, const std::string &data,
-               const std::string &reply_to) {
-          (void)subject;
-
-          if (reply_to.empty()) {
-            Logger::error("Invalid NATS request: missing reply subject");
-            return;
-          }
-
-          const auto &request_json = data;
-
-          try {
-            m_thread_pool->enqueue([this, request_json, reply_to]() {
-              process_request_from_nats(request_json, reply_to);
-            });
-          } catch (const std::exception &e) {
-            // Pool is shutting down (enqueue throws on stopped pool). The
-            // callback runs on the NATS delivery thread, so an exception must
-            // never escape into the C library (undefined behavior).
-            Logger::error("Failed to enqueue NATS request (reply_to={}): {}",
-                          reply_to, e.what());
-          }
-        });
-
+    const bool subscribed =
+        subscribe_nats_subject(m_ctx.m_config.m_nats_subject,
+                               m_ctx.m_config.m_nats_queue_group,
+                               "NATS request", [this](const std::string &data,
+                                                      const std::string &reply_to) {
+                                 process_request_from_nats(data, reply_to);
+                               });
     if (!subscribed) {
       Logger::error("Failed to subscribe worker to NATS subject: {}",
                     m_ctx.m_config.m_nats_subject);
       return false;
     }
-
     Logger::info("Worker subscribed to NATS successfully");
     return true;
   };
@@ -113,25 +119,13 @@ void L2Worker::run_with_nats() {
     if (!m_db_query_handler || !m_db_query_handler->is_enabled()) {
       return true;
     }
-    const bool subscribed = m_nats_client->subscribe_queue(
-        m_ctx.m_config.m_db_query_nats_subject,
-        m_ctx.m_config.m_db_query_nats_queue_group,
-        [this](const std::string &subject, const std::string &data,
-               const std::string &reply_to) {
-          (void)subject;
-          if (reply_to.empty()) {
-            Logger::error("Invalid DB query request: missing reply subject");
-            return;
-          }
-          try {
-            m_thread_pool->enqueue([this, data, reply_to]() {
-              process_db_query_from_nats(data, reply_to);
-            });
-          } catch (const std::exception &e) {
-            Logger::error("Failed to enqueue DB query (reply_to={}): {}",
-                          reply_to, e.what());
-          }
-        });
+    const bool subscribed =
+        subscribe_nats_subject(m_ctx.m_config.m_db_query_nats_subject,
+                               m_ctx.m_config.m_db_query_nats_queue_group,
+                               "DB query", [this](const std::string &data,
+                                                  const std::string &reply_to) {
+                                 process_db_query_from_nats(data, reply_to);
+                               });
     if (!subscribed) {
       Logger::error("Failed to subscribe worker to DB NATS subject: {}",
                     m_ctx.m_config.m_db_query_nats_subject);
@@ -272,6 +266,26 @@ struct WorkerActivityGuard {
     }
   }
 };
+
+// Bundles the shared prologue of the main and DB NATS task handlers: the
+// in-flight activity guard and the thread-local log context scope, plus the
+// task start timestamp used by the tracing spans.
+//
+// The LogContextScope correlates all log lines of this NATS task via the
+// thread-local context (each task runs on a thread pool thread).
+// request_id/trace_id/client_ip are set after metadata extraction; the scope
+// restores the previous values on exit so one thread cannot leak context into
+// the next task.
+struct WorkerTaskContext {
+  WorkerActivityGuard m_activity;
+  LogContextScope m_log_scope;
+  uint64_t m_start_us;
+
+  explicit WorkerTaskContext(AppContext &ctx)
+      : m_activity(ctx.m_worker.m_metrics->m_in_flight_requests,
+                   &ctx.m_worker.m_metrics->m_responses_total),
+        m_start_us(get_current_timestamp_us()) {}
+};
 } // namespace
 
 void L2Worker::process_request_from_nats(const std::string &request_json,
@@ -281,28 +295,18 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
   m_ctx.m_worker.m_metrics->m_bytes_received.Increment(
       static_cast<double>(request_json.size()));
 
-  WorkerActivityGuard activity(m_ctx.m_worker.m_metrics->m_in_flight_requests,
-                               &m_ctx.m_worker.m_metrics->m_responses_total);
-  if (m_thread_pool) {
-    m_ctx.m_worker.m_metrics->m_queue_size.Set(
-        static_cast<double>(m_thread_pool->queue_size()));
-  }
+  WorkerTaskContext task(m_ctx);
+  update_queue_size_metric();
 
   const std::string nats_consume_span_id =
       JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
-  const uint64_t start_us = get_current_timestamp_us();
-
-  // Correlate all log lines of this NATS task via the thread-local context
-  // (each task runs on a thread pool thread). request_id/trace_id/client_ip
-  // are set after metadata extraction; the scope restores the previous values
-  // on exit so one thread cannot leak context into the next task.
-  LogContextScope log_scope;
+  const uint64_t start_us = task.m_start_us;
 
   try {
     nlohmann::json request_data;
     if (!parse_request_data(request_json, request_data)) {
       Logger::error("Failed to parse request JSON for NATS request");
-      activity.m_status = 400;
+      task.m_activity.m_status = 400;
       send_nats_response(reply_to,
                          make_error_json("Invalid request format").dump());
       return;
@@ -329,18 +333,16 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
       if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
         const uint64_t end_us = get_current_timestamp_us();
-        log_span_to_jaeger(
-            m_ctx.m_tracer.get(), metadata.m_method, metadata.m_path, 200,
-            start_us, end_us, proxy_service_name(m_ctx.m_config.m_mode),
-            metadata.m_request_id, metadata.m_trace_ctx.m_trace_id,
-            nats_consume_span_id, metadata.m_proxy_span_id,
-            {{"dedup.cached", true}});
+        log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
+                        metadata.m_path, 200, start_us, end_us,
+                        m_ctx.m_config.m_mode, metadata.m_request_id,
+                        metadata.m_trace_ctx.m_trace_id, nats_consume_span_id,
+                        metadata.m_proxy_span_id, {{"dedup.cached", true}});
       }
 
-      activity.m_status = 200;
+      task.m_activity.m_status = 200;
       send_nats_response(reply_to, *cached_response);
-      m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
-          static_cast<double>(cached_response->size()));
+      record_bytes_sent(cached_response->size());
       return;
     }
 
@@ -359,43 +361,24 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
     ResponseData response_data = prepare_response_data(l2_response, spans);
 
-    nlohmann::json response_json;
-    response_json[NatsResponseContract::kStatus] = l2_response.m_status_code;
-    activity.m_status = l2_response.m_status_code;
+    task.m_activity.m_status = l2_response.m_status_code;
 
     HttpResponse http_response;
     http_response.m_body = l2_response.m_body;
     http_response.m_headers = l2_response.m_headers;
     http_response.m_status = l2_response.m_status_code;
     json response_headers_json = prepare_response_headers(http_response);
-    if (!response_headers_json.empty()) {
-      response_json[NatsResponseContract::kHeaders] = response_headers_json;
-    }
 
     std::string l2_response_stored = l2_response.m_body;
     if (response_data.m_is_binary) {
       l2_response_stored = base64::to_base64(l2_response.m_body);
     }
 
-    response_json[NatsResponseContract::kBody]
-                 [NatsResponseContract::kBodyRequestId] = metadata.m_request_id;
-    response_json[NatsResponseContract::kBody]
-                 [NatsResponseContract::kBodyResponse] = l2_response_stored;
-    response_json[NatsResponseContract::kBody]
-                 [NatsResponseContract::kBodyTimestamp] =
-                     response_data.m_timestamp_us;
-    response_json[NatsResponseContract::kBody]
-                 [NatsResponseContract::kBodyIsBinary] =
-                     nlohmann::json(response_data.m_is_binary);
-    response_json[NatsResponseContract::kBody]
-                 [NatsResponseContract::kBodyContentType] =
-                     response_data.m_content_type;
-
-    if (!spans.m_traceparent_header.empty()) {
-      response_json[NatsResponseContract::kBody]
-                   [NatsResponseContract::kBodyTraceparent] =
-                       spans.m_traceparent_header;
-    }
+    const nlohmann::json response_json = build_nats_response_envelope(
+        l2_response.m_status_code, metadata.m_request_id, l2_response_stored,
+        response_data.m_timestamp_us, response_data.m_is_binary,
+        response_data.m_content_type, response_headers_json,
+        spans.m_traceparent_header);
 
     // Send nats_consume_span_id as NATS header instead of JSON body
     const NatsHeaders response_headers =
@@ -405,16 +388,15 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     m_dedup_cache.store(metadata.m_request_id, response_json_dump);
     send_nats_response(reply_to, response_json_dump, response_headers);
 
-    m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
-        static_cast<double>(response_json_dump.size()));
+    record_bytes_sent(response_json_dump.size());
 
     if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
       const uint64_t end_us = get_current_timestamp_us();
-      log_span_to_jaeger(m_ctx.m_tracer.get(), metadata.m_method,
-                         metadata.m_path, l2_response.m_status_code, start_us,
-                         end_us, proxy_service_name(m_ctx.m_config.m_mode),
-                         metadata.m_request_id, metadata.m_trace_ctx.m_trace_id,
-                         spans.m_worker_process_span_id, worker_parent_span_id);
+      log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
+                      metadata.m_path, l2_response.m_status_code, start_us,
+                      end_us, m_ctx.m_config.m_mode, metadata.m_request_id,
+                      metadata.m_trace_ctx.m_trace_id,
+                      spans.m_worker_process_span_id, worker_parent_span_id);
     }
 
     record_l2_call_metrics(start_us);
@@ -426,7 +408,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
   } catch (const std::exception &e) {
     Logger::error("Error processing NATS request: {}", e.what());
-    activity.m_status = 500;
+    task.m_activity.m_status = 500;
 
     nlohmann::json error_json = make_error_json("Internal server error");
     error_json["message"] = e.what();
@@ -487,19 +469,10 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   int status = 500;
   json body;
   std::string consume_span_id;
-  const uint64_t start_us = get_current_timestamp_us();
 
-  WorkerActivityGuard activity(m_ctx.m_worker.m_metrics->m_in_flight_requests,
-                               &m_ctx.m_worker.m_metrics->m_responses_total);
-  if (m_thread_pool) {
-    m_ctx.m_worker.m_metrics->m_queue_size.Set(
-        static_cast<double>(m_thread_pool->queue_size()));
-  }
-
-  // Correlate all DB gateway log lines of this NATS task via the thread-local
-  // context; the scope restores the previous values on exit so one thread
-  // cannot leak context into the next task.
-  LogContextScope log_scope;
+  WorkerTaskContext task(m_ctx);
+  update_queue_size_metric();
+  const uint64_t start_us = task.m_start_us;
 
   json request_data;
   try {
@@ -564,11 +537,11 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     Logger::error("Error processing DB query (reply_to={}): {}", reply_to,
                   e.what());
     status = 500;
-    activity.m_status = 500;
+    task.m_activity.m_status = 500;
     body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
   }
 
-  activity.m_status = status;
+  task.m_activity.m_status = status;
   json envelope = make_db_response_envelope(status, body);
   const std::string db_name =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
@@ -580,6 +553,5 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       type.empty() ? "unknown" : type, status);
   const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
   send_nats_response(reply_to, envelope.dump(), response_headers);
-  m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
-      static_cast<double>(envelope.dump().size()));
+  record_bytes_sent(envelope.dump().size());
 }

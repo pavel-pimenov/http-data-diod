@@ -349,6 +349,18 @@ void L2Worker::run() {
   }
 }
 
+void L2Worker::update_queue_size_metric() {
+  if (m_thread_pool) {
+    m_ctx.m_worker.m_metrics->m_queue_size.Set(
+        static_cast<double>(m_thread_pool->queue_size()));
+  }
+}
+
+void L2Worker::record_bytes_sent(size_t bytes) {
+  m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
+      static_cast<double>(bytes));
+}
+
 void L2Worker::metrics_ticker_loop(std::stop_token st) {
   const auto step = std::chrono::milliseconds(100);
   const int steps_per_sample = 50; // ~5s between samples
@@ -356,10 +368,7 @@ void L2Worker::metrics_ticker_loop(std::stop_token st) {
   while (!st.stop_requested()) {
     if (++step_count >= steps_per_sample) {
       step_count = 0;
-      if (m_thread_pool) {
-        m_ctx.m_worker.m_metrics->m_queue_size.Set(
-            static_cast<double>(m_thread_pool->queue_size()));
-      }
+      update_queue_size_metric();
     }
     std::this_thread::sleep_for(step);
   }

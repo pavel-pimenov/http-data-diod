@@ -90,6 +90,14 @@ private:
                                  const std::string &reply_to);
   void process_db_query_from_nats(const std::string &request_json,
                                   const std::string &reply_to);
+  // Subscribes the worker to a NATS subject with the shared reply_to
+  // validation + enqueue + catch handling. Enqueued task is `fn` (the concrete
+  // process_*_from_nats handler); error_context is the log prefix (e.g. the
+  // failed-enqueue message).
+  template <typename Fn>
+  bool subscribe_nats_subject(
+      const std::string &subject, const std::string &queue_group,
+      const std::string &error_context, Fn &&fn);
   void send_nats_response(const std::string &reply_to,
                           const std::string &response_json);
   void send_nats_response(const std::string &reply_to,
@@ -107,6 +115,10 @@ private:
       const std::string &method, int &final_attempt);
   void record_l2_call_metrics(uint64_t start_us);
   void metrics_ticker_loop(std::stop_token st);
+  // Samples the thread-pool queue depth into the worker queue-size gauge.
+  void update_queue_size_metric();
+  // Records the outgoing NATS response payload size into m_bytes_sent.
+  void record_bytes_sent(size_t bytes);
 
   struct RequestData {
     std::string m_request_id;

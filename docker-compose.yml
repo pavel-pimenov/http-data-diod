@@ -368,8 +368,10 @@ services:
       - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
       - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
       # HTTP DB gateway (route /v1/sql/* to the DB worker over NATS). The proxy
-      # only registers the database config for routing/validation; the worker
-      # holds the driver connection pools (runtime-db image).
+      # needs only the enabled flags (to register DB names for listing/validation)
+      # and the NATS routing config; the driver connection pools (host/port/
+      # credentials/sizes) are owned solely by the worker, so those env vars are
+      # NOT passed here.
       - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
       - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
       - DB_QUERY_NATS_QUEUE_GROUP=${DB_QUERY_NATS_QUEUE_GROUP:-db_workers}
@@ -377,21 +379,7 @@ services:
       - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
       - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
       - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
-      - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
-      - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
-      - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}
-      - DB_ORACLE_USER=${DB_ORACLE_USER:-app_user}
-      - DB_ORACLE_PASSWORD=${DB_ORACLE_PASSWORD:-app_password}
-      - DB_ORACLE_POOL_MIN=${DB_ORACLE_POOL_MIN:-1}
-      - DB_ORACLE_POOL_MAX=${DB_ORACLE_POOL_MAX:-5}
       - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-true}
-      - DB_POSTGRES_HOST=${DB_POSTGRES_HOST:-postgres}
-      - DB_POSTGRES_PORT=${DB_POSTGRES_PORT:-5432}
-      - DB_POSTGRES_DB=${DB_POSTGRES_DB:-app_db}
-      - DB_POSTGRES_USER=${DB_POSTGRES_USER:-app_user}
-      - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD:-app_password}
-      - DB_POSTGRES_POOL_MIN=${DB_POSTGRES_POOL_MIN:-1}
-      - DB_POSTGRES_POOL_MAX=${DB_POSTGRES_POOL_MAX:-5}
       # Per-IP rate limiting (включено по умолчанию; занизь лимиты через
       # env для trip-теста, см. docker-compose.ratelimit.yml)
       - ENABLE_PER_IP_RATE_LIMITING=${ENABLE_PER_IP_RATE_LIMITING:-true}

@@ -47,6 +47,72 @@ DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
 - `DB_ORACLE_ENABLED`, `DB_ORACLE_HOST`, `DB_ORACLE_PORT`, `DB_ORACLE_SERVICE`, `DB_ORACLE_USER`, `DB_ORACLE_PASSWORD`, `DB_ORACLE_POOL_MIN`, `DB_ORACLE_POOL_MAX`
 - `DB_POSTGRES_ENABLED`, `DB_POSTGRES_HOST`, `DB_POSTGRES_PORT`, `DB_POSTGRES_DB`, `DB_POSTGRES_USER`, `DB_POSTGRES_PASSWORD`, `DB_POSTGRES_POOL_MIN`, `DB_POSTGRES_POOL_MAX`
 
+## Oracle Instant Client: где скачать и куда подложить в контейнер
+
+l2-worker ходит в Oracle через ODPI-C, которому нужны динамические библиотеки Oracle Instant Client
+(`libclntsh.so` и др.). В исходниках они не лежат — их качает Dockerfile при сборке.
+
+### Вариант 1 — автоматическая сборка (рекомендуемый)
+
+Dockerfile (`cpp/l2-proxy/Dockerfile`, stage `oracle-client`) сам скачивает Basic-пакет (без SQL*Plus)
+Instant Client 21.13 с прямого login-free CDN Oracle:
+
+```
+https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip
+```
+
+Чтобы встроить клиент в образ l2-worker:
+
+```
+L2_WORKER_DOCKER_TARGET=runtime-db docker compose up -d --build l2-worker
+```
+
+вместе с profile `oracle` и `DB_ORACLE_ENABLED=true`. По умолчанию сборка идёт с `target=runtime`
+и клиент **не** кладётся в образ — так локальные/тестовые сборки с PostgreSQL не качают ~280 МБ.
+
+Куда в контейнере: архив распаковывается в `/opt/oracle`, каталог `/opt/oracle/instantclient_21_13`.
+Stage `runtime-db` регистрирует его в динамическом загрузчике:
+
+- `/etc/ld.so.conf.d/oracle-instantclient.conf` → путь `/opt/oracle/instantclient_21_13`
+- ставит пакеты `libaio1t64`, `libnsl2`
+- создаёт compat-symlink `libaio.so.1` → `libaio.so.1t64` (Ubuntu t64-переход)
+
+### Вариант 2 — вручную (offline-сборка / нет доступа к download.oracle.com)
+
+1. Скачайте **Basic Package (ZIP)** с официальной страницы Instant Client for Linux x86-64:
+   <https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html>
+
+2. Занесите архив в контейнер и распакуйте в `/opt/oracle`:
+
+   ```bash
+   docker cp instantclient-basic-linux.x64-<ver>.zip l2-worker:/tmp/
+   docker compose exec l2-worker bash -c \
+     'cd /opt/oracle && unzip /tmp/instantclient-basic-linux.x64-<ver>.zip && rm -f /tmp/*.zip'
+   ```
+
+3. Зарегистрируйте каталог в загрузчике и доставьте недостающие пакеты:
+
+   ```bash
+   docker compose exec l2-worker bash -c \
+     'echo /opt/oracle/instantclient_<ver> > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+      apt-get update && apt-get install -y libaio1t64 libnsl2 && ldconfig'
+   ```
+
+   На Ubuntu c t64-переходом убедитесь, что доступен `libaio.so.1` (иначе `libaio.so.1t64`).
+
+4. Перезапустите l2-worker, чтобы ODPI-C нашёл `libclntsh.so`:
+
+   ```bash
+   docker compose restart l2-worker
+   ```
+
+Примечания:
+
+- Версия Instant Client не обязана совпадать с версией СУБД — OCI-клиент 21.x работает и с Oracle XE 21c.
+- Имя каталога зависит от версии (`instantclient_21_13`, `instantclient_21_23`, ...) — используйте тот, что распаковался.
+- SQL*Plus/Tools/SDK не нужны — шлюзу достаточно Basic-пакета.
+- Если используете `tnsnames.ora`/`sqlnet.ora`, положите их в `network/admin` внутри каталога клиента (или задайте `TNS_ADMIN`); пулу шлюза это не нужно (он ходит по host:port/service).
+
 ## Демо-данные
 
 `sql/oracle.sql` (и `sql/postgres.sql` для PostgreSQL) создаёт таблицу `app_user.demo_messages` / `demo_messages` и заполняет её:
