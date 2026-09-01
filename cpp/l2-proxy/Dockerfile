@@ -224,38 +224,32 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV ASAN_OPTIONS=detect_leaks=1:halt_on_error=0:log_path=/memory-logs/asan
 ENV LSAN_OPTIONS=report_objects=1
 
-# Oracle Instant Client for the DB gateway (used only by the runtime-db stage,
-# so the plain runtime image never contains the ~280MB unpacked client).
-# Built on top of ubuntu-base so it inherits the APT_MIRROR handling and curl.
-FROM ubuntu-base AS oracle-client
+# Oracle OCI client libraries for the DB gateway (used only by the runtime-db
+# stage, so the plain runtime image never contains the client).
+# The libs are pulled from the gvenzl/oracle-xe:21.3.0-slim image (already used
+# for the oracle service) instead of downloading the Instant Client from
+# download.oracle.com — that host is not reachable in a closed network.
+FROM gvenzl/oracle-xe:21.3.0-slim AS oracle-libs
 
-ARG DEBIAN_FRONTEND=noninteractive
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    sh -c 'i=0; until apt-get update; do i=$((i+1)); \
-      if [ "$i" -ge 10 ]; then exit 1; fi; \
-      echo "apt-get update attempt ${i} failed, retrying..."; sleep 5; done' && \
-    apt-get install -y --no-install-recommends \
-    unzip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Basic (no SQL*Plus) Instant Client 21.13. The URL is the login-free Oracle
-# CDN download; curl is inherited from ubuntu-base. Pinned version so the layer
-# cache only invalidates when we bump it explicitly.
-RUN set -eux; \
-    curl -fSL --retry 10 --retry-delay 3 --retry-all-errors \
-      -o /tmp/instantclient.zip \
-      https://download.oracle.com/otn_software/linux/instantclient/2113000/instantclient-basic-linux.x64-21.13.0.0.0dbru.zip && \
-    unzip -q /tmp/instantclient.zip -d /opt/oracle && \
-    rm -f /tmp/instantclient.zip
-
-# Runtime stage with the Oracle Instant Client for the DB gateway (l2-worker).
+# Runtime stage with the Oracle OCI client for the DB gateway (l2-worker).
 # Adds the client libs next to the runtime-base layout and registers them with
 # the dynamic loader so embedded ODPI-C finds libclntsh.so via dlopen().
 FROM runtime-base AS runtime-db
 
-COPY --from=oracle-client /opt/oracle /opt/oracle
+# The Oracle Home of Oracle XE 21c ships the same OCI client libraries (the
+# client is a subset of the DB install). Only the client libs ODPI-C needs are
+# copied: libclntsh.so.21.1 plus its only non-system dependencies
+# (libclntshcore.so.21.1, libnnz21.so). A symlink without the version suffix is
+# created below for dlopen("libclntsh.so"). The timezone data under
+# oracore/zoneinfo is required too (Oracle client fails with ORA-01804 without
+# it) and is resolved relative to the directory of libclntsh. The NLS data
+# under nls/ is needed by the full OCI implementation to initialize
+# national-language support (fails with ORA-12715 otherwise).
+COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/lib/libclntsh.so.21.1 /opt/oracle/instantclient_21_13/
+COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/lib/libclntshcore.so.21.1 /opt/oracle/instantclient_21_13/
+COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/lib/libnnz21.so /opt/oracle/instantclient_21_13/
+COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/oracore/zoneinfo /opt/oracle/instantclient_21_13/oracore/zoneinfo
+COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/nls /opt/oracle/instantclient_21_13/nls
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
@@ -265,13 +259,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
+# The Oracle Home of Oracle XE 21c ships a full (non-Instant-Client) OCI
+# implementation which locates NLS/timezone data via $ORACLE_HOME. Point it at
+# the copied client dir so libclntsh.so finds oracore/zoneinfo (ORA-01804
+# otherwise) and network/admin for TNSNAMES lookups.
+ENV ORACLE_HOME=/opt/oracle/instantclient_21_13
+
 # Point ld.so at the unpacked client. The Ubuntu t64 transition ships libaio
 # only as libaio.so.1t64, but libclntsh.so links against the legacy SONAME
 # libaio.so.1 — provide the ABI-compatible compat symlink.
 RUN set -eux; \
-    INSTANT_DIR=$(find /opt/oracle -maxdepth 1 -type d -name 'instantclient*' | head -1); \
+    INSTANT_DIR=/opt/oracle/instantclient_21_13; \
     [ -n "${INSTANT_DIR}" ]; \
     echo "${INSTANT_DIR}" > /etc/ld.so.conf.d/oracle-instantclient.conf; \
+    ln -sf libclntsh.so.21.1 "${INSTANT_DIR}/libclntsh.so"; \
+    ln -sf libclntshcore.so.21.1 "${INSTANT_DIR}/libclntshcore.so"; \
     ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1; \
     ldconfig
 

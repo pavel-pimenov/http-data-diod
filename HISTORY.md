@@ -1,3 +1,44 @@
+# build: Oracle OCI client в образе без скачивания с download.oracle.com
+
+## Date: 2026-09-01
+
+### Что сделано
+Заменил скачивание Oracle Instant Client с `download.oracle.com` (недоступно в закрытой сети)
+на извлечение OCI-библиотек из уже используемого образа `gvenzl/oracle-xe:21.3.0-slim`
+(`$ORACLE_HOME/lib` Oracle XE 21c содержит полный OCI-клиент).
+
+`cpp/l2-proxy/Dockerfile`:
+- Стадия `oracle-client` (curl + unzip 90MB zip) удалена.
+- Новая стадия `oracle-libs` = `FROM gvenzl/oracle-xe:21.3.0-slim` (без запуска БД).
+- Стадия `runtime-db` теперь копирует `COPY --from=oracle-libs`:
+  - `lib/libclntsh.so.21.1`, `lib/libclntshcore.so.21.1`, `lib/libnnz21.so` (единственные
+    не-системные зависимости OCI, проверено через `ldd`);
+  - `oracore/zoneinfo` (без него — `ORA-01804 failure to initialize timezone information`);
+  - `nls/` (без него — `ORA-12715`, инициализация NLS полного OCI);
+  - `ENV ORACLE_HOME=/opt/oracle/instantclient_21_13` (необходим для поиска zoneinfo/NLS).
+- Симлинки `libclntsh.so → libclntsh.so.21.1`, `libclntshcore.so → libclntshcore.so.21.1`
+  сохранены (для `dlopen("libclntsh.so")`).
+
+### Почему так
+- В закрытом окружении нет доступа к `download.oracle.com`; образ `gvenzl/oracle-xe:21.3.0-slim`
+  уже используется (сервис `oracle`), поэтому не нужен новый pull.
+- Залили кучу итераций: `DPI-1047` → `ORA-01804` → `ORA-12715` — каждая ошибка закрыта добавлением
+  недостающего компонента из XE-образа.
+
+### Проверка
+- `L2_WORKER_DOCKER_TARGET=runtime-db DB_ORACLE_ENABLED=true ./rebuild-and-run.sh --profile oracle`.
+- Лог воркера: `DB executor 'oracle': pool ready (1..5 sessions, connect oracle:1521/XEPDB1)`.
+- `GET /v1/sql/` → `{"databases":[{"driver":"oracle",...},{"driver":"postgres",...}]}`.
+- `GET /v1/sql/oracle/ping` → `{"db":"oracle","latency_ms":35,"status":"ok"}`.
+- `POST /v1/sql/oracle/query` SELECT SYSDATE → строка с датой; SELECT из demo_messages → 2 строки;
+  неверный SQL → 422 `SQL_ERROR ORA-00942`.
+- 404 для неизвестной БД, `python3 message_counter.py --iterations 1 --concurrent 1` ✓.
+
+### Файлы
+- `cpp/l2-proxy/Dockerfile`
+
+---
+
 # docs(db-gate): ld.so регистрация Oracle Instant Client подробно (offline)
 
 ## Date: 2026-09-01
