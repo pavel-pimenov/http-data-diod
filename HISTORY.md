@@ -39,6 +39,28 @@ python3 message_counter.py --iterations 1 --concurrent 1 → ✅
 - `docs/http-db-gate-example.md`
 - `HISTORY.md`
 
+# docs(verify): прогон метрик DB-gateway под нагрузкой и E2E oracle-контура
+
+## Date: 2026-09-01
+
+### Проверка метрик под нагрузкой
+После правок серии `l2_proxy_db_requests_total` / `l2_worker_db_requests_total` согласованы с
+фактическим трафиком: на прогоне из 10 запросов прокси выдал 10 серий (200/400/404/405/422 по
+`type="ping|query|list"`), воркер — 3 серии (200 ping, 200 query, 422 query). Гистограмма
+`l2_worker_db_query_duration_seconds{db="oracle"}` получила 3 наблюдения (SELECT с bind-переменной
+и SQL-ошибка; латентность 5-25 мс — наблюдения легли в bucket 0.005–0.025). Пулы
+`l2_worker_db_pool_connections{db="oracle|postgres",state="idle"}=1`, `active=0` на холостом ходу.
+
+### E2E oracle-контура
+- `GET /v1/sql/oracle/ping` → 200 (через `:8888` и nginx `:7777`).
+- `POST /v1/sql/oracle/query` SELECT c bind-переменной (`:id`) → 200, строки из `app_user.demo_messages`.
+- `POST /v1/sql/oracle/query` `SELECT * FROM no_such_table` → 422 (ORA-).
+- `python3 message_counter.py --iterations 1 --concurrent 1` → ✅.
+- Список БД через nginx → 200 (`oracle`+`postgres`).
+
+### Файлы
+- `HISTORY.md`
+
 # fix(cpp): 400 на /v1/sql/* для не-JSON тела попадают в l2_proxy_db_requests_total
 
 ## Date: 2026-09-01
