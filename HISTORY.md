@@ -1,3 +1,54 @@
+# fix(cpp): l2_proxy_db_requests_total считает весь трафик DB-gateway (включая пред-роутинговые ошибки)
+
+## Date: 2026-09-01
+
+### Что сделано
+Раньше `l2_proxy_db_requests_total` на прокси учитывал только запросы HTTP DB Gateway, дошедшие до
+NATS-роутинга (`route_db_request`). Пред-роутинговые ошибки — 404 `NOT_FOUND`/`UNKNOWN_DATABASE`,
+405 `METHOD_NOT_ALLOWED`, 400 `BAD_REQUEST` (плохой / пустой JSON, невалидный контракт) — и успешный
+`GET /v1/sql/` (list) в счётчик не попадали, хотя HELP/README обещают «total by database, type and
+status». Из-за этого метрика не отражала реальный трафик шлюза (например, 404 от неверных путей
+были «невидимы» в Prometheus), в отличие от воркера, который считает все запросы.
+
+Исправление в `cpp/l2-proxy/request_handler.cpp::handle_db_gateway`:
+
+- Добавлена лямбда `record_gateway_metrics(db, type, status)`, которая обновляет только счётчик
+  `l2_proxy_db_requests_total` (duration-histogram для пред-роутинговых ответов не наблюдается —
+  они не доходят до NATS, обработчик это явно комментирует).
+- Вызовы добавлены на все пред-роутинговые ответы:
+  - `404` «DB gateway is disabled» → `{db="", type="", status="404"}`;
+  - `405`/`200` для `/v1/sql/` (list): DB-имя пустое, `type="list"` (marker-тип, нет NATS-запроса);
+  - `404` «Unknown DB gateway path» → `db`/`type` из пути;
+  - `404` «Unknown database» → `db=<name из пути>`, `type=<action>`;
+  - `400` «Invalid JSON body» и невалидный контракт → `{db, query, 400}`;
+  - `404` «Unsupported DB gateway action» (GET на `/query`, несуществующий action) →
+    `{db, action, 404}`.
+- Метрика теперь считает успешные `ping`/`query` (по-прежнему через `route_db_request`) и все
+  пред-роутинговые ответы, покрывая весь входящий трафик `/v1/sql/*`.
+
+### Проверка (в контейнере, после `./rebuild-and-run.sh` + `--profile oracle`)
+Прогнана серия запросов напрямую на `:8888` и через nginx `:7777`; снят `/metrics` на `:19090`:
+
+```
+GET  /v1/sql/          → 200   l2_proxy_db_requests_total{db="",type="list",status="200"}  +1
+POST /v1/sql/          → 405   l2_proxy_db_requests_total{db="",type="list",status="405"}  +1
+GET  /v1/sql/nosuchdb/ping → 404 l2_proxy_db_requests_total{db="nosuchdb",type="ping",status="404"} +1
+GET  /v1/sql/oracle/bogus  → 404 l2_proxy_db_requests_total{db="oracle",type="bogus",status="404"} +1
+POST /v1/sql/oracle/query  (bad/empty json) → 400 l2_proxy_db_requests_total{db="oracle",type="query",status="400"} +1
+GET  /v1/sql/oracle/query  → 404   l2_proxy_db_requests_total{db="oracle",type="query",status="404"} +1
+GET  /v1/sql/oracle/ping   → 200   l2_proxy_db_requests_total{db="oracle",type="ping",status="200"} +1
+```
+
+- `l2_worker_db_requests_total`, `l2_worker_db_pool_connections{db,state}`, histograms и
+  `l2_proxy_db_request_duration_seconds` — на месте.
+- vmagent/VictoriaMetrics (`:8428`) скрейпят новые серии (`job="l2-proxy"`).
+- `python3 message_counter.py --iterations 1 --concurrent 1` → ✅ успех. (Первые 502 были из-за
+  stale DNS-кэша nginx после пересоздания контейнеров — решено `docker compose restart nginx`.)
+
+### Файлы
+- `cpp/l2-proxy/request_handler.cpp`
+- `HISTORY.md`
+
 # docs: актуализация описания Oracle OCI client после перехода на COPY из XE-образа
 
 ## Date: 2026-09-01

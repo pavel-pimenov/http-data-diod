@@ -629,9 +629,21 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                            trace_ctx.m_sampled);
   };
 
+  // Same request counter as route_db_request uses, so pre-routing failures
+  // (404/405/400) and the /v1/sql/ listing are counted alongside the
+  // NATS-routed requests and the metric reflects the real gateway traffic.
+  // Only the counter is updated: these requests never reach NATS, so no
+  // duration histogram is observed for them.
+  auto record_gateway_metrics = [this](const std::string &db,
+                                       const std::string &type, int status) {
+    record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total,
+                              db, type, status);
+  };
+
   if (!m_ctx.m_config.m_db_query_enabled) {
     send_db_gateway_error(res, 404, "NOT_FOUND", "DB gateway is disabled",
                           method, req.path, start_us, trace_ctx, request_id);
+    record_gateway_metrics("", "", 404);
     return;
   }
 
@@ -647,6 +659,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (method != "GET") {
       send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
                             req.path, start_us, trace_ctx, request_id);
+      record_gateway_metrics("", "list", 405);
       return;
     }
     json names = json::array();
@@ -657,6 +670,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     }
     res.status = 200;
     send_json_response(res, res.status, json{{"databases", names}});
+    record_gateway_metrics("", "list", 200);
     return;
   }
 
@@ -668,6 +682,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       action.find('/') != std::string::npos) {
     send_db_gateway_error(res, 404, "NOT_FOUND", "Unknown DB gateway path",
                           method, req.path, start_us, trace_ctx, request_id);
+    record_gateway_metrics(db_name, action, 404);
     return;
   }
 
@@ -678,6 +693,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     send_db_gateway_error(res, 404, "UNKNOWN_DATABASE",
                           std::format("Unknown database '{}'", db_name),
                           method, req.path, start_us, trace_ctx, request_id);
+    record_gateway_metrics(db_name, action, 404);
     return;
   }
 
@@ -686,6 +702,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!parsed_body) {
       send_db_gateway_error(res, 400, "BAD_REQUEST", "Invalid JSON body",
                             method, req.path, start_us, trace_ctx, request_id);
+      record_gateway_metrics(db_name, action, 400);
       return;
     }
     json request = build_db_query_request(DbQueryContract::kTypeQuery,
@@ -695,6 +712,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!validated) {
       send_db_gateway_error(res, 400, "BAD_REQUEST", validated.error(), method,
                             req.path, start_us, trace_ctx, request_id);
+      record_gateway_metrics(db_name, action, 400);
       return;
     }
     route_db_request(res, request, method, req.path, start_us, trace_ctx,
@@ -715,6 +733,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                         std::format("Unsupported DB gateway action '{}' for {}",
                                     action, method),
                         method, req.path, start_us, trace_ctx, request_id);
+  record_gateway_metrics(db_name, action, 404);
 }
 
 void RequestHandler::send_db_gateway_error(
