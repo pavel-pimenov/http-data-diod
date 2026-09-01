@@ -1,3 +1,60 @@
+# refactor(docker-compose): удалены мёртвые env-переменные по режимам работы l2-сервисов
+
+## Date: 2026-09-01
+
+### Что сделано
+Сверка переменных окружения в `docker-compose.yml` с реальным использованием в C++ коде
+(`get_env_*`/`get_env_string_silent` в `config.cpp`, `logger.hpp`, `main.cpp`, `l2_worker.cpp`,
+`request_handler.cpp`, `l2_worker_nats.cpp`) показала переменные, которые в конкретном сервисе
+задаются, но не влияют на его поведение (режимная привязка):
+
+ВЫВОД АНАЛИЗА (что на что влияет):
+- `HTTP_POOL_SIZE`, `HTTP_TIMEOUT_SECONDS` — используются только worker (создание HTTP-клиентского
+  пула к l2-server, `l2_worker.cpp:41-42`). Для l2-server (сервер, не ходит по HTTP) и l2-proxy
+  (обходится NATS) значения не влияют.
+- `THREAD_POOL_TYPE` — применяется только в `l2_worker.cpp:84` (custom-пул NATS-воркера). Для
+  l2-server и l2-proxy никакой ThreadPool не создаётся → настройка бесполезна.
+- `ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION` / `ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION` —
+  используются только HTTP-клиентским пулом воркера (`l2_worker.cpp:45-46`), у l2-server пула нет.
+- `L2_SERVER_HOST` — читается для построения L2_SERVER_URLS (`config.cpp:90,107`), но в режиме
+  `l2-server` функция возвращается раньше (`config.cpp:94-104`, URL очищаются), поэтому для
+  l2-сервера эта переменная не нужна.
+- `DB_QUERY_NATS_QUEUE_GROUP` — используется только worker-подпиской (`l2_worker_nats.cpp:124,136`);
+- `DB_QUERY_DEFAULT_TIMEOUT_MS` / `DB_QUERY_DEFAULT_MAX_ROWS` — только worker-исполнителем запросов
+  (`config.cpp:317-318,335-336`, дефолт для драйверных пулов).
+- `SSL_SERVER_CERT_FILE` / `SSL_SERVER_KEY_FILE` — для TLS-сервера (`main.cpp:215-216,334-335`
+  SSLServer), worker никогда не поднимает TLS-сервер (только health HTTP на 19093).
+
+### Изменения
+
+`docker-compose.yml`:
+
+- **l2-server** (MODE=l2-server): удалены `L2_SERVER_HOST`, `THREAD_POOL_TYPE`, `HTTP_POOL_SIZE`,
+  `HTTP_TIMEOUT_SECONDS`, `ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION`,
+  `ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION`.
+- **l2-proxy** (MODE=proxy): удалены `THREAD_POOL_TYPE`, `HTTP_POOL_SIZE`, `HTTP_TIMEOUT_SECONDS`,
+  `DB_QUERY_NATS_QUEUE_GROUP`, `DB_QUERY_DEFAULT_TIMEOUT_MS`, `DB_QUERY_DEFAULT_MAX_ROWS`.
+  Комментарий над DB_QUERY-блоком уточнён: прокси нужны только `DB_QUERY_ENABLED`,
+  `DB_QUERY_NATS_SUBJECT`, `DB_QUERY_NATS_TIMEOUT_MS` + флаги включения БД.
+- **l2-worker** (MODE=worker): удалены `SSL_SERVER_CERT_FILE`, `SSL_SERVER_KEY_FILE`;
+  оставлен `SSL_CA_CERT_PATH` (проверка сертификата сервера клиентским пулом); комментарий
+  переписан под «HTTPS client settings».
+
+Не тронуто: build-args (`BASE_IMAGE`, `APT_MIRROR`, `ENABLE_ASAN`, `ENABLE_PROFILER`, `CACHE_BUST`,
+`*_DOCKER_TARGET`), mem-лимиты, env инфраструктурных сервисов (NATS, postgres, oracle, swarm, ...).
+
+### Проверка
+- `docker compose config -q` — валидно (на локали такого стека сборка не нужна, сервисы не меняют
+  код, а только окружение; полный прогон через `./rebuild-and-run.sh` + `message_counter.py` — см.
+  процедуру изменений).
+- Поиск ссылок на удалённые переменные в `*.sh`/`*.py`/`*.yml` дал 0 результатов
+  (`test-memory-leaks.sh` экспортирует `HTTP_POOL_SIZE=10` — он автономен и попадает только в
+  worker-контейнер, где переменная остаётся объявленной).
+
+### Файлы
+- `docker-compose.yml`
+- `HISTORY.md`
+
 # fix(cpp): l2_proxy_db_requests_total считает весь трафик DB-gateway (включая пред-роутинговые ошибки)
 
 ## Date: 2026-09-01

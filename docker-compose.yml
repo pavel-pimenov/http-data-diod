@@ -170,18 +170,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-text}
       - L2_SERVER_PROTOCOL=http
-      - L2_SERVER_HOST=l2-server
       - L2_SERVER_PORT=8088
       # Test-only: random response delay in ms (0 = disabled). Desynchronizes
       # response order for the response-to-request correlation test.
       - L2_TEST_RESPONSE_DELAY_MS=${L2_TEST_RESPONSE_DELAY_MS:-0}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
-      - THREAD_POOL_TYPE=custom
       - ENABLE_TRACING=true
-      - ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION=false
-      - ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION=false
-      - HTTP_POOL_SIZE=200
-      - HTTP_TIMEOUT_SECONDS=300
       # Tracing tuning
       - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
       - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
@@ -345,10 +339,7 @@ services:
       - MODE=proxy
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
-      - THREAD_POOL_TYPE=custom
-      - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-100}
       - REQUEST_TIMEOUT_SECONDS=30
-      - HTTP_TIMEOUT_SECONDS=10
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
       - ENABLE_TRACING=true
       # NATS Configuration
@@ -370,14 +361,12 @@ services:
       # HTTP DB gateway (route /v1/sql/* to the DB worker over NATS). The proxy
       # needs only the enabled flags (to register DB names for listing/validation)
       # and the NATS routing config; the driver connection pools (host/port/
-      # credentials/sizes) are owned solely by the worker, so those env vars are
-      # NOT passed here.
+      # credentials/sizes) and per-query defaults are owned solely by the worker,
+      # so those env vars are NOT passed here. The wide DB_QUERY_NATS_QUEUE_GROUP
+      # subscription also lives on the worker only.
       - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
       - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
-      - DB_QUERY_NATS_QUEUE_GROUP=${DB_QUERY_NATS_QUEUE_GROUP:-db_workers}
       - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
-      - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
-      - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
       - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
       - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-true}
       # Per-IP rate limiting (включено по умолчанию; занизь лимиты через
@@ -584,9 +573,8 @@ services:
       - DB_POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD:-app_password}
       - DB_POSTGRES_POOL_MIN=${DB_POSTGRES_POOL_MIN:-1}
       - DB_POSTGRES_POOL_MAX=${DB_POSTGRES_POOL_MAX:-5}
-      # HTTPS server SSL configuration (optional - for client certificate verification)
-      - SSL_SERVER_CERT_FILE=${SSL_SERVER_CERT_FILE:-}
-      - SSL_SERVER_KEY_FILE=${SSL_SERVER_KEY_FILE:-}
+      # HTTPS client settings for outbound calls to l2-server (the worker does not
+      # run an TLS server; the pool only verifies the upstream server).
       - SSL_CA_CERT_PATH=${SSL_CA_CERT_PATH:-}
       - ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=0:log_path=/memory-logs/l2-worker-asan:ubsan_options=print_stacktrace=1}
       - LSAN_OPTIONS=${LSAN_OPTIONS:-report_objects=1}
