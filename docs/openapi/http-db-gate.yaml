@@ -54,6 +54,14 @@ paths:
                           type: boolean
                           description: false, если база сконфигурирована, но отключена
                           example: true
+        '404':
+          description: Путь отличается от `/v1/sql`/`/v1/sql/` (unknown gateway path)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /v1/sql/{db}/ping:
     get:
       tags: [SQL Gateway]
@@ -94,6 +102,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '503':
           description: База данных недоступна
           content:
@@ -140,8 +150,10 @@ paths:
                 $ref: '#/components/schemas/QueryResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '404':
-          description: База данных не найдена
+          description: База данных не найдена или неизвестный action/путь
           content:
             application/json:
               schema:
@@ -294,6 +306,15 @@ components:
   responses:
     BadRequest:
       description: Некорректный запрос (битый JSON, отсутствует `sql`, пустой путь)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    MethodNotAllowed:
+      description: |
+        Использован неподдерживаемый HTTP-метод для известного действия:
+        только `GET /v1/sql/{db}/ping` и `POST /v1/sql/{db}/query`; GET на
+        `query`/POST на `ping`/POST на список отклоняются с `405`.
       content:
         application/json:
           schema:

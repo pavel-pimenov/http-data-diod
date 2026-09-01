@@ -210,6 +210,8 @@ curl http://localhost:8888/v1/sql
 ```
 > При включённом Oracle (`DB_ORACLE_ENABLED=true`, profile `oracle`) список
 > дополняется `{"driver":"oracle","enabled":true,"name":"oracle"}`.
+>
+> Пути `/v1/sql` и `/v1/sql/` эквивалентны (обрезаются ведущие/хвостовые слэши).
 
 ### 2. Ping базы
 
@@ -294,9 +296,24 @@ curl -X POST http://localhost:8888/v1/sql/postgres/query \
 }
 ```
 
-### 5. Ошибки
+### 5. Контракт методов
 
+| Путь | HTTP-метод | Назначение | Некорректный метод |
+|---|---|---|---|
+| `/v1/sql` и `/v1/sql/` | `GET` | Список баз данных | `405 METHOD_NOT_ALLOWED` |
+| `/v1/sql/{db}/ping` | `GET` | Проверка доступности БД | `405 METHOD_NOT_ALLOWED` |
+| `/v1/sql/{db}/query` | `POST` | Выполнить SQL-запрос | `405 METHOD_NOT_ALLOWED` |
+
+Неизвестный `{action}` (например `/v1/sql/oracle/bogus`) отвечает `404 NOT_FOUND`,
+известный, но вызванный не тем HTTP-методом (например `GET /v1/sql/oracle/query`)
+— `405 METHOD_NOT_ALLOWED`.
+
+### 6. Ошибки
+
+- `400 BAD_REQUEST` — невалидный JSON-тело `query` или невалидный контракт (пустое тело, нет `sql`)
+- `404 NOT_FOUND` — неизвестный DB gateway путь / неизвестный action
 - `404 UNKNOWN_DATABASE` — неизвестная база (`/v1/sql/mssql/query`)
+- `405 METHOD_NOT_ALLOWED` — известный action, но не тот HTTP-метод
 - `422 SQL_ERROR` — ошибка Oracle / не-read-only SQL (не начинается с `SELECT`/`WITH`)
 - `504 TIMEOUT` — воркер не ответил за `DB_QUERY_NATS_TIMEOUT_MS`
 - `503 DB_UNAVAILABLE` — пул недоступен (Oracle лежит)

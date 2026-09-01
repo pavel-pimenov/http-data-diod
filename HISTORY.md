@@ -1,3 +1,44 @@
+# feat(cpp): 405 METHOD_NOT_ALLOWED для известного action с неверным HTTP-методом + фиксация контракта
+
+## Date: 2026-09-01
+
+### Что сделано
+`GET /v1/sql/{db}/query`, `POST /v1/sql/{db}/ping` и прочие известные action с неверным методом
+раньше отвечали `404 NOT_FOUND "Unsupported DB gateway action..."`. Формально это метод-ошибка
+клиента, а не отсутствие ресурса, поэтому известный action с неверным глаголом теперь отвечает
+`405 METHOD_NOT_ALLOWED`; полностью неизвестные action (`/v1/sql/oracle/bogus`) остаются `404`.
+
+Изменения:
+
+- `cpp/l2-proxy/request_handler.cpp::handle_db_gateway`: перед общим 404 добавлена ветка —
+  `(action == "query" && method != "POST") || (action == "ping" && method != "GET")` →
+  `405 METHOD_NOT_ALLOWED`, счётчик `l2_proxy_db_requests_total{db,type,status="405"}`.
+- `docs/openapi/http-db-gate.yaml`: компонент `MethodNotAllowed`; `405` добавлен на все три
+  эндпоинта (`GET /v1/sql`, `GET /v1/sql/{db}/ping`, `POST /v1/sql/{db}/query`); у `/v1/sql`
+  уточнён `404` (путь отличается от `/v1/sql`/`/v1/sql/`). YAML-валидация (`yaml.safe_load`) прошла.
+- `docs/http-db-gate-example.md`: добавлен раздел «5. Контракт методов» (таблица путей/методов и
+  ремарка про эквивалентность `/v1/sql` и `/v1/sql/`), раздел «6. Ошибки» дополнен `400`, `404`,
+  `405`.
+
+### Проверка (в контейнере, после `./rebuild-and-run.sh`)
+```
+GET  /v1/sql/oracle/query → 405   l2_proxy_db_requests_total{db="oracle",status="405",type="query"} +1
+POST /v1/sql/oracle/ping  → 405   {db="oracle",status="405",type="ping"}
+POST /v1/sql/             → 405   {db="",status="405",type="list"}
+GET  /v1/sql/oracle/bogus → 404   {db="oracle",status="404",type="bogus"}
+GET  /v1/sql/mssql/ping   → 404 UNKNOWN_DATABASE
+POST /v1/sql/oracle/query с SELECT → 200
+POST /v1/sql/oracle/query с ошибкой SQL → 422
+POST /v1/sql/oracle/query -d 'nope' → 400
+python3 message_counter.py --iterations 1 --concurrent 1 → ✅
+```
+
+### Файлы
+- `cpp/l2-proxy/request_handler.cpp`
+- `docs/openapi/http-db-gate.yaml`
+- `docs/http-db-gate-example.md`
+- `HISTORY.md`
+
 # fix(cpp): 400 на /v1/sql/* для не-JSON тела попадают в l2_proxy_db_requests_total
 
 ## Date: 2026-09-01

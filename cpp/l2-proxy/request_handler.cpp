@@ -732,6 +732,20 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     return;
   }
 
+  // Known action queried with the wrong HTTP method → 405 Method Not Allowed
+  // (the action exists, the client just used the wrong verb). Unknown actions
+  // remain 404: a wrong action path is "not found" while a wrong verb on a
+  // valid action is a client method error.
+  if ((action == "query" && method != "POST") ||
+      (action == "ping" && method != "GET")) {
+    send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED",
+                          std::format("Unsupported method '{}' for action '{}'",
+                                      method, action),
+                          method, req.path, start_us, trace_ctx, request_id);
+    record_gateway_metrics(db_name, action, 405);
+    return;
+  }
+
   send_db_gateway_error(res, 404, "NOT_FOUND",
                         std::format("Unsupported DB gateway action '{}' for {}",
                                     action, method),
