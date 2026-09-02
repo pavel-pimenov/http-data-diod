@@ -6078,3 +6078,124 @@ Restored `handle_redis_unavailable()` and `reset_retry_delay_on_connection_resto
 - `./rebuild-and-run.sh`: build OK, all 322 assertions in 59 test cases pass, all health checks green
 - `python3 message_counter.py --iterations 1 --concurrent 1`: no message loss (Expected 1 / Actual 1)
 - `python3 test-crash-handler.py`: SIGSEGV dump contains raw-address stack trace, all checks PASS
+# chore(compose): Oracle XE always-on with reduced memory limit
+
+## Date: 2026-09-02
+
+### Контекст
+Потребовалось держать `oracle` контейнер в стандартном составе `docker compose` без
+on-demand профиля и одновременно ужать его memory limit до минимально практичного
+значения для локального стенда и проверки DB-подключения.
+
+### Что сделано
+- `docker-compose.yml`: подтверждено, что сервис `oracle` больше не ограничен профилем
+  `oracle` и поднимается всегда вместе с остальным стеком.
+- `docker-compose.yml`: лимит памяти Oracle XE уменьшен с `2g` до
+  `${ORACLE_MEM_LIMIT:-768m}` для более экономного запуска по умолчанию.
+
+### Veracity / проверка
+- `docker compose config --services`: подтверждено, что `oracle` входит в стандартный
+  список сервисов и больше не требует отдельного профиля.
+- `./rebuild-and-run.sh`: стадия сборки `l2-proxy`/`l2-worker` прошла успешно, но запуск
+  остановился на pull образа `docker-registry.dp.nlmk.com/gvenzl/oracle-xe:21.3.0-slim`
+  с ошибкой registry: `error pulling image configuration: unknown blob`.
+- Отдельный `docker pull docker-registry.dp.nlmk.com/gvenzl/oracle-xe:21.3.0-slim`
+  воспроизводит ту же ошибку. Из-за этого стек не стартует, `message_counter.py` и
+  прикладной тест DB-подключения к Oracle выполнить в текущем окружении невозможно до
+  исправления/замены образа в registry.
+# chore(compose): проверка JFrog pull Oracle XE и минимального mem_limit
+
+## Date: 2026-09-02
+
+### Контекст
+Потребовалось включить `oracle` в стандартный состав `docker compose`, проверить, почему
+первый pull образа из JFrog cache падал с `unknown blob`, и подобрать минимальный
+практичный memory limit для запуска Oracle XE.
+
+### Что сделано
+- `docker-compose.yml`: подтверждено, что сервис `oracle` поднимается без отдельного
+  профиля и входит в обычный список `docker compose config --services`.
+- Проверен registry-образ `docker-registry.dp.nlmk.com/gvenzl/oracle-xe:21.3.0-slim`.
+  `docker manifest inspect` успешно прочитал OCI manifest с config digest
+  `sha256:523f7afc7a05b1ddd4420d4de72f96024c58545d5946202b42d6d616c3c4b475` и 6 layer blob'ами.
+- Первый pull из JFrog/dockerhub-remote упал с `error pulling image configuration: unknown blob`,
+  но повторный `docker --debug pull` прошёл успешно и скачал образ с digest
+  `sha256:ecdf4302ac3d134e1bac5ef6e0c223c2d0f4d4d2b6d551aa79b2346f1ab8f792`.
+  Вывод: проблема была транзиентной на стороне remote-cache/registry, а не в теге compose.
+- `docker-compose.yml`: экспериментально проверен нижний `ORACLE_MEM_LIMIT`. Значение
+  `768m` оказалось ниже встроенного минимума образа Oracle XE: контейнер падал на старте
+  с сообщением `There are currently only 768 MiB available inside the container`.
+  Поэтому дефолтный лимит возвращён на `${ORACLE_MEM_LIMIT:-2g}`.
+
+### Veracity / проверка
+- `docker compose config --services`: `oracle` присутствует в общем списке сервисов.
+- `./rebuild-and-run.sh`: первый прогон собрал стек, но упёрся в transient pull error Oracle.
+- `docker --debug pull docker-registry.dp.nlmk.com/gvenzl/oracle-xe:21.3.0-slim`: success.
+- Повторный `./rebuild-and-run.sh` после успешного pull поднял стек; при `mem_limit=768m`
+  контейнер `oracle` ушёл в restart-loop по собственной memory-проверке образа.
+- `docker logs oracle`: подтверждена причина отказа старта — недостаточный объём памяти,
+  а не ошибка сети/registry.
+# chore(compose): Oracle DB gateway enabled by default, Postgres disabled
+
+## Date: 2026-09-02
+
+### Контекст
+После проверки always-on запуска Oracle контейнера потребовалось включить Oracle DB gateway
+по умолчанию в приложении и не активировать PostgreSQL, чтобы `l2-worker` не зависал на
+подключении к несуществующему `postgres` сервису.
+
+### Что сделано
+- `docker-compose.yml`: для `l2-proxy` дефолт `DB_ORACLE_ENABLED` переключён на `true`.
+- `docker-compose.yml`: для `l2-worker` дефолт `DB_ORACLE_ENABLED` переключён на `true`.
+- `docker-compose.yml`: для `l2-proxy` и `l2-worker` дефолт `DB_POSTGRES_ENABLED`
+  переключён на `false`.
+- `docker-compose.yml`: дефолтный `L2_WORKER_DOCKER_TARGET` переключён на `runtime-db`,
+  чтобы `l2-worker` собирался с Oracle OCI client libraries и реально мог подключаться
+  к Oracle по ODPI-C.
+- `rebuild-and-run.sh`: обычный release-прогон больше не перетирает compose-настройку
+  worker на `runtime`. Дефолт скрипта синхронизирован с Oracle-сценарием:
+  `L2_WORKER_DOCKER_TARGET=${L2_WORKER_DOCKER_TARGET:-runtime-db}`.
+
+### Veracity / проверка
+- Запущена обязательная контейнерная проверка через `./rebuild-and-run.sh`.
+- Промежуточная проверка показала, что при `runtime`-сборке `l2-worker` Oracle DB gateway
+  неработоспособен: логи содержат `DPI-1047: Cannot locate a 64-bit Oracle Client library`.
+- Прямое подключение к Oracle внутри DB-контейнера подтверждено командой
+  `sqlplus -s app_user/app_password@//localhost:1521/XEPDB1` с `select 1 from dual`.
+- Причина расхождения найдена: `rebuild-and-run.sh` в release-ветке насильно экспортировал
+  `L2_WORKER_DOCKER_TARGET=runtime`, из-за чего worker стартовал без `/opt/oracle` и без
+  `libclntsh.so`, даже если compose уже был переведён на `runtime-db`.
+- После правки скрипта повторный `./rebuild-and-run.sh` действительно собрал `l2-worker`
+  через stage `runtime-db`: в build-логе выполнены `COPY --from=oracle-libs ...` и apt-install
+  `libaio1t64/libnsl2`; итоговый image digest worker изменился.
+- Внутри `l2-worker` подтверждено наличие Oracle client libraries:
+  `/opt/oracle/instantclient_21_13/libclntsh.so`, `libclntshcore.so`, `libnnz21.so`,
+  `ldconfig -p` видит `libclntsh.so`.
+- Логи `l2-worker`: после кратковременного `ORA-01109: database not open` на холодном старте
+  worker успешно поднял pool: `DB executor 'oracle': pool ready (1..5 sessions, connect
+  oracle:1521/XEPDB1 )`, затем подписался на `service.db.query`.
+- E2E внутри `l2-proxy` подтверждён:
+  `GET http://localhost:8888/v1/sql/oracle/ping` → `200 {"db":"oracle","status":"ok",...}`;
+  `POST http://localhost:8888/v1/sql/oracle/query {"sql":"select 1 as value from dual"}`
+  → `200` с `row_count=1`, `VALUE=1`.
+- Отдельно выявлена несвязанная проблема этого хоста/окружения: обращения с хоста к опубликованным
+  портам `127.0.0.1:8888` и `127.0.0.1:7777` таймаутятся даже при рабочем ответе изнутри
+  контейнера. Из-за этого `python3 message_counter.py --iterations 1 --concurrent 1` и host-side
+  `curl` невалидны как проверка Oracle-интеграции в текущем окружении.
+# chore(env): local .env template for external Oracle connection
+
+## Date: 2026-09-02
+
+### Контекст
+Для следующего шага после встроенного Oracle XE потребовалось подготовить локальную
+конфигурацию подключения к внешней Oracle базе `xxxxx` без сохранения реального
+пароля в отслеживаемых файлах репозитория.
+
+### Что сделано
+- Проверено, что `.gitignore` уже содержит `.env`, поэтому локальные секреты не попадут
+  в git.
+- Создан локальный файл `.env` с параметрами внешней Oracle базы:
+  `DB_ORACLE_HOST=xxxx`, `DB_ORACLE_PORT=1521`, `DB_ORACLE_SERVICE=xxxx`,
+  `DB_ORACLE_USER=xxxxx`, `DB_ORACLE_ENABLED=true`, `DB_POSTGRES_ENABLED=false`.
+- Поле `DB_ORACLE_PASSWORD` оставлено шаблоном `********************` для ручной
+  подстановки реального секрета пользователем.

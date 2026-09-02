@@ -36,6 +36,8 @@ import random
 import json
 import hashlib
 import signal
+import os
+from urllib.parse import urlparse
 from typing import Optional, Tuple, Any, List, Dict
 
 # Set up logging
@@ -74,7 +76,7 @@ CRITICAL_JSON_SIZE_MB = 10.0  # Critical threshold - will reduce body size
 FAVICON_PATH = '/favicon.ico'
 
 # Default command line argument values (should match parse_args defaults)
-DEFAULT_URL = 'http://localhost:7777'
+DEFAULT_URL = os.environ.get('TEST_BASE_URL', 'http://nginx' if os.path.exists('/.dockerenv') else 'http://localhost:7777')
 DEFAULT_ITERATIONS = 100
 DEFAULT_CONCURRENT = 20
 
@@ -83,6 +85,50 @@ MAX_CONNECTIONS = 100
 CONNECTOR_LIMIT = 100
 
 # ============================================================================
+
+
+def should_use_ssl(url: str) -> bool:
+    return urlparse(url).scheme.lower() == 'https' and SSL_VERIFY
+
+
+def normalize_runtime_url(url: str) -> str:
+    parsed_url = urlparse(url)
+    if parsed_url.hostname != 'localhost':
+        return url
+
+    netloc = parsed_url.netloc
+    if parsed_url.port is not None:
+        netloc = f"127.0.0.1:{parsed_url.port}"
+    else:
+        netloc = '127.0.0.1'
+    return parsed_url._replace(netloc=netloc).geturl()
+
+
+async def resolve_runtime_url(url: str) -> str:
+    parsed_url = urlparse(url)
+    if parsed_url.scheme.lower() != 'http' or parsed_url.hostname != 'localhost' or parsed_url.port != 7777:
+        return normalize_runtime_url(url)
+
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection('127.0.0.1', 7777), timeout=1.0)
+        writer.write(b"GET /nginx-health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(64), timeout=1.0)
+        writer.close()
+        await writer.wait_closed()
+        if response.startswith(b"HTTP/1.1 200") or response.startswith(b"HTTP/1.0 200"):
+            return normalize_runtime_url(url)
+    except Exception:
+        pass
+
+    if os.path.exists('/.dockerenv'):
+        fallback_url = 'http://nginx'
+    else:
+        fallback_url = 'http://127.0.0.1:8888'
+    logger.warning(
+        "localhost:7777 is not responding over HTTP; using l2-proxy fallback %s",
+        fallback_url)
+    return fallback_url
 
 
 def generate_random_body(max_size_mb: float = 0.01) -> str:
@@ -159,6 +205,7 @@ async def make_request(session: aiohttp.ClientSession, url: str,
             mismatch: bool — response belonged to a different request
     """
     try:
+        use_ssl = should_use_ssl(url)
         headers = {'Content-Type': 'application/json',
                    'X-Correlation-Test': '1',
                    'X-DataHub-Client-Id': str(payload.get("client_id", "test-client"))}
@@ -173,7 +220,7 @@ async def make_request(session: aiohttp.ClientSession, url: str,
         expected_req_id = str(payload.get("req_id"))
         expected_hash = hashlib.sha256(payload_json.encode('utf-8')).hexdigest()
 
-        async with session.post(url, data=payload_json, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),  ssl=not SSL_VERIFY ) as response:
+        async with session.post(url, data=payload_json, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=use_ssl) as response:
             if response.status == 200:
                 response_data = await response.json()
                 value_return = response_data.get("value_return")
@@ -376,7 +423,7 @@ async def run_test(url: str, iterations: int, concurrent: int, base_payload: dic
     start_time = time.time()
     semaphore = asyncio.Semaphore(concurrent)
 
-    connector = aiohttp.TCPConnector(limit=CONNECTOR_LIMIT, ssl=not SSL_VERIFY)
+    connector = aiohttp.TCPConnector(limit=CONNECTOR_LIMIT, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         total_sum = 0
         successful_requests = 0
@@ -586,7 +633,7 @@ async def make_get_request(session: aiohttp.ClientSession, url: str, req_id: int
     """
     headers = {'X-DataHub-Client-Id': client_id or f"client-{random.randint(1, 10000)}"}
     try:
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=not SSL_VERIFY) as response:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=should_use_ssl(url)) as response:
             if response.status == 200:
                 # Check content type
                 content_type = response.headers.get('Content-Type', '')
@@ -661,7 +708,7 @@ async def run_get_test(url: str, iterations: int, concurrent: int,
     start_time = time.time()
     semaphore = asyncio.Semaphore(concurrent)
 
-    connector = aiohttp.TCPConnector(limit=CONNECTOR_LIMIT, ssl=not SSL_VERIFY)
+    connector = aiohttp.TCPConnector(limit=CONNECTOR_LIMIT, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [
             asyncio.create_task(limited_get_request(session, semaphore, url, i+1, client_id))
@@ -755,6 +802,8 @@ async def main():
 
     # Set logging level
     logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    args.url = await resolve_runtime_url(args.url)
 
     all_success = True
 

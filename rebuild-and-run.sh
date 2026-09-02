@@ -150,11 +150,10 @@ else
     # set to false (not unset): the `set -u` above trips on unbound vars
     export ENABLE_ASAN=false
     export L2_PROXY_DOCKER_TARGET=runtime
-    # Default worker build drops the Oracle OCI client so local
-    # and test runs work with PostgreSQL only. Production: set
-    # L2_WORKER_DOCKER_TARGET=runtime-db (and the `oracle` profile +
-    # DB_ORACLE_ENABLED=true) to embed the Oracle client for the DB gateway.
-    export L2_WORKER_DOCKER_TARGET="${L2_WORKER_DOCKER_TARGET:-runtime}"
+    # Default worker build embeds the Oracle OCI client so the local compose
+    # stack can connect both to the built-in Oracle XE and to external Oracle
+    # databases without extra flags.
+    export L2_WORKER_DOCKER_TARGET="${L2_WORKER_DOCKER_TARGET:-runtime-db}"
     echo "Building Docker images (RelWithDebInfo, optimized, no sanitizers)..."
 fi
 
@@ -358,4 +357,3 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
         echo "   python3 scripts/generate-grafana-dashboards.py --correct-dashboards"
     fi
 fi
-

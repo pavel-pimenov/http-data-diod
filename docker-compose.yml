@@ -261,7 +261,7 @@ services:
   # init scripts run on the first boot via /docker-entrypoint-initdb.d.
   postgres:
     container_name: postgres
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     ports:
@@ -367,10 +367,9 @@ services:
       - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
       - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
       - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
-      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
-      - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-true}
-      # Per-IP rate limiting (включено по умолчанию; занизь лимиты через
-      # env для trip-теста, см. docker-compose.ratelimit.yml)
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
+      - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-false}
+      # Per-IP rate limiting
       - ENABLE_PER_IP_RATE_LIMITING=${ENABLE_PER_IP_RATE_LIMITING:-true}
       # Per-IP rate limiting tuning (only when ENABLE_PER_IP_RATE_LIMITING=true)
       - PER_IP_MAX_TOKENS=${PER_IP_MAX_TOKENS:-10000}
@@ -463,13 +462,9 @@ services:
     build:
       context: ./cpp/l2-proxy
       dockerfile: Dockerfile
-      # Default build drops the Oracle OCI client (no download from
-      # download.oracle.com — the libs come from the gvenzl/oracle-xe image at
-      # build time) so local/test runs work with PostgreSQL only.
-      # Production: set L2_WORKER_DOCKER_TARGET=runtime-db to embed the
-      # Oracle client for the DB gateway (also enable the `oracle` profile
-      # and DB_ORACLE_ENABLED=true).
-      target: ${L2_WORKER_DOCKER_TARGET:-runtime}
+      # Default build embeds the Oracle OCI client from the gvenzl/oracle-xe
+      # image so the Oracle DB gateway works in the local compose stack too.
+      target: ${L2_WORKER_DOCKER_TARGET:-runtime-db}
       args:
         BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
         APT_MIRROR: "${APT_MIRROR:-}"
@@ -505,13 +500,16 @@ services:
       # Optimized timeouts for faster failure detection
       - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-128}
       - HTTP_POOL_IDLE_TIMEOUT_SECONDS=${HTTP_POOL_IDLE_TIMEOUT_SECONDS:-300}
-      - L2_SERVER_URLS=["http://l2-server:8088/"]
+      - L2_SERVER_PROTOCOL=http
+      - L2_SERVER_HOST=l2-server
+      - L2_SERVER_PORT=8088
+      - L2_SERVER_URLS=${L2_SERVER_URLS:-}
       - HTTP_TIMEOUT_SECONDS=10
       - L2_WORKER_THREADS=${L2_WORKER_THREADS:-128}
       - L2_WORKER_QUEUE_SIZE=${L2_WORKER_QUEUE_SIZE:-0}
       - MAX_RETRIES=1
       # Dedup cache for duplicate NATS requests (DEDUP_ENABLED=true enables at-most-once L2)
-      - DEDUP_ENABLED=${DEDUP_ENABLED:-true}
+      - DEDUP_ENABLED=${DEDUP_ENABLED:-false}
       - DEDUP_MAX_ENTRIES=${DEDUP_MAX_ENTRIES:-4096}
       - DEDUP_TTL_MS=${DEDUP_TTL_MS:-60000}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
@@ -557,7 +555,7 @@ services:
       - DB_QUERY_NATS_TIMEOUT_MS=${DB_QUERY_NATS_TIMEOUT_MS:-30000}
       - DB_QUERY_DEFAULT_TIMEOUT_MS=${DB_QUERY_DEFAULT_TIMEOUT_MS:-5000}
       - DB_QUERY_DEFAULT_MAX_ROWS=${DB_QUERY_DEFAULT_MAX_ROWS:-1000}
-      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-false}
+      - DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}
       - DB_ORACLE_HOST=${DB_ORACLE_HOST:-oracle}
       - DB_ORACLE_PORT=${DB_ORACLE_PORT:-1521}
       - DB_ORACLE_SERVICE=${DB_ORACLE_SERVICE:-XEPDB1}
@@ -565,7 +563,7 @@ services:
       - DB_ORACLE_PASSWORD=${DB_ORACLE_PASSWORD:-app_password}
       - DB_ORACLE_POOL_MIN=${DB_ORACLE_POOL_MIN:-1}
       - DB_ORACLE_POOL_MAX=${DB_ORACLE_POOL_MAX:-5}
-      - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-true}
+      - DB_POSTGRES_ENABLED=${DB_POSTGRES_ENABLED:-false}
       - DB_POSTGRES_HOST=${DB_POSTGRES_HOST:-postgres}
       - DB_POSTGRES_PORT=${DB_POSTGRES_PORT:-5432}
       - DB_POSTGRES_DB=${DB_POSTGRES_DB:-app_db}

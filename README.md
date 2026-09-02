@@ -26,7 +26,7 @@ flowchart TD
     jaeger[jaeger]
     datahub-gantpool[DataHub-GantPool]
     server[l2-server]
-    postgres[postgres 16]
+    postgres[postgres 17]
     oracle[oracle-xe 21c]
 
     user -- "HTTPS 443" --> nginx
@@ -88,7 +88,7 @@ flowchart LR
 
     %% Сегмент баз данных (HTTP DB Gateway)
     subgraph DB_NET ["Сегмент СУБД (HTTP DB Gateway)"]
-        postgres[postgres 16]
+        postgres[postgres 17]
         oracle[oracle-xe 21c<br/>profile: oracle]
     end
 
@@ -143,7 +143,7 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 | Драйвер | Образ / протокол | Статус по умолчанию | Включение |
 |---|---|---|---|
-| PostgreSQL | `postgres:16-alpine`, libpq, порт 5432 | **включён** (`DB_POSTGRES_ENABLED=true`) | поднят в `docker-compose.yml` |
+| PostgreSQL | `postgres:17-alpine`, libpq, порт 5432 | **включён** (`DB_POSTGRES_ENABLED=true`) | поднят в `docker-compose.yml` |
 | Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `oracle` + `DB_ORACLE_ENABLED=true` |
 
 Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
@@ -168,13 +168,11 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 | `ENABLE_GLOBAL_RATE_LIMITING` | `true` | Полное включение/отключение глобального лимитера |
 | `GLOBAL_RATE_LIMIT_MAX_TOKENS` | `10000` | Burst-ёмкость глобального бакета (макс. мгновенный всплеск до 429) |
 | `GLOBAL_RATE_LIMIT_REFILL_RATE` | `1000` | Sustained rate: пополнение токенов/сек = допустимый постоянный req/s |
-| `ENABLE_PER_IP_RATE_LIMITING` | `true` | Включение per-IP лимитера (в compose — `true`; для trip-теста занизь лимиты через `docker-compose.ratelimit.yml`) |
+| `ENABLE_PER_IP_RATE_LIMITING` | `true` | Включение per-IP лимитера (в compose — `true`;) |
 | `PER_IP_MAX_TOKENS` | `10000` (compose) | Burst-ёмкость бакета на IP |
 | `PER_IP_REFILL_RATE` | `1000` (compose) | Sustained req/s per IP |
 | `PER_IP_MAX_IPS` | `10000` | Максимум отслеживаемых IP; при превышении новые IP получают 429 |
 | `PER_IP_CLEANUP_TTL_SECONDS` | `300` | Idle-время до вытеснения IP из кэша |
-
-Дефолтные лимиты per-IP (в `docker-compose.yml`) специально щадящие — чтобы нагрузочное тестирование не резалось `429`. Чтобы продемонстрировать отказы по IP, разверните с малыми лимитами (`docker-compose.ratelimit.yml`) или через env. Для нагрузочного тестирования без лимитеров отключите оба через `ENABLE_GLOBAL_RATE_LIMITING=false` (+ `ENABLE_PER_IP_RATE_LIMITING=false`).
 
 ### Метрики Prometheus
 
@@ -223,13 +221,6 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 ### Тест
 
 `python3 rate_limit_test.py` — интеграционный тест лимитера. Ожидание (`429` под нагрузкой или его отсутствие) выводится из `ENABLE_GLOBAL_RATE_LIMITING` (или флагов `--expect-429`/`--expect-zero`).
-
-Для быстрой детерминированной проверки `429` разверните стек с маленьким лимитом:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.ratelimit.yml up -d
-python3 rate_limit_test.py --expect-429
-```
 
 Проверка отключённого лимитера (при `ENABLE_GLOBAL_RATE_LIMITING=false`):
 
