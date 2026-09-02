@@ -190,10 +190,12 @@ public:
   }
 
   static std::string to_lower(std::string_view header_name) {
-    return header_name | std::views::transform([](unsigned char c) {
-             return static_cast<char>(std::tolower(c));
-           }) |
-           std::ranges::to<std::string>();
+    std::string lower;
+    lower.reserve(header_name.size());
+    for (const unsigned char c : header_name) {
+      lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return lower;
   }
 };
 

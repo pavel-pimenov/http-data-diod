@@ -313,15 +313,6 @@ inline bool validate_positive(const T &value, const std::string &name) {
 }
 
 consteval std::chrono::seconds stats_log_interval() { return std::chrono::seconds(600); }
-consteval size_t dedup_cache_default_max() { return 4096; }
-
-// deducing this (C++23 explicit object) demo: один метод для const/non-const
-struct DeducingThisDemo {
-  std::string m_val;
-  // explicit object parameter — единый шаблон вместо двух перегрузок
-  template <typename Self>
-  auto &&get(this Self &&self) { return std::forward<Self>(self).m_val; }
-};
 
 // optional монадики helper: trim заголовок через transform/or_else chain
 [[nodiscard]] inline std::string header_or_default(

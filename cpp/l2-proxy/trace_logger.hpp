@@ -68,14 +68,58 @@ struct Baggage {
 
   size_t size() const { return m_items.size(); }
 
+  // Percent-encodes a string per RFC 3986 (used by W3C Baggage).
+  static std::string url_encode(std::string_view in) {
+    static constexpr char g_hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(in.size());
+    for (const unsigned char c : in) {
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+          c == '~') {
+        out.push_back(static_cast<char>(c));
+      } else {
+        out.push_back('%');
+        out.push_back(g_hex[c >> 4]);
+        out.push_back(g_hex[c & 0x0f]);
+      }
+    }
+    return out;
+  }
+
+  // Decodes a percent-encoded string.
+  static std::string url_decode(std::string_view in) {
+    auto hex_val = [](char c) -> int {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+      return -1;
+    };
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+      if (in[i] == '%' && i + 2 < in.size()) {
+        const int hi = hex_val(in[i + 1]);
+        const int lo = hex_val(in[i + 2]);
+        if (hi >= 0 && lo >= 0) {
+          out.push_back(static_cast<char>((hi << 4) | lo));
+          i += 2;
+          continue;
+        }
+      }
+      out.push_back(in[i]);
+    }
+    return out;
+  }
+
   // Serialize to W3C Baggage header format
   std::string to_header() const {
     std::string result;
     for (const auto &[key, value] : m_items) {
       if (!result.empty())
         result += ",";
-      // URL encode key and value
-      result.append(key).append("=").append(value);
+      // URL encode key and value per W3C Baggage spec
+      result.append(url_encode(key)).append("=").append(url_encode(value));
     }
     return result;
   }
@@ -97,7 +141,7 @@ struct Baggage {
         key.erase(key.find_last_not_of(" \t") + 1);
         value.erase(0, value.find_first_not_of(" \t"));
         value.erase(value.find_last_not_of(" \t") + 1);
-        baggage.set(key, value);
+        baggage.set(url_decode(key), url_decode(value));
       }
     }
 

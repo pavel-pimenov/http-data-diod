@@ -1,3 +1,61 @@
+# feat(cpp): юнит-тесты DedupCache/CircuitBreaker, perf-оптимизации hot-path и code-quality
+
+## Date: 2026-09-02
+
+### Контекст
+Раунды улучшений после стабилизации сборки. Три направления: закрыть самые опасные
+дыры в тестовом покрытии (кэш дедупликации и circuit breaker), ускорить горячие пути
+(хранилище ответов, hex-digest, lowercase заголовков, LRU-eviction) и почистить
+code-quality (мёртвый код, параметризуемый диапазон get_env_double, W3C URL-encoding).
+
+### Что сделано
+- **Новый `circuit_breaker.hpp/.cpp`**: `L2Worker::CircuitBreaker` вынесен из вложенного
+  приватного типа в отдельный публичный `struct CircuitBreaker` (namespace scope). Это
+  позволило юнит-тестировать state machine (CLOSED/OPEN/HALF_OPEN) без поднятия тяжёлых
+  зависимостей L2Worker. Зависит только от `time_utils.hpp`/`logger.hpp`/prometheus
+  вместо всего `common_utils.hpp` (что также устранило необходимость `SSLClient` для теста).
+  `l2_worker.hpp` подключает `circuit_breaker.hpp`, определения убраны из `l2_worker.cpp`.
+- **`test_components.cpp` (+18 TEST_CASE)**: новый тег `[dedup-cache]` — выключенный кэш,
+  store→find, refresh, истечение по TTL, bounded eviction (LRU), refresh двигает узел в конец
+  (порядок LRU сохраняется), конкурентный доступ 8×200 ключей (нет потери записей/крешей).
+  Новый тег `[circuit-breaker]` — старт в CLOSED, открытие после порога отказов, сброс счётчика
+  успехом, мгновенное открытие из HALF_OPEN, закрытие после порога успехов в HALF_OPEN,
+  повторное открытие по истечении таймаута в OPEN (через backdated `m_last_failure_time_us`).
+- **Perf: `dedup_cache.hpp`**: `store()` больше не делает линейный скан `m_order` для переноса
+  обновлённого узла в конец. Вместо `deque`+scanf используется `std::list` (иначе `splice`),
+  Entry хранит итератор списка → перемещение в конец стало O(1) вместо O(n) на каждый
+  NATS-ответ (по умолчанию 4096 записей).
+- **Perf: `compute_sha256_hex`** (`common_utils.cpp`): убран `std::ostringstream` + `std::hex`
+  (по аллокации и форматированию на каждый запрос), заменён прямым hex-кодированием через
+  lookup-таблицу в pre-allocated `std::string` (2 байта на байт хэша). Удалены неиспользуемые
+  `<iomanip>`/`<sstream>`/`<print>`.
+- **Perf: `HeaderUtils::to_lower`** (`header_utils.hpp`): заменён `std::ranges::to<std::string>`
+  (по аллокации на каждый заголовок в `filter_headers_impl`) на прямой цикл c `reserve()` —
+  нижним регистром тот же результат, без heap-аллокации по итогам скана.
+- **Perf: `evict_stale_and_trim`** (`labeled_entries_utils.hpp`): вместо `std::sort` полного
+  копирования (O(n log n)) — `std::nth_element` (O(n)) для выбора самых старых `to_evict`
+  элементов, когда тримм в небольшом хвосте (на каждый Prometheus-скрейп коллекторов).
+- **Perf: `InFlightTracker::wait_for_completion`** (`in_flight_tracker.hpp`): условие ожидания
+  использует `m_active` (1 atomic) вместо перебора всех 16 шардов `in_flight_sum()` на каждое
+  пробуждение.
+- **Code quality: мёртвый код удалён**: `DeducingThisDemo` (C++23 explicit-object demo, не
+  использовался в проде) и дублирующий `dedup_cache_default_max()` (дефолт был в
+  `dedup_cache.hpp` как `dedup_default_max()`) убраны из `common_utils.hpp`.
+- **Code quality: `Config::get_env_double`** параметризован диапазоном (default `[0.0, 1.0]`,
+  `min_val`/`max_val` аргументы). Жёсткий `[0,1]` был зашит под `TRACING_SAMPLE_RATE` и ломался
+  бы при появлении дробной переменной вне [0,1]. Тесты на кастомный диапазон добавлены.
+- **Code quality: `Baggage`** (`trace_logger.hpp`) — `to_header()`/`from_header()` теперь
+  URL-кодируют/декодируют ключи и значения по RFC 3986 (W3C Baggage spec) вместо raw-склейки;
+  `%2C`/`%3D`/`%20` больше не ломают парсинг. +тесты round-trip и кодирования.
+
+### Проверка
+- Сборка + юнит-тесты в контейнере (`./rebuild-and-run.sh`) — успешно (test_components,
+  test_proxy_core).
+- `message_counter.py --iterations 1 --concurrent 1` — успешно (POST-correlation + GET favicon).
+- Примечание окружения: Postgres пересоздан из-за несовместимости PG16→PG17 data dir; диск
+  был переполнен (cleanup через `docker system prune -a --volumes`). Код не затрагивался.
+
+---
 # feat(cpp): header-only request-data хелперы, расширенный test_proxy_core + production httplib, perf-regression и gcov-замер
 
 ## Date: 2026-09-02

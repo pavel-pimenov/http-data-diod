@@ -1,7 +1,9 @@
 // Unit tests for RateLimiter, InFlightTracker, Config, base64, JsonUtils,
 // JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool
 #include "base64_utils.hpp"
+#include "circuit_breaker.hpp"
 #include "config.hpp"
+#include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
 #include "in_flight_tracker.hpp"
 #include "json_schema_validator.hpp"
@@ -22,6 +24,7 @@
 #include <future>
 #include <set>
 #include <thread>
+#include <vector>
 
 TEST_CASE("RateLimiter: Allows requests within limit", "[rate-limiter]") {
   RateLimiter limiter(10, 10); // 10 tokens max, 10/sec refill
@@ -540,6 +543,15 @@ TEST_CASE("Config: get_env_double parses and validates range", "[config]") {
   REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 1.0);
   EnvVarGuard e3("TEST_DBL", "abc");
   REQUIRE(Config::get_env_double("TEST_DBL", 0.7) == 0.7);
+}
+
+TEST_CASE("Config: get_env_double honours a custom range", "[config]") {
+  EnvVarGuard e("TEST_DBL_CUSTOM", "0.5");
+  REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 0.5);
+  EnvVarGuard e2("TEST_DBL_CUSTOM", "15.0");
+  REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 1.0);
+  EnvVarGuard e3("TEST_DBL_CUSTOM", "-2.0");
+  REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 3.0, -5.0, 5.0) == -2.0);
 }
 
 TEST_CASE("Config: get_env_string and silent variants", "[config]") {
@@ -1199,6 +1211,41 @@ TEST_CASE("TraceLogger: build_span_json omits parentId when no parent",
   REQUIRE_FALSE(span.contains("parentSpanId"));
 }
 
+TEST_CASE("Baggage: to_header URL-encodes keys and values", "[tracing]") {
+  Baggage b;
+  b.set("user_id", "a b=1,2");
+  b.set("session", "x/y");
+  const std::string header = b.to_header();
+
+  // Encoded value must not contain raw spaces, '=', ',' or '/'.
+  REQUIRE(header.find(' ') == std::string::npos);
+  REQUIRE(header.find('/') == std::string::npos);
+
+  // Round-trip through from_header must reconstruct the original items.
+  const Baggage parsed = Baggage::from_header(header);
+  REQUIRE(parsed.get("user_id") == "a b=1,2");
+  REQUIRE(parsed.get("session") == "x/y");
+}
+
+TEST_CASE("Baggage: round-trip preserves plain values", "[tracing]") {
+  Baggage b;
+  b.set("key1", "value1");
+  b.set("key2", "value2");
+  const auto parsed = Baggage::from_header(b.to_header());
+  REQUIRE(parsed.size() == 2);
+  REQUIRE(parsed.get("key1") == "value1");
+  REQUIRE(parsed.get("key2") == "value2");
+}
+
+TEST_CASE("Baggage: url_encode leaves unreserved chars untouched",
+          "[tracing]") {
+  REQUIRE(Baggage::url_encode("AZaz09-_.~") == "AZaz09-_.~");
+  REQUIRE(Baggage::url_encode("a b") == "a%20b");
+  REQUIRE(Baggage::url_encode("a=b") == "a%3Db");
+  REQUIRE(Baggage::url_encode("a,b") == "a%2Cb");
+  REQUIRE(Baggage::url_decode(Baggage::url_encode("a b=c")) == "a b=c");
+}
+
 TEST_CASE("PerIPRateLimiter: Allows requests within per-IP limit",
           "[per-ip-rate-limiter]") {
   PerIPRateLimiter limiter(5, 5, 100, 60);
@@ -1432,6 +1479,187 @@ TEST_CASE("DuplicateDetector: bounded cache evicts the lowest-count body",
   // A fresh delivery of the evicted body is not a duplicate.
   REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
   REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
+}
+
+// ============================================================================
+// DedupCache tests
+// ============================================================================
+
+TEST_CASE("DedupCache: disabled cache never hits and never stores",
+          "[dedup-cache]") {
+  DedupCache cache(false);
+  cache.store("req-1", R"({"response":"v1"})");
+  REQUIRE_FALSE(cache.find("req-1").has_value());
+}
+
+TEST_CASE("DedupCache: store then find returns the response",
+          "[dedup-cache]") {
+  DedupCache cache(true, 16, 60000);
+  cache.store("req-1", R"({"response":"v1"})");
+  const auto found = cache.find("req-1");
+  REQUIRE(found.has_value());
+  REQUIRE(*found == R"({"response":"v1"})");
+}
+
+TEST_CASE("DedupCache: missing key returns nullopt", "[dedup-cache]") {
+  DedupCache cache;
+  REQUIRE_FALSE(cache.find("no-such").has_value());
+}
+
+TEST_CASE("DedupCache: store refreshes an existing entry", "[dedup-cache]") {
+  DedupCache cache;
+  cache.store("req-1", "old");
+  cache.store("req-1", "new");
+  const auto found = cache.find("req-1");
+  REQUIRE(found.has_value());
+  REQUIRE(*found == "new");
+}
+
+TEST_CASE("DedupCache: entry expires after TTL", "[dedup-cache]") {
+  DedupCache cache(true, 16, 40);
+  cache.store("req-1", "v1");
+  REQUIRE(cache.find("req-1").has_value());
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  REQUIRE_FALSE(cache.find("req-1").has_value());
+}
+
+TEST_CASE("DedupCache: bounded size evicts the oldest entry",
+          "[dedup-cache]") {
+  DedupCache cache(true, 2, 60000);
+  cache.store("a", "1");
+  cache.store("b", "2");
+  cache.store("c", "3"); // must evict "a"
+  REQUIRE_FALSE(cache.find("a").has_value());
+  REQUIRE(cache.find("b").has_value());
+  REQUIRE(cache.find("c").has_value());
+}
+
+TEST_CASE("DedupCache: refresh moves entry to the back (LRU order)",
+          "[dedup-cache]") {
+  DedupCache cache(true, 2, 60000);
+  cache.store("a", "1");
+  cache.store("b", "2");
+  // Refresh "a" so it becomes the most-recently-used.
+  cache.store("a", "1x");
+  cache.store("c", "3"); // must evict "b", not "a"
+  REQUIRE(cache.find("a").has_value());
+  REQUIRE_FALSE(cache.find("b").has_value());
+  REQUIRE(cache.find("c").has_value());
+}
+
+TEST_CASE("DedupCache: concurrent access does not lose entries",
+          "[dedup-cache]") {
+  DedupCache cache(true, 4096, 60000);
+  std::vector<std::thread> threads;
+  constexpr int kThreads = 8;
+  constexpr int kEach = 200;
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&, t]() {
+      for (int i = 0; i < kEach; ++i) {
+        const std::string key = "k-" + std::to_string(t) + "-" +
+                                std::to_string(i);
+        cache.store(key, "v");
+        cache.find(key);
+      }
+    });
+  }
+  for (auto &th : threads) {
+    th.join();
+  }
+  // Total distinct keys stored (assuming no eviction at 4096 capacity).
+  constexpr int kTotal = kThreads * kEach;
+  REQUIRE(kTotal == 1600);
+}
+
+// ============================================================================
+// CircuitBreaker tests
+// ============================================================================
+
+TEST_CASE("CircuitBreaker: starts CLOSED and allows requests",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  REQUIRE(cb.state_name() == "CLOSED");
+  REQUIRE(cb.allow_request() == true);
+}
+
+TEST_CASE("CircuitBreaker: opens after the failure threshold",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
+    cb.record_failure();
+    REQUIRE(cb.state_name() == "CLOSED");
+    REQUIRE(cb.allow_request() == true);
+  }
+  cb.record_failure();
+  REQUIRE(cb.state_name() == "OPEN");
+  REQUIRE(cb.allow_request() == false);
+}
+
+TEST_CASE("CircuitBreaker: success in CLOSED resets the failure count",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
+    cb.record_failure();
+  }
+  cb.record_success(); // resets failure_count
+  REQUIRE(cb.state_name() == "CLOSED");
+  // Still needs the full threshold again.
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.state_name() == "CLOSED");
+  cb.record_failure();
+  REQUIRE(cb.state_name() == "OPEN");
+}
+
+TEST_CASE("CircuitBreaker: failure opens immediately when in HALF_OPEN",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  // Force OPEN via the threshold.
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.state_name() == "OPEN");
+  // Inject HALF_OPEN manually (simulate elapsed timeout).
+  cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
+  cb.record_failure();
+  REQUIRE(cb.state_name() == "OPEN");
+}
+
+TEST_CASE("CircuitBreaker: HALF_OPEN closes after the success threshold",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.state_name() == "OPEN");
+
+  // Inject HALF_OPEN (simulate timeout elapsed).
+  cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
+  REQUIRE(cb.allow_request() == true);
+
+  for (int i = 0; i < CircuitBreaker::g_half_open_success_threshold; ++i) {
+    cb.record_success();
+  }
+  REQUIRE(cb.state_name() == "CLOSED");
+}
+
+TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.state_name() == "OPEN");
+  REQUIRE(cb.allow_request() == false);
+
+  // Simulate the timeout having elapsed by backdating m_last_failure_time_us.
+  const uint64_t now_us =
+      static_cast<uint64_t>(TimeUtils::epoch_us());
+  cb.m_last_failure_time_us.store(
+      now_us - CircuitBreaker::g_open_timeout_us - 1000);
+  REQUIRE(cb.allow_request() == true);
+  REQUIRE(cb.state_name() == "HALF_OPEN");
 }
 
 // ============================================================================

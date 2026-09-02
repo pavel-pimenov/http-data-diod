@@ -149,7 +149,8 @@ public:
     std::unique_lock lock(m_mutex);
 
     bool completed =
-        m_cv.wait_for(lock, timeout, [this] { return in_flight_sum() == 0; });
+        m_cv.wait_for(lock, timeout,
+                      [this] { return m_active.load(std::memory_order_acquire) == 0; });
 
     if (!completed) {
       if (log_issues) {

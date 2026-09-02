@@ -419,7 +419,8 @@ std::string Config::get_env_protocol(const std::string &env_name,
   return protocol;
 }
 
-double Config::get_env_double(const std::string &env_name, double default_val) {
+double Config::get_env_double(const std::string &env_name, double default_val,
+                              double min_val, double max_val) {
   std::string value;
   if (!get_env_raw(env_name, value)) {
     log_env_default(env_name, std::to_string(default_val));
@@ -427,12 +428,12 @@ double Config::get_env_double(const std::string &env_name, double default_val) {
   }
   try {
     auto val = std::stod(value);
-    if (val >= 0.0 && val <= 1.0) {
+    if (val >= min_val && val <= max_val) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
     } else {
-      Logger::warn("{} must be between 0.0 and 1.0, using default {}", env_name,
-                   default_val);
+      Logger::warn("{} must be between {} and {}, using default {}", env_name,
+                   min_val, max_val, default_val);
       return default_val;
     }
   } catch (const std::exception &e) {

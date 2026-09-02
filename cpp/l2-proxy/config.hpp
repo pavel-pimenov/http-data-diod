@@ -161,7 +161,8 @@ public:
                                     const std::string &default_val);
   static std::string get_env_protocol(const std::string &env_name,
                                       const std::string &default_val);
-  static double get_env_double(const std::string &env_name, double default_val);
+  static double get_env_double(const std::string &env_name, double default_val,
+                               double min_val = 0.0, double max_val = 1.0);
   static bool get_env_bool(const std::string &env_name, bool default_val);
 
 private:

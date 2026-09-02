@@ -193,9 +193,10 @@ add_executable(l2-proxy
  trace_context_extractor.cpp
  request_data_preparer.cpp
  response_builder.cpp
- server_handler.cpp
- duplicate_detector.cpp
- l2_worker.cpp
+  server_handler.cpp
+  duplicate_detector.cpp
+  circuit_breaker.cpp
+  l2_worker.cpp
  l2_worker_nats.cpp
  trace_logger.cpp
  nats_client.cpp
@@ -346,6 +347,7 @@ if(BUILD_TESTS)
         test_components.cpp
         config.cpp
         duplicate_detector.cpp
+        circuit_breaker.cpp
     )
     target_include_directories(test_components PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -358,6 +360,7 @@ if(BUILD_TESTS)
         CLI11::CLI11
         pthread
         spdlog::spdlog_header_only
+        prometheus-cpp::pull
     )
     if(ENABLE_ASAN)
         target_compile_options(test_components PRIVATE

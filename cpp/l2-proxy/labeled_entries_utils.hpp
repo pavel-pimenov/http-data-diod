@@ -52,12 +52,15 @@ void evict_stale_and_trim(std::unordered_map<std::string, Entry> &entries,
   for (const auto &kv : entries) {
     oldest.push_back(&kv.first);
   }
-  std::sort(oldest.begin(), oldest.end(),
-            [&entries](const std::string *lhs, const std::string *rhs) {
-              return entries.at(*lhs).m_last_seen <
-                     entries.at(*rhs).m_last_seen;
-            });
   const size_t to_evict = entries.size() - max_entries;
+  // nth_element places the to_evict smallest elements (oldest) in the front
+  // of the range in O(n) average, cheaper than a full O(n log n) sort when
+  // only a small fraction is trimmed off.
+  std::nth_element(oldest.begin(), oldest.begin() + to_evict, oldest.end(),
+                   [&entries](const std::string *lhs, const std::string *rhs) {
+                     return entries.at(*lhs).m_last_seen <
+                            entries.at(*rhs).m_last_seen;
+                   });
   for (size_t i = 0; i < to_evict; ++i) {
     entries.erase(*oldest[i]);
   }

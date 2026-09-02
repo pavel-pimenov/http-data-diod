@@ -6,27 +6,21 @@
 #include "url_utils.hpp"
 #include <array>
 #include <format>
-#include <iomanip>
 #include <openssl/sha.h>
 #include <span>
-#include <sstream>
 #include <string_view>
-#if __has_include(<print>)
-#include <print>
-#endif
 
 std::string compute_sha256_hex(std::string_view data) {
+  static constexpr char g_hex[] = "0123456789abcdef";
   unsigned char hash[SHA256_DIGEST_LENGTH];
   SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
-  std::ostringstream oss;
-  oss << std::hex << std::setfill('0');
-  for (const unsigned char byte : hash) oss << std::setw(2) << static_cast<int>(byte);
-#if __has_include(<print>) && defined(__cpp_lib_print)
-  // std::print demo — fire-and-forget debug (no-op в prod, guarded)
-  // std::println("sha256 {} bytes -> {}...", data.size(), oss.str().substr(0,8));
-  (void)data;
-#endif
-  return oss.str();
+  std::string result;
+  result.reserve(SHA256_DIGEST_LENGTH * 2);
+  for (const unsigned char byte : hash) {
+    result.push_back(g_hex[byte >> 4]);
+    result.push_back(g_hex[byte & 0x0f]);
+  }
+  return result;
 }
 
 std::string log_body_preview(std::string_view body, size_t max_len) {
