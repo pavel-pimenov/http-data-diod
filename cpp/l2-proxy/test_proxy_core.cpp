@@ -376,6 +376,89 @@ TEST_CASE("Header utils: skip and redact", "[header-utils]") {
   REQUIRE(HeaderUtils::to_lower("X-Custom") == "x-custom");
 }
 
+TEST_CASE("Header utils: filter_headers skips default headers case-insensitively",
+          "[header-utils]") {
+  httplib::Headers source = {
+      {"Host", "example.com"},
+      {"Content-Length", "42"},
+      {"X-Custom", "value"},
+      {"Connection", "keep-alive"},
+  };
+  httplib::Headers dest;
+  HeaderUtils::filter_headers(source, dest);
+
+  REQUIRE_FALSE(dest.find("Host") != dest.end());
+  REQUIRE_FALSE(dest.find("Content-Length") != dest.end());
+  REQUIRE_FALSE(dest.find("Connection") != dest.end());
+  REQUIRE(dest.find("X-Custom") != dest.end());
+  REQUIRE(dest.find("X-Custom")->second == "value");
+}
+
+TEST_CASE("Header utils: filter_headers honours a custom skip set",
+          "[header-utils]") {
+  httplib::Headers source = {{"X-Drop", "1"}, {"X-Keep", "2"}};
+  httplib::Headers dest;
+  header_utils::HeaderSet skip = {"x-drop"};
+  HeaderUtils::filter_headers(source, dest, skip);
+
+  REQUIRE_FALSE(dest.find("X-Drop") != dest.end());
+  REQUIRE(dest.find("X-Keep") != dest.end());
+}
+
+TEST_CASE("Header utils: filter_headers_to_json skips default headers",
+          "[header-utils]") {
+  httplib::Headers source = {
+      {"Authorization", "Bearer secret"},
+      {"X-Forwarded-For", "1.2.3.4"},
+      {"Transfer-Encoding", "chunked"},
+  };
+  nlohmann::json out;
+  HeaderUtils::filter_headers_to_json(source, out);
+
+  // Transfer-Encoding is in the default skip set; sensitive headers like
+  // Authorization are still forwarded (only their log value is redacted).
+  REQUIRE_FALSE(out.contains("Transfer-Encoding"));
+  REQUIRE(out.contains("X-Forwarded-For"));
+  REQUIRE(out["X-Forwarded-For"] == "1.2.3.4");
+}
+
+TEST_CASE("Header utils: filter_headers_from_json skips default headers",
+          "[header-utils]") {
+  nlohmann::json source = {
+      {"Host", "example.com"},
+      {"X-Request-Id", "abc"},
+  };
+  httplib::Headers dest;
+  HeaderUtils::filter_headers_from_json(source, dest);
+
+  REQUIRE(dest.size() == 1);
+  REQUIRE(dest.find("X-Request-Id") != dest.end());
+  REQUIRE(dest.find("X-Request-Id")->second == "abc");
+}
+
+TEST_CASE("Header utils: filter_headers_from_json ignores non-object input",
+          "[header-utils]") {
+  httplib::Headers dest;
+  HeaderUtils::filter_headers_from_json(nlohmann::json::array(), dest);
+  REQUIRE(dest.empty());
+}
+
+TEST_CASE("Header utils: headers_to_json preserves all pairs",
+          "[header-utils]") {
+  httplib::Headers source = {{"A", "1"}, {"B", "2"}};
+  const auto out = HeaderUtils::headers_to_json(source);
+  REQUIRE(out.size() == 2);
+  REQUIRE(out["A"] == "1");
+  REQUIRE(out["B"] == "2");
+}
+
+TEST_CASE("Header utils: should_skip_header with custom set", "[header-utils]") {
+  header_utils::HeaderSet skip = {"x-custom"};
+  REQUIRE(HeaderUtils::should_skip_header("X-Custom", skip));
+  REQUIRE(HeaderUtils::should_skip_header("x-custom", skip));
+  REQUIRE_FALSE(HeaderUtils::should_skip_header("X-Other", skip));
+}
+
 TEST_CASE("Random utils: between stays within the inclusive range",
           "[random-utils]") {
   for (int i = 0; i < 200; ++i) {

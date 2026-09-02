@@ -383,6 +383,7 @@ if(BUILD_TESTS)
     # needed by header_utils.hpp's logger.hpp include).
     add_executable(test_proxy_core
         test_proxy_core.cpp
+        config.cpp
     )
     target_include_directories(test_proxy_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

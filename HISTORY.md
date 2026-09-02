@@ -1,3 +1,42 @@
+# test(cpp): покрытие фильтрации заголовков + починка окружения (Postgres PG17)
+
+## Date: 2026-09-02
+
+### Контекст
+Раунд после стабилизации сборки: закрыть пробел в тестовом покрытии операций с
+заголовками на forward-пути (skip/default/custom set, перегон в JSON), т.к. ранее тесты
+покрывали только `is_sensitive_header`/`should_skip`/`redact`/`to_lower`. Параллельно —
+вычинить окружение: Postgres падал (`database files are incompatible with server`), диск
+был забит.
+
+### Что сделано
+- **`test_proxy_core.cpp` (+7 TEST_CASE, стало 49 в файле)** тег `[header-utils]`:
+  - `filter_headers` — дефолтный skip-set (Host/Content-Length/Connection) совпадает
+    case-insensitively, кастомные skip-наборы (`x-drop`) уважаются. Учтена природа
+    `httplib::Headers` (insertion_ordered_multimap: проверка через `find`, без `contains`/`[]`).
+  - `filter_headers_to_json` — hop-by-hop пропускаются, чувствительные (Authorization)
+    **форвардятся** (redact только для логов, не для форвардинга — это и есть ожидаемое
+    поведение).
+  - `filter_headers_from_json` — дефолтный skip, не-object вход (массив) игнорируется.
+  - `headers_to_json` — сохраняет все пары.
+  - `should_skip_header` с кастомным set.
+- **`CMakeLists.txt`**: `config.cpp` добавлен в `test_proxy_core` — мой новый тест через
+  `filter_headers_impl` (header_utils.hpp) потянул `Logger::debug` → `default_logger_name()` →
+  `Config::get_env_string_silent()`, которой в целевом не было (раньше prosy-core-тесты не
+  вызывали Logger). Это единственный не-header-only символ, который нужен для компиляции
+  тестов на фильтрацию.
+- **Окружение (не код)**: Postgres пересоздан — старый volume `postgres-data` (данные PG16)
+  несовместим с `postgres:17-alpine`; volume удалён, БД заново инициализирована из
+  `sql/postgres.sql` (контейнер healthy). Диск очищен через `docker system prune -a --volumes`
+  (~12 GB) — сборка падала из-за `database or disk is full`.
+
+### Проверка
+- Сборка + юнит-тесты в контейнере (`./rebuild-and-run.sh`): `test_components` — 151 test
+  case/612 assertions, `test_proxy_core` — 49 test case/634 assertions, все зелёные.
+- `message_counter.py --iterations 1 --concurrent 1` — успешно (POST-correlation + GET favicon).
+- Все сервисы healthy (включая пересозданный postgres).
+
+---
 # feat(cpp): юнит-тесты DedupCache/CircuitBreaker, perf-оптимизации hot-path и code-quality
 
 ## Date: 2026-09-02
