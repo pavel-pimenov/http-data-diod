@@ -6,6 +6,11 @@
 * Все изменения проверяй через сборку в контейнерах - для этого запускай скрипт ./rebuild-and-run.sh
 * После запуска контейнеров тест корректной работы сервисов проверяется через запуск python3 message_counter.py --iterations 1 --concurrent 1
 * Запускать отдельные команды сборки на локальной машине не нужно - на нем нет такого окружения.
+* Для замера покрытия юнит-тестов на хосте используй `gcovr` (HTML-отчёт) и `lcov` (объединение сырых `.gcno/.gcda` из builder-контейнера).
+  Утилиты ставятся на хост (в образе builder их нет): `sudo apt install gcovr lcov`. Без них замер покрытия не собрать.
+  Нюанс: `.gcno/.gcda` собраны в build-каталоге контейнера (префикс путей `/workspace/...`), поэтому на хосте:
+  - `lcov --capture --directory <gcda_dir> --base-directory <repo_root> --substitute 's|/workspace/cpp/l2-proxy|<абс. repo>/cpp/l2-proxy|' --ignore-errors source,empty,unused,inconsistent -o cov.info`, затем `lcov --extract cov.info '<repo>/cpp/l2-proxy/*' -o proj.info` и `genhtml proj.info -o html/`.
+  - `gcovr --object-directory <gcda_dir> --root <repo>/cpp/l2-proxy --filter 'cpp/l2-proxy/.*' --html --html-details -o coverage.html --gcov-ignore-errors=all`.
 * Используй clang-tidy
 * Правила наименования C++
   - Для членов класс используй в имени префикс m_

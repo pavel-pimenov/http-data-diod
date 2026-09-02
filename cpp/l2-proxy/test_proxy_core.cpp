@@ -4,6 +4,7 @@
 #include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
+#include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 
@@ -272,4 +273,62 @@ TEST_CASE("Gateway helper: resolve_positive_or falls back on non-positive",
   REQUIRE(resolve_positive_or(42, 5) == 42);
   REQUIRE(resolve_positive_or(0, 5) == 5);
   REQUIRE(resolve_positive_or(-1, 5) == 5);
+}
+
+TEST_CASE("Request data: client IP prefers X-Real-IP over X-Forwarded-For",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-real-ip", "1.2.3.4");
+  req.headers.emplace("x-forwarded-for", "5.5.5.5, 6.6.6.6");
+  REQUIRE(extract_client_ip(req) == "1.2.3.4");
+}
+
+TEST_CASE("Request data: client IP takes last XFF entry when no X-Real-IP",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-forwarded-for", "5.5.5.5, 6.6.6.6");
+  REQUIRE(extract_client_ip(req) == "6.6.6.6");
+}
+
+TEST_CASE("Request data: client IP falls back to remote addr",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  REQUIRE(extract_client_ip(req) == "9.9.9.9");
+}
+
+TEST_CASE("Request data: query string is taken after the ?", "[request-data]") {
+  httplib::Request req;
+  req.target = "/v1/sql/oracle/query?a=1&b=2";
+  REQUIRE(extract_query_string(req) == "a=1&b=2");
+}
+
+TEST_CASE("Request data: empty query string when no ? present",
+          "[request-data]") {
+  httplib::Request req;
+  req.target = "/v1/sql/oracle/ping";
+  REQUIRE(extract_query_string(req) == "");
+}
+
+TEST_CASE("Request data: proxy IP is the local addr", "[request-data]") {
+  httplib::Request req;
+  req.local_addr = "127.0.0.1";
+  REQUIRE(extract_proxy_ip(req) == "127.0.0.1");
+}
+
+TEST_CASE("Request data: NatsContract field names stay stable",
+          "[request-data]") {
+  // prepare_request_data writes these exact keys into the backend envelope;
+  // a rename here silently breaks the worker/consumer contract.
+  REQUIRE(std::string(NatsContract::kRequestId) == "request_id");
+  REQUIRE(std::string(NatsContract::kMethod) == "method");
+  REQUIRE(std::string(NatsContract::kPath) == "path");
+  REQUIRE(std::string(NatsContract::kQuery) == "query");
+  REQUIRE(std::string(NatsContract::kClientIp) == "client_ip");
+  REQUIRE(std::string(NatsContract::kProxyIp) == "proxy_ip");
+  REQUIRE(std::string(NatsContract::kTraceparent) == "traceparent");
+  REQUIRE(std::string(NatsContract::kBody) == "body");
+  REQUIRE(std::string(NatsContract::kHeaders) == "headers");
 }

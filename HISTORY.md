@@ -1,3 +1,72 @@
+# feat(cpp): header-only request-data хелперы, расширенный test_proxy_core + production httplib, perf-regression и gcov-замер
+
+## Date: 2026-09-02
+
+### Контекст
+Продолжение раунда от 2026-09-01 (test_proxy_core). Задачи: расширить юнит-покрытие
+прокси-core на запросо-зависимую логику (trace-context/request-data) без поднятия тяжёлых
+связок (JaegerLogger/HttpClientPool/prometheus), снять gcov-покрытие тестового TU, прогнать
+performance-regression и обновить сторонний httplib.
+
+### Что сделано
+- **`url_utils.hpp`**: `extract_client_ip()` и `extract_query_string()` переведены из
+  `common_utils.cpp` в header (inline, объяви их уже были здесь). Логика X-Real-IP →
+  последний X-Forwarded-For → cf-connecting-ip → remote_addr; `req.target` → query-string
+  после `?`. Дубли в common_utils.cpp удалены.
+- **`test_proxy_core.cpp` (+6 TEST_CASE, стало 23)**: новый тег `[request-data]` —
+  приоритет real-ip/XFF/remote, выбор последнего XFF, fallback, query-string из target,
+  proxy IP из local_addr, стабильность имён полей `NatsContract` (контракт
+  `prepare_request_data` со worker'ом).
+- **`httplib.cc/h` (сторонний, обновлён пользователем)**: upstream-синк — токен-матчинг
+  WebSocket Upgrade (RFC 9110 7.8), `parse_trailers` через `get_combined_header_value`,
+  etag с суффиксом `W/"..."`, `split_unquoted` (кавычки в параметрах), единый
+  `set_sni(hostname, verify_hostname)`. Интерфейс для приложения не изменился —
+  `compute_etag` получил default-параметр. Проанализирован только интерфейс (AGENTS.md).
+- **Performance regression**: `scripts/performance-regression-test.sh` прогнан против
+  свежего бинаря, зафиксирован результат. Примечание: `scripts/perf-report.json` — формат
+  отчёта (rps/p50), не baseline для скрипта (тот ждёт `requests_per_second` и т.д.),
+  сравнение с ним — ручное.
+  Прогоны (High Load 100×concurrent 20, через nginx :7777): 253.7 и 320.97 req/s,
+  p50 49.8ms, p95 122.8ms, p99 130.2ms, ошибок 0 — пороги скрипта (p95≤500, p99≤1000,
+  ≥50 rps) PASSED. Сравнение с `perf-report.json` (2026-08-11, High Load rps=638.1,
+  p50 49.9ms, p95 116.4ms, p99 142.0ms): латентности в паритете (p50 идентична, p99 лучше),
+  throughput ниже в ~2 раза — вероятно, из-за нагрузки хоста во время прогона и включённого
+  Oracle в l2-worker (baseline снимался с runtime-контуром).
+- **gcov/lcov замер покрытия `test_proxy_core`** в builder-контейнере (см. Veracity ниже).
+- **Host-инструменты покрытия**: замер делается пересборкой тестового TU в builder-контейнере
+  с `--coverage`, а агрегацию `.gcda/.gcno` в отчёт выполняют `gcovr` (HTML) и `lcov`
+  (объединение записей) — эти утилиты ставятся ТОЛЬКО на хост
+  (`sudo apt install gcovr lcov`), в образе builder их нет. Описание добавлено в AGENTS.md,
+  чтобы не забыть поставить их на новом компе.
+  Проверено на хосте (gcovr 7.2, lcov 2.0, genhtml):
+  ```bash
+  # .gcno/.gcda скопированы из builder-контейнера (пути в них /workspace/...)
+  lcov --capture --directory coverage-build \
+      --base-directory "$(pwd)" \
+      --substitute 's|/workspace/cpp/l2-proxy|'"$(pwd)"'/cpp/l2-proxy|' \
+      --ignore-errors source,empty,unused,inconsistent -o coverage-build/coverage-all.info
+  lcov --extract coverage-build/coverage-all.info "$(pwd)/cpp/l2-proxy/*" \
+      -o coverage-build/coverage-project.info
+  genhtml coverage-build/coverage-project.info -o coverage-build/html
+  gcovr --object-directory coverage-build --root cpp/l2-proxy \
+      --filter 'cpp/l2-proxy/.*' --html --html-details \
+      -o coverage-build/gcovr-coverage.html --gcov-ignore-errors=all
+  ```
+  Результат lcov-агрегации: source files 6, lines 97.2% (457/470), functions 98.7% (78/79)
+
+### Veracity / проверка
+- `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
+  зелёная, `test_components` + `test_proxy_core` прошли.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — без потерь.
+- Регресс `/v1/sql` без изменений (контракт не тронут).
+- clang-tidy: новые строки без ошибок.
+- **gcov/lcov замер (coverage build в builder-контейнере: `-fprofile-arcs -ftest-coverage`,
+  Debug, UNITY=OFF, `ninja test_proxy_core` + запуск, анализ через `gcov -m`)**: сам TU
+  `test_proxy_core.cpp` — 99.17% строк (241); включённые проектные хедеры: `db_gateway_routing.hpp`
+  100% (27), `json_utils.hpp` 100% (11), `url_utils.hpp` 96.15% (26), `db_query_utils.hpp` 93.13% (131).
+
+---
+
 # refactor(cpp): выделена тестируемая роутинг-логика /v1/sql + новый TU test_proxy_core
 
 ## Date: 2026-09-01
