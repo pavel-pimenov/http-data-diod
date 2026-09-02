@@ -158,6 +158,24 @@ performance-regression и обновить сторонний httplib.
 - `message_counter.py` — без потерь.
 - clang-tidy: EXIT=0.
 
+## test(cpp): покрытие HeaderUtils (заголовки/redact) в test_proxy_core
+
+### Что сделано
+- В `test_proxy_core.cpp` добавлен тег `[header-utils]` (3 TEST_CASE):
+  `is_sensitive_header` (прямой список + фрагменты, negative-кейсы),
+  `is_binary_content_type` (image/octet-stream/video, negative для JSON),
+  `should_skip_header`/`redact_header_value`/`to_lower`.
+- `header_utils.hpp` тянет `logger.hpp` (spdlog), поэтому в `CMakeLists.txt`
+  target `test_proxy_core` получил `spdlog::spdlog_header_only` (как у
+  `test_components`); комментарий target обновлён. Итог: 38 TEST_CASE, 185 assertions.
+
+### Veracity / проверка
+- `./rebuild-and-run.sh`: зелёная сборка + тесты (в Dockerfile), контейнеры healthy.
+- Полный прогон test_proxy_core в builder-контейнере:
+  `All tests passed (185 assertions in 38 test cases)`.
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.

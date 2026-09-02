@@ -3,6 +3,7 @@
 // test_components.cpp; both run from the Docker build test stage.
 #include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
+#include "header_utils.hpp"
 #include "json_utils.hpp"
 #include "labeled_entries_utils.hpp"
 #include "url_utils.hpp"
@@ -327,6 +328,32 @@ TEST_CASE("Request data: proxy IP is the local addr", "[request-data]") {
   httplib::Request req;
   req.local_addr = "127.0.0.1";
   REQUIRE(extract_proxy_ip(req) == "127.0.0.1");
+}
+
+TEST_CASE("Header utils: sensitive headers are detected", "[header-utils]") {
+  REQUIRE(HeaderUtils::is_sensitive_header("Authorization"));
+  REQUIRE(HeaderUtils::is_sensitive_header("Cookie"));
+  REQUIRE(HeaderUtils::is_sensitive_header("X-Api-Key"));
+  REQUIRE(HeaderUtils::is_sensitive_header("x-amz-security-token"));
+  REQUIRE_FALSE(HeaderUtils::is_sensitive_header("X-Forwarded-For"));
+  REQUIRE_FALSE(HeaderUtils::is_sensitive_header("Content-Length"));
+}
+
+TEST_CASE("Header utils: binary content types detected", "[header-utils]") {
+  REQUIRE(HeaderUtils::is_binary_content_type("image/png"));
+  REQUIRE(HeaderUtils::is_binary_content_type("application/octet-stream"));
+  REQUIRE(HeaderUtils::is_binary_content_type("video/mp4"));
+  REQUIRE_FALSE(HeaderUtils::is_binary_content_type("application/json"));
+}
+
+TEST_CASE("Header utils: skip and redact", "[header-utils]") {
+  REQUIRE(HeaderUtils::should_skip_header("Host"));
+  REQUIRE(HeaderUtils::should_skip_header("Content-Length"));
+  REQUIRE_FALSE(HeaderUtils::should_skip_header("X-Custom"));
+  REQUIRE(HeaderUtils::redact_header_value("Authorization", "Bearer 123") ==
+          "***");
+  REQUIRE(HeaderUtils::redact_header_value("X-Custom", "data") == "data");
+  REQUIRE(HeaderUtils::to_lower("X-Custom") == "x-custom");
 }
 
 TEST_CASE("Request data: NatsContract field names stay stable",

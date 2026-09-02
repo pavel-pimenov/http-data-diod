@@ -374,9 +374,10 @@ if(BUILD_TESTS)
     # Enable Catch2 test discovery
     catch_discover_tests(test_components)
 
-    # Proxy-core tests (separate TU): /v1/sql routing contract and the pure
-    # DB gateway helpers. Header-only sources keep the target dependency-light
-    # (nlohmann/json + Catch2) so it stays fast to build in the test stage.
+    # Proxy-core tests (separate TU): /v1/sql routing contract, the pure
+    # DB gateway helpers and header-only utilities. Header-only sources keep
+    # the target dependency-light (nlohmann/json + Catch2 + spdlog-header-only,
+    # needed by header_utils.hpp's logger.hpp include).
     add_executable(test_proxy_core
         test_proxy_core.cpp
     )
@@ -389,6 +390,7 @@ if(BUILD_TESTS)
     target_link_libraries(test_proxy_core PRIVATE
         Catch2::Catch2WithMain
         pthread
+        spdlog::spdlog_header_only
     )
     if(ENABLE_ASAN)
         target_compile_options(test_proxy_core PRIVATE
