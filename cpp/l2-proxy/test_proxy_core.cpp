@@ -4,9 +4,12 @@
 #include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
+#include "labeled_entries_utils.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <string>
+#include <unordered_map>
 
 using db_gateway_routing::classify_method;
 using db_gateway_routing::normalize_path_rest;
@@ -339,4 +342,42 @@ TEST_CASE("Request data: NatsContract field names stay stable",
   REQUIRE(std::string(NatsContract::kTraceparent) == "traceparent");
   REQUIRE(std::string(NatsContract::kBody) == "body");
   REQUIRE(std::string(NatsContract::kHeaders) == "headers");
+}
+
+namespace {
+struct LabeledEntry {
+  std::chrono::steady_clock::time_point m_last_seen;
+};
+}
+
+TEST_CASE("Labeled entries: keeps fresh and drops stale (TTL)", "[labeled]") {
+  std::unordered_map<std::string, LabeledEntry> entries;
+  entries["old"] = LabeledEntry{std::chrono::steady_clock::now()};
+  entries["fresh"] = LabeledEntry{std::chrono::steady_clock::now()};
+  entries["old"].m_last_seen -= std::chrono::seconds(10);
+  evict_stale_and_trim(entries, 1, 100);
+  REQUIRE(entries.size() == 1);
+  REQUIRE(entries.contains("fresh"));
+}
+
+TEST_CASE("Labeled entries: trims oldest beyond max_entries", "[labeled]") {
+  std::unordered_map<std::string, LabeledEntry> entries;
+  const auto now = std::chrono::steady_clock::now();
+  entries["a"] = LabeledEntry{now - std::chrono::seconds(3)};
+  entries["b"] = LabeledEntry{now - std::chrono::seconds(2)};
+  entries["c"] = LabeledEntry{now - std::chrono::seconds(1)};
+  evict_stale_and_trim(entries, 0, 2);
+  REQUIRE(entries.size() == 2);
+  REQUIRE(entries.contains("c"));
+  REQUIRE(entries.contains("b"));
+}
+
+TEST_CASE("Labeled entries: ttl=0 keeps everyone", "[labeled]") {
+  std::unordered_map<std::string, LabeledEntry> entries;
+  entries["a"] = LabeledEntry{std::chrono::steady_clock::now() -
+                              std::chrono::hours(1)};
+  entries["b"] = LabeledEntry{std::chrono::steady_clock::now() -
+                              std::chrono::hours(1)};
+  evict_stale_and_trim(entries, 0, 100);
+  REQUIRE(entries.size() == 2);
 }

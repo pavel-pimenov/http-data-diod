@@ -140,6 +140,24 @@ performance-regression и обновить сторонний httplib.
 - `message_counter.py` — без потерь.
 - clang-tidy: EXIT=0.
 
+## test(cpp): покрытие evict_stale_and_trim (TTL+LRU) в test_proxy_core
+
+### Что сделано
+- В `test_proxy_core.cpp` добавлен тег `[labeled]` (3 TEST_CASE): TTL выкидывает
+  устаревшие записи; при превышении max_entries вытесняются самые старые;
+  ttl=0 отключает вытеснение по возрасту. Логика `evict_stale_and_trim`
+  (`labeled_entries_utils.hpp`) до этого не имела прямого покрытия.
+- Тест использует локальную структуру-Entry (только `m_last_seen`) — функция
+  шаблонная, зависимость только от header-only `prometheus/client_metric.h`,
+  дополнительной линковки не требует. Итог: 27 TEST_CASE всего.
+
+### Veracity / проверка
+- `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
+- Ручной прогон в builder-контейнере: `/tmp/tbuild/test_proxy_core "[labeled]"`
+  → All tests passed (6 assertions in 3 test cases).
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.
