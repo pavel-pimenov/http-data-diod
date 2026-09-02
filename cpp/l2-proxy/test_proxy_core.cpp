@@ -183,6 +183,24 @@ TEST_CASE("Gateway read-only check: mutations are rejected",
   REQUIRE_FALSE(is_read_only_sql("-- x\nDELETE FROM t"));
 }
 
+TEST_CASE("Gateway read-only check: strip_sql_comments edges",
+          "[db-gateway-readonly]") {
+  REQUIRE(strip_sql_comments("-- hi") == "");
+  REQUIRE(strip_sql_comments("/* hi */") == "");
+  REQUIRE(strip_sql_comments("/* hi */ SELECT 1") == " SELECT 1");
+  REQUIRE(strip_sql_comments("SELECT 1 -- trailing") == "SELECT 1 ");
+  REQUIRE(strip_sql_comments("-- only\nSELECT 1") == "\nSELECT 1");
+  REQUIRE(strip_sql_comments("/* unterminated") == "");
+  REQUIRE(strip_sql_comments("") == "");
+  // A quote does not disable comment stripping (documented limitation: the
+  // reader is naive, string literals are not parsed).
+  REQUIRE(strip_sql_comments("SELECT '--x' FROM t") ==
+          "SELECT '");
+  // The first keyword is still SELECT, so the read-only check stays correct
+  // even though the trailing part of the string literal was eaten.
+  REQUIRE(is_read_only_sql("SELECT '--x' FROM t") == true);
+}
+
 TEST_CASE("Gateway request validation: parses a valid query",
           "[db-gateway-validate]") {
   const json raw = build_db_query_request(

@@ -186,10 +186,28 @@ performance-regression и обновить сторонний httplib.
 
 ### Veracity / проверка
 - Полный прогон test_proxy_core в builder-контейнере:
-  `All tests passed (586 assertions in 39 test cases)`.
+  `All tests passed (607 assertions in 41 test cases)`.
 - `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
 - `message_counter.py` — без потерь.
 - clang-tidy: EXIT=0.
+
+## test(cpp): покрытие strip_sql_comments (края комментариев) в test_proxy_core
+
+### Что сделано
+- В `test_proxy_core.cpp` расширен тег `[db-gateway-readonly]`: новый TEST_CASE
+  `strip_sql_comments edges` — block-comment без остатка, `--` до конца строки,
+  unterminated `/*`, пустая строка, сохранение `\n` после `--`, и задокументированный
+  naive-reader лимит: кавычки не отключают снятие комментариев, но первое слово
+  остаётся `select`, поэтому read-only проверка не ломается. Итог:
+  42 TEST_CASE, 616 assertions (до раунда 41/607).
+
+### Veracity / проверка
+- Полный прогон test_proxy_core в builder-контейнере:
+  `All tests passed (616 assertions in 42 test cases)`.
+- `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
+
 
 ## test(cpp): покрытие RequestValidator/ResponseValidator в test_proxy_core
 
