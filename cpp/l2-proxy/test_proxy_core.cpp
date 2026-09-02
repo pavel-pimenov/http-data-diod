@@ -6,6 +6,7 @@
 #include "header_utils.hpp"
 #include "json_utils.hpp"
 #include "labeled_entries_utils.hpp"
+#include "random_utils.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -354,6 +355,16 @@ TEST_CASE("Header utils: skip and redact", "[header-utils]") {
           "***");
   REQUIRE(HeaderUtils::redact_header_value("X-Custom", "data") == "data");
   REQUIRE(HeaderUtils::to_lower("X-Custom") == "x-custom");
+}
+
+TEST_CASE("Random utils: between stays within the inclusive range",
+          "[random-utils]") {
+  for (int i = 0; i < 200; ++i) {
+    const int v = RandomUtils::between(5, 7);
+    REQUIRE(v >= 5);
+    REQUIRE(v <= 7);
+  }
+  REQUIRE(RandomUtils::between(42, 42) == 42);
 }
 
 TEST_CASE("Request data: NatsContract field names stay stable",

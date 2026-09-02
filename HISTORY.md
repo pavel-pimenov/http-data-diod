@@ -176,7 +176,20 @@ performance-regression и обновить сторонний httplib.
 - `message_counter.py` — без потерь.
 - clang-tidy: EXIT=0.
 
+## test(cpp): покрытие RandomUtils::between в test_proxy_core
+
+### Что сделано
+- В `test_proxy_core.cpp` добавлен тег `[random-utils]` (1 TEST_CASE): 200 итераций
+  `between(5,7)` проверяются на попадание в инклюзивный диапазон + равенство
+  `between(42,42) == 42` (границы одной точки). `RandomUtils` — header-only
+  (`random_utils.hpp`, thread_local RNG), доп. линковки не требует.
+
 ### Veracity / проверка
+- Полный прогон test_proxy_core в builder-контейнере:
+  `All tests passed (586 assertions in 39 test cases)`.
+- `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.
 - `python3 message_counter.py --iterations 1 --concurrent 1` — без потерь.
