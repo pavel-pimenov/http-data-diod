@@ -644,10 +644,19 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                               db, type, status);
   };
 
+  // Combined error path used by every pre-routing rejection: logs the Jaeger
+  // proxy-response span, writes the JSON error body and bumps the counter —
+  // the same triple all the duplicate if/return blocks used to repeat by hand.
+  auto reject_gateway = [&](int status, const std::string &code,
+                            const std::string &message, const std::string &db,
+                            const std::string &type) {
+    send_db_gateway_error(res, status, code, message, method, req.path,
+                          start_us, trace_ctx, request_id);
+    record_gateway_metrics(db, type, status);
+  };
+
   if (!m_ctx.m_config.m_db_query_enabled) {
-    send_db_gateway_error(res, 404, "NOT_FOUND", "DB gateway is disabled",
-                          method, req.path, start_us, trace_ctx, request_id);
-    record_gateway_metrics("", "", 404);
+    reject_gateway(404, "NOT_FOUND", "DB gateway is disabled", "", "");
     return;
   }
 
@@ -657,9 +666,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
 
   if (parsed.m_is_list) {
     if (method != "GET") {
-      send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
-                            req.path, start_us, trace_ctx, request_id);
-      record_gateway_metrics("", "list", 405);
+      reject_gateway(405, "METHOD_NOT_ALLOWED", "Use GET", "", "list");
       return;
     }
     json names = json::array();
@@ -677,9 +684,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   const auto &db_name = parsed.m_db_name;
   const auto &action = parsed.m_action;
   if (!parsed.m_valid) {
-    send_db_gateway_error(res, 404, "NOT_FOUND", "Unknown DB gateway path",
-                          method, req.path, start_us, trace_ctx, request_id);
-    record_gateway_metrics(db_name, action, 404);
+    reject_gateway(404, "NOT_FOUND", "Unknown DB gateway path", db_name,
+                   action);
     return;
   }
 
@@ -687,19 +693,16 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       m_ctx.m_config.m_databases,
       [&db_name](const DbConfig &db) { return db.m_name == db_name; });
   if (!known_db) {
-    send_db_gateway_error(res, 404, "UNKNOWN_DATABASE",
-                          std::format("Unknown database '{}'", db_name),
-                          method, req.path, start_us, trace_ctx, request_id);
-    record_gateway_metrics(db_name, action, 404);
+    reject_gateway(404, "UNKNOWN_DATABASE",
+                   std::format("Unknown database '{}'", db_name),
+                   db_name, action);
     return;
   }
 
   if (action == "query" && method == "POST") {
     const auto parsed_body = JsonUtils::try_parse(body);
     if (!parsed_body) {
-      send_db_gateway_error(res, 400, "BAD_REQUEST", "Invalid JSON body",
-                            method, req.path, start_us, trace_ctx, request_id);
-      record_gateway_metrics(db_name, action, 400);
+      reject_gateway(400, "BAD_REQUEST", "Invalid JSON body", db_name, action);
       return;
     }
     json request = build_db_query_request(DbQueryContract::kTypeQuery,
@@ -707,9 +710,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     add_trace_fields(request);
     const auto validated = parse_db_query_request(request);
     if (!validated) {
-      send_db_gateway_error(res, 400, "BAD_REQUEST", validated.error(), method,
-                            req.path, start_us, trace_ctx, request_id);
-      record_gateway_metrics(db_name, action, 400);
+      reject_gateway(400, "BAD_REQUEST", validated.error(), db_name, action);
       return;
     }
     route_db_request(res, request, method, req.path, start_us, trace_ctx,
@@ -732,10 +733,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   const auto method_decision =
       db_gateway_routing::classify_method(action, method);
   if (method_decision.m_is_error) {
-    send_db_gateway_error(res, method_decision.m_status,
-                          method_decision.m_code, method_decision.m_message,
-                          method, req.path, start_us, trace_ctx, request_id);
-    record_gateway_metrics(db_name, action, method_decision.m_status);
+    reject_gateway(method_decision.m_status, method_decision.m_code,
+                   method_decision.m_message, db_name, action);
     return;
   }
 }
@@ -774,11 +773,30 @@ void RequestHandler::route_db_request(
         start_us, get_current_timestamp_us());
   };
 
+  // Combined error path for post-routing NATS failures: Jaeger panic log,
+  // JSON error body and the DB duration counters, one call instead of the
+  // send_db_gateway_error + record_db_metrics pair repeated after each branch.
+  auto reject_db_request = [this, &res, &record_db_metrics, method, path,
+                            start_us, &trace_ctx, request_id](
+                               int status, const std::string &message) {
+    std::string code;
+    switch (status) {
+      case 503:
+        code = "DB_UNAVAILABLE";
+        break;
+      case 504:
+        code = "TIMEOUT";
+        break;
+      default:
+        code = "BAD_GATEWAY";
+    }
+    send_db_gateway_error(res, status, code, message, method, path, start_us,
+                          trace_ctx, request_id);
+    record_db_metrics(status);
+  };
+
   if (!m_ctx.m_nats_client) {
-    send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
-                          "NATS client is not available", method, path,
-                          start_us, trace_ctx, request_id);
-    record_db_metrics(503);
+    reject_db_request(503, "NATS client is not available");
     return;
   }
 
@@ -818,15 +836,9 @@ void RequestHandler::route_db_request(
                                       nats_start_us, attrs);
     }
     if (!m_ctx.m_nats_client->is_connected()) {
-      send_db_gateway_error(res, 503, "DB_UNAVAILABLE",
-                            "NATS connection is not available", method, path,
-                            start_us, trace_ctx, request_id);
-      record_db_metrics(503);
+      reject_db_request(503, "NATS connection is not available");
     } else {
-      send_db_gateway_error(res, 504, "TIMEOUT",
-                            "DB worker did not respond in time", method, path,
-                            start_us, trace_ctx, request_id);
-      record_db_metrics(504);
+      reject_db_request(504, "DB worker did not respond in time");
     }
     observe_db_request_duration(
         m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
@@ -854,10 +866,7 @@ void RequestHandler::route_db_request(
 
   const auto envelope = JsonUtils::try_parse(reply.m_data);
   if (!envelope || !envelope->is_object()) {
-    send_db_gateway_error(res, 502, "BAD_GATEWAY",
-                          "Invalid response envelope from DB worker", method,
-                          path, start_us, trace_ctx, request_id);
-    record_db_metrics(502);
+    reject_db_request(502, "Invalid response envelope from DB worker");
     return;
   }
   const int status =

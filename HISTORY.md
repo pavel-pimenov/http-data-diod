@@ -54,6 +54,44 @@ performance-regression и обновить сторонний httplib.
   ```
   Результат lcov-агрегации: source files 6, lines 97.2% (457/470), functions 98.7% (78/79)
 
+---
+
+# refactor(cpp): единый error-path для DB-gateway (убрано ручное дублирование send+record)
+
+## Date: 2026-09-02
+
+### Контекст
+Продолжение серии безопасных рефакторингов запросного пути. В `request_handler.cpp` пары
+`send_db_gateway_error(...)` + `record_gateway_metrics(...)` (в `handle_db_gateway`) и
+`send_db_gateway_error(...)` + `record_db_metrics(...)` (в `route_db_request`) повторялись
+вручную 11 раз с одинаковым содержимым. Поведение не меняется — только группировка вызовов.
+
+### Что сделано
+- `handle_db_gateway`: добавлена локальная лямбда `reject_gateway(status, code, message, db, type)`,
+  вызывающая `send_db_gateway_error` + `record_gateway_metrics`. Ею заменены отработавшие ветки:
+  DB gateway disabled (404), list не-GET (405), Unknown DB gateway path (404),
+  UNKNOWN_DATABASE (404), не-JSON тело (400), невалидный query-payload (400), ошибка
+  классификации метода (405). Список-/успешные ветки не тронуты.
+- `route_db_request`: добавлена лямбда `reject_db_request(status, message)` — логирует Jaeger
+  proxy-response span, пишет JSON-error body и проставляет counters/histograms; код
+  (DB_UNAVAILABLE/TIMEOUT/BAD_GATEWAY) выводится из status. Заменены ветки: NATS-клиент
+  отсутствует (503), не подключён (503), worker не ответил (504), невалидный envelope (502).
+- Общий объём: −47 строк, чистая группировка, семантика и порядок вызовов (в т.ч. вспомогательных
+  duration-observe) сохранены один в один.
+
+### Veracity / проверка
+- `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
+  зелёная, `ninja test_components test_proxy_core` + `./test_components` + `./test_proxy_core`
+  (в Dockerfile) прошли; все контейнеры healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: успех, 0 потерь.
+- `/v1/sql` контракт после рефакторинга (тот же код ошибок по/без refactor):
+  GET /v1/sql → 200; POST /v1/sql → 405; GET /v1/sql/oracle/query → 405; GET /v1/sql/oracle/ping
+  → 200; POST /v1/sql/oracle/ping → 405; POST /v1/sql/oracle/query c не-JSON → 400; неправильное
+  имя поля в payload (`query` вместо контрактного `sql`) → 400 BAD_REQUEST; POST с
+  `{"sql":...}` → 200; GET несуществующей БД → 404.
+- `./scripts/run-clang-tidy.sh`: EXIT=0, предупреждений в изменённых файлах нет
+  (оставшиеся warning'и — pre-existing в других заголовках).
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.
