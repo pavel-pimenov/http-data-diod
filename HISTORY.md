@@ -1,3 +1,50 @@
+# refactor(cpp): выделена тестируемая роутинг-логика /v1/sql + новый TU test_proxy_core
+
+## Date: 2026-09-01
+
+### Контекст
+Из HISTORY (2026-08-11) «Основной код прокси (request_handler...) в test_components не входит —
+покрытие по ним не измеряется (отдельный TU, кандидат на следующий раунд)». Раунд выполнен.
+
+### Что сделано
+- **`db_gateway_routing.hpp` (новый, header-only)**: чистая логика маршрутизации `/v1/sql` —
+  `normalize_path_rest()` (обрезка ведущих/хвостовых слэшей), `parse_path()` (отрезок пути на
+  `{db}/{action}`, признак list) и `classify_method()` (известный action + неверный HTTP-метод →
+  `405 METHOD_NOT_ALLOWED`, неизвестный action → `404 NOT_FOUND`, точные пары `query+POST`/
+  `ping+GET` — не ошибка). Зависимостей нет (std::string/std::format) — покрывается юнит-тестом
+  без поднятия AppContext/NATS.
+- **`request_handler.cpp::handle_db_gateway`**: парсинг пути и хвост «405 vs 404» переведены на
+  эти хелперы. Поведение сохранено байт-в-байт (те же коды, сообщения и метрики).
+- **`test_proxy_core.cpp` (новый TU, 16 TEST_CASE)**: покрывает
+  `db_gateway_routing` (normalize/parse/classify: 405 для query с GET/PUT/DELETE/PATCH/HEAD и ping
+  с POST/PUT/DELETE/PATCH, 404 для неизвестных action, парсинг list/`missing-action`/лишние сегменты)
+  и чистые хелперы DB gateway из `db_query_utils` (error/unavailable/sql_error-тела, `build_db_query_request`
+  с пробросом params/timeout_ms/max_rows, read-only проверка SELECT/WITH с обходом через комментарии,
+  валидация запроса, query/ping-ответы, envelope, DbRowCollector с усечением, `resolve_positive_or`).
+- **CMakeLists.txt**: target `test_proxy_core` + `catch_discover_tests`. Зависимости минимальные
+  (nlohmann/json + Catch2 + pthread), собирается/запускается в тестовом слое Dockerfile
+  (`ninja test_components test_proxy_core && ./test_components && ./test_proxy_core`).
+- **`run_tests.sh`**: прогоняет оба бинарника (общий `-f/--filter` и `-v`).
+- **Чистка «компрессия»**: gzip-код давно удалён из response_builder; убраны устаревшие
+  комментарии «compression was removed» в `request_data_preparer.cpp` и `l2_worker.cpp`.
+
+### Проверка
+- Сборка в контейнере (`./rebuild-and-run.sh`): `./test_components` и `./test_proxy_core` зелёные.
+- Регресс `/v1/sql` (после рефакторинга): GET list → 200, GET ping → 200, POST query (SELECT) → 200,
+  GET query → 405, POST ping → 405, POST list → 405, богус-action → 404, UNKNOWN_DATABASE → 404,
+  не-JSON → 400; `python3 message_counter.py --iterations 1 --concurrent 1` → ✅.
+
+### Файлы
+- `cpp/l2-proxy/db_gateway_routing.hpp` (новый)
+- `cpp/l2-proxy/request_handler.cpp`
+- `cpp/l2-proxy/test_proxy_core.cpp` (новый)
+- `cpp/l2-proxy/CMakeLists.txt`
+- `cpp/l2-proxy/Dockerfile`
+- `cpp/l2-proxy/run_tests.sh`
+- `cpp/l2-proxy/request_data_preparer.cpp`
+- `cpp/l2-proxy/l2_worker.cpp`
+- `HISTORY.md`
+
 # feat(cpp): 405 METHOD_NOT_ALLOWED для известного action с неверным HTTP-методом + фиксация контракта
 
 ## Date: 2026-09-01

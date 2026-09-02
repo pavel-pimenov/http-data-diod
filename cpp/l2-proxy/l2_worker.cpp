@@ -642,7 +642,7 @@ L2Worker::extract_request_metadata(const json &request_data) {
   metadata.m_query = request_data.value(NatsContract::kQuery, std::string{});
   metadata.m_method = request_data[NatsContract::kMethod].get<std::string>();
 
-  // Extract body as-is (compression was removed)
+  // Extract body as-is
   metadata.m_body = request_data[NatsContract::kBody].get<std::string>();
 
   // Extract optional fields with defaults

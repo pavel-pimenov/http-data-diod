@@ -1,6 +1,7 @@
 #include "request_handler.hpp"
 #include "common_utils.hpp"
 #include "crash_handler.hpp"
+#include "db_gateway_routing.hpp"
 #include <execinfo.h>
 #if __has_include(<stacktrace>)
 #include <stacktrace>
@@ -650,15 +651,11 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     return;
   }
 
-  auto path_rest = req.path.substr(std::string(kDbGatewayPath).size());
-  while (!path_rest.empty() && path_rest.front() == '/') {
-    path_rest.erase(0, 1);
-  }
-  while (!path_rest.empty() && path_rest.back() == '/') {
-    path_rest.pop_back();
-  }
+  const auto parsed = db_gateway_routing::parse_path(
+      db_gateway_routing::normalize_path_rest(
+          req.path.substr(std::string(kDbGatewayPath).size())));
 
-  if (path_rest.empty()) {
+  if (parsed.m_is_list) {
     if (method != "GET") {
       send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
                             req.path, start_us, trace_ctx, request_id);
@@ -677,12 +674,9 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     return;
   }
 
-  const size_t slash = path_rest.find('/');
-  const auto db_name = path_rest.substr(0, slash);
-  const auto action =
-      slash == std::string::npos ? "" : path_rest.substr(slash + 1);
-  if (db_name.empty() || action.empty() ||
-      action.find('/') != std::string::npos) {
+  const auto &db_name = parsed.m_db_name;
+  const auto &action = parsed.m_action;
+  if (!parsed.m_valid) {
     send_db_gateway_error(res, 404, "NOT_FOUND", "Unknown DB gateway path",
                           method, req.path, start_us, trace_ctx, request_id);
     record_gateway_metrics(db_name, action, 404);
@@ -732,25 +726,18 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     return;
   }
 
-  // Known action queried with the wrong HTTP method → 405 Method Not Allowed
-  // (the action exists, the client just used the wrong verb). Unknown actions
-  // remain 404: a wrong action path is "not found" while a wrong verb on a
-  // valid action is a client method error.
-  if ((action == "query" && method != "POST") ||
-      (action == "ping" && method != "GET")) {
-    send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED",
-                          std::format("Unsupported method '{}' for action '{}'",
-                                      method, action),
+  // Known action with the wrong HTTP method → 405 Method Not Allowed (an
+  // action exists but the client used the wrong verb); unknown actions → 404.
+  // The decision is computed by the testable db_gateway_routing helpers.
+  const auto method_decision =
+      db_gateway_routing::classify_method(action, method);
+  if (method_decision.m_is_error) {
+    send_db_gateway_error(res, method_decision.m_status,
+                          method_decision.m_code, method_decision.m_message,
                           method, req.path, start_us, trace_ctx, request_id);
-    record_gateway_metrics(db_name, action, 405);
+    record_gateway_metrics(db_name, action, method_decision.m_status);
     return;
   }
-
-  send_db_gateway_error(res, 404, "NOT_FOUND",
-                        std::format("Unsupported DB gateway action '{}' for {}",
-                                    action, method),
-                        method, req.path, start_us, trace_ctx, request_id);
-  record_gateway_metrics(db_name, action, 404);
 }
 
 void RequestHandler::send_db_gateway_error(

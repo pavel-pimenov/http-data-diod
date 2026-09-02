@@ -22,7 +22,7 @@ prepare_request_data(const std::string &request_id, const std::string &method,
   request_data[NatsContract::kClientIp] = extract_client_ip(req);
   request_data[NatsContract::kProxyIp] = extract_proxy_ip(req);
 
-  // Include request body as-is (compression was removed)
+  // Include request body as-is
   request_data[NatsContract::kBody] = body;
 
   // Include client headers, filtering out some

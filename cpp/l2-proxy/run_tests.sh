@@ -57,12 +57,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Build test binaries if needed
-if [ ! -f "build_tests/test_components" ]; then
+if [ ! -f "build_tests/test_components" ] || [ ! -f "build_tests/test_proxy_core" ]; then
     echo "Building test binaries..."
     mkdir -p build_tests
     cd build_tests
     cmake .. -DBUILD_TESTS=ON
-    make -j$(nproc) test_components
+    make -j$(nproc) test_components test_proxy_core
     cd ..
 fi
 
@@ -70,23 +70,38 @@ echo ""
 echo "Running tests..."
 echo ""
 
+run_suite() {
+    local bin="$1"
+    local filter="$2"
+    local verbose="$3"
+    if [ -n "$filter" ]; then
+        echo "Running tests matching filter: $filter"
+        if [ $verbose -eq 1 ]; then
+            ./build_tests/$bin "[$filter]" -s
+        else
+            ./build_tests/$bin "[$filter]"
+        fi
+    else
+        if [ $verbose -eq 1 ]; then
+            ./build_tests/$bin -s
+        else
+            ./build_tests/$bin
+        fi
+    fi
+    return $?
+}
+
 # Run component tests
-if [ -n "$TEST_FILTER" ]; then
-    echo "Running tests matching filter: $TEST_FILTER"
-    if [ $VERBOSE -eq 1 ]; then
-        ./build_tests/test_components "[${TEST_FILTER}]" -s
-    else
-        ./build_tests/test_components "[${TEST_FILTER}]"
-    fi
-else
-    if [ $VERBOSE -eq 1 ]; then
-        ./build_tests/test_components -s
-    else
-        ./build_tests/test_components
-    fi
+if ! run_suite test_components "$TEST_FILTER" $VERBOSE; then
+    FAILED=1
+fi
+echo ""
+# Run proxy-core tests
+if ! run_suite test_proxy_core "$TEST_FILTER" $VERBOSE; then
+    FAILED=1
 fi
 
-RESULT=$?
+RESULT=$FAILED
 
 echo ""
 echo "=========================================="

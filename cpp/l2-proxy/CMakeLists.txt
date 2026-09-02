@@ -374,6 +374,35 @@ if(BUILD_TESTS)
     # Enable Catch2 test discovery
     catch_discover_tests(test_components)
 
+    # Proxy-core tests (separate TU): /v1/sql routing contract and the pure
+    # DB gateway helpers. Header-only sources keep the target dependency-light
+    # (nlohmann/json + Catch2) so it stays fast to build in the test stage.
+    add_executable(test_proxy_core
+        test_proxy_core.cpp
+    )
+    target_include_directories(test_proxy_core PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_options(test_proxy_core PRIVATE
+        ${L2_PROXY_COMMON_COMPILE_OPTIONS}
+    )
+    target_link_libraries(test_proxy_core PRIVATE
+        Catch2::Catch2WithMain
+        pthread
+    )
+    if(ENABLE_ASAN)
+        target_compile_options(test_proxy_core PRIVATE
+            -fsanitize=address
+            -fno-omit-frame-pointer
+            -g
+            -O1
+        )
+        target_link_options(test_proxy_core PRIVATE
+            -fsanitize=address
+        )
+    endif()
+    catch_discover_tests(test_proxy_core)
+
     # Enable testing
     enable_testing()
 endif()
