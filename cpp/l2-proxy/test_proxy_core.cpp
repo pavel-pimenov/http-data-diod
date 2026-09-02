@@ -4,6 +4,7 @@
 #include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
 #include "header_utils.hpp"
+#include "json_schema_validator.hpp"
 #include "json_utils.hpp"
 #include "labeled_entries_utils.hpp"
 #include "random_utils.hpp"
@@ -365,6 +366,77 @@ TEST_CASE("Random utils: between stays within the inclusive range",
     REQUIRE(v <= 7);
   }
   REQUIRE(RandomUtils::between(42, 42) == 42);
+}
+
+TEST_CASE("Schema validator: required fields, methods, paths, sizes",
+          "[schema-validator]") {
+  std::string error;
+  RequestValidator validator =
+      create_standard_request_validator();
+  json ok = {{"method", "POST"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
+  REQUIRE(validator.validate(ok, error));
+  REQUIRE_NOTHROW(validator.validate_or_throw(ok));
+
+  json missing = {{"method", "POST"}, {"path", "/v1/sql"}};
+  REQUIRE_FALSE(validator.validate(missing, error));
+  REQUIRE(error.find("Missing required field") != std::string::npos);
+  REQUIRE_THROWS_AS(validator.validate_or_throw(missing),
+                    std::invalid_argument);
+
+  json bad_method = {{"method", "DELETE"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
+  REQUIRE_FALSE(validator.validate(bad_method, error));
+  REQUIRE(error.find("Method not allowed") != std::string::npos);
+
+  RequestValidator path_validator = create_standard_request_validator();
+  path_validator.add_allowed_path("/v1");
+  json bad_path = {{"method", "POST"}, {"path", "/other"}, {"request_id", "r1"}};
+  REQUIRE_FALSE(path_validator.validate(bad_path, error));
+  REQUIRE(error.find("Path not allowed") != std::string::npos);
+
+  json too_long_path = {{"method", "POST"},
+                        {"path", std::string(3000, 'x')},
+                        {"request_id", "r1"}};
+  REQUIRE_FALSE(validator.validate(too_long_path, error));
+  REQUIRE(error.find("Path too long") != std::string::npos);
+
+  json too_big_body = {{"method", "POST"},
+                       {"path", "/v1/sql"},
+                       {"request_id", "r1"},
+                       {"body", std::string(11 * 1024 * 1024, 'a')}};
+  REQUIRE_FALSE(validator.validate(too_big_body, error));
+  REQUIRE(error.find("Body too large") != std::string::npos);
+
+  json with_body_ok = {{"method", "POST"},
+                       {"path", "/v1/sql"},
+                       {"request_id", "r1"},
+                       {"body", "small"}};
+  REQUIRE(validator.validate(with_body_ok, error));
+}
+
+TEST_CASE("Schema validator: response status and body rules",
+          "[schema-validator]") {
+  std::string error;
+  ResponseValidator validator =
+      create_standard_response_validator();
+  validator.add_allowed_status_code(200);
+
+  json ok = {{"status_code", 200},
+             {"body", {{"response", "payload"}}}};
+  REQUIRE(validator.validate(ok, error));
+
+  json bad_status = {{"status_code", 500},
+                     {"body", {{"response", "payload"}}}};
+  REQUIRE_FALSE(validator.validate(bad_status, error));
+  REQUIRE(error.find("Status code not allowed") != std::string::npos);
+
+  json missing_body = {{"status_code", 200}};
+  REQUIRE_FALSE(validator.validate(missing_body, error));
+  REQUIRE(error.find("body required but missing") != std::string::npos);
+
+  json too_big = {{"status_code", 200},
+                  {"body", {{"response", std::string(51 * 1024 * 1024, 'b')}}}};
+  REQUIRE_FALSE(validator.validate(too_big, error));
+  REQUIRE(error.find("body too large") != std::string::npos);
 }
 
 TEST_CASE("Request data: NatsContract field names stay stable",

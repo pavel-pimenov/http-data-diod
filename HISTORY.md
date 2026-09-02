@@ -190,6 +190,26 @@ performance-regression и обновить сторонний httplib.
 - `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
 - `message_counter.py` — без потерь.
 - clang-tidy: EXIT=0.
+
+## test(cpp): покрытие RequestValidator/ResponseValidator в test_proxy_core
+
+### Что сделано
+- В `test_proxy_core.cpp` добавлен тег `[schema-validator]` (2 TEST_CASE):
+  RequestValidator — обязательные поля, allowed methods, allowed paths
+  (отдельный validator с add_allowed_path, т.к. standard их не задаёт),
+  max path length, max body size, `validate_or_throw` (not-throw и
+  invalid_argument); ResponseValidator — allowed status codes, required body,
+  max body size. Итог: 41 TEST_CASE, 607 assertions (до раунда 39/586).
+- `json_schema_validator.hpp` — header-only (logger.hpp уже подключён в тесте).
+
+### Veracity / проверка
+- Полный прогон test_proxy_core в builder-контейнере:
+  `All tests passed (607 assertions in 41 test cases)`.
+- `./rebuild-and-run.sh`: зелёная сборка, контейнеры healthy.
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
+
+### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.
 - `python3 message_counter.py --iterations 1 --concurrent 1` — без потерь.
