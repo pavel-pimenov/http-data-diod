@@ -1,6 +1,7 @@
 #ifndef METRICS_MANAGER_HPP
 #define METRICS_MANAGER_HPP
 
+#include "time_utils.hpp"
 #include <array>
 #include <memory>
 #include <prometheus/counter.h>
@@ -101,7 +102,7 @@ inline void observe_db_request_duration(
     prometheus::Family<prometheus::Histogram> &duration_family,
     const std::string &db, uint64_t start_us, uint64_t end_us) {
   duration_family.Add({{"db", db}}, latency_buckets_ms_to_10s())
-      .Observe(static_cast<double>(end_us - start_us) / 1'000'000.0);
+      .Observe(TimeUtils::duration_seconds(start_us, end_us));
 }
 
 #endif // METRICS_MANAGER_HPP

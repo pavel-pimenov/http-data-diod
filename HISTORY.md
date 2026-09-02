@@ -125,6 +125,21 @@ performance-regression и обновить сторонний httplib.
 - `message_counter.py` — без потерь; E2E-запрос /v1/sql/oracle/query → 200 ok.
 - clang-tidy: EXIT=0.
 
+## refactor(cpp): единый TimeUtils::duration_seconds вместо ручных /1e6
+
+### Что сделано
+- `metrics_manager.hpp` (`observe_db_request_duration`) и `trace_logger.cpp`
+  (avg queue latency в sender_loop) дублировали пересчёт `us → s` руками
+  (`x / 1'000'000.0`), хотя в `time_utils.hpp` для этого уже существует
+  `TimeUtils::duration_seconds(start_us, end_us)`. Использован общий helper.
+- В `metrics_manager.hpp` добавлен include `time_utils.hpp` (лёгкий header-only),
+  в `trace_logger.cpp` — тоже. Поведение не меняется (та же арифметика).
+
+### Veracity / проверка
+- `./rebuild-and-run.sh`: зелёная сборка + тесты, контейнеры healthy.
+- `message_counter.py` — без потерь.
+- clang-tidy: EXIT=0.
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.

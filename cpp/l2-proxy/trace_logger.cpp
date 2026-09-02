@@ -1,6 +1,7 @@
 #include "trace_logger.hpp"
 #include "http_client_pool.hpp"
 #include "logger.hpp"
+#include "time_utils.hpp"
 #include <format>
 
 // Thread-local random generator for fast ID generation (initialized once per
@@ -255,7 +256,8 @@ void JaegerLogger::sender_loop(std::stop_token st) {
                             .count();
       double avg_queue_time_s = 0.0;
       for (const auto &span : batch) {
-        avg_queue_time_s += (now_us - span.m_enqueue_time_us) / 1000000.0;
+        avg_queue_time_s +=
+            TimeUtils::duration_seconds(span.m_enqueue_time_us, now_us);
       }
       avg_queue_time_s /= batch.size();
       m_tracing_queue_time_histogram.Observe(avg_queue_time_s);
