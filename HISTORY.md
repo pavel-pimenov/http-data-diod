@@ -92,6 +92,22 @@ performance-regression и обновить сторонний httplib.
 - `./scripts/run-clang-tidy.sh`: EXIT=0, предупреждений в изменённых файлах нет
   (оставшиеся warning'и — pre-existing в других заголовках).
 
+## refactor(cpp): зачистка /health/ready от тройного дублирования
+
+### Что сделано
+- В `handle_get` ветка `kHealthReadyPath` (liveness-ответ): три идентичных присваивания
+  `error_msg = "NATS connection not available"` (no-client, allow_connect+disconnected,
+  default+disconnected) сведены в одно пост-условие
+  `if (!nats_healthy && error_msg.empty()) error_msg = "NATS connection not available";`.
+  Логика ветвлений (allow_connect → ping / иначе только is_connected) и сообщения
+  («NATS ping failed», «NATS health check failed: …») полностью сохранены.
+- Поведение проверено: /health/ready → 200 `{"status":"ready",...}`, /health/live и /health → 200.
+
+### Veracity / проверка
+- `./rebuild-and-run.sh`: зелёная сборка, `test_components` + `test_proxy_core` прошли.
+- `message_counter.py` и curl-прогоны: все здоровы, /v1/sql без изменений (200 на GET list).
+- clang-tidy: EXIT=0, замечаний в изменённых файлах нет.
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.

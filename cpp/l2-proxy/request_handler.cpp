@@ -159,19 +159,18 @@ void RequestHandler::handle_get(const httplib::Request &req,
             if (!nats_healthy) {
               error_msg = "NATS ping failed";
             }
-          } else {
-            error_msg = "NATS connection not available";
           }
         } else {
           // Default: never initiate a reconnect from the health endpoint.
           // Only report the current connection state, so /health/ready answers
           // fast for the load balancer even while NATS is down.
           nats_healthy = m_ctx.m_nats_client->is_connected();
-          if (!nats_healthy) {
-            error_msg = "NATS connection not available";
-          }
         }
-      } else {
+      }
+      // A missing or disconnected client reports the same readable message
+      // (the legacy allow-connect path with a lost connection also lands here
+      // because nats_healthy stays false and error_msg is still empty).
+      if (!nats_healthy && error_msg.empty()) {
         error_msg = "NATS connection not available";
       }
     } catch (const std::exception &e) {
