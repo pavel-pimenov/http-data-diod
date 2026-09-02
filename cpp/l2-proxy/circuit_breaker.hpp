@@ -22,7 +22,7 @@ struct CircuitBreaker {
   static constexpr int g_half_open_success_threshold = 2;
 
   void set_gauge(prometheus::Gauge *gauge);
-  bool allow_request();
+  [[nodiscard]] bool allow_request();
   void record_success();
   void record_failure();
   std::string state_name() const;

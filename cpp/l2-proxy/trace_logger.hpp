@@ -6,17 +6,13 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
-#include <iomanip>
 #include <mutex>
-#include <queue>
-#include <random>
 #include <ranges>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
-#if __has_include(<stop_token>)
+
 #include <stop_token>
-#endif
 
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>

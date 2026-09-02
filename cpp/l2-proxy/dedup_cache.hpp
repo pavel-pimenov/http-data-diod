@@ -21,7 +21,8 @@ public:
                       uint64_t ttl_ms = dedup_default_ttl())
       : m_enabled(enabled), m_max_entries(max_entries), m_ttl_ms(ttl_ms) {}
 
-  std::optional<std::string> find(std::string_view request_id) const {
+  [[nodiscard]] std::optional<std::string>
+  find(std::string_view request_id) const {
     if (!m_enabled) {
       return std::nullopt;
     }
