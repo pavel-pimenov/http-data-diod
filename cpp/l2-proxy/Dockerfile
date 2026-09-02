@@ -275,7 +275,9 @@ RUN set -eux; \
     echo "${INSTANT_DIR}" > /etc/ld.so.conf.d/oracle-instantclient.conf; \
     ln -sf libclntsh.so.21.1 "${INSTANT_DIR}/libclntsh.so"; \
     ln -sf libclntshcore.so.21.1 "${INSTANT_DIR}/libclntshcore.so"; \
-    ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1; \
+    LIBAIO_PATH=$(find /usr/lib -name 'libaio.so.1t64' | head -1) && \
+    LIBAIO_DIR=$(dirname "$LIBAIO_PATH") && \
+    ln -sf "$LIBAIO_PATH" "${LIBAIO_DIR}/libaio.so.1"; \
     ldconfig
 
 # Runtime stage with gperftools heap profiling support

@@ -1,3 +1,20 @@
+# fix(docker): портировать symlink libaio для mbuild-agnostic (aarch64/x86_64)
+
+## Date: 2026-09-02
+
+### Что сделано
+- **`cpp/l2-proxy/Dockerfile` (runtime-db stage)**: заменён захардкоженный путь
+  `/usr/lib/x86_64-linux-gnu/libaio.so.1t64` на динамический поиск через `find`:
+  ```
+  LIBAIO_PATH=$(find /usr/lib -name 'libaio.so.1t64' | head -1) && \
+  LIBAIO_DIR=$(dirname "$LIBAIO_PATH") && \
+  ln -sf "$LIBAIO_PATH" "${LIBAIO_DIR}/libaio.so.1"
+  ```
+  Сборка падала на ARM64 (Apple Silicon / docker buildx) из-за несуществующего
+  `x86_64`-пути. Теперь Runtime-db stage корректно работает на любой архитектуре.
+
+---
+
 # test(cpp): покрытие фильтрации заголовков + починка окружения (Postgres PG17)
 
 ## Date: 2026-09-02
