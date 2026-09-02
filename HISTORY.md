@@ -108,6 +108,23 @@ performance-regression и обновить сторонний httplib.
 - `message_counter.py` и curl-прогоны: все здоровы, /v1/sql без изменений (200 на GET list).
 - clang-tidy: EXIT=0, замечаний в изменённых файлах нет.
 
+## refactor(cpp): nonempty_or helper вместо повторяющегося тернарника в метриках worker
+
+### Что сделано
+- В `db_query_utils.hpp` добавлен header-only helper `nonempty_or(value, fallback)`
+  (возвращает value если непустой, иначе fallback) — симметричен существующему
+  `resolve_positive_or` для несвязанных метрик.
+- В `l2_worker_nats.cpp` тернарники `db_name.empty() ? "unknown" : db_name` /
+  `type.empty() ? "unknown" : type` (для `m_db_query_duration_seconds` и
+  `m_db_requests_total`) заменены на `nonempty_or`.
+- В `test_proxy_core.cpp` добавлен TEST_CASE `[db-gateway-labels]`, покрывающий
+  helper (возврат значения и фолбэк). Теперь тестов 24.
+
+### Veracity / проверка
+- `./rebuild-and-run.sh`: зелёная сборка, `test_proxy_core` (включая новый кейс) прошёл.
+- `message_counter.py` — без потерь; E2E-запрос /v1/sql/oracle/query → 200 ok.
+- clang-tidy: EXIT=0.
+
 ### Veracity / проверка
 - `./rebuild-and-run.sh` (L2_WORKER_DOCKER_TARGET=runtime-db, DB_ORACLE_ENABLED=true): сборка
   зелёная, `test_components` + `test_proxy_core` прошли.

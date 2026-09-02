@@ -515,7 +515,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
             request_data, DbQueryContract::kDb);
         observe_db_request_duration(
             m_ctx.m_worker.m_metrics->m_db_query_duration_seconds,
-            db_name.empty() ? "unknown" : db_name, db_start_us, db_end_us);
+            nonempty_or(db_name, "unknown"), db_start_us, db_end_us);
         if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
           const std::string db_span_id =
               JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
@@ -549,8 +549,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       JsonUtils::safe_get_string(request_data, DbQueryContract::kType);
   record_db_request_metrics(
       m_ctx.m_worker.m_metrics->m_db_requests_total,
-      db_name.empty() ? "unknown" : db_name,
-      type.empty() ? "unknown" : type, status);
+      nonempty_or(db_name, "unknown"), nonempty_or(type, "unknown"), status);
   const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
   send_nats_response(reply_to, envelope.dump(), response_headers);
   record_bytes_sent(envelope.dump().size());

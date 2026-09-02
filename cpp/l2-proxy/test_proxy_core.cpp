@@ -251,6 +251,14 @@ TEST_CASE("Gateway responses: query and ping bodies", "[db-gateway-response]") {
   REQUIRE(ping_resp[DbResponseContract::kLatencyMs] == 3);
 }
 
+TEST_CASE("Gateway labels: nonempty_or picks the value or the fallback",
+          "[db-gateway-labels]") {
+  REQUIRE(nonempty_or("oracle", "unknown") == "oracle");
+  REQUIRE(nonempty_or("", "unknown") == "unknown");
+  REQUIRE(nonempty_or("query", "unknown") == "query");
+  REQUIRE(nonempty_or("", "unknown") != "");
+}
+
 TEST_CASE("Gateway envelope: wraps status and body", "[db-gateway-envelope]") {
   const json body = json{{"status", "ok"}};
   const json envelope = make_db_response_envelope(200, body);

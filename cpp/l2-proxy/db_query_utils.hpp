@@ -151,6 +151,14 @@ inline int resolve_positive_or(int value, int fallback) {
   return value > 0 ? value : fallback;
 }
 
+// Returns value when non-empty, otherwise fallback. Used for Prometheus label
+// values that must not be empty (db/type), which previously repeated the
+// `x.empty() ? "unknown" : x` ternary in both worker metric sites.
+inline std::string nonempty_or(std::string_view value,
+                               std::string_view fallback) {
+  return value.empty() ? std::string(fallback) : std::string(value);
+}
+
 // Builds the DbResponseContract error body shared by the proxy and the worker.
 inline json make_db_error_body(int http_status, const std::string &code,
                                const std::string &message) {
