@@ -13,7 +13,6 @@
 #include "http_client.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
-#include "labeled_counter_collector.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 #include "nats_client.hpp"
@@ -328,8 +327,9 @@ bool RequestHandler::reject_rate_limited(
     const std::string &message, uint64_t limit, uint64_t remaining) {
   rejected_counter.Increment();
   if (m_ctx.m_proxy.m_per_client_id_metrics_collector) {
-    m_ctx.m_proxy.m_per_client_id_metrics_collector->record_rejection(
-        client_id);
+    m_ctx.m_proxy.m_per_client_id_metrics_collector
+        ->get(client_id, 1)
+        ->Increment();
   }
   res.set_header("Retry-After", "1");
   res.set_header("X-RateLimit-Limit", std::to_string(limit));
@@ -542,7 +542,9 @@ void RequestHandler::handle_request(const httplib::Request &req,
   const auto client_id =
       get_header_value(req.headers, "X-DataHub-Client-Id", "unknown");
   if (m_ctx.m_proxy.m_per_client_id_metrics_collector) {
-    m_ctx.m_proxy.m_per_client_id_metrics_collector->record_request(client_id);
+    m_ctx.m_proxy.m_per_client_id_metrics_collector
+        ->get(client_id, 0)
+        ->Increment();
   }
 
   // Duplicate POST detection: the same request body (SHA-256 hash) delivered
@@ -556,8 +558,9 @@ void RequestHandler::handle_request(const httplib::Request &req,
                                                    body)) {
       m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
       if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-        m_ctx.m_proxy.m_per_client_id_duplicate_collector->record_request(
-            client_id);
+        m_ctx.m_proxy.m_per_client_id_duplicate_collector
+            ->get(client_id, 0)
+            ->Increment();
       }
       Logger::warn("Duplicate POST detected: client_id={} body_bytes={}",
                    client_id, body.size());
@@ -569,8 +572,9 @@ void RequestHandler::handle_request(const httplib::Request &req,
       // /debug/duplicates and l2_proxy_per_client_id_duplicate_* metrics).
       if (m_ctx.m_config.m_duplicate_reject_enabled) {
         if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-          m_ctx.m_proxy.m_per_client_id_duplicate_collector->record_rejection(
-              client_id);
+          m_ctx.m_proxy.m_per_client_id_duplicate_collector
+              ->get(client_id, 1)
+              ->Increment();
         }
         res.status = 409;
         send_json_response(res, res.status,

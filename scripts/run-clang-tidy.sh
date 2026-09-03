@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Run clang-tidy on changed C++ files inside a container.
 #

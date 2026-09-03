@@ -3,10 +3,11 @@
 // test_components.cpp; both run from the Docker build test stage.
 #include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
+#include "dynamic_labeled_family.hpp"
+#include "error_categorizer.hpp"
 #include "header_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
-#include "labeled_entries_utils.hpp"
 #include "random_utils.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -555,40 +556,269 @@ TEST_CASE("Request data: NatsContract field names stay stable",
   REQUIRE(std::string(NatsContract::kHeaders) == "headers");
 }
 
-namespace {
-struct LabeledEntry {
-  std::chrono::steady_clock::time_point m_last_seen;
-};
+TEST_CASE("Dynamic labeled family: counter increments and renders",
+          "[labeled-family]") {
+  DynamicLabeledFamily<prometheus::Counter> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+          {"requests_total", "Requests per client"},
+          {"rejected_total", "Rejected per client"}});
+  family.get("alice", 0)->Increment();
+  family.get("alice", 0)->Increment();
+  family.get("alice", 1)->Increment();
+
+  auto families = family.Collect();
+  REQUIRE(families.size() == 2);
+  // Requests family
+  REQUIRE(families[0].name == "requests_total");
+  REQUIRE(families[0].metric.size() == 1);
+  REQUIRE(families[0].metric[0].label.size() == 1);
+  REQUIRE(families[0].metric[0].label[0].name == "client_id");
+  REQUIRE(families[0].metric[0].label[0].value == "alice");
+  REQUIRE(families[0].metric[0].counter.value == 2.0);
+  // Rejected family
+  REQUIRE(families[1].name == "rejected_total");
+  REQUIRE(families[1].metric[0].counter.value == 1.0);
 }
 
-TEST_CASE("Labeled entries: keeps fresh and drops stale (TTL)", "[labeled]") {
-  std::unordered_map<std::string, LabeledEntry> entries;
-  entries["old"] = LabeledEntry{std::chrono::steady_clock::now()};
-  entries["fresh"] = LabeledEntry{std::chrono::steady_clock::now()};
-  entries["old"].m_last_seen -= std::chrono::seconds(10);
-  evict_stale_and_trim(entries, 1, 100);
-  REQUIRE(entries.size() == 1);
-  REQUIRE(entries.contains("fresh"));
+TEST_CASE("Dynamic labeled family: empty family is omitted on collect",
+          "[labeled-family]") {
+  DynamicLabeledFamily<prometheus::Counter> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+          {"requests_total", "help"}});
+  REQUIRE(family.Collect().empty());
 }
 
-TEST_CASE("Labeled entries: trims oldest beyond max_entries", "[labeled]") {
-  std::unordered_map<std::string, LabeledEntry> entries;
-  const auto now = std::chrono::steady_clock::now();
-  entries["a"] = LabeledEntry{now - std::chrono::seconds(3)};
-  entries["b"] = LabeledEntry{now - std::chrono::seconds(2)};
-  entries["c"] = LabeledEntry{now - std::chrono::seconds(1)};
-  evict_stale_and_trim(entries, 0, 2);
-  REQUIRE(entries.size() == 2);
-  REQUIRE(entries.contains("c"));
-  REQUIRE(entries.contains("b"));
+TEST_CASE("Dynamic labeled family: max_entries cap evicts oldest",
+          "[labeled-family]") {
+  DynamicLabeledFamily<prometheus::Counter> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+          {"requests_total", "help"}},
+      {}, 0, 2);
+  family.get("a", 0)->Increment();
+  family.get("b", 0)->Increment();
+  family.get("c", 0)->Increment();
+
+  auto families = family.Collect();
+  REQUIRE(families.size() == 1);
+  // Two of the three series survive (created oldest == most recently touched
+  // order is the same here since all are touched once in sequence), and the
+  // most-recently-touched ones are kept.
+  REQUIRE(families[0].metric.size() == 2);
 }
 
-TEST_CASE("Labeled entries: ttl=0 keeps everyone", "[labeled]") {
-  std::unordered_map<std::string, LabeledEntry> entries;
-  entries["a"] = LabeledEntry{std::chrono::steady_clock::now() -
-                              std::chrono::hours(1)};
-  entries["b"] = LabeledEntry{std::chrono::steady_clock::now() -
-                              std::chrono::hours(1)};
-  evict_stale_and_trim(entries, 0, 100);
-  REQUIRE(entries.size() == 2);
+TEST_CASE("Dynamic labeled family: snapshot provider replaces gauge set",
+          "[labeled-family]") {
+  auto current_requests = 0.0;
+  auto current_rejected = 0.0;
+  DynamicLabeledFamily<prometheus::Gauge> family(
+      "ip",
+      std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
+          {"ip_requests", "req"}, {"ip_rejected", "rej"}},
+      [&]() {
+        return std::vector<std::pair<std::string, std::vector<double>>>{
+            {"1.2.3.4", {current_requests, current_rejected}}};
+      });
+
+  current_requests = 7.0;
+  current_rejected = 2.0;
+  auto families = family.Collect();
+  REQUIRE(families.size() == 2);
+  REQUIRE(families[0].name == "ip_requests");
+  REQUIRE(families[0].metric[0].label[0].value == "1.2.3.4");
+  REQUIRE(families[0].metric[0].gauge.value == 7.0);
+  REQUIRE(families[1].metric[0].gauge.value == 2.0);
+}
+
+TEST_CASE("Dynamic labeled family: provider drops vanished labels",
+          "[labeled-family]") {
+  auto present = true;
+  DynamicLabeledFamily<prometheus::Gauge> family(
+      "ip",
+      std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
+          {"ip_requests", "req"}},
+      [&]() {
+        std::vector<std::pair<std::string, std::vector<double>>> entries;
+        if (present) {
+          entries.emplace_back("9.9.9.9", std::vector<double>{3.0});
+        }
+        return entries;
+      });
+
+  REQUIRE(family.Collect().size() == 1);
+  present = false;
+  REQUIRE(family.Collect().empty());
+}
+
+// ============================================================================
+// Error categorization (error_categorizer.hpp)
+// ============================================================================
+
+using namespace error_categorizer;
+
+TEST_CASE("Error categorizer: http keyword rules", "[error-categorizer]") {
+  REQUIRE(categorize_http_error("Connection refused") ==
+          HttpErrorType::CONNECTION_ERROR);
+  REQUIRE(categorize_http_error("could not resolve host") ==
+          HttpErrorType::CONNECTION_ERROR);
+  REQUIRE(categorize_http_error("DNS lookup failed") ==
+          HttpErrorType::CONNECTION_ERROR);
+  REQUIRE(categorize_http_error("SSL handshake failed") ==
+          HttpErrorType::SSL_ERROR);
+  REQUIRE(categorize_http_error("certificate verify failed") ==
+          HttpErrorType::SSL_ERROR);
+  REQUIRE(categorize_http_error("Operation timed out") ==
+          HttpErrorType::TIMEOUT_ERROR);
+  REQUIRE(categorize_http_error("Protocol error") ==
+          HttpErrorType::PROTOCOL_ERROR);
+  REQUIRE(categorize_http_error("unexpected character invalid") ==
+          HttpErrorType::PROTOCOL_ERROR);
+}
+
+TEST_CASE("Error categorizer: http status codes take precedence over text",
+          "[error-categorizer]") {
+  REQUIRE(categorize_http_error("anything", 500) ==
+          HttpErrorType::SERVER_ERROR);
+  REQUIRE(categorize_http_error("anything", 503) ==
+          HttpErrorType::SERVER_ERROR);
+  REQUIRE(categorize_http_error("anything", 429) ==
+          HttpErrorType::RATE_LIMIT_ERROR);
+  REQUIRE(categorize_http_error("anything", 400) ==
+          HttpErrorType::CLIENT_ERROR);
+  REQUIRE(categorize_http_error("anything", 404) ==
+          HttpErrorType::CLIENT_ERROR);
+}
+
+TEST_CASE("Error categorizer: http unknown falls back to OTHER",
+          "[error-categorizer]") {
+  REQUIRE(categorize_http_error("no matching keyword here") ==
+          HttpErrorType::OTHER_ERROR);
+  REQUIRE(categorize_http_error("") == HttpErrorType::OTHER_ERROR);
+}
+
+TEST_CASE("Error categorizer: l2 keyword rules", "[error-categorizer]") {
+  REQUIRE(categorize_l2_error("Connection lost") ==
+          L2ErrorType::CONNECTION_ERROR);
+  REQUIRE(categorize_l2_error("retry attempts exhausted") ==
+          L2ErrorType::RETRY_EXHAUSTED);
+  REQUIRE(categorize_l2_error("request timed out") ==
+          L2ErrorType::TIMEOUT_ERROR);
+  REQUIRE(categorize_l2_error("invalid json response") ==
+          L2ErrorType::RESPONSE_ERROR);
+  REQUIRE(categorize_l2_error("parse error") == L2ErrorType::RESPONSE_ERROR);
+  REQUIRE(categorize_l2_error("unknown") == L2ErrorType::OTHER_ERROR);
+}
+
+TEST_CASE("Error categorizer: processing keyword rules",
+          "[error-categorizer]") {
+  REQUIRE(categorize_processing_error("json parse failure") ==
+          ProcessingErrorType::JSON_PARSE_ERROR);
+  REQUIRE(categorize_processing_error("required field missing") ==
+          ProcessingErrorType::VALIDATION_ERROR);
+  REQUIRE(categorize_processing_error("invalid value") ==
+          ProcessingErrorType::VALIDATION_ERROR);
+  REQUIRE(categorize_processing_error("gzip decompress failed") ==
+          ProcessingErrorType::DECOMPRESSION_ERROR);
+  REQUIRE(categorize_processing_error("base64 decode error") ==
+          ProcessingErrorType::ENCODING_ERROR);
+  REQUIRE(categorize_processing_error("timeout") ==
+          ProcessingErrorType::TIMEOUT_ERROR);
+  REQUIRE(categorize_processing_error("resource exhausted") ==
+          ProcessingErrorType::RESOURCE_EXHAUSTED);
+  REQUIRE(categorize_processing_error("no available slots") ==
+          ProcessingErrorType::RESOURCE_EXHAUSTED);
+  REQUIRE(categorize_processing_error("unrecognized") ==
+          ProcessingErrorType::OTHER_ERROR);
+}
+
+TEST_CASE("Error categorizer: keyword matching is case-insensitive",
+          "[error-categorizer]") {
+  REQUIRE(categorize_http_error("TIMED OUT") == HttpErrorType::TIMEOUT_ERROR);
+  REQUIRE(categorize_http_error("Connection") ==
+          HttpErrorType::CONNECTION_ERROR);
+  REQUIRE(categorize_l2_error("JSON Parse") == L2ErrorType::RESPONSE_ERROR);
+  REQUIRE(categorize_processing_error("Timeout") ==
+          ProcessingErrorType::TIMEOUT_ERROR);
+}
+
+TEST_CASE("Error categorizer: to_string maps every enum value",
+          "[error-categorizer]") {
+  REQUIRE(http_error_type_to_string(HttpErrorType::CONNECTION_ERROR) ==
+          "CONNECTION_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::SSL_ERROR) == "SSL_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::TIMEOUT_ERROR) ==
+          "TIMEOUT_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::STATUS_CODE_ERROR) ==
+          "STATUS_CODE_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::PROTOCOL_ERROR) ==
+          "PROTOCOL_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::RATE_LIMIT_ERROR) ==
+          "RATE_LIMIT_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::SERVER_ERROR) ==
+          "SERVER_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::CLIENT_ERROR) ==
+          "CLIENT_ERROR");
+  REQUIRE(http_error_type_to_string(HttpErrorType::OTHER_ERROR) ==
+          "OTHER_ERROR");
+
+  REQUIRE(l2_error_type_to_string(L2ErrorType::CONNECTION_ERROR) ==
+          "CONNECTION_ERROR");
+  REQUIRE(l2_error_type_to_string(L2ErrorType::TIMEOUT_ERROR) ==
+          "TIMEOUT_ERROR");
+  REQUIRE(l2_error_type_to_string(L2ErrorType::RESPONSE_ERROR) ==
+          "RESPONSE_ERROR");
+  REQUIRE(l2_error_type_to_string(L2ErrorType::RETRY_EXHAUSTED) ==
+          "RETRY_EXHAUSTED");
+  REQUIRE(l2_error_type_to_string(L2ErrorType::OTHER_ERROR) == "OTHER_ERROR");
+
+  REQUIRE(processing_error_type_to_string(
+              ProcessingErrorType::JSON_PARSE_ERROR) == "JSON_PARSE_ERROR");
+  REQUIRE(processing_error_type_to_string(ProcessingErrorType::VALIDATION_ERROR) ==
+          "VALIDATION_ERROR");
+  REQUIRE(processing_error_type_to_string(
+              ProcessingErrorType::DECOMPRESSION_ERROR) == "DECOMPRESSION_ERROR");
+  REQUIRE(processing_error_type_to_string(ProcessingErrorType::ENCODING_ERROR) ==
+          "ENCODING_ERROR");
+  REQUIRE(processing_error_type_to_string(ProcessingErrorType::TIMEOUT_ERROR) ==
+          "TIMEOUT_ERROR");
+  REQUIRE(processing_error_type_to_string(
+              ProcessingErrorType::RESOURCE_EXHAUSTED) == "RESOURCE_EXHAUSTED");
+  REQUIRE(processing_error_type_to_string(ProcessingErrorType::OTHER_ERROR) ==
+          "OTHER_ERROR");
+}
+
+TEST_CASE("Error categorizer: first matching rule wins", "[error-categorizer]") {
+  // "connection" (CONNECTION) precedes "timeout" (TIMEOUT) in the http table.
+  REQUIRE(categorize_http_error("connection timed out") ==
+          HttpErrorType::CONNECTION_ERROR);
+  // "connection" precedes "ssl" in the http table (first match wins).
+  REQUIRE(categorize_http_error("ssl handshake failed") ==
+          HttpErrorType::SSL_ERROR);
+}
+
+// ============================================================================
+// URL utils (url_utils.hpp)
+// ============================================================================
+
+TEST_CASE("URL utils: normalize_path fills a leading slash",
+          "[url-utils]") {
+  REQUIRE(normalize_path("/api") == "/api");
+  REQUIRE(normalize_path("api") == "/api");
+  REQUIRE(normalize_path("") == "/");
+}
+
+TEST_CASE("URL utils: extract_query_string after the ?", "[url-utils]") {
+  httplib::Request req;
+  req.target = "/search?q=hello&lang=ru";
+  REQUIRE(extract_query_string(req) == "q=hello&lang=ru");
+  req.target = "/noparams";
+  REQUIRE(extract_query_string(req) == "");
+}
+
+TEST_CASE("URL utils: extract_proxy_ip uses local addr", "[url-utils]") {
+  httplib::Request req;
+  req.local_addr = "127.0.0.2";
+  REQUIRE(extract_proxy_ip(req) == "127.0.0.2");
 }

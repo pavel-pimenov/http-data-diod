@@ -1,43 +1,17 @@
 #ifndef ERROR_TYPES_HPP
 #define ERROR_TYPES_HPP
 
-#include <cstdint>
+#include "error_categorizer.hpp"
 #include <prometheus/counter.h>
-#include <string>
 
 // ============================================================================
 // Error Type Enumerations
 // ============================================================================
-
-enum class HttpErrorType : uint8_t {
-  CONNECTION_ERROR,
-  SSL_ERROR,
-  TIMEOUT_ERROR,
-  STATUS_CODE_ERROR,
-  PROTOCOL_ERROR,
-  RATE_LIMIT_ERROR,
-  SERVER_ERROR,
-  CLIENT_ERROR,
-  OTHER_ERROR
-};
-
-enum class L2ErrorType : uint8_t {
-  CONNECTION_ERROR,
-  TIMEOUT_ERROR,
-  RESPONSE_ERROR,
-  RETRY_EXHAUSTED,
-  OTHER_ERROR
-};
-
-enum class ProcessingErrorType : uint8_t {
-  JSON_PARSE_ERROR,
-  VALIDATION_ERROR,
-  DECOMPRESSION_ERROR,
-  ENCODING_ERROR,
-  TIMEOUT_ERROR,
-  RESOURCE_EXHAUSTED,
-  OTHER_ERROR
-};
+//
+// The error-type enums (HttpErrorType, L2ErrorType, ProcessingErrorType) live
+// in error_categorizer.hpp (dependency-light, unit-testable without
+// prometheus). error_types.hpp re-exports the categorizers and adds the
+// prometheus-backed error-handling helpers below.
 
 // ============================================================================
 // Error Metrics Structs
@@ -61,15 +35,21 @@ struct ProcessingErrorMetrics {
 // ============================================================================
 // Error Categorization
 // ============================================================================
+//
+// The categorizers and enum-to-string helpers are implemented (header-only)
+// in error_categorizer.hpp inside the error_categorizer namespace. Re-expose
+// them and the error-type enums at global scope for backward compatibility
+// with existing callers.
 
-HttpErrorType categorize_http_error(const std::string &error_msg,
-                                    int status_code = 0);
-L2ErrorType categorize_l2_error(const std::string &error_msg);
-ProcessingErrorType categorize_processing_error(const std::string &error_msg);
-
-std::string http_error_type_to_string(HttpErrorType type);
-std::string l2_error_type_to_string(L2ErrorType type);
-std::string processing_error_type_to_string(ProcessingErrorType type);
+using error_categorizer::HttpErrorType;
+using error_categorizer::L2ErrorType;
+using error_categorizer::ProcessingErrorType;
+using error_categorizer::categorize_http_error;
+using error_categorizer::categorize_l2_error;
+using error_categorizer::categorize_processing_error;
+using error_categorizer::http_error_type_to_string;
+using error_categorizer::l2_error_type_to_string;
+using error_categorizer::processing_error_type_to_string;
 
 // ============================================================================
 // Error Handling Functions

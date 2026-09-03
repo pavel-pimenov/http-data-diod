@@ -1,3 +1,158 @@
+# build(metrics): vendored prometheus-cpp 1.2.4 + civetweb, убраны Ubuntu-пакеты метрик
+
+## Date: 2026-09-02
+
+### Контекст
+Ранее проект линковался с системным `prometheus-cpp-dev` из Ubuntu APT (версия 1.0.x),
+у которой отсутствовали `Family::Remove`/`Family::Has`. Из-за этого динамические
+label-коллекторы (`LabeledCounterCollector`/`LabeledHistogramCollector`) приходилось
+писать вручную через snapshot-подход и ручную TTL/LRU-эвикцию. Переход на вендоренный
+prometheus-cpp 1.2.4 добавляет нативный `Family::Remove`/`Has` и новые билдеры, что
+позволяет в дальнейшем упростить код метрик.
+
+### Что сделано
+- **`cpp/l2-proxy/prometheus-cpp/` (вендоренные исходники prometheus-cpp 1.2.4)**:
+  только `core/`, `pull/`, `push/`, `util/` исходники без upstream CMake, тестов,
+  бенчмарков и submodule'ов (по просьбе не засорять репозиторий).
+  - Вручную созданы экспортные заголовки `core/include/prometheus/detail/core_export.h`
+    и `pull/include/prometheus/detail/pull_export.h` (в официальном tree они генерировались
+    `generate_export_header`; для статической сборки макросы пустые).
+- **`cpp/l2-proxy/CMakeLists.txt`**: вместо `find_package(prometheus-cpp REQUIRED)`
+  теперь собственная static-сборка из вендоренных исходников:
+  - `proj_prometheus_core` (14 .cc из `core/src`), C++17, `Threads::Threads`, `rt`.
+  - `proj_prometheus_util` (INTERFACE, header-only `prometheus/detail/base64.h`).
+  - `proj_civetweb` (static `civetweb.c` + `CivetServer.cpp`), без SSL/Lua/CGI
+    (нужен только plain-HTTP /metrics, поэтому `NO_SSL`, `NO_SSL_DL`, `NO_CGI`).
+  - `proj_prometheus_pull` (5 .cc), `HAVE_ZLIB` + `ZLIB`, ссылается на core/util/civetweb.
+  - Алиасы `prometheus-cpp::core`/`prometheus-cpp::pull` сохранены для обратной совместимости
+    ссылок в l2-proxy и test_components.
+  - `test_proxy_core` теперь линкует `prometheus-cpp::core` (нужен include path на
+    `prometheus/client_metric.h` через `labeled_entries_utils.hpp`; раньше системные
+    заголовки находились сами).
+- **`cpp/l2-proxy/prometheus-cpp/3rdparty/civetweb/` (вендоренный civetweb v1.16)**:
+  `src/civetweb.c`, `src/CivetServer.cpp`, необходимые `.inl` и `include/civetweb.h`,
+  `include/CivetServer.h`. Lua/duktape/SQLite (`src/third_party`) не вендорены.
+  Системный Ubuntu `libcivetweb` не подходит: он разделяет C API (`libcivetweb`)
+  и C++-обёртку (`libcivetweb-cpp`) и имеет несовместимый с prometheus-cpp pull API.
+- **`cpp/l2-proxy/Dockerfile`**:
+  - builder: убран `prometheus-cpp-dev` и `libcivetweb-dev`.
+  - runtime (ubuntu-base): убраны `libprometheus-cpp-core1.0`, `libprometheus-cpp-pull1.0`,
+    `libcivetweb1` — метрики и civetweb теперь собираются статически и вшиты в бинарь.
+
+### Проверка
+- `./rebuild-and-run.sh` — успешная сборка (RelWithDebInfo), контейнеры healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь
+  и crossed responses; GET-тест бинарного favicon ✅.
+
+### Тестовый фикс (попутно)
+- `test_components.cpp:1563`: `cache.find(key);` → `(void)cache.find(key);` —
+  устранено `-Wunused-result` на `[[nodiscard]]` методе `DedupCache::find`, из-за чего
+  компиляция test_components падала (сторонняя, не связанная с метриками ошибка).
+
+---
+
+# refactor(metrics): замена самописных label-коллекторов на native Family (1.2.4)
+
+## Date: 2026-09-02
+
+### Контекст
+Вендоренный prometheus-cpp 1.2.4 добавил `Family::Remove`/`Family::Has`, которых не было
+в Ubuntu-пакете 1.0.x. Раньше `LabeledCounterCollector`/`LabeledHistogramCollector` и
+`labeled_entries_utils` вручную собирали `MetricFamily` (ручной bucket-счёт, ручной эвикшн).
+Теперь рендеринг делегирован нативному `prometheus::Family<T>`, а обёртка управляет только
+жизненным циклом label-значений (TTL/LRU через `Family::Remove`). Это сократило код метрик
+и убрало риск рассинхрона ручной сериализации с реальной логикой серий.
+
+### Что сделано
+- **`dynamic_labeled_family.hpp` (новый generic-обёртка `DynamicLabeledFamily<T>`)**:
+  оборачивает одну или несколько `prometheus::Family<T>` (e.g. `requests_total` + `rejected_total`,
+  разделяющих один набор динамических label-значений) под одним `Collectable`.
+  - `get(label_value, series_index)` — direct-запись: возвращает child (Counter/Histogram)
+    для инкремента/обсерва, обеспечивая создание и обновление last-seen.
+  - `Collect()` — либо эвиктит по TTL/LRU (через `Family::Remove`), либо, для снапшот-
+    провайдера (Gauge), заменяет набор серий абсолютными значениями через `Gauge::Set`.
+  - Пустые семейства (нет серий) автоматически опускаются (в отличие от прежнего
+    histogram, который выводил пустой `# HELP`/`# TYPE` блок).
+  - Защита от use-after-free при эвикшене: label копируется до `m_children.erase()`.
+- **Замена интеграций**:
+  - `app_context.{hpp,cpp}`: 4 поля `ProxyContext` теперь `DynamicLabeledFamily<...>`;
+    per-IP → `Gauge` (снапшот-провайдер из `PerIPRateLimiter`), per-client/duplicate → `Counter`,
+    latency → `Histogram` с бакетами `g_k_latency_5ms_to_10s`.
+  - `request_handler.cpp`: `record_request/record_rejection` → `get(client_id, i)->Increment()`.
+  - `scoped_profiler.hpp`: `observe()` → `get(label_value, 0)->Observe()`.
+  - `main.cpp`, `request_handler.cpp`: удалены `#include "labeled_*.hpp"`.
+  - `rate_limiter_per_ip.hpp`: обновлён комментарий.
+- **Удалены**: `labeled_counter_collector.{hpp,cpp}`, `labeled_histogram_collector.{hpp,cpp}`,
+  `labeled_entries_utils.hpp`; убраны их источники из `CMakeLists.txt`.
+- **`test_proxy_core.cpp`**: старые `[labeled]`-тесты на `evict_stale_and_trim` заменены
+  тестами `[labeled-family]` на `DynamicLabeledFamily`: инкремент/рендеринг counter-пары,
+  пустое семейство опускается, max_entries-кап эвиктит старые, снапшот-провайдер gauge
+  выставляет значения и удаляет исчезнувшие label-значения.
+
+### Проверка
+- `./rebuild-and-run.sh` — успешная сборка (RelWithDebInfo); `test_components`
+  (161 case / 665 assertions) и `test_proxy_core` (49 case / 641 assertions зелёные)
+  прошли в контейнере builder.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь
+  и crossed responses; GET-тест бинарного favicon ✅.
+- `/metrics` (19090): per-IP (gauge, label `ip`), per-client (counter, label `client_id`),
+  latency (histogram, label `client_id`) рендерятся корректно через native Family.
+
+### Изменение поведения
+- Per-IP метрики стали **gauge** вместо counter (нативный `Counter` не поддерживает
+  `Set` из снапшота; выбран gauge). Влияние на Grafana/`rate()`: для отслеживания запросов
+  по IP теперь используются абсолютные значения gauge, а не инкрементальный counter.
+- Серии counter с нулевым значением (e.g. `rejected_total{...} 0`) теперь выводятся
+  (нативный Family рендерит все добавленные children), тогда как раньше нулевые серии
+  опускались. Это незначительное расширение /metrics без влияния на панели.
+
+---
+
+# test(cpp): категоризация ошибок в header-only модуль + покрытие чистых утилит
+
+## Date: 2026-09-02
+
+### Контекст
+Цель — закрыть пробел в тестовом покрытии категоризации ошибок (http/l2/processing)
+и чистых (dependency-light) утилит, чтобы покрытие можно было замерить гcovr без
+линковки тяжёлых цепочек (prometheus/httplib/JaegerLogger/HttpClientPool).
+
+### Что сделано
+- **`error_categorizer.hpp` (новый header-only модуль)** — включает только
+  `<array>/<cctype>/<cstdint>/<span>/<string>/<string_view>`. Содержит:
+  - enum-типы `HttpErrorType`, `L2ErrorType`, `ProcessingErrorType`
+    и `*_to_string`, перенесённые из `error_types.hpp`.
+  - `namespace error_categorizer` с `categorize_http_error`, `categorize_l2_error`,
+    `categorize_processing_error`, `enum_to_string`, `to_lower`, keyword-таблицами
+    `g_http_/g_l2_/g_processing_keyword_rules` и `g_*_error_names`.
+  - Поведение «первое совпадение ключевого слова побеждает» зеркалит прежние
+    if/else-if цепочки.
+- **`error_types.hpp`** — включает `error_categorizer.hpp`, re-export'ит enum-типы
+  и категоризующие функции в глобальный scope (через `using`) для обратной
+  совместимости с существующими вызовами; оставляет только prometheus-метрики
+  (`L2ErrorMetrics`/`ProcessingErrorMetrics`) и хелперы ошибок.
+- **`common_utils.cpp`** — убран anonymous-namespace блок (rule-структуры,
+  keyword-таблицы, `*_to_string`); фактическая категоризация теперь из
+  `error_categorizer`. Локальный `handle_error_with_category` + `handle_*_error_with_category`
+  используют re-export'нутые функции.
+- **`test_proxy_core.cpp`** — тесты `[error-categorizer]` (keyword rules http/l2/processing,
+  приоритет первого совпадения, case-insensitivity, `*_to_string` для всех значений) —
+  вместо `common_utils.hpp` инклюдится лёгкий `error_categorizer.hpp` (без prometheus).
+- **`test_components.cpp`** — тесты `[common-utils]` (`get_header_value`,
+  `find_header_optional`, `header_or_default`, `resolve_parent_id`, `shorten_user_agent`,
+  `validate_range`/`validate_positive`, `RetryHandler`, `compute_sha256_hex`,
+  `log_body_preview`, `parse_url`). Таргет `test_components` в CMake расширен
+  источниками `common_utils.cpp`, `trace_logger.cpp`, `http_client.cpp`,
+  `http_client_pool.cpp`, `httplib/httplib.cc` и линковкой prometheus/OpenSSL/ZLIB.
+
+### Проверка
+- `./rebuild-and-run.sh` — успешная сборка (RelWithDebInfo), `test_components`
+  (161 case / 664 assertions) и `test_proxy_core` (60 case / 696 assertions) зелёные.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ без потерь
+  и без crossed responses; GET-тест бинарного favicon ✅.
+
+---
+
 # fix(docker): портировать symlink libaio для mbuild-agnostic (aarch64/x86_64)
 
 ## Date: 2026-09-02

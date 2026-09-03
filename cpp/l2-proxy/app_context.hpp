@@ -2,6 +2,7 @@
 #define APP_CONTEXT_HPP
 
 #include "config.hpp"
+#include "dynamic_labeled_family.hpp"
 #include "in_flight_tracker.hpp"
 #include "metrics_history.hpp"
 #include <memory>
@@ -150,11 +151,8 @@ class JaegerLogger;
 class NatsClient;
 class RateLimiter;
 class PerIPRateLimiter;
-class LabeledCounterCollector;
-class LabeledHistogramCollector;
 class DuplicateDetector;
 
-// Sub-contexts for logical grouping of components by mode
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
 struct ProxyContext {
   std::unique_ptr<ProxyMetrics> m_metrics;
@@ -163,17 +161,21 @@ struct ProxyContext {
   std::unique_ptr<PerIPRateLimiterMetrics> m_per_ip_rate_limiter_metrics;
   std::unique_ptr<RateLimiter> m_rate_limiter;
   std::unique_ptr<PerIPRateLimiter> m_per_ip_rate_limiter;
-  // Dynamic-label collectors: one instance per label. Per-IP is fed by a
-  // snapshot provider reading the rate limiter; per-client-id by direct
-  // recording from the request handler. The per-client latency histogram uses
-  // the same X-DataHub-Client-Id label for Grafana p95-per-client panels.
-  std::shared_ptr<LabeledCounterCollector> m_per_ip_metrics_collector;
-  std::shared_ptr<LabeledCounterCollector> m_per_client_id_metrics_collector;
-  std::shared_ptr<LabeledHistogramCollector> m_per_client_id_latency_collector;
+  // Dynamic-label families: one instance per label. Per-IP is a Gauge fed by a
+  // snapshot provider reading the rate limiter (absolute values set on each
+  // scrape); per-client-id and per-client latency are direct-recording
+  // Counter/Histogram. All render through a native prometheus::Family.
+  std::shared_ptr<DynamicLabeledFamily<prometheus::Gauge>>
+      m_per_ip_metrics_collector;
+  std::shared_ptr<DynamicLabeledFamily<prometheus::Counter>>
+      m_per_client_id_metrics_collector;
+  std::shared_ptr<DynamicLabeledFamily<prometheus::Histogram>>
+      m_per_client_id_latency_collector;
   // Duplicate POST bodies detected per X-DataHub-Client-Id header (fed by the
   // request handler; counts the same-body-hash-seen-again deliveries per
   // client). Powers the "top duplicate clients" Grafana panel.
-  std::shared_ptr<LabeledCounterCollector> m_per_client_id_duplicate_collector;
+  std::shared_ptr<DynamicLabeledFamily<prometheus::Counter>>
+      m_per_client_id_duplicate_collector;
   // Detects duplicate POST bodies from clients (keyed by SHA-256), keeps a
   // bounded report of the top duplicates; served on GET /debug/duplicates.
   std::unique_ptr<DuplicateDetector> m_duplicate_detector;

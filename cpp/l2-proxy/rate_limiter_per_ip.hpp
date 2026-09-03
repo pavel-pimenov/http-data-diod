@@ -15,7 +15,8 @@
 
 class PerIPRateLimiter {
 public:
-  // Per-IP counters exposed via LabeledCounterCollector (label "ip")
+  // Per-IP counters fed to the DynamicLabeledFamily<prometheus::Gauge> snapshot
+  // provider (label "ip")
   struct IPStats {
     uint64_t m_requests = 0;
     uint64_t m_rejected = 0;

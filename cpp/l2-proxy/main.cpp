@@ -28,7 +28,6 @@
 
 #include "app_context.hpp"
 #include "l2_worker.hpp"
-#include "labeled_counter_collector.hpp"
 #include "request_handler.hpp"
 #include "server_handler.hpp"
 #include "stats_logger.hpp"

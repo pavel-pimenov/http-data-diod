@@ -2,6 +2,7 @@
 // JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool
 #include "base64_utils.hpp"
 #include "circuit_breaker.hpp"
+#include "common_utils.hpp"
 #include "config.hpp"
 #include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
@@ -1559,7 +1560,7 @@ TEST_CASE("DedupCache: concurrent access does not lose entries",
         const std::string key = "k-" + std::to_string(t) + "-" +
                                 std::to_string(i);
         cache.store(key, "v");
-        cache.find(key);
+        (void)cache.find(key);
       }
     });
   }
@@ -1807,4 +1808,137 @@ TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
     (void)Config::get_env_bool("FUZZ_VALUE", true);
     (void)Config::get_env_protocol("FUZZ_VALUE", "http");
   }
+}
+
+// ============================================================================
+// Common utils (common_utils.hpp header-only helpers)
+// ============================================================================
+
+TEST_CASE("Common utils: get_header_value returns value or default",
+          "[common-utils]") {
+  httplib::Headers headers;
+  headers.emplace("x-token", "abc");
+  headers.emplace("x-empty", "");
+  REQUIRE(get_header_value(headers, "x-token") == "abc");
+  REQUIRE(get_header_value(headers, "x-token", "dflt") == "abc");
+  REQUIRE(get_header_value(headers, "x-missing") == "unknown");
+  REQUIRE(get_header_value(headers, "x-missing", "dflt") == "dflt");
+  REQUIRE(get_header_value(headers, "x-empty") == "unknown");
+}
+
+TEST_CASE("Common utils: find_header_optional", "[common-utils]") {
+  httplib::Headers headers;
+  headers.emplace("x-token", "abc");
+  REQUIRE(find_header_optional(headers, "x-token").has_value());
+  REQUIRE(*find_header_optional(headers, "x-token") == "abc");
+  REQUIRE(!find_header_optional(headers, "x-missing").has_value());
+  headers.emplace("x-empty", "");
+  REQUIRE(!find_header_optional(headers, "x-empty").has_value());
+}
+
+TEST_CASE("Common utils: header_or_default", "[common-utils]") {
+  httplib::Headers headers;
+  headers.emplace("x-token", "abc");
+  REQUIRE(header_or_default(headers, "x-token") == "abc");
+  REQUIRE(header_or_default(headers, "x-missing") == "unknown");
+  REQUIRE(header_or_default(headers, "x-missing", "dflt") == "dflt");
+}
+
+TEST_CASE("Common utils: resolve_parent_id", "[common-utils]") {
+  REQUIRE(resolve_parent_id("span1", "fallback") == "span1");
+  REQUIRE(resolve_parent_id("", "fallback") == "fallback");
+}
+
+TEST_CASE("Common utils: shorten_user_agent", "[common-utils]") {
+  const std::string short_ua = "curl/8.0";
+  REQUIRE(shorten_user_agent(short_ua) == short_ua);
+
+  std::string long_no_pattern;
+  long_no_pattern.assign(100, 'a');
+  const auto shortened = shorten_user_agent(long_no_pattern);
+  REQUIRE(shortened.size() <= 80);
+  REQUIRE(shortened.find("...") != std::string::npos);
+
+  REQUIRE(shorten_user_agent(
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+              .find("Chrome/") == 0);
+  REQUIRE(shorten_user_agent(
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/121.0")
+              .find("Firefox/") == 0);
+  REQUIRE(shorten_user_agent(
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/119.0.0.0 Safari/537.36")
+              .find("Edge/") == 0);
+}
+
+TEST_CASE("Common utils: validate_range and validate_positive",
+          "[common-utils]") {
+  REQUIRE(validate_positive(5, "port") == true);
+  REQUIRE(validate_positive(0, "port") == false);
+  REQUIRE(validate_positive(-3, "port") == false);
+
+  REQUIRE(validate_range(5, "size", 1, 100) == true);
+  REQUIRE(validate_range(0, "size", 1, 100) == false);
+  REQUIRE(validate_range(101, "size", 1, 100) == false);
+  REQUIRE(validate_range(50, "size", 1, 100, 40) == true);
+  REQUIRE(validate_range(80, "size", 1, 100, 40) == true);
+}
+
+TEST_CASE("Common utils: RetryHandler manages backoff state",
+          "[common-utils]") {
+  RetryHandler handler(100, 1000);
+  REQUIRE(handler.get_consecutive_failures() == 0);
+  REQUIRE(handler.get_current_delay_ms() == 100);
+
+  handler.record_failure();
+  REQUIRE(handler.get_consecutive_failures() == 1);
+  REQUIRE(handler.get_current_delay_ms() == 200);
+
+  handler.record_failure();
+  handler.record_failure();
+  handler.record_failure();
+  REQUIRE(handler.get_consecutive_failures() == 4);
+  REQUIRE(handler.get_current_delay_ms() == 1000);
+
+  handler.record_success();
+  REQUIRE(handler.get_consecutive_failures() == 0);
+  REQUIRE(handler.get_current_delay_ms() == 100);
+}
+
+// ============================================================================
+// Common utils (common_utils.cpp compiled functions)
+// ============================================================================
+
+TEST_CASE("Common utils: compute_sha256_hex", "[common-utils]") {
+  REQUIRE(compute_sha256_hex("") ==
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  REQUIRE(compute_sha256_hex("abc") ==
+          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  // Deterministic for identical input.
+  REQUIRE(compute_sha256_hex("same") == compute_sha256_hex("same"));
+  REQUIRE(compute_sha256_hex("a") != compute_sha256_hex("b"));
+}
+
+TEST_CASE("Common utils: log_body_preview", "[common-utils]") {
+  REQUIRE(log_body_preview("short") == "short");
+  REQUIRE(log_body_preview("exact", 5) == "exact");
+  const auto preview = log_body_preview("0123456789", 5);
+  REQUIRE(preview.find("01234...") == 0);
+  REQUIRE(preview.find("10 bytes total") != std::string::npos);
+}
+
+TEST_CASE("Common utils: parse_url", "[common-utils]") {
+  const auto http = parse_url("http://example.com:8080/api");
+  REQUIRE(http.m_host == "example.com");
+  REQUIRE(http.m_port == 8080);
+  REQUIRE(http.m_path == "/api");
+  REQUIRE(http.m_is_https == false);
+
+  const auto https = parse_url("https://secure.example.com/path");
+  REQUIRE(https.m_host == "secure.example.com");
+  REQUIRE(https.m_is_https == true);
+  REQUIRE(https.m_port == 443);
+
+  const auto no_port = parse_url("http://example.com/x");
+  REQUIRE(no_port.m_host == "example.com");
+  REQUIRE(no_port.m_path == "/x");
 }

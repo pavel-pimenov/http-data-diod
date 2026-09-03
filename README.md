@@ -180,11 +180,11 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_rate_limiter_rejected_total` — запросы, отброшенные глобальным лимитером (counter).
 - `l2_per_ip_rate_limiter_rejected_total` — запросы, отброшенные per-IP лимитером (counter).
 - `l2_proxy_per_ip_rate_limiter_ips_tracked` — число отслеживаемых IP (gauge).
-- `l2_proxy_per_ip_requests_total{ip="..."}` — запросы по каждому IP (counter; label `ip`, кастомный коллектор).
-- `l2_proxy_per_ip_rejected_total{ip="..."}` — отказы по каждому IP (counter; label `ip`, кастомный коллектор).
-- `l2_proxy_per_client_id_requests_total{client_id="..."}` — запросы по значению заголовка `X-DataHub-Client-Id` (counter; label `client_id`, кастомный коллектор). Позволяет различать клиентов, работающих из-под одного IP.
-- `l2_proxy_per_client_id_rejected_total{client_id="..."}` — отказы по каждому клиенту `X-DataHub-Client-Id` (counter; label `client_id`, кастомный коллектор).
-- `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, кастомный коллектор) — p50/p95/p99 по клиентам в Grafana.
+ - `l2_proxy_per_ip_requests_total{ip="..."}` — запросы по каждому IP (gauge; label `ip`, native `Family<Gauge>` со снапшот-провайдером из per-IP лимитера).
+ - `l2_proxy_per_ip_rejected_total{ip="..."}` — отказы по каждому IP (gauge; label `ip`, native `Family<Gauge>` со снапшот-провайдером из per-IP лимитера).
+ - `l2_proxy_per_client_id_requests_total{client_id="..."}` — запросы по значению заголовка `X-DataHub-Client-Id` (counter; label `client_id`, native `Family<Counter>`). Позволяет различать клиентов, работающих из-под одного IP.
+ - `l2_proxy_per_client_id_rejected_total{client_id="..."}` — отказы по каждому клиенту `X-DataHub-Client-Id` (counter; label `client_id`, native `Family<Counter>`).
+ - `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, native `Family<Histogram>`) — p50/p95/p99 по клиентам в Grafana.
 
 #### Насыщенность и доступность (observability-обогащение)
 
@@ -319,8 +319,8 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_rate_limiter_rejected_total` | counter | — | Отказы глобального лимитера |
 | `l2_per_ip_rate_limiter_rejected_total` | counter | — | Отказы per-IP лимитера |
 | `l2_proxy_per_ip_rate_limiter_ips_tracked` | gauge | — | Число отслеживаемых IP |
-| `l2_proxy_per_ip_requests_total` | counter | `ip` | Запросы по IP |
-| `l2_proxy_per_ip_rejected_total` | counter | `ip` | Отказы по IP |
+| `l2_proxy_per_ip_requests_total` | gauge | `ip` | Запросы по IP |
+| `l2_proxy_per_ip_rejected_total` | gauge | `ip` | Отказы по IP |
 | `l2_proxy_per_client_id_requests_total` | counter | `client_id` | Запросы по `X-DataHub-Client-Id` |
 | `l2_proxy_per_client_id_rejected_total` | counter | `client_id` | Отказы по `X-DataHub-Client-Id` |
 | `l2_proxy_per_client_id_latency_seconds` | histogram | `client_id` | Латентность по `X-DataHub-Client-Id` |

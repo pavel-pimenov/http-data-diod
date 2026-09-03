@@ -126,8 +126,116 @@ endif()
 set(OpenSSL_USE_STATIC_LIBS OFF)
 find_package(OpenSSL REQUIRED)
 
-find_package(prometheus-cpp REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(Threads REQUIRED)
+
+# ------------------- Built-in prometheus-cpp (vendored sources) -------------------
+# Prometheus-cpp 1.2.4 is vendored under prometheus-cpp/ (only core/pull/push/util
+# sources, no upstream CMake/tests/benchmarks). We build the core (metrics) and
+# pull (network Exposer) libraries directly from those sources, dropping the old
+# Ubuntu prometheus-cpp-dev package (1.0.x) which lacked Family::Remove/Has and
+# the newer builders. push (Pushgateway) and util/public headers that are not
+# used by the project are omitted.
+#
+# The Ubuntu packaged version is deliberately not used anymore: apt ships an
+# old 1.0.x line without Family::Remove, which forces the project's labeled
+# collectors to hand-roll snapshot/eviction logic. The vendored 1.2.4 adds
+# Family::Remove/Has so that logic can be simplified.
+set(PROMETHEUS_CPP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/prometheus-cpp)
+
+# core: the metrics library (Counter, Gauge, Histogram, Summary, Info, Registry).
+add_library(proj_prometheus_core STATIC
+    ${PROMETHEUS_CPP_ROOT}/core/src/check_names.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/counter.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/detail/builder.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/detail/ckms_quantiles.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/detail/time_window_quantiles.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/detail/utils.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/family.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/gauge.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/histogram.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/info.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/registry.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/serializer.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/summary.cc
+    ${PROMETHEUS_CPP_ROOT}/core/src/text_serializer.cc
+)
+target_compile_features(proj_prometheus_core PUBLIC cxx_std_17)
+target_include_directories(proj_prometheus_core PUBLIC
+    ${PROMETHEUS_CPP_ROOT}/core/include
+)
+target_link_libraries(proj_prometheus_core PUBLIC Threads::Threads)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(proj_prometheus_core PRIVATE rt)
+endif()
+# Static build: export/import macros resolve to empty.
+target_compile_definitions(proj_prometheus_core
+    PUBLIC PROMETHEUS_CPP_CORE_STATIC_DEFINE
+)
+
+# util: header-only prometheus/detail/base64.h used by pull's BasicAuth.
+add_library(proj_prometheus_util INTERFACE)
+target_include_directories(proj_prometheus_util INTERFACE
+    ${PROMETHEUS_CPP_ROOT}/util/include
+)
+
+# pull: the network Exposer (/metrics over HTTP) backed by civetweb.
+# Civetweb is vendored alongside prometheus (3rdparty/civetweb) because the
+# Ubuntu package splits the C API (libcivetweb) and the C++ CivetServer wrapper
+# (libcivetweb-cpp) and neither matches the API the vendored prometheus-cpp pull
+# expects. SSL and Lua are NOT compiled in: only the plain HTTP /metrics path is
+# needed by the proxy/worker/server exposers.
+add_library(proj_civetweb STATIC
+    ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/civetweb.c
+    ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/CivetServer.cpp
+)
+target_include_directories(proj_civetweb PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/prometheus-cpp/3rdparty/civetweb/include
+)
+target_compile_definitions(proj_civetweb PRIVATE
+    NO_SSL
+    NO_SSL_DL
+    NO_CGI
+)
+target_compile_options(proj_civetweb PRIVATE
+    ${L2_PROXY_COMMON_COMPILE_OPTIONS}
+    -Wno-unused-result
+)
+target_link_libraries(proj_civetweb PUBLIC Threads::Threads)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(proj_civetweb PRIVATE rt)
+endif()
+
+add_library(proj_prometheus_pull STATIC
+    ${PROMETHEUS_CPP_ROOT}/pull/src/basic_auth.cc
+    ${PROMETHEUS_CPP_ROOT}/pull/src/endpoint.cc
+    ${PROMETHEUS_CPP_ROOT}/pull/src/exposer.cc
+    ${PROMETHEUS_CPP_ROOT}/pull/src/handler.cc
+    ${PROMETHEUS_CPP_ROOT}/pull/src/metrics_collector.cc
+)
+target_compile_features(proj_prometheus_pull PUBLIC cxx_std_17)
+target_include_directories(proj_prometheus_pull PUBLIC
+    ${PROMETHEUS_CPP_ROOT}/pull/include
+)
+target_compile_definitions(proj_prometheus_pull
+    PUBLIC PROMETHEUS_CPP_PULL_STATIC_DEFINE
+    PRIVATE HAVE_ZLIB
+)
+target_link_libraries(proj_prometheus_pull
+    PUBLIC
+        proj_prometheus_core
+        proj_prometheus_util
+        proj_civetweb
+        ZLIB::ZLIB
+        Threads::Threads
+)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(proj_prometheus_pull PRIVATE rt)
+endif()
+
+# Compatibility alias so existing references keep working without renaming.
+add_library(prometheus-cpp::core ALIAS proj_prometheus_core)
+add_library(prometheus-cpp::pull ALIAS proj_prometheus_pull)
 
 # Find spdlog (fast C++ logging library)
 find_package(spdlog CONFIG REQUIRED)
@@ -211,8 +319,6 @@ add_executable(l2-proxy
   db_query_executor_oracle.cpp
   db_query_executor_postgres.cpp
   db_query_executor_factory.cpp
-  labeled_counter_collector.cpp
-  labeled_histogram_collector.cpp
   httplib/httplib.cc
   odpi/embed/dpi.c
 )
@@ -254,8 +360,7 @@ set_source_files_properties(
     http_client.cpp http_client_pool.cpp stats_logger.cpp
     db_query_handler.cpp db_query_executor_base.cpp
     db_query_executor_oracle.cpp db_query_executor_postgres.cpp
-    db_query_executor_factory.cpp labeled_counter_collector.cpp
-    labeled_histogram_collector.cpp
+    db_query_executor_factory.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
 # Include directories
@@ -289,6 +394,11 @@ if(ENABLE_PROFILER)
     )
 endif()
 target_link_libraries(l2-proxy PRIVATE ${NATS_C_LIBRARY})
+
+# The vendored civetweb is a static archive linked transitively through
+# prometheus-cpp::pull, so no extra --no-as-needed handling is required here:
+# civetweb's symbols are referenced directly (not only via vtables) and resolve
+# at static-link time.
 
 # C++23 std::stacktrace / std::print may need -lstdc++exp on GCC 13-16
 find_library(STDCXX_EXP_LIBRARY stdc++exp
@@ -348,12 +458,23 @@ if(BUILD_TESTS)
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
+        common_utils.cpp
+        trace_logger.cpp
+        http_client.cpp
+        http_client_pool.cpp
+        httplib/httplib.cc
     )
     target_include_directories(test_components PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/httplib
     )
     target_compile_options(test_components PRIVATE
         ${L2_PROXY_COMMON_COMPILE_OPTIONS}
+    )
+    target_compile_definitions(test_components PRIVATE
+        CPPHTTPLIB_OPENSSL_SUPPORT
+        CPPHTTPLIB_ZLIB_SUPPORT
+        ENABLE_NATS
     )
     target_link_libraries(test_components PRIVATE 
         Catch2::Catch2WithMain 
@@ -361,6 +482,10 @@ if(BUILD_TESTS)
         pthread
         spdlog::spdlog_header_only
         prometheus-cpp::pull
+        prometheus-cpp::core
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        ZLIB::ZLIB
     )
     if(ENABLE_ASAN)
         target_compile_options(test_components PRIVATE
@@ -393,6 +518,7 @@ if(BUILD_TESTS)
     )
     target_link_libraries(test_proxy_core PRIVATE
         Catch2::Catch2WithMain
+        prometheus-cpp::core
         pthread
         spdlog::spdlog_header_only
     )

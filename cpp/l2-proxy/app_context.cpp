@@ -1,7 +1,6 @@
 #include "app_context.hpp"
 #include "duplicate_detector.hpp"
-#include "labeled_counter_collector.hpp"
-#include "labeled_histogram_collector.hpp"
+#include "dynamic_labeled_family.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 #include "nats_client.hpp"
@@ -305,23 +304,27 @@ AppContext::AppContext() {
       m_proxy.m_per_ip_rate_limiter = std::make_unique<PerIPRateLimiter>(
           m_config.m_per_ip_max_tokens, m_config.m_per_ip_refill_rate,
           m_config.m_per_ip_max_ips, m_config.m_per_ip_cleanup_ttl_seconds);
-      // Per-IP counters live in the rate limiter, so the collector is fed by a
-      // snapshot provider that pulls the current IP set on every scrape.
+      // Per-IP gauges, fed by a snapshot provider that pulls the current IP set
+      // on every scrape (absolute values set via Gauge::Set). Gauge is used
+      // because the native prometheus::Counter cannot be set from a snapshot.
       m_proxy.m_per_ip_metrics_collector = std::make_shared<
-          LabeledCounterCollector>(
-          "ip", "l2_proxy_per_ip_requests_total",
-          "Total number of requests received per client IP",
-          "l2_proxy_per_ip_rejected_total",
-          "Total number of requests rejected by the per-IP rate limiter per "
-          "client IP",
+          DynamicLabeledFamily<prometheus::Gauge>>(
+          "ip",
+          std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
+              {"l2_proxy_per_ip_requests_total",
+               "Total number of requests received per client IP"},
+              {"l2_proxy_per_ip_rejected_total",
+               "Total number of requests rejected by the per-IP rate limiter "
+               "per client IP"}},
           [limiter = m_proxy.m_per_ip_rate_limiter.get()]() {
-            std::vector<std::pair<std::string, LabeledCounterCollector::Stats>>
-                entries;
+            std::vector<std::pair<std::string, std::vector<double>>> entries;
             if (limiter != nullptr) {
               for (const auto &[ip, stats] : limiter->get_per_ip_stats()) {
-                entries.emplace_back(
-                    ip, LabeledCounterCollector::Stats{stats.m_requests,
-                                                       stats.m_rejected});
+                entries.emplace_back(ip, std::vector<double>{
+                                             static_cast<double>(
+                                                 stats.m_requests),
+                                             static_cast<double>(
+                                                 stats.m_rejected)});
               }
             }
             return entries;
@@ -338,34 +341,43 @@ AppContext::AppContext() {
     // Per-client metrics collector (X-DataHub-Client-Id header). Purely
     // observability: lets Grafana tell apart clients that share one IP.
     // Counters are recorded directly by the request handler.
-    m_proxy.m_per_client_id_metrics_collector =
-        std::make_shared<LabeledCounterCollector>(
-            "client_id", "l2_proxy_per_client_id_requests_total",
-            "Total number of requests received per X-DataHub-Client-Id header",
-            "l2_proxy_per_client_id_rejected_total",
-            "Total number of requests rejected by rate limiters per "
-            "X-DataHub-Client-Id header");
+    m_proxy.m_per_client_id_metrics_collector = std::make_shared<
+        DynamicLabeledFamily<prometheus::Counter>>(
+        "client_id",
+        std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+            {"l2_proxy_per_client_id_requests_total",
+             "Total number of requests received per X-DataHub-Client-Id "
+             "header"},
+            {"l2_proxy_per_client_id_rejected_total",
+             "Total number of requests rejected by rate limiters per "
+             "X-DataHub-Client-Id header"}});
 
     // Per-client latency histogram (same label) for p50/p95/p99 panels per
     // client in Grafana. Buckets mirror the global request-duration histogram.
-    m_proxy.m_per_client_id_latency_collector =
-        std::make_shared<LabeledHistogramCollector>(
-            "client_id", "l2_proxy_per_client_id_latency_seconds",
-            "Request processing latency per X-DataHub-Client-Id header",
-            std::vector<double>(
-                histogram_buckets::g_k_latency_5ms_to_10s.begin(),
-                histogram_buckets::g_k_latency_5ms_to_10s.end()));
+    m_proxy.m_per_client_id_latency_collector = std::make_shared<
+        DynamicLabeledFamily<prometheus::Histogram>>(
+        "client_id",
+        std::vector<DynamicLabeledFamily<prometheus::Histogram>::Series>{
+            {"l2_proxy_per_client_id_latency_seconds",
+             "Request processing latency per X-DataHub-Client-Id header"}},
+        DynamicLabeledFamily<prometheus::Histogram>::Provider{}, 300, 10000,
+        std::vector<double>(
+            histogram_buckets::g_k_latency_5ms_to_10s.begin(),
+            histogram_buckets::g_k_latency_5ms_to_10s.end()));
 
     // Per-client duplicate counter: counts duplicate POST bodies per
     // X-DataHub-Client-Id header so Grafana can show which clients repeat the
     // same payload (retry storms) instead of only an aggregate rate.
     m_proxy.m_per_client_id_duplicate_collector = std::make_shared<
-        LabeledCounterCollector>(
-        "client_id", "l2_proxy_per_client_id_duplicate_requests_total",
-        "Total number of duplicate POST bodies (same body hash seen again) "
-        "detected per X-DataHub-Client-Id header",
-        "l2_proxy_per_client_id_duplicate_rejected_total",
-        "Reserved: rejected duplicate POSTs per X-DataHub-Client-Id header");
+        DynamicLabeledFamily<prometheus::Counter>>(
+        "client_id",
+        std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+            {"l2_proxy_per_client_id_duplicate_requests_total",
+             "Total number of duplicate POST bodies (same body hash seen "
+             "again) detected per X-DataHub-Client-Id header"},
+            {"l2_proxy_per_client_id_duplicate_rejected_total",
+             "Reserved: rejected duplicate POSTs per X-DataHub-Client-Id "
+             "header"}});
 
     // Duplicate POST detector: keys bodies by SHA-256, keeps a bounded report
     // of the top duplicates. Served on GET /debug/duplicates.

@@ -33,8 +33,6 @@ RUN set -eux; \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    libprometheus-cpp-core1.0 \
-    libprometheus-cpp-pull1.0 \
     libfmt10 \
     libspdlog1.15 \
     libssl3t64 \
@@ -66,7 +64,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     zlib1g-dev \
     libssl-dev \
     libzstd-dev \
-    prometheus-cpp-dev \
     libspdlog-dev \
     libfmt-dev \
     libgoogle-perftools-dev \
