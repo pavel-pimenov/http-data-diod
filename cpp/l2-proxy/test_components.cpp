@@ -2342,6 +2342,32 @@ TEST_CASE("RequestIdGenerator: generate_uuid has stable format and is unique",
   REQUIRE(a.substr(second_tilde + 1).size() == 6);
 }
 
+TEST_CASE("Common utils: setup_http_connection with and without keep-alive",
+          "[common-utils]") {
+  httplib::Client with_ka("example.com", 80);
+  REQUIRE_NOTHROW(setup_http_connection(with_ka, 30, true));
+
+  httplib::Client no_ka("example.com", 8080);
+  REQUIRE_NOTHROW(setup_http_connection(no_ka, 5, false));
+}
+
+TEST_CASE("Common utils: setup_ssl_client with and without verification",
+          "[common-utils]") {
+  httplib::SSLClient verify("example.com", 443);
+  REQUIRE_NOTHROW(setup_ssl_client(verify, 30, true, true, "", true));
+
+  httplib::SSLClient insecure("example.com", 443);
+  REQUIRE_NOTHROW(setup_ssl_client(insecure, 15, false, false, "", false));
+}
+
+TEST_CASE("Common utils: setup_ssl_client tolerates a missing CA bundle",
+          "[common-utils]") {
+  httplib::SSLClient client("example.com", 443);
+  REQUIRE_NOTHROW(setup_ssl_client(client, 10, true, true, "/no/such/ca.pem",
+                                   true));
+}
+
+
 
 
 

@@ -1,3 +1,34 @@
+# test: покрыты setup_ssl_client и setup_http_connection (каналы без сети)
+
+## Date: 2026-09-04
+
+### Контекст
+Из оставшихся непокрытых функций, требующих реальных объектов/инфраструктуры,
+взята лёгкая и безопасная пара: `setup_ssl_client` и `setup_http_connection`
+(шаблон). Обе только настраивают опции `httplib::Client`/`SSLClient` — конструктор
+клиента не устанавливает соединение, поэтому тест не требует сети и не рискует
+дестабилизировать сборку.
+
+Тяжёлые и рискованные кандидаты (реальный `JaegerLogger` с фоновыми потоками,
+`extract_trace_context`, тянущий тянет `app_context.hpp`/`tracing_helpers.hpp`)
+по решению оставлены вне охвата — их покрытие потребовало бы хрупких зависимостей
+в тестовом target'е.
+
+### Что сделано
+В `test_components.cpp` добавлены 3 тест-кейса:
+- `setup_http_connection` — с keep-alive и без (no-throw для обоих режимов)
+- `setup_ssl_client` — с верификацией сертификата/хоста и keep-alive; упрощённый
+  режим (без верификации, без keep-alive)
+- `setup_ssl_client` с несуществующим CA-bundle — `set_ca_cert_path` лишь хранит
+  путь, поэтому no-throw при `"/no/such/ca.pem"`
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # test: добиты чисто-функциональные хелперы (parse_url, to_lower, fail_request, generate_uuid и др.)
 
 ## Date: 2026-09-04
