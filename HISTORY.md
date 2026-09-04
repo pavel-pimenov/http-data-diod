@@ -1,3 +1,30 @@
+# refactor(cpp): RequestIdGenerator на std::format без thread_local stringstream
+
+## Date: 2026-09-04
+
+### Контекст
+`RequestIdGenerator::generate_uuid()` использовал три `thread_local std::stringstream`
+(дата, результат), которые вручную очищались (`str("")`, `clear()`) и переиспользовались;
+форматирование даты — через `std::put_time` + `localtime_r`, цифр — через
+`std::setfill('0')`/`std::setw(6)`. Это устаревший многословный C++98-стиль.
+
+### Что сделано
+- `request_id_generator.cpp`: `generate_uuid` переписан через `std::format`;
+  убраны `thread_local std::stringstream date_ss`/`result_ss`
+- `request_id_generator.hpp`: удалены члены `date_ss`/`result_ss` и неиспользуемые
+  includes `<sstream>`, `<iomanip>`
+- Формат ID сохранён без изменений: `YYYY-MM-DD~<counter>~<6-значный random>`.
+  Кэширование даты на час (per-thread) и локальная таймзона (`localtime_r`) тоже
+  сохранены; дата собирается из `std::tm` через `std::format("{:04d}-{:02d}-{:02d}")`.
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` (+ тест `generate_uuid`) —
+  все прошли; `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # test: покрыты setup_ssl_client и setup_http_connection (каналы без сети)
 
 ## Date: 2026-09-04

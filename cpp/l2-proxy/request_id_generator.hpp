@@ -3,8 +3,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <string>
 
 class RequestIdGenerator {
@@ -14,8 +12,6 @@ private:
 
   // Thread-local storage for date caching
   static thread_local std::string cached_date_str;
-  static thread_local std::stringstream date_ss;
-  static thread_local std::stringstream result_ss;
 
 public:
   RequestIdGenerator() = default;
