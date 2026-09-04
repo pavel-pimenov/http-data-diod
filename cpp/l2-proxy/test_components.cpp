@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <future>
+#include <prometheus/counter.h>
+#include <prometheus/registry.h>
 #include <set>
 #include <thread>
 #include <vector>
@@ -2119,5 +2121,109 @@ TEST_CASE("Common utils: set_health_alive and set_health_ready",
   REQUIRE(ready.body.find(R"("status": "ready")") != std::string::npos);
   REQUIRE(ready.body.find(R"("service": "worker")") != std::string::npos);
 }
+
+TEST_CASE("Common utils: validate_and_parse_json valid input",
+          "[common-utils]") {
+  auto result = validate_and_parse_json(R"({"a": 1})", "handler");
+  REQUIRE(result.has_value());
+  REQUIRE((*result)["a"] == 1);
+}
+
+TEST_CASE("Common utils: validate_and_parse_json invalid input",
+          "[common-utils]") {
+  auto result = validate_and_parse_json("{nope", "handler");
+  REQUIRE_FALSE(result.has_value());
+  REQUIRE(result.error().find("Failed to parse JSON") != std::string::npos);
+}
+
+TEST_CASE("Common utils: validate_and_parse_json with context and request_id",
+          "[common-utils]") {
+  auto good =
+      validate_and_parse_json(R"({"ok": true})", "query", "req-42");
+  REQUIRE(good.has_value());
+  REQUIRE((*good)["ok"] == true);
+
+  auto bad = validate_and_parse_json("{", "query", "req-42");
+  REQUIRE_FALSE(bad.has_value());
+}
+
+TEST_CASE("Common utils: handle_error increments counter and logs",
+          "[common-utils]") {
+  prometheus::Registry registry;
+  auto &family =
+      prometheus::BuildCounter().Name("err").Help("h").Register(registry);
+  auto &counter = family.Add({});
+
+  handle_error("boom", &counter, true);
+  handle_error("warn me", &counter, false);
+  REQUIRE(counter.Collect().counter.value == 2.0);
+}
+
+TEST_CASE("Common utils: handle_error tolerates null counter", "[common-utils]") {
+  handle_error("no counter", nullptr, true);
+  handle_error("no counter warn", nullptr, false);
+  REQUIRE(true);
+}
+
+TEST_CASE("Common utils: handle_http_error formats url and attempt",
+          "[common-utils]") {
+  prometheus::Registry registry;
+  auto &family =
+      prometheus::BuildCounter().Name("h_err").Help("h").Register(registry);
+  auto &counter = family.Add({});
+
+  handle_http_error("conn refused", &counter, "query", 2, "http://x:8080");
+  handle_http_error("conn refused", &counter, "query", 2, "");
+  handle_http_error("conn refused", &counter, "query", 0, "http://x:8080");
+  handle_http_error("conn refused", &counter, "query", 0, "");
+  REQUIRE(counter.Collect().counter.value == 4.0);
+}
+
+TEST_CASE("Common utils: handle_http_error tolerates null counter",
+          "[common-utils]") {
+  handle_http_error("err", nullptr, "query", 1, "http://x");
+  REQUIRE(true);
+}
+
+TEST_CASE("Common utils: handle_trace_context with null tracer",
+          "[common-utils]") {
+  TraceContext ctx = handle_trace_context("00-abc-def-01", nullptr);
+  REQUIRE(ctx.m_trace_id.empty());
+  REQUIRE(ctx.m_span_id.empty());
+  REQUIRE(ctx.m_parent_id.empty());
+  REQUIRE(ctx.m_traceparent_header.empty());
+}
+
+TEST_CASE("TraceLogger: parse_traceparent accepts valid traceparent",
+          "[tracing]") {
+  std::string trace_id, parent_id;
+  bool sampled = false;
+  const bool ok = JaegerLogger::parse_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01", trace_id,
+      parent_id, sampled);
+  REQUIRE(ok);
+  REQUIRE(trace_id == "0123456789abcdef0123456789abcdef");
+  REQUIRE(parent_id == "0123456789abcdef");
+  REQUIRE(sampled == true);
+}
+
+TEST_CASE("TraceLogger: parse_traceparent handles unsampled and invalid",
+          "[tracing]") {
+  std::string trace_id, parent_id;
+  bool sampled = true;
+  bool ok = JaegerLogger::parse_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-00", trace_id,
+      parent_id, sampled);
+  REQUIRE(ok);
+  REQUIRE(sampled == false);
+
+  trace_id.clear();
+  parent_id.clear();
+  ok = JaegerLogger::parse_traceparent("garbage", trace_id, parent_id, sampled);
+  REQUIRE_FALSE(ok);
+  ok = JaegerLogger::parse_traceparent("", trace_id, parent_id, sampled);
+  REQUIRE_FALSE(ok);
+}
+
 
 

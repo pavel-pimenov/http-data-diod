@@ -1,3 +1,34 @@
+# test: расширено покрытие P1-методов обработки ошибок, JSON-валидации и trace-context
+
+## Date: 2026-09-04
+
+### Контекст
+Продолжение расширения юнит-тестов. Покрыты оставшиеся P1-методы из `common_utils.cpp`
+и trace/parse-хелперы: `validate_and_parse_json`, `handle_error`, `handle_http_error`,
+`handle_trace_context` (ветка с null-трассером) и статический `JaegerLogger::parse_traceparent`.
+
+### Что сделано
+В `test_components.cpp` добавлены тест-кейсы (9 новых):
+- `validate_and_parse_json`: валидный/невалидный JSON; с context и `request_id`
+- `handle_error`: проверка инкремента реального `prometheus::Counter` (registry) для
+  `log_error=true/false`; устойчивость к `nullptr`-счётчику
+- `handle_http_error`: все 4 ветки форматирования (url+attempt, url only, attempt only,
+  neither) с проверкой инкремента счётчика; устойчивость к `nullptr`
+- `handle_trace_context`: ветка с null-трассером возвращает пустой `TraceContext`
+- `parse_traceparent`: валидный sampled (`-01`) и unsampled (`-00`) traceparent,
+  невалидные строки
+
+Добавлены include `<prometheus/counter.h>` и `<prometheus/registry.h>` для создания
+реальных счётчиков в тестах. Особенность этой версии prometheus-cpp: `Counter::Collect()`
+возвращает `ClientMetric` напрямую, поэтому значение читается как `counter.Collect().counter.value`.
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor: Раунд C — декомпозиция umbrella-header common_utils.hpp
 
 ## Date: 2026-09-04
