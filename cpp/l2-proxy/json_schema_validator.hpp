@@ -1,6 +1,7 @@
 #ifndef JSON_SCHEMA_VALIDATOR_HPP
 #define JSON_SCHEMA_VALIDATOR_HPP
 
+#include "json_utils.hpp"
 #include "logger.hpp"
 #include <format>
 #include <nlohmann/json.hpp>
@@ -192,16 +193,11 @@ public:
         return false;
       }
 
-      if (response.contains("body")) {
-        auto &body = response["body"];
-        if (body.contains("response")) {
-          const std::string &body_str = body["response"];
-          if (body_str.length() > m_max_body_size) {
-            error = std::format("Response body too large: {} > {}",
-                                body_str.length(), m_max_body_size);
-            return false;
-          }
-        }
+      const std::string &body_str = get_body_response_ref(response);
+      if (body_str.length() > m_max_body_size) {
+        error = std::format("Response body too large: {} > {}",
+                            body_str.length(), m_max_body_size);
+        return false;
       }
     }
 

@@ -1,3 +1,51 @@
+# refactor: Раунд B — унифицирован to_lower, централизована навигация body/response
+
+## Date: 2026-09-04
+
+### Контекст
+Раунд B чистки дубликатов из плана. При разборе выяснилось, что пункт «перенос
+pool_executor» уже выполнен в прежних раундах (`pool_executor.hpp` и
+`retry_handler.hpp` уже вынесены в свои заголовки и подключены к umbrella-header
+`common_utils.hpp`). Остались два реальных дубликата: lowercasing в 4 местах и
+навигация по JSON-контракту `envelope -> body -> response` в 2 местах.
+
+### Что сделано
+
+**1. Единый `to_lower`** — новый dependency-light header `string_utils.hpp`,
+обычная ASCII-нормализация. Все 4 дублирующих цикла заменены на общий вызов:
+- `error_categorizer.hpp`: удалён локальный `to_lower`, используется `::to_lower`
+- `header_utils.hpp`: `HeaderUtils::to_lower` теперь делегирует в `::to_lower`
+  (публичный API сохранён — на него есть тест)
+- `config.cpp` `get_env_bool`: убран `std::transform`-цикл, `value = to_lower(value)`
+  (заодно удалён ставший ненужным `<algorithm>`)
+- `db_query_utils.hpp` `next_word_lower`: цикл заменён на `to_lower(word)`
+
+**2. Централизованная навигация JSON-контракта** — в `json_utils.hpp` добавлены
+хелперы поверх `NatsResponseContract`, убирающие повторный ручной обход
+`j["body"][...]`:
+- `get_response_body(j)` — ссылка на вложенный `body`-объект (или пустой объект)
+- `get_body_response_ref(j)` — zero-copy ссылка на `body.response`
+- `get_body_string/get_body_bool/get_body_int(j, key, fallback)` — типобезопасное
+  чтение полей вложенного body
+
+Переиспользовано:
+- `response_builder.cpp`: извлечение `l2_response`, `is_binary`, `content_type`
+  через новые хелперы (сохранена zero-copy семантика)
+- `json_schema_validator.hpp`: проверка размера `body.response` через
+  `get_body_response_ref` (упрощена двойная проверка `contains`)
+
+**3. Тесты** — добавлены в `test_components.cpp`:
+- `get_body_*` навигация по envelope
+- `get_body_*` устойчивость к отсутствующим полям
+- `get_body_response_ref` (zero-copy перечитывание)
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — оба образа собраны, все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # test: расширено покрытие юнит-тестов (чистые функции + Response-хелперы)
 
 ## Date: 2026-09-04

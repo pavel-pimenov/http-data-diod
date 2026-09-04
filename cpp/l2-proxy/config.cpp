@@ -3,7 +3,7 @@
 #include "logger.hpp"
 #include "nats_client.hpp"
 #include "nlohmann/json.hpp"
-#include <algorithm>
+#include "string_utils.hpp"
 #include <cctype>
 #include <cstdlib>
 #include <format>
@@ -305,9 +305,7 @@ bool Config::get_env_bool(const std::string &env_name, bool default_val) {
   if (!get_env_raw(env_name, value)) {
     return default_val;
   }
-  std::transform(
-      value.begin(), value.end(), value.begin(),
-      [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+  value = to_lower(value);
   if (value == "true" || value == "1" || value == "yes" || value == "on") {
     return true;
   }

@@ -155,4 +155,47 @@ inline json build_nats_response_envelope(
   return envelope;
 }
 
+// Envelope navigation helpers: the worker->proxy NATS response envelope has a
+// nested shape (envelope -> body -> field, see NatsResponseContract), so every
+// reader repeated `j[NatsResponseContract::kBody][...]` by hand. These centralise
+// that navigation; get_body_response_ref keeps the zero-copy semantics the
+// response path relies on.
+
+// Reference to the nested body object (or a static empty object when absent).
+inline const json &get_response_body(const json &j) {
+  static const json empty_body = json::object();
+  const auto it = j.find(NatsResponseContract::kBody);
+  if (it != j.end() && it->is_object()) {
+    return *it;
+  }
+  return empty_body;
+}
+
+// Zero-copy reference to the actual response string, matching non-binary bodies
+// that are stored verbatim (not base64).
+inline const std::string &get_body_response_ref(const json &j) {
+  static const std::string empty;
+  const auto it = get_response_body(j).find(NatsResponseContract::kBodyResponse);
+  if (it != get_response_body(j).end() && it->is_string()) {
+    return it->get_ref<const std::string &>();
+  }
+  return empty;
+}
+
+// Fetch a string/bool field from the nested body object with a fallback.
+inline std::string get_body_string(const json &j, const std::string &key,
+                                   const std::string &fallback = "") {
+  return JsonUtils::safe_get_string(get_response_body(j), key, fallback);
+}
+
+inline bool get_body_bool(const json &j, const std::string &key,
+                          bool fallback = false) {
+  return JsonUtils::safe_get_bool(get_response_body(j), key, fallback);
+}
+
+inline int get_body_int(const json &j, const std::string &key,
+                        int fallback = 0) {
+  return JsonUtils::safe_get_int(get_response_body(j), key, fallback);
+}
+
 #endif

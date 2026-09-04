@@ -3,6 +3,7 @@
 
 #include "httplib/httplib.h"
 #include "logger.hpp"
+#include "string_utils.hpp"
 #include <algorithm>
 #include <ranges>
 #include <set>
@@ -190,12 +191,7 @@ public:
   }
 
   static std::string to_lower(std::string_view header_name) {
-    std::string lower;
-    lower.reserve(header_name.size());
-    for (const unsigned char c : header_name) {
-      lower.push_back(static_cast<char>(std::tolower(c)));
-    }
-    return lower;
+    return ::to_lower(header_name);
   }
 };
 

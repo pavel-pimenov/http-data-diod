@@ -1,8 +1,8 @@
 #ifndef ERROR_CATEGORIZER_HPP
 #define ERROR_CATEGORIZER_HPP
 
+#include "string_utils.hpp"
 #include <array>
-#include <cctype>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -47,15 +47,6 @@ enum class ProcessingErrorType : std::uint8_t {
   RESOURCE_EXHAUSTED,
   OTHER_ERROR
 };
-
-inline std::string to_lower(std::string_view s) {
-  std::string lower;
-  lower.reserve(s.size());
-  for (const unsigned char c : s) {
-    lower.push_back(static_cast<char>(std::tolower(c)));
-  }
-  return lower;
-}
 
 // Maps an enum value to its string name via an array indexed by the underlying
 // value; unknown values fall back to "UNKNOWN".

@@ -845,6 +845,37 @@ TEST_CASE("JsonUtils: build_nats_response_envelope optional fields omitted",
   REQUIRE_FALSE(body.contains(NatsResponseContract::kBodyTraceparent));
 }
 
+TEST_CASE("JsonUtils: get_body_* navigate the response envelope",
+          "[json-utils]") {
+  json env = build_nats_response_envelope(
+      200, "req-9", "resp", 1000, false, "application/json", json::object(),
+      "");
+  REQUIRE(get_body_response_ref(env) == "resp");
+  REQUIRE(get_body_bool(env, NatsResponseContract::kBodyIsBinary) == false);
+  REQUIRE(get_body_string(env, NatsResponseContract::kBodyContentType,
+                          "default") == "application/json");
+  REQUIRE(get_body_string(env, "missing", "def") == "def");
+  REQUIRE(get_body_int(env, NatsResponseContract::kBodyTimestamp, -1) == 1000);
+  REQUIRE(get_body_response_ref(env) == "resp");
+}
+
+TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {
+  json env;
+  REQUIRE(get_response_body(env).empty());
+  REQUIRE(get_body_response_ref(env) == "");
+  REQUIRE(get_body_string(env, "x", "def") == "def");
+  REQUIRE(get_body_bool(env, "x", true) == true);
+}
+
+TEST_CASE("JsonUtils: get_body_response_ref is zero-copy", "[json-utils]") {
+  json env = build_nats_response_envelope(200, "req", "abc", 0, false, "",
+                                          json::object(), "");
+  REQUIRE(get_body_response_ref(env) == "abc");
+  env[NatsResponseContract::kBody][NatsResponseContract::kBodyResponse] =
+      "changed";
+  REQUIRE(get_body_response_ref(env) == "changed");
+}
+
 // ============================================================================
 // JsonSchemaValidator tests
 // ============================================================================

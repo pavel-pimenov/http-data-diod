@@ -21,20 +21,16 @@ void set_response_content(httplib::Response &res,
 
   // Extract the actual response from l2-server without deep-copying the JSON
   // body string (parsed_response_data outlives the reference below)
-  const auto &l2_response =
-      parsed_response_data[NatsResponseContract::kBody]
-                          [NatsResponseContract::kBodyResponse]
-                              .get_ref<const std::string &>();
+  const std::string &l2_response = get_body_response_ref(parsed_response_data);
   const int status_code = parsed_response_data[NatsResponseContract::kStatus];
   res.status = status_code;
 
   // Check if response contains binary data (base64 encoded)
-  const bool is_binary = JsonUtils::safe_get_bool(
-      parsed_response_data[NatsResponseContract::kBody],
-      NatsResponseContract::kBodyIsBinary);
-  const std::string content_type =
-      parsed_response_data[NatsResponseContract::kBody].value(
-          NatsResponseContract::kBodyContentType, "application/json");
+  const bool is_binary =
+      get_body_bool(parsed_response_data, NatsResponseContract::kBodyIsBinary);
+  const std::string content_type = get_body_string(
+      parsed_response_data, NatsResponseContract::kBodyContentType,
+      "application/json");
 
   // For binary data, decode from base64 into a separate buffer
   std::string decoded_binary_response;

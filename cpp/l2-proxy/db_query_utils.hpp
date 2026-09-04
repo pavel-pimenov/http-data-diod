@@ -2,6 +2,7 @@
 #define DB_QUERY_UTILS_HPP
 
 #include "json_utils.hpp"
+#include "string_utils.hpp"
 #include <cctype>
 #include <cstddef>
 #include <expected>
@@ -54,11 +55,7 @@ inline std::string next_word_lower(const std::string &s, size_t &pos) {
     ++pos;
   }
   std::string word = s.substr(start, pos - start);
-  for (char &c : word) {
-    c = static_cast<char>(
-        std::tolower(static_cast<unsigned char>(c)));
-  }
-  return word;
+  return to_lower(word);
 }
 
 // True when the statement is a read-only query: the first meaningful keyword
