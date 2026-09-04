@@ -1,3 +1,42 @@
+# test: добиты чисто-функциональные хелперы (parse_url, to_lower, fail_request, generate_uuid и др.)
+
+## Date: 2026-09-04
+
+### Контекст
+Продолжение расширения юнит-тестов для «полного покрытия». По итогам аудита
+header-only утилит (json_utils, header_utils, base64_utils, time_utils, url_utils,
+retry_utils, json_schema_validator — уже покрыты полностью) остались непокрытыми
+несколько чистых/полу-чистых функций и ошибочные ветки `parse_url`.
+
+### Что сделано
+В `test_components.cpp` добавлены 10 тест-кейсов:
+- `parse_url` — https c явным портом (8443), фолбэк на дефолт при нечисловом порте
+  (http→80, https→443), URL без пути, отклонение невалидных (`""`, `"http://"`,
+  `"http://:8080/x"`, `"http:///x"` → `std::runtime_error`)
+- `get_current_timestamp_us` — положительность, монотонность, величина > эпохи 2023
+- `to_lower` (standalone `string_utils.hpp`) — пустая строка, уже-нижний регистр,
+  смешанный регистр, цифры/спецсимволы
+- `fail_request` — пишет status/body с `request_id`, инкрементирует `prometheus::Counter`,
+  возвращает `false`; отдельный кейс с `log_message` (для лога, а не для body)
+- `validate_trace_context` — не бросает для заполненного и пустого `TraceContext`
+- `RequestIdGenerator::generate_uuid` — формат `YYYY-MM-DD~<counter>~<6-значный-random>`,
+  уникальность последовательных вызовов
+
+Сопутствующие изменения:
+- `CMakeLists.txt`: `request_id_generator.cpp` добавлен в target `test_components`
+  (для теста `generate_uuid`); include `request_id_generator.hpp`
+- Исправлен флаки-ассерт в тесте `get_current_timestamp_us`: сравнение с отдельным
+  вызовом `TimeUtils::epoch_us()` могло разойтись на границе микросекунды; заменено
+  на проверку величины относительно эпохи 2023
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+  (найден и устранён флаки-кейс, из-за которого build падал с exit code 42)
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # test: расширено покрытие P1-методов обработки ошибок, JSON-валидации и trace-context
 
 ## Date: 2026-09-04

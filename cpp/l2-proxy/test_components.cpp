@@ -12,6 +12,7 @@
 #include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
+#include "request_id_generator.hpp"
 #include "retry_utils.hpp"
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
@@ -2224,6 +2225,123 @@ TEST_CASE("TraceLogger: parse_traceparent handles unsampled and invalid",
   ok = JaegerLogger::parse_traceparent("", trace_id, parent_id, sampled);
   REQUIRE_FALSE(ok);
 }
+
+TEST_CASE("Common utils: parse_url https with explicit port", "[common-utils]") {
+  const auto u = parse_url("https://example.com:8443/secure/x");
+  REQUIRE(u.m_host == "example.com");
+  REQUIRE(u.m_port == 8443);
+  REQUIRE(u.m_path == "/secure/x");
+  REQUIRE(u.m_is_https == true);
+}
+
+TEST_CASE("Common utils: parse_url falls back on non-numeric port",
+          "[common-utils]") {
+  const auto http = parse_url("http://example.com:notaport/x");
+  REQUIRE(http.m_host == "example.com");
+  REQUIRE(http.m_port == 80);
+  REQUIRE(http.m_path == "/x");
+  REQUIRE(http.m_is_https == false);
+
+  const auto https = parse_url("https://example.com:notaport/x");
+  REQUIRE(https.m_host == "example.com");
+  REQUIRE(https.m_port == 443);
+  REQUIRE(https.m_is_https == true);
+}
+
+TEST_CASE("Common utils: parse_url without trailing slash", "[common-utils]") {
+  const auto u = parse_url("http://example.com");
+  REQUIRE(u.m_host == "example.com");
+  REQUIRE(u.m_port == 80);
+  REQUIRE(u.m_path == "/");
+}
+
+TEST_CASE("Common utils: parse_url rejects invalid input", "[common-utils]") {
+  REQUIRE_THROWS_AS(parse_url(""), std::runtime_error);
+  REQUIRE_THROWS_AS(parse_url("http://"), std::runtime_error);
+  REQUIRE_THROWS_AS(parse_url("http://:8080/x"), std::runtime_error);
+  REQUIRE_THROWS_AS(parse_url("http:///x"), std::runtime_error);
+}
+
+TEST_CASE("Common utils: get_current_timestamp_us returns sane values",
+          "[common-utils]") {
+  const auto first = get_current_timestamp_us();
+  REQUIRE(first > 0);
+  const auto second = get_current_timestamp_us();
+  REQUIRE(second >= first);
+  REQUIRE(second - first < 1'000'000);
+  REQUIRE(get_current_timestamp_us() > 1'700'000'000'000'000ULL);
+}
+
+TEST_CASE("Common utils: to_lower standalone", "[common-utils]") {
+  REQUIRE(to_lower("") == "");
+  REQUIRE(to_lower("abc") == "abc");
+  REQUIRE(to_lower("ABC") == "abc");
+  REQUIRE(to_lower("MiXeD123!") == "mixed123!");
+  REQUIRE(to_lower("Hello WORLD") == "hello world");
+  REQUIRE(to_lower("A+C2") == "a+c2");
+}
+
+TEST_CASE("Common utils: fail_request writes response, increments counter",
+          "[common-utils]") {
+  prometheus::Registry registry;
+  auto &family =
+      prometheus::BuildCounter().Name("fail").Help("h").Register(registry);
+  auto &counter = family.Add({});
+
+  httplib::Response res;
+  const bool ok = fail_request(res, 503, "unavailable", &counter, "req-9");
+  REQUIRE_FALSE(ok);
+  REQUIRE(res.status == 503);
+  auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["error"] == "unavailable");
+  REQUIRE((*body)["request_id"] == "req-9");
+  REQUIRE(counter.Collect().counter.value == 1.0);
+}
+
+TEST_CASE("Common utils: fail_request uses log_message for logging",
+          "[common-utils]") {
+  httplib::Response res;
+  const bool ok = fail_request(res, 400, "short msg", nullptr, "", "long log line");
+  REQUIRE_FALSE(ok);
+  REQUIRE(res.status == 400);
+  auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["error"] == "short msg");
+}
+
+TEST_CASE("Common utils: validate_trace_context does not throw for any field set",
+          "[common-utils]") {
+  TraceContext full;
+  full.m_trace_id = "0123456789abcdef0123456789abcdef";
+  full.m_span_id = "abcdef0123456789";
+  full.m_parent_id = "0123456789abcdef";
+  full.m_traceparent_header = "00-t-p-01";
+  validate_trace_context(full, "svc");
+
+  TraceContext empty;
+  validate_trace_context(empty, "svc");
+  REQUIRE(true);
+}
+
+TEST_CASE("RequestIdGenerator: generate_uuid has stable format and is unique",
+          "[request-id]") {
+  RequestIdGenerator gen;
+  const std::string a = gen.generate_uuid();
+  const std::string b = gen.generate_uuid();
+
+  REQUIRE(a.size() > 0);
+  REQUIRE(a != b);
+  REQUIRE(a.find('~') != std::string::npos);
+  REQUIRE(a.find("{~}") == std::string::npos);
+
+  const size_t first_tilde = a.find('~');
+  const size_t second_tilde = a.find('~', first_tilde + 1);
+  REQUIRE(first_tilde != std::string::npos);
+  REQUIRE(second_tilde != std::string::npos);
+  REQUIRE(a.substr(second_tilde + 1).size() == 6);
+}
+
 
 
 
