@@ -34,19 +34,19 @@ public:
   // ========================================================================
   // Group 1: std::string fields (32 bytes each on libstdc++)
   // ========================================================================
-  std::string m_mode;
-  std::string m_l2_server_url;
+  std::string m_mode{"proxy"};
+  std::string m_l2_server_url{"http://l2-server:8088"};
   std::string m_jaeger_url;
-  std::string m_log_level;
-  std::string m_l2_server_protocol;
-  std::string m_proxy_protocol;
-  std::string m_thread_pool_type;
+  std::string m_log_level{"INFO"};
+  std::string m_l2_server_protocol{"http"};
+  std::string m_proxy_protocol{"http"};
+  std::string m_thread_pool_type{"none"};
   std::string m_ssl_ca_cert_path;
   std::string m_ssl_server_cert_file;
   std::string m_ssl_server_key_file;
-  std::string m_nats_host;
-  std::string m_nats_subject;
-  std::string m_nats_queue_group;
+  std::string m_nats_host{"nats-server"};
+  std::string m_nats_subject{"service.proxy"};
+  std::string m_nats_queue_group{"proxy_workers"};
   std::string m_nats_username;
   std::string m_nats_password;
   std::string m_nats_token;
@@ -54,97 +54,97 @@ public:
   std::string m_nats_tls_cert_file;
   std::string m_nats_tls_key_file;
   std::string m_nats_tls_ca_cert_file;
-  std::string m_db_query_nats_subject;
-  std::string m_db_query_nats_queue_group;
+  std::string m_db_query_nats_subject{"service.db.query"};
+  std::string m_db_query_nats_queue_group{"db_workers"};
 
   // ========================================================================
   // Group 2: std::vector fields (24 bytes each on libstdc++)
   // ========================================================================
-  std::vector<std::string> m_l2_server_urls;
+  std::vector<std::string> m_l2_server_urls{{"http://l2-server:8088"}};
   // Databases exposed through the HTTP DB Gateway (/v1/sql/{db}/...).
   std::vector<DbConfig> m_databases;
 
   // ========================================================================
   // Group 3: double (8 bytes)
   // ========================================================================
-  double m_tracing_sample_rate; // Sampling rate (0.0-1.0, 1.0 = 100%)
+  double m_tracing_sample_rate{1.0}; // Sampling rate (0.0-1.0, 1.0 = 100%)
 
   // ========================================================================
   // Group 4: size_t (8 bytes)
   // ========================================================================
-  size_t m_tracing_batch_size; // Batch size for sending spans to Jaeger
+  size_t m_tracing_batch_size{50}; // Batch size for sending spans to Jaeger
 
   // ========================================================================
   // Group 5: int fields (4 bytes each) — sorted by logical group
   // ========================================================================
-  int m_request_timeout_seconds;
-  int m_http_timeout_seconds;
-  int m_l2_worker_threads;
-  int m_l2_worker_queue_size;
-  int m_proxy_port;
-  int m_l2_server_port;
-  int m_http_pool_size;
-  int m_http_pool_idle_timeout_seconds;
-  int m_max_retries;
-  int m_tracing_flush_interval_ms;
-  int m_per_ip_max_tokens;
-  int m_per_ip_refill_rate;
-  int m_per_ip_max_ips;
-  int m_per_ip_cleanup_ttl_seconds;
-  int m_global_max_tokens;
-  int m_global_refill_rate;
-  int m_dedup_max_entries;
-  int m_dedup_ttl_ms;
-  int m_duplicate_detection_top_n;
-  int m_duplicate_detection_max_entries;
-  int m_duplicate_detection_max_body_bytes;
-  int m_duplicate_detection_ttl_ms;
-  int m_nats_port;
-  int m_nats_timeout_ms;
+  int m_request_timeout_seconds{30};
+  int m_http_timeout_seconds{10};
+  int m_l2_worker_threads{128};
+  int m_l2_worker_queue_size{0};
+  int m_proxy_port{8888};
+  int m_l2_server_port{8088};
+  int m_http_pool_size{400};
+  int m_http_pool_idle_timeout_seconds{300};
+  int m_max_retries{1};
+  int m_tracing_flush_interval_ms{1000};
+  int m_per_ip_max_tokens{100};
+  int m_per_ip_refill_rate{10};
+  int m_per_ip_max_ips{10000};
+  int m_per_ip_cleanup_ttl_seconds{300};
+  int m_global_max_tokens{10000};
+  int m_global_refill_rate{1000};
+  int m_dedup_max_entries{4096};
+  int m_dedup_ttl_ms{60000};
+  int m_duplicate_detection_top_n{100};
+  int m_duplicate_detection_max_entries{1000};
+  int m_duplicate_detection_max_body_bytes{500};
+  int m_duplicate_detection_ttl_ms{60000};
+  int m_nats_port{4222};
+  int m_nats_timeout_ms{30000};
   // DB Gateway NATS request timeout (how long the proxy waits for a worker
   // reply) in ms.
-  int m_db_query_nats_timeout_ms;
+  int m_db_query_nats_timeout_ms{30000};
   // Default statement execution timeout in ms applied to every DB query unless
   // the request overrides it.
-  int m_db_query_default_timeout_ms;
+  int m_db_query_default_timeout_ms{5000};
   // Default row limit applied to every DB query unless the request overrides it.
-  int m_db_query_default_max_rows;
+  int m_db_query_default_max_rows{1000};
   // Test-only: random response delay in ms on the l2-server (0 = disabled).
   // Used to desynchronize response order from request order for the
   // response-to-request correlation test.
-  int m_test_response_delay_ms;
+  int m_test_response_delay_ms{0};
 
   // ========================================================================
   // Group 6: bool fields (1 byte each) — packed together at the end
   // ========================================================================
-  bool m_enable_tracing;
-  bool m_enable_ssl_server_certificate_verification;
-  bool m_enable_ssl_server_hostname_verification;
-  bool m_enable_per_ip_rate_limiting;
-  bool m_enable_global_rate_limiting;
-  bool m_nats_enable_tls;
-  bool m_dedup_enabled;
-  bool m_duplicate_detection_enabled;
+  bool m_enable_tracing{false};
+  bool m_enable_ssl_server_certificate_verification{false};
+  bool m_enable_ssl_server_hostname_verification{false};
+  bool m_enable_per_ip_rate_limiting{true};
+  bool m_enable_global_rate_limiting{true};
+  bool m_nats_enable_tls{false};
+  bool m_dedup_enabled{false};
+  bool m_duplicate_detection_enabled{true};
   // Master switch of the HTTP DB Gateway (DB_QUERY_ENABLED). When false the
   // /v1/sql/** endpoints answer 404 and the worker skips the DB subscription.
-  bool m_db_query_enabled;
+  bool m_db_query_enabled{false};
   // When true the proxy rejects (HTTP 409) a POST whose body hash was already
   // seen within the detector TTL instead of forwarding it to the worker.
   // Off by default: only counting/logging happens (see /debug/duplicates).
-  bool m_duplicate_reject_enabled;
+  bool m_duplicate_reject_enabled{false};
 
-  bool m_crash_test;
+  bool m_crash_test{false};
   // Gates the /crash-test HTTP endpoint (default off). Deliberately separate
   // from m_crash_test: CRASH_TEST=true crashes at startup, while this flag
   // only arms the endpoint so test-crash-handler.py can trigger it remotely.
-  bool m_enable_crash_test_endpoint;
+  bool m_enable_crash_test_endpoint{false};
   // When false (default) /health/ready never initiates a NATS reconnect and
   // only reports the current connection state — guaranteed non-blocking so the
   // load balancer gets a fast answer. Set true to allow the legacy ping path
   // (which may attempt a blocking connect() when the connection is lost).
-  bool m_health_ready_allow_connect;
+  bool m_health_ready_allow_connect{false};
 
-  Config();
+  Config() = default;
   void load_from_env();
   [[nodiscard]] bool validate(bool log_issues = true) const;
   NatsConfig create_nats_config() const;

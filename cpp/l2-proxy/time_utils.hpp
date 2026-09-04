@@ -46,8 +46,6 @@ public:
     return std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", now_s, ms);
   }
 
-  static std::string format_iso8601() { return format_rfc3339(); }
-
   static int64_t
   ms_until(const std::chrono::system_clock::time_point &deadline) {
     const auto now = std::chrono::system_clock::now();

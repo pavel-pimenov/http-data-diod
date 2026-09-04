@@ -332,6 +332,24 @@ TEST_CASE("Request data: client IP falls back to remote addr",
   REQUIRE(extract_client_ip(req) == "9.9.9.9");
 }
 
+TEST_CASE("Request data: client IP uses cf-connecting-ip as last fallback",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("cf-connecting-ip", "7.7.7.7");
+  REQUIRE(extract_client_ip(req) == "7.7.7.7");
+}
+
+TEST_CASE("Request data: X-Real-IP wins over cf-connecting-ip",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-real-ip", "1.2.3.4");
+  req.headers.emplace("cf-connecting-ip", "7.7.7.7");
+  REQUIRE(extract_client_ip(req) == "1.2.3.4");
+}
+
+
 TEST_CASE("Request data: query string is taken after the ?", "[request-data]") {
   httplib::Request req;
   req.target = "/v1/sql/oracle/query?a=1&b=2";

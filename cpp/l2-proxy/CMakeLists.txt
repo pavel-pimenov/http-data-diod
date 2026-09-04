@@ -196,6 +196,11 @@ target_compile_definitions(proj_civetweb PRIVATE
     NO_SSL
     NO_SSL_DL
     NO_CGI
+    NO_FILES
+    NO_CACHING
+    NO_FILESYSTEMS
+    MG_EXTERNAL_FUNCTION_mg_cry_internal_impl
+    MG_EXTERNAL_FUNCTION_log_access
 )
 target_compile_options(proj_civetweb PRIVATE
     ${L2_PROXY_COMMON_COMPILE_OPTIONS}
@@ -275,20 +280,6 @@ find_library(NATS_C_LIBRARY nats
 message(STATUS "Found NATS C client: ${NATS_C_LIBRARY}")
 
 
-
-# Generate l2-proxy-version.h only if it doesn't exist
-#if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/l2-proxy-version.h)
-#  add_custom_command(
-#    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/l2-proxy-version.h
-#    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/generate_version.sh > ${CMAKE_CURRENT_BINARY_DIR}/l2-proxy-version.h
-#    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-#    COMMENT "Generating l2-proxy-version.h"
-#  )
-#endif()
-
-#add_custom_target(generate_version DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/l2-proxy-version.h)
-
-
 # Add executable
 add_executable(l2-proxy
  main.cpp
@@ -337,11 +328,6 @@ target_compile_definitions(l2-proxy PRIVATE
     L2_PROXY_BUILD_MODE="${L2_PROXY_BUILD_MODE}"
 )
 
-# Suppress deprecation warnings for httplib
-target_compile_options(l2-proxy PRIVATE -Wno-deprecated-declarations)
-
-
-# add_dependencies(l2-proxy generate_version)
 
 # GROUP-mode unity: main.cpp and httplib.cc have no UNITY_GROUP and are
 # compiled individually; the rest are grouped into two batches.
@@ -444,9 +430,6 @@ target_link_options(l2-proxy PRIVATE -rdynamic)
 if(ENABLE_PROFILER)
     target_link_options(l2-proxy PRIVATE -no-pie)
 endif()
-
-# Add test subdirectory (only when building locally)
-# add_subdirectory(test)
 
 # Unit tests (optional, enabled with -DBUILD_TESTS=ON)
 if(BUILD_TESTS)

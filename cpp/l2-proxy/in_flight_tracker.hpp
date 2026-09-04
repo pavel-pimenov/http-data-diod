@@ -106,11 +106,6 @@ public:
   // Start tracking a request
   RequestGuard track() { return RequestGuard(this); }
 
-  // Manual increment/decrement (use track() instead for RAII)
-  void increment() { increment(shard_index()); }
-
-  void decrement() { decrement(shard_index()); }
-
 private:
   void increment(size_t shard) {
     Shard &s = m_shards[shard];

@@ -10,6 +10,7 @@ Checks: >
   modernize-use-override,
   modernize-use-auto,
   modernize-use-emplace,
+  modernize-use-using,
   modernize-loop-convert,
   performance-*,
   -performance-no-int-to-ptr,

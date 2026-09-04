@@ -6,17 +6,13 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
-#include <ctime>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <random>
-#include <sstream>
 #include <string>
 #include <thread>
-#include <unistd.h>
 
 #include "cpp_httplib_config.h"
 #include "httplib/httplib.h"

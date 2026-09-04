@@ -24,6 +24,7 @@
 #include "base64_utils.hpp"
 #include "error_types.hpp"
 #include "pool_executor.hpp"
+#include "retry_handler.hpp"
 #include "url_utils.hpp"
 
 #include "httplib/httplib.h"
@@ -40,10 +41,6 @@
 class JaegerLogger;
 
 using json = nlohmann::json;
-
-inline std::string read_request_body(const httplib::Request &req) {
-  return req.body;
-}
 
 [[nodiscard]] inline std::string
 get_header_value(const httplib::Headers &headers, std::string_view name,
@@ -230,11 +227,6 @@ void increment_and_log_response_sent(prometheus::Counter &metrics_counter,
                                      const std::string &request_id,
                                      int status_code);
 
-inline ScopedMetrics
-create_scoped_request_metrics(prometheus::Counter &metrics_counter) {
-  return ScopedMetrics(metrics_counter);
-}
-
 inline ScopedProfiler
 create_scoped_request_profiler(prometheus::Histogram &histogram) {
   return ScopedProfiler(histogram);
@@ -311,41 +303,5 @@ inline bool validate_positive(const T &value, const std::string &name) {
   }
   return true;
 }
-
-consteval std::chrono::seconds stats_log_interval() { return std::chrono::seconds(600); }
-
-// optional монадики helper: trim заголовок через transform/or_else chain
-[[nodiscard]] inline std::string header_or_default(
-    const httplib::Headers &h, std::string_view name, std::string_view def = "unknown") {
-  return find_header_optional(h, name)
-      .transform([](std::string_view v) { return std::string(v); })
-      .value_or(std::string(def));
-}
-
-class RetryHandler {
-public:
-  explicit RetryHandler(int initial_delay_ms = 100, int max_delay_ms = 2000)
-      : m_initial_delay_ms(initial_delay_ms), m_max_delay_ms(max_delay_ms),
-        m_current_delay_ms(initial_delay_ms), m_consecutive_failures(0) {}
-
-  void record_failure() {
-    m_consecutive_failures++;
-    m_current_delay_ms = std::min(m_current_delay_ms * 2, m_max_delay_ms);
-  }
-
-  void record_success() {
-    m_consecutive_failures = 0;
-    m_current_delay_ms = m_initial_delay_ms;
-  }
-
-  int get_consecutive_failures() const { return m_consecutive_failures; }
-  int get_current_delay_ms() const { return m_current_delay_ms; }
-
-private:
-  int m_initial_delay_ms;
-  int m_max_delay_ms;
-  int m_current_delay_ms;
-  int m_consecutive_failures = 0;
-};
 
 #endif // COMMON_UTILS_HPP

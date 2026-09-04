@@ -61,6 +61,31 @@ TEST_CASE("RateLimiter: Refills tokens over time", "[rate-limiter]") {
   REQUIRE(limiter.acquire() == true);
 }
 
+TEST_CASE("RateLimiter: accessors report configured values", "[rate-limiter]") {
+  RateLimiter limiter(50, 7);
+  REQUIRE(limiter.max_tokens() == 50);
+  REQUIRE(limiter.refill_rate() == 7);
+  REQUIRE(limiter.available_tokens() <= 50);
+  REQUIRE(limiter.available_tokens() > 0);
+}
+
+TEST_CASE("RateLimiter: available_tokens decreases with acquire",
+          "[rate-limiter]") {
+  RateLimiter limiter(10, 0);
+  uint64_t before = limiter.available_tokens();
+  limiter.acquire();
+  uint64_t after = limiter.available_tokens();
+  REQUIRE(after == before - 1);
+}
+
+TEST_CASE("InFlightTracker: request_shutdown and is_shutdown_requested",
+          "[in-flight]") {
+  InFlightTracker tracker;
+  REQUIRE_FALSE(tracker.is_shutdown_requested());
+  tracker.request_shutdown();
+  REQUIRE(tracker.is_shutdown_requested());
+}
+
 TEST_CASE("InFlightTracker: Tracks active requests", "[in-flight]") {
   InFlightTracker tracker;
 
@@ -770,6 +795,14 @@ TEST_CASE("JsonUtils: safe_get_int", "[json-utils]") {
   REQUIRE(JsonUtils::safe_get_int(j, "str", -1) == -1);
 }
 
+TEST_CASE("JsonUtils: safe_get_bool", "[json-utils]") {
+  json j = {{"flag", true}, {"num", 1}};
+  REQUIRE(JsonUtils::safe_get_bool(j, "flag") == true);
+  REQUIRE(JsonUtils::safe_get_bool(j, "missing", true) == true);
+  REQUIRE(JsonUtils::safe_get_bool(j, "num", true) == true);
+}
+
+
 TEST_CASE("JsonUtils: has_key", "[json-utils]") {
   json j = {{"key", "value"}, {"null_key", nullptr}};
   REQUIRE(JsonUtils::has_key(j, "key") == true);
@@ -943,13 +976,22 @@ TEST_CASE("RetryUtils: calculate_retry_delay_with_jitter", "[retry-utils]") {
   REQUIRE(delay <= 550);
 }
 
-TEST_CASE("RetryUtils: calculate_simple_jitter_delay", "[retry-utils]") {
+TEST_CASE("RetryUtils: calculate_jitter_delay bounds", "[retry-utils]") {
   for (int i = 0; i < 100; ++i) {
-    int delay = calculate_simple_jitter_delay(100, 50);
-    REQUIRE(delay >= 100);
-    REQUIRE(delay <= 150);
+    int delay = calculate_jitter_delay(1000, 50);
+    REQUIRE(delay >= 1000);
+    REQUIRE(delay <= 1499);
   }
 }
+
+TEST_CASE("RetryUtils: calculate_jitter_delay edge cases", "[retry-utils]") {
+  REQUIRE(calculate_jitter_delay(0) == 0);
+  REQUIRE(calculate_jitter_delay(-10) == 0);
+  // max_jitter = (100*1)/100 = 1, between(0,0) = 0
+  REQUIRE(calculate_jitter_delay(100, 1) == 100);
+  REQUIRE(calculate_jitter_delay(100, 0) == 100);
+}
+
 
 TEST_CASE("RetryUtils: execute_with_retry succeeds first try",
           "[retry-utils]") {
@@ -1023,6 +1065,30 @@ TEST_CASE("TimeUtils: ms_until future deadline", "[time-utils]") {
   REQUIRE(ms >= 4900);
   REQUIRE(ms <= 5100);
 }
+
+TEST_CASE("TimeUtils: steady_ms advances", "[time-utils]") {
+  auto a = TimeUtils::steady_ms();
+  auto b = TimeUtils::steady_ms();
+  REQUIRE(a > 0);
+  REQUIRE(b >= a);
+}
+
+TEST_CASE("TimeUtils: duration_seconds converts microseconds", "[time-utils]") {
+  REQUIRE_THAT(TimeUtils::duration_seconds(0, 1'000'000),
+               Catch::Matchers::WithinRel(1.0, 0.001));
+  REQUIRE_THAT(TimeUtils::duration_seconds(0, 500'000),
+               Catch::Matchers::WithinRel(0.5, 0.001));
+  REQUIRE_THAT(TimeUtils::duration_seconds(1'000'000, 2'000'000),
+               Catch::Matchers::WithinRel(1.0, 0.001));
+  REQUIRE_THAT(TimeUtils::duration_seconds(0, 1500),
+               Catch::Matchers::WithinRel(0.0015, 0.001));
+}
+
+TEST_CASE("TimeUtils: duration_seconds handles zero interval", "[time-utils]") {
+  REQUIRE_THAT(TimeUtils::duration_seconds(42, 42),
+               Catch::Matchers::WithinRel(0.0, 0.001));
+}
+
 
 // ============================================================================
 // ThreadPool tests
@@ -1836,14 +1902,6 @@ TEST_CASE("Common utils: find_header_optional", "[common-utils]") {
   REQUIRE(!find_header_optional(headers, "x-empty").has_value());
 }
 
-TEST_CASE("Common utils: header_or_default", "[common-utils]") {
-  httplib::Headers headers;
-  headers.emplace("x-token", "abc");
-  REQUIRE(header_or_default(headers, "x-token") == "abc");
-  REQUIRE(header_or_default(headers, "x-missing") == "unknown");
-  REQUIRE(header_or_default(headers, "x-missing", "dflt") == "dflt");
-}
-
 TEST_CASE("Common utils: resolve_parent_id", "[common-utils]") {
   REQUIRE(resolve_parent_id("span1", "fallback") == "span1");
   REQUIRE(resolve_parent_id("", "fallback") == "fallback");
@@ -1942,3 +2000,93 @@ TEST_CASE("Common utils: parse_url", "[common-utils]") {
   REQUIRE(no_port.m_host == "example.com");
   REQUIRE(no_port.m_path == "/x");
 }
+
+TEST_CASE("Common utils: parse_json valid and invalid", "[common-utils]") {
+  auto valid = parse_json(R"({"a": 1})");
+  REQUIRE(valid.has_value());
+  REQUIRE((*valid)["a"] == 1);
+
+  auto invalid = parse_json("{not json}");
+  REQUIRE_FALSE(invalid.has_value());
+  REQUIRE(invalid.error().find("Failed to parse JSON") != std::string::npos);
+}
+
+TEST_CASE("Common utils: parse_json truncates long body preview",
+          "[common-utils]") {
+  std::string big_body(500, 'x');
+  auto result = parse_json(big_body);
+  REQUIRE_FALSE(result.has_value());
+  // Only the first 100 bytes are kept in the preview.
+  REQUIRE(result.error().find(std::string(100, 'x') + "...") !=
+          std::string::npos);
+  REQUIRE(result.error().size() < 400);
+}
+
+TEST_CASE("Common utils: format_http_error branches", "[common-utils]") {
+  const auto read = format_http_error(httplib::Error::Read, 30, "query");
+  REQUIRE(read.find("(timeout after 30 seconds)") != std::string::npos);
+
+  const auto write = format_http_error(httplib::Error::Write, 5, "ping");
+  REQUIRE(write.find("(timeout after 5 seconds)") != std::string::npos);
+
+  const auto conn =
+      format_http_error(httplib::Error::Connection, 30, "query");
+  REQUIRE(conn.find("(connection failed)") != std::string::npos);
+
+  const auto bind =
+      format_http_error(httplib::Error::BindIPAddress, 30, "query");
+  REQUIRE(bind.find("(failed to bind IP address)") != std::string::npos);
+
+  const auto other = format_http_error(httplib::Error::Success, 30, "query");
+  REQUIRE(other.find("HTTP query failed: 0") != std::string::npos);
+  REQUIRE(other.find("timeout") == std::string::npos);
+}
+
+TEST_CASE("Common utils: set_json_error_response", "[common-utils]") {
+  httplib::Response res;
+  set_json_error_response(res, 400, "bad request", "req-1");
+  REQUIRE(res.status == 400);
+  auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["error"] == "bad request");
+  REQUIRE((*body)["request_id"] == "req-1");
+}
+
+TEST_CASE("Common utils: set_json_error_response omits request_id when empty",
+          "[common-utils]") {
+  httplib::Response res;
+  set_json_error_response(res, 500, "boom");
+  auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["error"] == "boom");
+  REQUIRE_FALSE(body->contains("request_id"));
+}
+
+TEST_CASE("Common utils: send_json_response", "[common-utils]") {
+  httplib::Response res;
+  json payload = {{"ok", true}, {"rows", 3}};
+  send_json_response(res, 200, payload);
+  REQUIRE(res.status == 200);
+  REQUIRE(res.get_header_value("Content-Type") == "application/json");
+  auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["ok"] == true);
+  REQUIRE((*body)["rows"] == 3);
+}
+
+TEST_CASE("Common utils: set_health_alive and set_health_ready",
+          "[common-utils]") {
+  httplib::Response alive;
+  set_health_alive(alive, "proxy");
+  REQUIRE(alive.status == 200);
+  REQUIRE(alive.body.find(R"("status": "alive")") != std::string::npos);
+  REQUIRE(alive.body.find(R"("service": "proxy")") != std::string::npos);
+
+  httplib::Response ready;
+  set_health_ready(ready, "worker");
+  REQUIRE(ready.status == 200);
+  REQUIRE(ready.body.find(R"("status": "ready")") != std::string::npos);
+  REQUIRE(ready.body.find(R"("service": "worker")") != std::string::npos);
+}
+
+

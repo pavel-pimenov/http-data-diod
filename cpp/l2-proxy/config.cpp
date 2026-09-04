@@ -29,47 +29,6 @@ void log_env_default(const std::string &env_name,
 }
 } // namespace
 
-Config::Config()
-    : m_mode("proxy"), m_l2_server_url("http://l2-server:8088"),
-      m_jaeger_url(""), m_log_level("INFO"), m_l2_server_protocol("http"),
-      m_proxy_protocol("http"), m_thread_pool_type("none"),
-      m_ssl_ca_cert_path(""), m_ssl_server_cert_file(""),
-      m_ssl_server_key_file(""), m_nats_host("nats-server"),
-      m_nats_subject("service.proxy"), m_nats_queue_group("proxy_workers"),
-      m_nats_username(""), m_nats_password(""), m_nats_token(""),
-      m_nats_credentials_file(""), m_nats_tls_cert_file(""),
-      m_nats_tls_key_file(""), m_nats_tls_ca_cert_file(""),
-      m_db_query_nats_subject("service.db.query"),
-      m_db_query_nats_queue_group("db_workers"),
-      m_l2_server_urls({"http://l2-server:8088"}), m_databases(),
-      m_tracing_sample_rate(1.0),
-      m_tracing_batch_size(50), m_request_timeout_seconds(30),
-      m_http_timeout_seconds(10), m_proxy_port(8888), m_l2_server_port(8088),
-      m_http_pool_size(400), m_http_pool_idle_timeout_seconds(300),
-      m_l2_worker_threads(128), m_l2_worker_queue_size(0), m_max_retries(1),
-      m_tracing_flush_interval_ms(1000), m_per_ip_max_tokens(100),
-      m_per_ip_refill_rate(10), m_per_ip_max_ips(10000),
-      m_per_ip_cleanup_ttl_seconds(300), m_global_max_tokens(10000),
-      m_global_refill_rate(1000), m_dedup_max_entries(4096),
-      m_dedup_ttl_ms(60000), m_duplicate_detection_top_n(100),
-      m_duplicate_detection_max_entries(1000),
-      m_duplicate_detection_max_body_bytes(500),
-      m_duplicate_detection_ttl_ms(60000),
-
-      m_nats_port(4222), m_nats_timeout_ms(30000), m_test_response_delay_ms(0),
-      m_db_query_nats_timeout_ms(30000),
-      m_db_query_default_timeout_ms(5000), m_db_query_default_max_rows(1000),
-      m_enable_tracing(false),
-      m_enable_ssl_server_certificate_verification(false),
-      m_enable_ssl_server_hostname_verification(false),
-      m_enable_per_ip_rate_limiting(true), m_enable_global_rate_limiting(true),
-
-      m_nats_enable_tls(false), m_dedup_enabled(false),
-      m_duplicate_detection_enabled(true), m_duplicate_reject_enabled(false),
-      m_db_query_enabled(false),
-      m_crash_test(false), m_enable_crash_test_endpoint(false),
-      m_health_ready_allow_connect(false) {}
-
 void Config::load_from_env() {
   load_l2_server_config();
   load_server_timeout_config();

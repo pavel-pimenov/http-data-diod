@@ -217,6 +217,13 @@ public:
 
   AppContext();
   ~AppContext();
+
+private:
+  void init_common();
+  void init_proxy_metrics();
+  void init_worker_metrics();
+  void init_server_metrics();
+  void init_proxy_components();
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 

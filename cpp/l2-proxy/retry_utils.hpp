@@ -36,10 +36,6 @@ inline int calculate_jitter_delay(int base_delay_ms, int jitter_percent = 50) {
 }
 
 // Base delay plus an absolute jitter in [0, jitter_ms].
-inline int calculate_simple_jitter_delay(int base_ms, int jitter_ms) {
-  return base_ms + RandomUtils::between(0, jitter_ms);
-}
-
 // Computes a per-attempt delay (base*attempt plus jitter) and sleeps the
 // calling thread before the next retry attempt. Shared by retry loops that
 // otherwise duplicated the identical delay+sleep pair.
@@ -48,21 +44,6 @@ inline void sleep_for_attempt_jitter(int attempt, int base_delay_ms = 100,
   const int delay_ms =
       calculate_jitter_delay(base_delay_ms * attempt, jitter_percent);
   std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-}
-
-// ============================================================================
-// Rate Limit Rejection Helper
-// ============================================================================
-
-template <typename Counter>
-inline void reject_with_rate_limit_error(void *response,
-                                         Counter &client_error_counter,
-                                         Counter &rejected_counter,
-                                         const std::string &reason) {
-  client_error_counter.Increment();
-  rejected_counter.Increment();
-
-  Logger::warn("Rate limit exceeded: {}", reason);
 }
 
 // ============================================================================

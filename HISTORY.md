@@ -1,3 +1,139 @@
+# test: расширено покрытие юнит-тестов (чистые функции + Response-хелперы)
+
+## Date: 2026-09-04
+
+### Контекст
+По приоритету P0-P1 из анализа покрытия: добавлены тесты на ранее непокрытые
+методы — чистые функции критичной логики и хелперы ответа.
+
+### Что сделано
+- **`JsonUtils::safe_get_bool`** (`test_components.cpp`): попадание/промах/не-bool → fallback
+- **RetryUtils `calculate_jitter_delay`**: границы джиттера (100 итераций), edge-cases
+  (`base<=0` → 0, `jitter_percent=0/1`)
+- **TimeUtils**: `steady_ms` (монотонность), `duration_seconds` (мкс→сек, нулевой интервал)
+- **Common utils `parse_json`**: валидный/невалидный JSON, обрезка длинного preview
+  (первые 100 байт + "...")
+- **Common utils `format_http_error`**: ветки Read/Write (timeout), Connection,
+  BindIPAddress, прочие (без суффикса)
+- **Common utils Response-хелперы**: `set_json_error_response` (+ omits request_id),
+  `send_json_response`, `set_health_alive`/`set_health_ready`
+- **RateLimiter accessors**: `max_tokens`/`refill_rate`/`available_tokens`,
+  уменьшение `available_tokens` после `acquire`
+- **InFlightTracker**: `request_shutdown`/`is_shutdown_requested`
+- **URL utils `extract_client_ip`** (`test_proxy_core.cpp`): fallback на `cf-connecting-ip`,
+  приоритет `X-Real-IP` над `cf-connecting-ip`
+
+### Проверка
+- Юнит-тесты: `test_components` — 714 assertions в 175 test cases,
+  `test_proxy_core` — 714 assertions в 64 test cases (все прошли)
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
+# ci: clang-tidy — добавлен modernize-use-using
+
+## Date: 2026-09-04
+
+### Контекст
+Раунд D (гигиена clang-tidy) из плана. Из предложенных checks:
+
+- **`bugprone-use-after-move`** — уже включён (входит в группу `bugprone-*` в `.clang-tidy`)
+- **`misc-include-cleaner`** — НЕ включён: слишком шумный (требует, чтобы каждый header
+  включал ровно используемые заголовки, что влечёт массовые правки includes и ложные
+  срабатывания в unity-сборке — не блокирует, но замусорит лог clang-tidy)
+- **`modernize-use-using`** — добавлен (страховка от регрессии к `typedef`)
+
+### Что сделано
+- `cpp/l2-proxy/.clang-tidy`: добавлен check `modernize-use-using`
+
+---
+
+# refactor: удалён мёртвый код (интерфейсы, exceptions, retry-utils, время), приватные increment/decrement
+
+## Date: 2026-09-04
+
+### Контекст
+Второй раунд зачистки мёртвого кода — интерфейсы, исключения и утилиты, которые
+никто не использует.
+
+### Что сделано
+- **`interfaces.hpp`**: удалён неиспользуемый интерфейс `ITracer` (ни один класс
+  его не реализует; реальное трассирование через `JaegerLogger` не наследуется)
+- **`retry_utils.hpp`**:
+  - удалён мёртвый шаблон `reject_with_rate_limit_error` (нигде не вызывался)
+  - удалён `calculate_simple_jitter_delay` (использовался только в тестах;
+    функционально подмножество `calculate_jitter_delay`)
+- **`exceptions.hpp`**: удалены 5 мёртвых классов исключений — `NatsException`,
+  `L2ServerException`, `JsonException`, `ConfigException`. Оставлены `L2ProxyException`
+  (база) и `TimeoutException` (ловят в `request_handler.cpp`)
+- **`time_utils.hpp`**: удалён мёртвый alias `format_iso8601()` (= `format_rfc3339()`)
+- **`common_utils.hpp`**: удалён дубликат `header_or_default()` (функционально
+  идентичен `get_header_value()`)
+- **`in_flight_tracker.hpp`**: публичные без-арг `increment()`/`decrement()` удалены
+  (никто не вызывал; RAII `track()` — единственный интерфейс)
+- **тесты**: удалены тесты `calculate_simple_jitter_delay` и `header_or_default`
+
+---
+
+# refactor: удалён мёртвый код, упрощены заголовки, Config constructor
+
+## Date: 2026-09-04
+
+### Контекст
+Массовая зачистка мёртвого кода и упрощение инфраструктуры проекта.
+
+### Что сделано
+- **Удалены неиспользуемые includes** из `main.cpp`: `<ctime>`, `<random>`, `<sstream>`, `<unistd.h>`
+- **Удалены мёртвые функции** из `common_utils.hpp`:
+  - `create_scoped_request_metrics()` — нигде не вызывалась
+  - `read_request_body()` — нигде не вызывалась
+  - `stats_log_interval()` — нигде не вызывалась
+- **Удалены мёртвые типы/функции**:
+  - `L2ErrorMetrics` из `error_types.hpp` — никогда не инстанцировался
+  - `handle_exception()` из `error_types.hpp` + `common_utils.cpp` — никогда не вызывался
+  - `handle_l2_error_with_category()` из `error_types.hpp` + `common_utils.cpp` — никогда не вызывался
+- **Удалён пустой файл** `thread_pool.cpp` (реализация целиком в .hpp)
+- **Config constructor** переписан через in-class default member initializers
+  (`config.hpp`), тело конструктора удалено из `config.cpp`
+- **RetryHandler** вынесен из `common_utils.hpp` в отдельный `retry_handler.hpp`
+  (обратная совместимость сохранена через `#include` в `common_utils.hpp`)
+- **AppContext constructor** разбит на `init_common()`, `init_proxy_metrics()`,
+  `init_worker_metrics()`, `init_server_metrics()`, `init_proxy_components()`
+- **CMakeLists.txt**: удалён закомментированный код (`generate_version.sh`,
+  `add_subdirectory(test)`, `add_dependencies`), убран дублирующий
+  `-Wno-deprecated-declarations`
+
+---
+
+# build(metrics): civetweb — отключены неиспользуемые фичи, удалены мёртвые .inl файлы
+
+## Date: 2026-09-04
+
+### Контекст
+Civetweb используется только для отдачи `/metrics` по plain HTTP. Ряд фич (SSL, WebSocket,
+Lua, Duktape, CGI, файловая система, кэширование) никогда не вызывается, но увеличивает
+размер бинарника и объём кода.
+
+### Что сделано
+- **Удалены 4 неиспользуемых .inl файла** (~46 KB) из `prometheus-cpp/3rdparty/civetweb/src/`:
+  - `mod_mbedtls.inl` (mbedTLS — `USE_MBEDTLS` не определён)
+  - `openssl_dl.inl` (дин. загрузка OpenSSL — ветка `!NO_SSL_DL` недостижима)
+  - `wolfssl_extras.inl` (wolfSSL — ветка `!NO_SSL_DL` недостижима)
+  - `sha1.inl` (WebSocket — `USE_WEBSOCKET` не определён)
+- **Добавлены compile definitions** в `proj_civetweb` (`CMakeLists.txt`):
+  - `NO_FILES` — отключена отдача файлов с диска (метрики генерируются в памяти)
+  - `NO_CACHING` — отключено HTTP-кэширование (свежие данные при каждом scrape)
+  - `NO_FILESYSTEMS` — отключён доступ к файловой системе
+- **Созданы заглушки** для `NO_FILESYSTEMS`:
+  - `external_mg_cry_internal_impl.inl` — no-op (ошибки не пишутся на диск)
+  - `external_log_access.inl` — no-op (лог доступа не ведётся)
+
+### Итого compile definitions proj_civetweb
+`NO_SSL`, `NO_SSL_DL`, `NO_CGI`, `NO_FILES`, `NO_CACHING`, `NO_FILESYSTEMS`,
+`MG_EXTERNAL_FUNCTION_mg_cry_internal_impl`, `MG_EXTERNAL_FUNCTION_log_access`.
+
+---
+
 # build(metrics): vendored prometheus-cpp 1.2.4 + civetweb, убраны Ubuntu-пакеты метрик
 
 ## Date: 2026-09-02

@@ -87,15 +87,6 @@ void handle_error(const std::string &error_msg,
   }
 }
 
-void handle_exception(const std::exception &e,
-                      prometheus::Counter *metrics_counter,
-                      const std::string &prefix_msg) {
-  const auto error_msg =
-      prefix_msg.empty() ? std::string(e.what())
-                         : std::format("{}: {}", prefix_msg, e.what());
-  handle_error(error_msg, metrics_counter, true);
-}
-
 void handle_http_error(const std::string &error_msg,
                        prometheus::Counter *metrics_counter,
                        const std::string &operation, int attempt,
@@ -161,19 +152,6 @@ void handle_error_with_category(
   if (other_counter != nullptr) {
     other_counter->Increment();
   }
-}
-
-void handle_l2_error_with_category(const std::string &error_msg,
-                                   const L2ErrorMetrics &metrics,
-                                   const std::string &operation) {
-  const L2ErrorType error_type = categorize_l2_error(error_msg);
-  handle_error_with_category(
-      error_msg, error_type, l2_error_type_to_string(error_type),
-      "L2 " + operation + " error", metrics.m_total_errors,
-      metrics.m_other_errors,
-      std::array{
-          std::pair{L2ErrorType::CONNECTION_ERROR, metrics.m_connection_errors},
-          std::pair{L2ErrorType::TIMEOUT_ERROR, metrics.m_timeout_errors}});
 }
 
 void handle_processing_error_with_category(
