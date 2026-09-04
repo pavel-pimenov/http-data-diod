@@ -23,6 +23,8 @@
 
 #include "base64_utils.hpp"
 #include "error_types.hpp"
+#include "header_utils.hpp"
+#include "json_response_utils.hpp"
 #include "pool_executor.hpp"
 #include "retry_handler.hpp"
 #include "url_utils.hpp"
@@ -41,83 +43,6 @@
 class JaegerLogger;
 
 using json = nlohmann::json;
-
-[[nodiscard]] inline std::string
-get_header_value(const httplib::Headers &headers, std::string_view name,
-                 std::string_view default_value = "unknown") {
-  const auto it = headers.find(std::string(name));
-  if (it != headers.end() && !it->second.empty()) {
-    return it->second;
-  }
-  return std::string(default_value);
-}
-
-// C++23 optional монадики: возвращает optional<string_view>, chain via and_then/transform/or_else
-[[nodiscard]] inline std::optional<std::string_view>
-find_header_optional(const httplib::Headers &headers, std::string_view name) {
-  const auto it = headers.find(std::string(name));
-  if (it != headers.end() && !it->second.empty()) {
-    return std::string_view(it->second);
-  }
-  return std::nullopt;
-}
-
-[[nodiscard]] inline std::string shorten_user_agent(std::string_view ua) {
-  constexpr size_t max_len = 80;
-  if (ua.size() <= max_len) {
-    return std::string(ua);
-  }
-
-  struct BrowserPattern {
-    const char *m_marker;
-    const char *m_name;
-  };
-  constexpr BrowserPattern patterns[] = {
-      {"Edg/", "Edge/"},    {"Chrome/", "Chrome/"}, {"Firefox/", "Firefox/"},
-      {"Opera/", "Opera/"}, {"OPR/", "Opera/"},     {"Version/", "Safari/"},
-  };
-  // span<const BrowserPattern> — non-owning view, 0 копий
-  std::span<const BrowserPattern> pat_view(patterns);
-
-  for (const auto &p : pat_view) {
-    const auto pos = ua.find(p.m_marker);
-    if (pos == std::string_view::npos) {
-      continue;
-    }
-    const auto start = pos;
-    auto end = ua.find(' ', start);
-    if (end == std::string_view::npos) {
-      end = ua.size();
-    }
-    return std::string(p.m_name) +
-           std::string(ua.begin() + start + std::strlen(p.m_marker),
-                       ua.begin() + end);
-  }
-
-  // Not a recognized browser or no pattern found — truncate
-  return std::string(ua.substr(0, max_len - 3)) + "...";
-}
-
-inline void set_json_error_response(httplib::Response &res, int status,
-                                     std::string_view message,
-                                     std::string_view request_id = "") {
-  res.status = status;
-  nlohmann::json body;
-  body["error"] = message;
-  if (!request_id.empty()) {
-    body["request_id"] = request_id;
-  }
-  res.set_content(body.dump(), "application/json");
-}
-
-// Serializes a JSON body and sets the application/json content type. Replaces
-// the repeated `res.status = s; res.set_content(body.dump(), "application/json")`
-// idiom so the status+content-type pairing lives in one place.
-inline void send_json_response(httplib::Response &res, int status,
-                              const nlohmann::json &body) {
-  res.status = status;
-  res.set_content(body.dump(), "application/json");
-}
 
 // RAII request prologue shared by every HTTP handler: snapshots the thread-local
 // logger context (LogContextScope) and sets the client IP extracted from the
@@ -159,20 +84,6 @@ inline std::string resolve_parent_id(std::string_view parent_span_id,
                                      std::string_view fallback_parent_id) {
   return parent_span_id.empty() ? std::string(fallback_parent_id)
                                 : std::string(parent_span_id);
-}
-
-inline void set_health_alive(httplib::Response &res,
-                             std::string_view service) {
-  res.status = 200;
-  res.set_content(std::format(R"({{"status": "alive", "service": "{}"}})", service),
-                  "application/json");
-}
-
-inline void set_health_ready(httplib::Response &res,
-                             std::string_view service) {
-  res.status = 200;
-  res.set_content(std::format(R"({{"status": "ready", "service": "{}"}})", service),
-                  "application/json");
 }
 
 std::expected<json, std::string> parse_json(std::string_view body);

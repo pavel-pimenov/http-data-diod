@@ -1,3 +1,37 @@
+# refactor: Раунд C — декомпозиция umbrella-header common_utils.hpp
+
+## Date: 2026-09-04
+
+### Контекст
+Раунд C: `common_utils.hpp` оставался god-header с 307 строками inline-реализаций.
+Часть под-модулей уже была вынесена ранее (base64_utils, error_types, pool_executor,
+retry_handler, url_utils, time_utils, json_utils, header_utils, string_utils). В этом
+раунде вынесены оставшиеся самодостаточные группы в когезивные заголовки; `common_utils.hpp`
+остался тонким umbrella-header, реэкспортирующим их для обратной совместимости.
+
+### Что сделано
+
+**1. HTTP-хелперы работы с заголовками → `header_utils.hpp`** (естественный дом:
+рядом с остальными `httplib::Headers`-утилитами):
+- `get_header_value`, `find_header_optional`, `shorten_user_agent`
+- добавлены `<cstring>`, `<optional>`, `<span>` в header_utils.hpp
+
+**2. JSON-response хелперы → новый `json_response_utils.hpp`**:
+- `set_json_error_response`, `send_json_response`, `set_health_alive`, `set_health_ready`
+
+**3. `common_utils.hpp`** — теперь тонкий umbrella: подключены `header_utils.hpp` и
+`json_response_utils.hpp`, inline-реализации удалены. Размер 307 → 218 строк. Остались
+декларации функций из `common_utils.cpp` (parse/validation/log/error) и тесно связанные
+с prometheus/logger RAII-guard'ы (`ScopedRequestContext`, `RequestScopedTiming`,
+`validate_range`/`validate_positive` — последние используются только в тестах).
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — оба образа собраны, все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor: Раунд B — унифицирован to_lower, централизована навигация body/response
 
 ## Date: 2026-09-04

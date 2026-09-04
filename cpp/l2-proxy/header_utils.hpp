@@ -5,8 +5,11 @@
 #include "logger.hpp"
 #include "string_utils.hpp"
 #include <algorithm>
+#include <cstring>
+#include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -194,5 +197,62 @@ public:
     return ::to_lower(header_name);
   }
 };
+
+// Header-value lookup helpers shared by the request/response paths. Kept here
+// (alongside the other httplib::Headers utilities) so the umbrella common_utils
+// header can re-export them without hosting the implementations.
+[[nodiscard]] inline std::string
+get_header_value(const httplib::Headers &headers, std::string_view name,
+                 std::string_view default_value = "unknown") {
+  const auto it = headers.find(std::string(name));
+  if (it != headers.end() && !it->second.empty()) {
+    return it->second;
+  }
+  return std::string(default_value);
+}
+
+// Returns optional<string_view> so callers can chain via and_then/transform/or_else.
+[[nodiscard]] inline std::optional<std::string_view>
+find_header_optional(const httplib::Headers &headers, std::string_view name) {
+  const auto it = headers.find(std::string(name));
+  if (it != headers.end() && !it->second.empty()) {
+    return std::string_view(it->second);
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] inline std::string shorten_user_agent(std::string_view ua) {
+  constexpr size_t max_len = 80;
+  if (ua.size() <= max_len) {
+    return std::string(ua);
+  }
+
+  struct BrowserPattern {
+    const char *m_marker;
+    const char *m_name;
+  };
+  constexpr BrowserPattern patterns[] = {
+      {"Edg/", "Edge/"},    {"Chrome/", "Chrome/"}, {"Firefox/", "Firefox/"},
+      {"Opera/", "Opera/"}, {"OPR/", "Opera/"},     {"Version/", "Safari/"},
+  };
+  std::span<const BrowserPattern> pat_view(patterns);
+
+  for (const auto &p : pat_view) {
+    const auto pos = ua.find(p.m_marker);
+    if (pos == std::string_view::npos) {
+      continue;
+    }
+    const auto start = pos;
+    auto end = ua.find(' ', start);
+    if (end == std::string_view::npos) {
+      end = ua.size();
+    }
+    return std::string(p.m_name) +
+           std::string(ua.begin() + start + std::strlen(p.m_marker),
+                       ua.begin() + end);
+  }
+
+  return std::string(ua.substr(0, max_len - 3)) + "...";
+}
 
 #endif // HEADER_UTILS_HPP
