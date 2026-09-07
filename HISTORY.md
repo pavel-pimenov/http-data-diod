@@ -1,3 +1,32 @@
+# test(cpp): направление 8a — юнит-тесты наблюдаемости (stats_page / metrics_history)
+
+## Date: 2026-09-07
+
+### Контекст
+Кольцевой буфер `/stats`-страницы (`metrics_history.hpp`) и чистые хелперы
+`stats_page.hpp` (`mh_format_labels`, `parse_stats_window`, `build_sparkline_svg`,
+`escape_html`) не были покрыты тестами, хотя не требовали моков (аннойнимные
+`inline`-функции и registry-конечный класс).
+
+### Что сделано
+- `test_proxy_core.cpp`: новый блок `[stats-*]`/`[metrics-history]`:
+  - `mh_format_labels`: пустые/заполненные метки → `"{job=x, db=main}"`
+  - `parse_stats_window`: default 30, кастомный default, clamping 1..120, не-число
+  - `build_sparkline_svg`: <2 точек → пусто, фильтрация по окну, rate-mode
+    (пересчёт в per-second delta + clamp отрицательных), gauge-mode (raw),
+    плоская линия при нулевом диапазоне
+  - `escape_html`: экранирование `& < > "`
+  - `MetricsHistory`: happy-path со счётчиком Counter (label → ключ `{app=test}`,
+    значение 3.5, has_family после sample-цикла; деструктор стопит jthread)
+- Тесты детерминистичны (float-значения ровные, тайминга нет — опрос до первой
+  выборки с дедлайном)
+
+### Проверка
+- Сборка в контейнере: EXIT=0; `./test_proxy_core` прошёл целиком (цепочка
+  `ninja ... && ./test_components && ./test_proxy_core && cp ...` завершилась DONE)
+- clang-tidy по test_proxy_core.cpp: новые warning-и не появились (3 — pre-existing
+  на строках 554/586/706)
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
 # refactor(cpp): направление 7b — дедупликация http/https-запуска слушателя в main.cpp
 
 ## Date: 2026-09-07

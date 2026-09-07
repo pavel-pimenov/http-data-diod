@@ -869,3 +869,94 @@ TEST_CASE("URL utils: extract_proxy_ip uses local addr", "[url-utils]") {
   req.local_addr = "127.0.0.2";
   REQUIRE(extract_proxy_ip(req) == "127.0.0.2");
 }
+
+// --- Observability page helpers (stats_page.hpp / metrics_history.hpp) ---
+#include "metrics_history.hpp"
+#include "stats_page.hpp"
+#include <map>
+#include <memory>
+
+TEST_CASE("Stats label formatter: empty and populated", "[stats-labels]") {
+  REQUIRE(mh_format_labels({}) == "");
+  const std::vector<prometheus::ClientMetric::Label> labels = {
+      {"job", "x"}, {"db", "main"}};
+  REQUIRE(mh_format_labels(labels) == "{job=x, db=main}");
+}
+
+TEST_CASE("Stats window parsing: defaults and clamping", "[stats-window]") {
+  std::map<std::string, std::string> params;
+  REQUIRE(parse_stats_window(params) == 30);
+  REQUIRE(parse_stats_window(params, 15) == 15);
+  params["window"] = "45";
+  REQUIRE(parse_stats_window(params) == 45);
+  params["window"] = "0";
+  REQUIRE(parse_stats_window(params) == 1);
+  params["window"] = "999";
+  REQUIRE(parse_stats_window(params) == 120);
+  params["window"] = "abc";
+  REQUIRE(parse_stats_window(params) == 30);
+}
+
+TEST_CASE("Sparkline SVG: insufficient samples returns empty", "[stats-svg]") {
+  const std::time_t base = 1'000'000'000;
+  REQUIRE(build_sparkline_svg({}, false, 30) == "");
+  REQUIRE(build_sparkline_svg({{base, 1.0}}, false, 30) == "");
+  // Old points outside the window are filtered out before the size check.
+  REQUIRE(build_sparkline_svg({{base - 3600, 1.0}, {base, 2.0}}, false,
+                              30) == "");
+}
+
+TEST_CASE("Sparkline SVG: rate mode computes per-second deltas", "[stats-svg]") {
+  const std::time_t base = 1'000'000'000;
+  const std::string svg =
+      build_sparkline_svg({{base, 0.0}, {base + 2, 100.0}, {base + 4, 0.0}},
+                          true, 30);
+  REQUIRE(svg.find("<svg class=\"spark\"") == 0);
+  REQUIRE(svg.find("<polyline") != std::string::npos);
+  // rate: (100-0)/2=50 and (0-100)/2=-50 clamped to 0; y from 1 (max) to 25.
+  REQUIRE(svg.find("0,1 188,25") != std::string::npos);
+}
+
+TEST_CASE("Sparkline SVG: gauge mode plots raw values", "[stats-svg]") {
+  const std::time_t base = 1'000'000'000;
+  const std::string flat =
+      build_sparkline_svg({{base, 5.0}, {base + 1, 5.0}, {base + 2, 5.0}},
+                          false, 30);
+  // Flat line: zero range collapses to a straight horizontal line at y=25.
+  REQUIRE(flat.find("0,25 94,25 188,25") != std::string::npos);
+  const std::string ramp =
+      build_sparkline_svg({{base, 0.0}, {base + 1, 0.0}, {base + 2, 48.0}},
+                          false, 30);
+  // min=0 max=48 range=48; x=0/94/188, y: 25, 25, 26-(48/48*24)-1=1.
+  REQUIRE(ramp.find("0,25 94,25 188,1") != std::string::npos);
+}
+
+TEST_CASE("Stats HTML: escape_html escapes markup", "[stats-page]") {
+  REQUIRE(escape_html("<a href=\"x\">&") == "&lt;a href=&quot;x&quot;&gt;&amp;");
+  REQUIRE(escape_html("plain") == "plain");
+}
+
+TEST_CASE("MetricsHistory: ring buffer records a counter family",
+          "[metrics-history]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = prometheus::BuildCounter()
+                     .Name("history_total")
+                     .Help("history test")
+                     .Register(*registry);
+  family.Add({{"app", "test"}}).Increment(3.5);
+
+  MetricsHistory history(registry, std::chrono::seconds(15), 8, 240);
+  history.start();
+  bool sampled = false;
+  for (int i = 0; i < 50 && !sampled; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    sampled = history.has_family("history_total");
+  }
+  history.stop();
+  REQUIRE(sampled);
+  const auto series = history.get_series("history_total", 16);
+  REQUIRE_FALSE(series.empty());
+  REQUIRE(series[0].m_labels == "{app=test}");
+  REQUIRE_FALSE(series[0].m_points.empty());
+  REQUIRE(series[0].m_points.back().second == 3.5);
+}
