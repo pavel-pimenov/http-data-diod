@@ -146,17 +146,24 @@ RUN --mount=type=cache,target=/root/.ccache \
     NINJA_JOBS=$(nproc); if [ "$ENABLE_ASAN" = "true" ]; then NINJA_JOBS=2; fi; echo "ninja jobs: $NINJA_JOBS (nproc $(nproc))" && \
     ninja -j$NINJA_JOBS && \
     _T2=$(date +%s) && \
-    ninja test_components test_proxy_core && \
+    ninja -j$NINJA_JOBS test_components test_proxy_core && \
     _T3=$(date +%s) && \
-    ./test_components && \
-    ./test_proxy_core && \
-    _T4=$(date +%s) && \
     echo "=== build timing ===" && \
     echo "  compile:    $((_T2 - _T1))s" && \
     echo "  test build: $((_T3 - _T2))s" && \
-    echo "  test run:   $((_T4 - _T3))s" && \
-    echo "  total:      $((_T4 - _T1))s" && \
     mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy
+
+# Unit tests run in their own RUN step (same build dir via the cache mount):
+# the results stay at the end of the build output instead of scrolling past a
+# clean build's compile progress, and the test gate becomes a separate cachable
+# step that re-runs only when the sources (parent layers) actually changed.
+RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
+    cd /app/build && \
+    _T4=$(date +%s) && \
+    ./test_components && \
+    ./test_proxy_core && \
+    _T5=$(date +%s) && \
+    echo "=== unit tests: $((_T5 - _T4))s, all passed ==="
 
 # Keep debug info (DWARF) for crash handler stack trace resolution
 
