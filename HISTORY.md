@@ -1,3 +1,32 @@
+# refactor(cpp): направление 5a — вынос GET /v1/sql/ listing из handle_db_gateway
+
+## Date: 2026-09-07
+
+### Контекст
+`handle_db_gateway` (133 строки) — роутер DB-gateway с inline-веткой GET-listing
+(~17 строк). Ветка издайтична (config + HTTP, без NATS) — её можно вынести в
+самостоятельный метод, пригодный для юнит-тестов.
+
+### Что сделано
+- ветка `parsed.m_is_list` → новый метод `handle_db_gateway_list(res, method,
+  path, start_us, trace_ctx, request_id)`: 405 для non-GET (через
+  `send_db_gateway_error` + counter) или JSON-список датabases при GET
+- перенос 1-в-1; вызов в `handle_db_gateway` заменён на
+  `handle_db_gateway_list(...); return;`
+- лямбда `record_gateway_metrics` стала неиспользуемой вне `reject_gateway` —
+  инлайнен её вызов прямо в `reject_gateway` (убрано ~7 строк boilerplate);
+  поясняющий комментарий про общий счётчик с `route_db_request` перенесён и
+  обновлён в комментарии `reject_gateway`
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+- `GET /v1/sql/` → `{"databases":[{"driver":"oracle","enabled":true,"name":"oracle"}]}`
+
+---
+
 # refactor(cpp): направление 4d — вынос subscribe-лямбд из run_with_nats
 
 ## Date: 2026-09-07

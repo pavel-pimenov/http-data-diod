@@ -130,6 +130,13 @@ private:
                              const std::string &method, const std::string &path,
                              uint64_t start_us, const TraceContext &trace_ctx,
                              const std::string &request_id);
+  // GET /v1/sql listing: 405 for non-GET, otherwise the configured databases
+  // as a JSON array (pure config + HTTP, no NATS round-trip).
+  void handle_db_gateway_list(httplib::Response &res,
+                              const std::string &method,
+                              const std::string &path, uint64_t start_us,
+                              const TraceContext &trace_ctx,
+                              const std::string &request_id);
   // Sends a validated DbQueryContract request to the DB subject, logs the
   // NATS round-trip span and applies the worker's {status, body} envelope to
   // the HTTP response.

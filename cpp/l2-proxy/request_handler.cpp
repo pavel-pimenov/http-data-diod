@@ -646,26 +646,18 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                            trace_ctx.m_sampled);
   };
 
-  // Same request counter as route_db_request uses, so pre-routing failures
-  // (404/405/400) and the /v1/sql/ listing are counted alongside the
-  // NATS-routed requests and the metric reflects the real gateway traffic.
-  // Only the counter is updated: these requests never reach NATS, so no
-  // duration histogram is observed for them.
-  auto record_gateway_metrics = [this](const std::string &db,
-                                       const std::string &type, int status) {
-    record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total,
-                              db, type, status);
-  };
-
   // Combined error path used by every pre-routing rejection: logs the Jaeger
-  // proxy-response span, writes the JSON error body and bumps the counter —
-  // the same triple all the duplicate if/return blocks used to repeat by hand.
+  // proxy-response span, writes the JSON error body and bumps the counter.
+  // The counter is the same one route_db_request uses, so pre-routing failures
+  // (404/405/400) are counted alongside the NATS-routed requests; these paths
+  // never reach NATS, so no duration histogram is observed for them.
   auto reject_gateway = [&](int status, const std::string &code,
                             const std::string &message, const std::string &db,
                             const std::string &type) {
     send_db_gateway_error(res, status, code, message, method, req.path,
                           start_us, trace_ctx, request_id);
-    record_gateway_metrics(db, type, status);
+    record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total,
+                              db, type, status);
   };
 
   if (!m_ctx.m_config.m_db_query_enabled) {
@@ -678,19 +670,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
           req.path.substr(std::string(kDbGatewayPath).size())));
 
   if (parsed.m_is_list) {
-    if (method != "GET") {
-      reject_gateway(405, "METHOD_NOT_ALLOWED", "Use GET", "", "list");
-      return;
-    }
-    json names = json::array();
-    for (const DbConfig &db : m_ctx.m_config.m_databases) {
-      names.push_back(json{{"name", db.m_name},
-                           {"driver", db.m_driver},
-                           {"enabled", true}});
-    }
-    res.status = 200;
-    send_json_response(res, res.status, json{{"databases", names}});
-    record_gateway_metrics("", "list", 200);
+    handle_db_gateway_list(res, method, req.path, start_us, trace_ctx,
+                           request_id);
     return;
   }
 
@@ -750,6 +731,29 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                    method_decision.m_message, db_name, action);
     return;
   }
+}
+
+void RequestHandler::handle_db_gateway_list(
+    httplib::Response &res, const std::string &method,
+    const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
+    const std::string &request_id) {
+  if (method != "GET") {
+    send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
+                          path, start_us, trace_ctx, request_id);
+    record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
+                              "list", 405);
+    return;
+  }
+  json names = json::array();
+  for (const DbConfig &db : m_ctx.m_config.m_databases) {
+    names.push_back(json{{"name", db.m_name},
+                         {"driver", db.m_driver},
+                         {"enabled", true}});
+  }
+  res.status = 200;
+  send_json_response(res, res.status, json{{"databases", names}});
+  record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
+                            "list", 200);
 }
 
 void RequestHandler::send_db_gateway_error(
