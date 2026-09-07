@@ -21,6 +21,7 @@ public:
   json execute_query(const std::string &sql, const json &params, int timeout_ms,
                      int max_rows, int &status_code) override;
   bool ping(int timeout_ms) override;
+  [[nodiscard]] bool is_ready() const override;
 
 protected:
   void refresh_pool_gauges() override;
@@ -33,8 +34,12 @@ private:
   // arrive only after init() returns, so until this flips they are answered
   // with DB_UNAVAILABLE instead of touching a not-yet-created pool.
   std::atomic<bool> m_ready{false};
+  // Set on destruction: the background thread stops retrying and, when not
+  // parked in a blocked ODPI call, exits so the destructor's join() returns.
+  std::atomic<bool> m_stop{false};
   // Runs the (potentially long) ODPI pool creation off the worker main loop so
   // an unreachable Oracle host cannot block the worker's NATS subscription.
+  // Retries on its own until the pool is created or destruction is requested.
   std::thread m_init_thread;
 
   // Returns the pooled connection to the pool and refreshes pool gauges.
@@ -45,5 +50,9 @@ private:
   // ping).
   struct ConnGuard;
 };
+
+// Poll interval between background ODPI pool creation retries when Oracle is
+// unreachable (the first attempt may block for minutes inside OCI).
+inline constexpr int g_oracle_init_retry_seconds = 5;
 
 #endif // DB_QUERY_EXECUTOR_ORACLE_HPP

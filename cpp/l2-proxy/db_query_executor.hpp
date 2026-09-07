@@ -23,6 +23,12 @@ public:
   // before execute_query()/ping().
   virtual bool init() = 0;
 
+  // True when the driver is fully initialized and can serve requests.
+  // Synchronous drivers are always ready after init(); async ones (Oracle
+  // inits the ODPI pool on a background thread) report readiness only once
+  // the pool exists.
+  [[nodiscard]] virtual bool is_ready() const { return true; }
+
   // Configured defaults applied when a request does not override them.
   [[nodiscard]] virtual int default_timeout_ms() const = 0;
   [[nodiscard]] virtual int default_max_rows() const = 0;

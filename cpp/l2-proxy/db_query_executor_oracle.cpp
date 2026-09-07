@@ -6,11 +6,13 @@
 #include <base64.hpp>
 #include <dpi.h>
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <format>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -177,17 +179,29 @@ struct OracleQueryExecutor::Impl {
                        m_error_info.fnName ? m_error_info.fnName : "");
   }
 
-  bool init() {
-    if (dpiContext_create(DPI_MAJOR_VERSION, DPI_MINOR_VERSION, &m_context,
+  // Creates the ODPI context and connection pool. Idempotent: a successful
+  // attempt leaves m_pool set and is a no-op when called again. On failure
+  // logs at error level only while log_errors is true (the background retries
+  // resurface the fatal message as a single warning, not once per attempt).
+  bool init(bool log_errors) {
+    if (m_pool) {
+      return true;
+    }
+    if (!m_context &&
+        dpiContext_create(DPI_MAJOR_VERSION, DPI_MINOR_VERSION, &m_context,
                           &m_error_info) < 0) {
-      Logger::error("DB executor '{}': failed to create ODPI-C context: {}",
-                    m_db.m_name, describe_error());
+      if (log_errors) {
+        Logger::error("DB executor '{}': failed to create ODPI-C context: {}",
+                      m_db.m_name, describe_error());
+      }
       return false;
     }
     dpiPoolCreateParams pool_params{};
     if (dpiContext_initPoolCreateParams(m_context, &pool_params) < 0) {
-      Logger::error("DB executor '{}': failed to init pool params: {}",
-                    m_db.m_name, describe_error());
+      if (log_errors) {
+        Logger::error("DB executor '{}': failed to init pool params: {}",
+                      m_db.m_name, describe_error());
+      }
       return false;
     }
     pool_params.minSessions = 0;
@@ -204,8 +218,10 @@ struct OracleQueryExecutor::Impl {
                        connect_string.data(),
                        static_cast<uint32_t>(connect_string.size()), nullptr,
                        &pool_params, &m_pool) < 0) {
-      Logger::error("DB executor '{}': failed to create pool for '{}': {}",
-                    m_db.m_name, connect_string, describe_error());
+      if (log_errors) {
+        Logger::error("DB executor '{}': failed to create pool for '{}': {}",
+                      m_db.m_name, connect_string, describe_error());
+      }
       return false;
     }
     Logger::info("DB executor '{}': pool ready (0..{} sessions, connect {})",
@@ -259,28 +275,45 @@ OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
       m_impl(std::make_unique<Impl>(m_db, this)) {}
 
 OracleQueryExecutor::~OracleQueryExecutor() {
+  m_stop.store(true, std::memory_order_release);
   if (m_init_thread.joinable()) {
     m_init_thread.join();
   }
 }
 
-// Runs the driver pool/context creation on a detached-from-caller background
-// thread: dpiPool_create can block for a long time when the Oracle host is
-// unreachable, and blocking the worker's main loop here would stall the NATS
-// subscription (and thus the whole HTTP flow) until the DB becomes reachable.
-// Returns true once the thread is scheduled so the caller registers the
-// executor immediately; queries are answered with DB_UNAVAILABLE until
-// m_ready flips.
+// Runs the driver pool/context creation on a background thread: dpiPool_create
+// can block for a long time when the Oracle host is unreachable, and blocking
+// the worker's main loop here would stall the NATS subscription (and thus the
+// whole HTTP flow) until the DB becomes reachable. Returns true once the
+// thread is scheduled so the caller registers the executor immediately; the
+// thread keeps retrying until the pool exists or the executor is destroyed,
+// and queries are answered with DB_UNAVAILABLE until m_ready flips.
 bool OracleQueryExecutor::init() {
   if (m_init_thread.joinable()) {
     return true;
   }
   m_init_thread = std::thread([this]() {
-    if (m_impl->init()) {
-      m_ready.store(true, std::memory_order_release);
+    bool first_attempt = true;
+    while (!m_stop.load(std::memory_order_acquire)) {
+      if (m_impl->init(first_attempt)) {
+        Logger::info("DB executor '{}': background init succeeded",
+                     m_impl->m_db.m_name);
+        m_ready.store(true, std::memory_order_release);
+        return;
+      }
+      first_attempt = false;
+      if (m_stop.load(std::memory_order_acquire)) {
+        return;
+      }
+      std::this_thread::sleep_for(
+          std::chrono::seconds(g_oracle_init_retry_seconds));
     }
   });
   return true;
+}
+
+[[nodiscard]] bool OracleQueryExecutor::is_ready() const {
+  return m_ready.load(std::memory_order_acquire);
 }
 
 void OracleQueryExecutor::release_conn(dpiConn *conn) {

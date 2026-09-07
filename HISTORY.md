@@ -1,3 +1,34 @@
+# fix(cpp): самовосстанавливающийся фоновый init oracle + неблокирующийся DbQueryHandler::init
+
+## Date: 2026-09-07
+
+### Контекст
+После перевода `OracleQueryExecutor::init()` на фоновый поток (round 8h) остался
+пробел: executor регистрируется сразу, но если фоновый init стабильно падал,
+oracle оставался зарегистрированным навсегда (503 без повторных попыток).
+Кроме того `DbQueryHandler::init()` держал m_mutex на протяжении
+create+init(), то есть ~10-секундный libpq-коннект (недоступный postgres)
+блокировал бы dispatch запросов на pool-тредах.
+
+### Что сделано
+- `db_query_executor_oracle.{hpp,cpp}`: фоновый поток теперь самовосстанавливается —
+  ретраит `Impl::init()` каждые `g_oracle_init_retry_seconds`=5с до готовности
+  или до удаления executor-а (`m_stop`). `Impl::init()` идемпотентен (пул создан → no-op)
+  и логирует ошибку только на первой попытке (последующие тихо; успех — info).
+  `is_ready()` (override) отдаёт `m_ready`.
+- `db_query_executor.hpp`: виртуальный `is_ready()` (default true; async-драйверы
+  переопределяют).
+- `db_query_handler.cpp`: `init()` больше не держит `m_mutex` внутри
+  create/init экзекутора (проверка presence и try_emplace под мьютексом,
+  само создание — вне его); `is_enabled()/all_configured()/handle_request()`
+  сериализуются прежним `m_mutex`.
+
+### Проверка
+- E2E: postgres ping → 200; oracle (сервис не запущен) → 503 DB_UNAVAILABLE,
+  ретрай-цикл фонового init не спамит лог (worker log стабилен).
+- `./rebuild-and-run.sh` → 11 healthy; `message_counter.py` → no message loss.
+- clang-tidy: только ODPI-заголовок (исключён), по проекту чисто.
+
 # feat(cpp): включение DB-гейтвея для postgres E2E (async init oracle + fast/slow-decoupling)
 
 ## Date: 2026-09-07

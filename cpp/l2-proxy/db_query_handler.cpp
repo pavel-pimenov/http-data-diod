@@ -6,12 +6,20 @@
 #include <format>
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
-  std::lock_guard lock(m_mutex);
-  m_expected_count = databases.size();
+  {
+    std::lock_guard lock(m_mutex);
+    m_expected_count = databases.size();
+  }
   for (const DbConfig &db : databases) {
-    if (m_executors.contains(db.m_name)) {
-      continue;
+    {
+      std::lock_guard lock(m_mutex);
+      if (m_executors.contains(db.m_name)) {
+        continue;
+      }
     }
+    // Created outside the lock: creating an executor may block (libpq connect
+    // probe, ODPI pool creation), so holding m_mutex across it would stall
+    // request dispatch on the pool threads.
     auto executor = create_db_query_executor(db);
     if (!executor || !executor->init()) {
       Logger::error("DB handler: failed to init executor for database '{}', "
@@ -20,8 +28,12 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
       continue;
     }
     executor->set_pool_metrics(m_pool_metrics);
-    m_executors.try_emplace(db.m_name, std::move(executor));
+    std::lock_guard lock(m_mutex);
+    if (!m_executors.contains(db.m_name)) {
+      m_executors.try_emplace(db.m_name, std::move(executor));
+    }
   }
+  std::lock_guard lock(m_mutex);
   if (m_executors.empty()) {
     Logger::warn("DB handler: no database executor initialized");
     return false;
