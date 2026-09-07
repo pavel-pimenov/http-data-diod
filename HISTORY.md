@@ -1,3 +1,28 @@
+# test(cpp): направление 8d — юнит-тесты RetryHandler + доводка clang-tidy до нуля
+
+## Date: 2026-09-07
+
+### Контекст
+`RetryHandler` (экспоненциальный backoff, используется в `run_with_nats` и
+`NatsPollService`) не был покрыт юнитами (тесты были только у
+`calculate_jitter_delay` и `CircuitBreaker`). Кроме того, в lint-ране
+всплыли последние 3 pre-existing warning-а (rate_limiter, rate_limiter_per_ip,
+test_components).
+
+### Что сделано
+- `test_components.cpp`: блок `[retry-handler]` — начальная задержка (явная и
+  default-ы), doubling до капа (10→100 с проверкой переполнения), счётчик
+  подряд идущих фейлов, reset полного успеха (задержка + счётчик), фикс
+  pre-existing `static_cast` → `const auto` (строка 1759)
+- `rate_limiter.hpp`: `const uint64_t ticks` → `const auto` (cast-init)
+- `rate_limiter_per_ip.hpp`: jthread-лямбда `std::stop_token st` →
+  `const std::stop_token &st` (performance-unnecessary-value-param)
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по test_components/rate_limiter/rate_limiter_per_ip: нет
+  errors/warnings
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
 # refactor(cpp): направление 8b — вынос ensure_db_query_subscription из run_with_nats
 
 ## Date: 2026-09-07

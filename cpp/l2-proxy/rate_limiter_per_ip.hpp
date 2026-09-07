@@ -221,7 +221,7 @@ private:
   }
 
   void start_background_cleanup() {
-    m_cleanup_thread = std::jthread([this](std::stop_token st) {
+    m_cleanup_thread = std::jthread([this](const std::stop_token &st) {
       Logger::debug("PerIPRateLimiter: background cleanup thread started");
       const int cleanup_every_seconds = m_cleanup_interval_seconds / 2 + 1;
       while (!st.stop_requested()) {

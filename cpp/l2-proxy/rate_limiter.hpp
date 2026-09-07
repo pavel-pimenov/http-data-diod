@@ -83,7 +83,7 @@ private:
                              .count();
 
     if (elapsed >= 1000) {
-      const uint64_t ticks = static_cast<uint64_t>(elapsed / 1000);
+      const auto ticks = static_cast<uint64_t>(elapsed / 1000);
       const uint64_t tokens_to_add = ticks * m_refill_tokens_per_second;
       // CAS loop so concurrent acquire() decrements are not lost.
       uint64_t cur = m_tokens.load(std::memory_order_relaxed);

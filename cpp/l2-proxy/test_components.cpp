@@ -13,6 +13,7 @@
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "request_id_generator.hpp"
+#include "retry_handler.hpp"
 #include "retry_utils.hpp"
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
@@ -1755,8 +1756,7 @@ TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
   REQUIRE(cb.allow_request() == false);
 
   // Simulate the timeout having elapsed by backdating m_last_failure_time_us.
-  const uint64_t now_us =
-      static_cast<uint64_t>(TimeUtils::epoch_us());
+  const auto now_us = static_cast<uint64_t>(TimeUtils::epoch_us());
   cb.m_last_failure_time_us.store(
       now_us - CircuitBreaker::g_open_timeout_us - 1000);
   REQUIRE(cb.allow_request() == true);
@@ -2365,6 +2365,42 @@ TEST_CASE("Common utils: setup_ssl_client tolerates a missing CA bundle",
   httplib::SSLClient client("example.com", 443);
   REQUIRE_NOTHROW(setup_ssl_client(client, 10, true, true, "/no/such/ca.pem",
                                    true));
+}
+
+TEST_CASE("RetryHandler: starts at the initial delay", "[retry-handler]") {
+  RetryHandler backoff(50, 2000);
+  REQUIRE(backoff.get_current_delay_ms() == 50);
+  REQUIRE(backoff.get_consecutive_failures() == 0);
+  RetryHandler defaults;
+  REQUIRE(defaults.get_current_delay_ms() == 100);
+  REQUIRE(defaults.get_consecutive_failures() == 0);
+}
+
+TEST_CASE("RetryHandler: failures double the delay up to the cap",
+          "[retry-handler]") {
+  RetryHandler backoff(10, 100);
+  int expected = 10;
+  for (int i = 0; i < 8; ++i) {
+    backoff.record_failure();
+    expected = std::min(expected * 2, 100);
+    REQUIRE(backoff.get_current_delay_ms() == expected);
+    REQUIRE(backoff.get_consecutive_failures() == i + 1);
+  }
+  backoff.record_failure();
+  REQUIRE(backoff.get_current_delay_ms() == 100);
+  REQUIRE(backoff.get_consecutive_failures() == 9);
+}
+
+TEST_CASE("RetryHandler: success resets the delay and failure count",
+          "[retry-handler]") {
+  RetryHandler backoff(10, 100);
+  backoff.record_failure();
+  backoff.record_failure();
+  REQUIRE(backoff.get_current_delay_ms() == 40);
+  REQUIRE(backoff.get_consecutive_failures() == 2);
+  backoff.record_success();
+  REQUIRE(backoff.get_current_delay_ms() == 10);
+  REQUIRE(backoff.get_consecutive_failures() == 0);
 }
 
 
