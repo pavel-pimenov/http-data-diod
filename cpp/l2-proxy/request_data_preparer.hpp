@@ -1,9 +1,9 @@
 #ifndef REQUEST_DATA_PREPARER_HPP
 #define REQUEST_DATA_PREPARER_HPP
 
-#include "common_utils.hpp"
 #include "httplib/httplib.h"
 #include <nlohmann/json.hpp>
+#include <string>
 
 // Prepare request data for backend
 nlohmann::json prepare_request_data(const std::string &request_id,

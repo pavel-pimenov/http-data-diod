@@ -446,6 +446,7 @@ if(BUILD_TESTS)
         http_client.cpp
         http_client_pool.cpp
         request_id_generator.cpp
+        request_data_preparer.cpp
         httplib/httplib.cc
     )
     target_include_directories(test_components PRIVATE

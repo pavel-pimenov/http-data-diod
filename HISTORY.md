@@ -1,3 +1,34 @@
+# test(cpp): направление 8e — юнит-тесты prepare_request_data + чистка include-графа
+
+## Date: 2026-09-07
+
+### Контекст
+`prepare_request_data` (сборка NATS-конверта запроса: request_id/method/path/
+query/client_ip/proxy_ip/body/headers) не имела тестов композиции — отдельные
+хелперы (extract_client_ip/query/proxy_ip) уже покрыты в test_proxy_core.
+Функция живёт в .cpp, поэтому тесты размещены в test_components, который явно
+компилирует production-файлы.
+
+### Что сделано
+- `test_components.cpp`: три теста `[request-data]` с ключами через
+  `NatsContract::k*`:
+  - полный конверт (request_id/method/path/query/клиентский и прокси IP/
+    traceparent/body, форвардинг x-custom, отбрасывание host)
+  - все заголовки в skip-списке → ключ `headers` отсутствует
+  - чувствительные заголовки (authorization/x-api-key) всё равно пробрасываются
+    (редектируются только логи)
+- `CMakeLists.txt`: `request_data_preparer.cpp` добавлен в sources
+  test_components
+- `request_data_preparer.hpp`: unusable include `common_utils.hpp` заменён на
+  `<string>` (заголовок подключает только то, что реально использует).
+  Побочно это вскрыло латентную зависимость test_proxy_core от
+  CPPHTTPLIB_OPENSSL_SUPPORT (объявление `httplib::SSLClient` в
+  common_utils.hpp) — до этого TU его не подтягивал транзитивно.
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по test_components/request_data_preparer: нет errors/warnings
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
 # test(cpp): направление 8d — юнит-тесты RetryHandler + доводка clang-tidy до нуля
 
 ## Date: 2026-09-07

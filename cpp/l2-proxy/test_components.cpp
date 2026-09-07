@@ -13,6 +13,7 @@
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "request_id_generator.hpp"
+#include "request_data_preparer.hpp"
 #include "retry_handler.hpp"
 #include "retry_utils.hpp"
 #include "thread_pool.hpp"
@@ -2401,6 +2402,59 @@ TEST_CASE("RetryHandler: success resets the delay and failure count",
   backoff.record_success();
   REQUIRE(backoff.get_current_delay_ms() == 10);
   REQUIRE(backoff.get_consecutive_failures() == 0);
+}
+
+TEST_CASE("Request data: prepare_request_data assembles the full envelope",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.local_addr = "127.0.0.1";
+  req.target = "/v1/sql/oracle/query?a=1&b=2";
+  req.headers.emplace("x-real-ip", "1.2.3.4");
+  req.headers.emplace("x-custom", "keep-me");
+  req.headers.emplace("host", "example.com");
+
+  const auto data =
+      prepare_request_data("req-1", "POST", "/v1/sql/oracle/query",
+                           "{\"q\":1}", req, "00-ab-cd-01");
+
+  REQUIRE(data[NatsContract::kRequestId] == "req-1");
+  REQUIRE(data[NatsContract::kMethod] == "POST");
+  REQUIRE(data[NatsContract::kPath] == "/v1/sql/oracle/query");
+  REQUIRE(data[NatsContract::kQuery] == "a=1&b=2");
+  REQUIRE(data[NatsContract::kClientIp] == "1.2.3.4");
+  REQUIRE(data[NatsContract::kProxyIp] == "127.0.0.1");
+  REQUIRE(data[NatsContract::kTraceparent] == "00-ab-cd-01");
+  REQUIRE(data[NatsContract::kBody] == "{\"q\":1}");
+  REQUIRE(data[NatsContract::kHeaders]["x-custom"] == "keep-me");
+  REQUIRE_FALSE(data[NatsContract::kHeaders].contains("host"));
+}
+
+TEST_CASE("Request data: prepare_request_data omits headers when all are "
+          "skipped", "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("host", "example.com");
+  req.headers.emplace("content-length", "10");
+
+  const auto data =
+      prepare_request_data("req-2", "GET", "/v1/sql/oracle/ping", "", req,
+                           "00-ab-cd-01");
+  REQUIRE_FALSE(data.contains(NatsContract::kHeaders));
+  REQUIRE(data[NatsContract::kClientIp] == "9.9.9.9");
+  REQUIRE(data[NatsContract::kBody] == "");
+}
+
+TEST_CASE("Request data: sensitive headers are still forwarded",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("authorization", "Bearer abc");
+  req.headers.emplace("x-api-key", "secret");
+
+  const auto data = prepare_request_data("req-3", "GET", "/x", "", req, "");
+  REQUIRE(data[NatsContract::kHeaders]["authorization"] == "Bearer abc");
+  REQUIRE(data[NatsContract::kHeaders]["x-api-key"] == "secret");
 }
 
 
