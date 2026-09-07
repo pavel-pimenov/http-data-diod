@@ -1,3 +1,47 @@
+# chore(cpp): урезание вендоренного civetweb до минимальной отдачи метрик
+
+## Date: 2026-09-07
+
+### Контекст
+`prometheus-cpp/3rdparty/civetweb` используется только как HTTP-сервер для
+`/metrics`. Пользователь попросил удалить лишние `.inl`-файлы (в частности
+`http2.inl`, `handle_form.inl`), чтобы уменьшить вендоренный код до
+необходимого минимума.
+
+### Анализ
+Сборка `proj_civetweb` (CMakeLists.txt l2-proxy) идёт с флагами
+`NO_SSL NO_SSL_DL NO_CGI NO_FILES NO_CACHING NO_FILESYSTEMS
+MG_EXTERNAL_FUNCTION_mg_cry_internal_impl MG_EXTERNAL_FUNCTION_log_access`.
+В `civetweb.c` подключения `.inl` стоят под макросами фич:
+- выключены в этой конфигурации (файл можно удалить): `http2.inl`
+  (`USE_HTTP2`), `mod_mbedtls.inl` (`USE_MBEDTLS`), `wolfssl_extras.inl`
+  (`WOLFSSL_VERSION`), `openssl_dl.inl` (ветка `#else` SSL-блока, у нас
+  `NO_SSL`), `mod_zlib.inl` (`USE_ZLIB`), `timer.inl` (`USE_TIMERS`,
+  выставляется только при `USE_LUA`), `mod_lua.inl`/`mod_duktape.inl`
+  (`USE_LUA`/`USE_DUKTAPE`), `sha1.inl` (`!NO_SSL_DL`).
+- нужны (безусловный инклюд): `md5.inl` (digest auth), `sort.inl`,
+  `match.inl`, `response.inl`.
+- кастомные no-op под `MG_EXTERNAL_FUNCTION_*` (уже были адаптированы под
+  metrics-only): `external_mg_cry_internal_impl.inl`,
+  `external_log_access.inl`.
+
+### Что сделано
+- Удалены: `http2.inl`, `mod_zlib.inl`, `timer.inl`, `handle_form.inl`.
+  (`mod_mbedtls.inl`, `wolfssl_extras.inl`, `openssl_dl.inl`, `mod_lua.inl`,
+  `mod_duktape.inl`, `sha1.inl` уже отсутствовали в копии — подтверждает
+  их ненужность при данных флагах.)
+- `civetweb.c`: убран безусловный `#include "handle_form.inl"` (+ комментарий
+  «mg_upload superseded»); функции формы в проекте нигде не используются
+  (проверено: только объявление в `civetweb.h`, ссылок из кода нет).
+- HISTORY.md: этот раздел.
+
+### Проверка
+- Оставшиеся инклюды `.inl` в `civetweb.c` проверены на существование:
+  только файлы с выключенными фича-макросами отсутствуют (препроцессор их
+  не открывает) + хидеры из include-путей.
+- `./rebuild-and-run.sh` + `python3 message_counter.py --iterations 1
+  --concurrent 1` — см. результат ниже в логе сборки.
+
 # chore(cpp): 8u — наблюдаемость DB-гейтвея: готовность по каждой БД
 
 ## Date: 2026-09-07
