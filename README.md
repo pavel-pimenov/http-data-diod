@@ -385,6 +385,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_db_requests_total` | counter | `db`,`type`,`status` | Запросы DB Gateway (воркер) |
 | `l2_worker_db_query_duration_seconds` | histogram | `db` | Длительность SQL-запроса (воркер) |
 | `l2_worker_db_pool_connections` | gauge | `db`,`state` | Соединения пула СУБД (active/idle) |
+| `l2_worker_db_gateway_ready` | gauge | `db` | Готовность экзекутора DB Gateway (1=жив, 0=стартует) |
 | `l2_worker_responses_total` | counter | `status` | Ответы воркера по NATS по статусу |
 | `l2_worker_in_flight_requests` | gauge | — | Обрабатываемые запросы |
 | `l2_worker_queue_size` | gauge | — | Глубина очереди пула потоков |

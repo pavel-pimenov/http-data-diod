@@ -223,6 +223,10 @@ void AppContext::init_worker_metrics() {
            m_worker_registry, "l2_worker_db_pool_connections",
            "Current number of DB pool connections by database and state "
            "(active/idle)"),
+       MetricsManager::create_gauge_family(
+           m_worker_registry, "l2_worker_db_gateway_ready",
+           "DB Gateway readiness per configured database (1 = executor live, "
+           "0 = still starting up)"),
        MetricsManager::create_counter_family(
            m_worker_registry, "l2_worker_responses_total",
            "Total number of worker NATS responses by HTTP status code"),

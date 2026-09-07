@@ -9,6 +9,11 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   {
     std::lock_guard lock(m_mutex);
     m_expected_count = databases.size();
+    m_configured_names.clear();
+    m_configured_names.reserve(databases.size());
+    for (const DbConfig &db : databases) {
+      m_configured_names.push_back(db.m_name);
+    }
   }
   for (const DbConfig &db : databases) {
     {
@@ -46,6 +51,22 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
 void DbQueryHandler::set_pool_metrics(
     prometheus::Family<prometheus::Gauge> *pool_metrics) {
   m_pool_metrics = pool_metrics;
+}
+
+std::vector<std::string> DbQueryHandler::configured_databases() const {
+  std::lock_guard lock(m_mutex);
+  return m_configured_names;
+}
+
+std::vector<std::string> DbQueryHandler::ready_databases() const {
+  std::lock_guard lock(m_mutex);
+  std::vector<std::string> names;
+  names.reserve(m_executors.size());
+  for (const auto &[name, executor] : m_executors) {
+    (void)executor;
+    names.push_back(name);
+  }
+  return names;
 }
 
 void DbQueryHandler::handle_request(const json &request, int &status_code,

@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <variant>
+#include <vector>
 #if __has_include(<flat_map>)
 #include <flat_map>
 #endif
@@ -42,6 +43,13 @@ public:
     return m_expected_count > 0 && m_executors.size() >= m_expected_count;
   }
 
+  // Names of every configured database. Used for the per-database gateway
+  // readiness gauge so a slow-starting database is visible before init().
+  [[nodiscard]] std::vector<std::string> configured_databases() const;
+
+  // Names of configured databases that have a live executor already.
+  [[nodiscard]] std::vector<std::string> ready_databases() const;
+
   // Executes one DbQueryContract request. Fills status_code with the HTTP
   // status of the DB gateway response and body with its JSON body
   // (success body or ErrorResponse object).
@@ -67,6 +75,9 @@ private:
   // with reads of m_executors.
   mutable std::mutex m_mutex;
   size_t m_expected_count = 0;
+  // Insertion-ordered configured database names (mirrors m_expected_count);
+  // kept so readiness can be reported for databases that have no executor yet.
+  std::vector<std::string> m_configured_names;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 };
 

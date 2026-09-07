@@ -117,6 +117,9 @@ private:
   void metrics_ticker_loop(const std::stop_token &st);
   // Samples the thread-pool queue depth into the worker queue-size gauge.
   void update_queue_size_metric();
+  // Publishes the per-database DB Gateway readiness gauge for every configured
+  // database (1 = executor live, 0 = still starting up).
+  void publish_db_gateway_ready_metric();
   // Records the outgoing NATS response payload size into m_bytes_sent.
   void record_bytes_sent(size_t bytes);
 

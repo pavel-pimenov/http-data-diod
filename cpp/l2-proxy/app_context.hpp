@@ -86,6 +86,9 @@ struct WorkerMetrics {
   prometheus::Family<prometheus::Counter> &m_db_requests_total;
   prometheus::Family<prometheus::Histogram> &m_db_query_duration_seconds;
   prometheus::Family<prometheus::Gauge> &m_db_pool_connections;
+  // DB Gateway readiness per configured database (1 = executor live,
+  // 0 = still starting up). Lets observability expose slow cold-starts.
+  prometheus::Family<prometheus::Gauge> &m_db_gateway_ready;
   // HTTP responses sent back over NATS by status code (per-status breakdown).
   prometheus::Family<prometheus::Counter> &m_responses_total;
   // In-flight requests currently processed by the worker (saturation).

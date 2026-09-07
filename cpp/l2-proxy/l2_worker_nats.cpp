@@ -9,6 +9,7 @@
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 #include <base64.hpp>
+#include <algorithm>
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -155,19 +156,26 @@ void L2Worker::run_with_nats() {
     // one (e.g. PostgreSQL) is never blocked by a slow one; per-request
     // dispatch answers DB_UNAVAILABLE/UNKNOWN_DATABASE for databases whose
     // executor is not up yet.
-    if (m_nats_client && m_nats_client->is_connected() && subscription_active &&
-        !db_subscription_active) {
-      db_subscription_active = ensure_db_query_subscription(backoff);
-    } else if (m_nats_client && m_nats_client->is_connected() &&
-               subscription_active && db_subscription_active &&
-               m_db_query_handler && !m_db_query_handler->all_configured() &&
-               ++m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
-      // Pick up databases that came up after the subscription became active
-      // (e.g. Oracle cold start): init() is incremental and only creates the
-      // missing executors, so this never disturbs already-served databases.
-      Logger::info("DB gateway: retrying init for {} configured database(s)",
-                   m_ctx.m_config.m_databases.size());
-      m_db_query_handler->init(m_ctx.m_config.m_databases);
+    if (m_nats_client && m_nats_client->is_connected()) {
+      // Per-database gateway readiness: publish independent of subscription so
+      // a fully-down set of databases still shows 0 for each configured name.
+      publish_db_gateway_ready_metric();
+      if (subscription_active) {
+        if (!db_subscription_active) {
+          db_subscription_active = ensure_db_query_subscription(backoff);
+        } else if (m_db_query_handler &&
+                   !m_db_query_handler->all_configured() &&
+                   ++m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
+          // Pick up databases that came up after the subscription became
+          // active (e.g. Oracle cold start): init() is incremental and only
+          // creates the missing executors, so this never disturbs
+          // already-served databases.
+          Logger::info("DB gateway: retrying init for {} configured "
+                       "database(s)",
+                       m_ctx.m_config.m_databases.size());
+          m_db_query_handler->init(m_ctx.m_config.m_databases);
+        }
+      }
     }
 
     if (m_nats_client && !m_nats_client->is_connected()) {
@@ -590,4 +598,18 @@ void L2Worker::send_db_query_response(const std::string &reply_to, int status,
   const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
   send_nats_response(reply_to, envelope_dump, response_headers);
   record_bytes_sent(envelope_dump.size());
+}
+
+void L2Worker::publish_db_gateway_ready_metric() {
+  if (!m_db_query_handler) {
+    return;
+  }
+  prometheus::Family<prometheus::Gauge> &ready_gauge =
+      m_ctx.m_worker.m_metrics->m_db_gateway_ready;
+  const std::vector<std::string> ready = m_db_query_handler->ready_databases();
+  for (const std::string &db : m_db_query_handler->configured_databases()) {
+    const bool is_ready =
+        std::find(ready.begin(), ready.end(), db) != ready.end();
+    ready_gauge.Add({{"db", db}}).Set(is_ready ? 1.0 : 0.0);
+  }
 }
