@@ -20,6 +20,7 @@ Exit code 0 = all checks passed, 1 = any check failed.
 """
 
 import argparse
+import concurrent.futures
 import json
 import sys
 import urllib.error
@@ -55,6 +56,37 @@ def _open(request):
         response.close()
 
 
+def check_parallel(base, concurrency, queries_per_thread):
+    """Runs `concurrency` concurrent queries with per-request unique markers
+    and verifies each response carries the marker it asked for. Detects lost
+    requests, cross-talk (1:1 NATS mapping) and pool saturation."""
+    results = []
+
+    def one(who):
+        marker = who
+        # SELECT <who> -- literal must round-trip unchanged through NATS.
+        code, body = http_post(
+            f"{base}/v1/sql/postgres/query",
+            {"sql": f"SELECT {marker} AS marker"},
+        )
+        rows = body.get("rows")
+        if (code != 200 or body.get("status") != "ok" or
+                not rows or len(rows[0]) != 1 or rows[0][0] != marker):
+            return (False, f"{who}: got status {code}, row {(rows or [])[:1]}")
+        return (True, f"{who}")
+
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=concurrency) as pool:
+        futures = []
+        for _ in range(concurrency * queries_per_thread):
+            futures.append(pool.submit(one, len(futures) + 1))
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+    total = len(results)
+    bad = [r for ok, r in results if not ok]
+    return total, bad
+
+
 def http_error_json(error):
     """Parses the JSON body of an HTTPError (empty -> error body shape)."""
     try:
@@ -66,6 +98,9 @@ def http_error_json(error):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=PROXY_BASE_URL)
+    parser.add_argument("--parallel", type=int, default=0,
+                        help="run N concurrent marker queries (default: 0 = "
+                             "sequential mode only)")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
 
@@ -177,6 +212,20 @@ def main():
             expect(False, f"oracle ping failed: HTTP {e.code}")
     except Exception as e:  # noqa: BLE001
         expect(False, f"oracle ping failed: {e}")
+
+    # 7. parallelism / cross-talk gate (optional)
+    if args.parallel and args.parallel > 0:
+        try:
+            total, bad = check_parallel(base, args.parallel, 2)
+            expect(not bad and total > 0,
+                   f"{total} concurrent marker queries: all round-tripped "
+                   f"uniquely" if not bad
+                   else f"{total} concurrent queries -> {len(bad)} mismatches")
+            if bad:
+                for problem in bad[:5]:
+                    print(f"    mismatch: {problem}")
+        except Exception as e:  # noqa: BLE001
+            expect(False, f"parallel gate failed: {e}")
 
     print(f"\nDB gateway E2E: {checks - len(failures)}/{checks} checks passed")
     if failures:
