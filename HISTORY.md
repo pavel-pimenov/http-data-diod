@@ -1,3 +1,40 @@
+# test(cpp): направление 8k — юнит-тесты хелперов контракта DB-гейтвея (db_query_utils)
+
+## Date: 2026-09-07
+
+### Контекст
+`db_query_utils.hpp` — чистые, header-only хелперы контракта HTTP DB Gateway
+(намеренно без ODPI-C). Их можно тестировать без участия драйверов в
+test_components, закрепив wire-контракт proxy<->worker на уровне JSON
+(дополняет E2E-проверку гейтвея из раундов 8f-8j).
+
+### Что сделано
+`test_components.cpp`, секция `[db-query-utils]` (9 тест-кейсов):
+- `strip_sql_comments`: line/block-комментарии, мультилайн, незакрытый блок
+- `is_read_only_sql`: select/with приняты; insert/update/delete/drop/пусто
+  отклонены; комментарии перед первым ключевым словом игнорируются; ведущие
+  скобки и регистр
+- `parse_db_query_request`: не-object/пустой object/bad type/нет sql/
+  мутирующий sql → ошибка; валидный query + скалярные params; params null →
+  пустой; params array/вложенные → ошибка; timeout_ms/max_rows 0 и <-1 → ошибка;
+  положительные значения проходят
+- `resolve_positive_or`, `nonempty_or`
+- `make_db_unavailable`/`make_db_sql_error`/`make_db_error_body`:
+  статусы 503/422 и ключи code/message
+- `make_db_ping_response`/`make_db_columns_json`/`make_db_query_response`:
+  поля контракта
+- `build_db_query_request`: query с params/timeout_ms/max_rows передаются;
+  ping без sql; опциональные ключи не добавляются при отсутствии;
+  `make_db_response_envelope`
+- `DbRowCollector`: лимит строк + truncated-флаг, точный предел не рвёт флаг
+
+### Проверка
+- Сборка builder: EXIT=0 (unity-блок test_components пересобран; цепочка
+  `./test_components && ./test_proxy_core` завершилась успешно)
+- clang-tidy test_components: no errors or warnings in project files
+- `./rebuild-and-run.sh` → 11 healthy; postgres ping → 200;
+  `message_counter.py` → no message loss
+
 # fix(cpp): самовосстанавливающийся фоновый init oracle + неблокирующийся DbQueryHandler::init
 
 ## Date: 2026-09-07

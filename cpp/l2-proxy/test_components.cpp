@@ -1,9 +1,10 @@
 // Unit tests for RateLimiter, InFlightTracker, Config, base64, JsonUtils,
-// JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool
+// JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool, DbQueryUtils
 #include "base64_utils.hpp"
 #include "circuit_breaker.hpp"
 #include "common_utils.hpp"
 #include "config.hpp"
+#include "db_query_utils.hpp"
 #include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
 #include "in_flight_tracker.hpp"
@@ -2455,6 +2456,221 @@ TEST_CASE("Request data: sensitive headers are still forwarded",
   const auto data = prepare_request_data("req-3", "GET", "/x", "", req, "");
   REQUIRE(data[NatsContract::kHeaders]["authorization"] == "Bearer abc");
   REQUIRE(data[NatsContract::kHeaders]["x-api-key"] == "secret");
+}
+
+TEST_CASE("[db-query-utils] strip_sql_comments removes line and block "
+          "comments",
+          "[db-query-utils]") {
+  REQUIRE(strip_sql_comments("SELECT 1") == "SELECT 1");
+  REQUIRE(strip_sql_comments("-- head\nSELECT 1") == "\nSELECT 1");
+  REQUIRE(strip_sql_comments("/* */SELECT 1") == "SELECT 1");
+  REQUIRE(strip_sql_comments("SELECT /* multi\nline */ 1") == "SELECT  1");
+  REQUIRE(strip_sql_comments("-- only comment\n") == "\n");
+  REQUIRE(strip_sql_comments("/* unterminated") == "");
+}
+
+TEST_CASE("[db-query-utils] is_read_only_sql accepts SELECT/WITH only",
+          "[db-query-utils]") {
+  REQUIRE(is_read_only_sql("SELECT * FROM t"));
+  REQUIRE(is_read_only_sql("WITH x AS (SELECT 1) SELECT * FROM x"));
+  REQUIRE(is_read_only_sql("  select 1"));
+  REQUIRE(is_read_only_sql("(SELECT * FROM t)"));
+  REQUIRE(is_read_only_sql("-- hidden\nSELECT 1"));
+  REQUIRE(is_read_only_sql("/* hidden */ SELECT 1"));
+  REQUIRE(!is_read_only_sql("INSERT INTO t VALUES (1)"));
+  REQUIRE(!is_read_only_sql("UPDATE t SET a=1"));
+  REQUIRE(!is_read_only_sql("DELETE FROM t"));
+  REQUIRE(!is_read_only_sql("DROP TABLE t"));
+  REQUIRE(!is_read_only_sql("/* not read */ DELETE FROM t"));
+  REQUIRE(!is_read_only_sql(""));
+}
+
+TEST_CASE("[db-query-utils] parse_db_query_request validates contract",
+          "[db-query-utils]") {
+  const json valid_query = json{
+      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
+      {DbQueryContract::kRequestId, "req-1"},
+      {DbQueryContract::kDb, "postgres"},
+      {DbQueryContract::kSql, "SELECT * FROM t"},
+      {DbQueryContract::kParams, json{{"id", 7}, {"active", true}}}};
+  const auto parsed =
+      parse_db_query_request(valid_query);
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->m_type == DbQueryContract::kTypeQuery);
+  REQUIRE(parsed->m_request_id == "req-1");
+  REQUIRE(parsed->m_db == "postgres");
+  REQUIRE(parsed->m_params["id"] == 7);
+  REQUIRE(parsed->m_params["active"] == true);
+  REQUIRE(parsed->m_timeout_ms == -1);
+  REQUIRE(parsed->m_max_rows == -1);
+
+  REQUIRE_FALSE(parse_db_query_request(json::array()).has_value());
+  REQUIRE_FALSE(parse_db_query_request(json::object()).has_value());
+
+  json bad_type = valid_query;
+  bad_type[DbQueryContract::kType] = "explain";
+  REQUIRE_FALSE(parse_db_query_request(bad_type).has_value());
+
+  json no_sql = valid_query;
+  no_sql.erase(DbQueryContract::kSql);
+  REQUIRE_FALSE(parse_db_query_request(no_sql).has_value());
+
+  json mutating = valid_query;
+  mutating[DbQueryContract::kSql] = "UPDATE t SET a=1";
+  REQUIRE_FALSE(parse_db_query_request(mutating).has_value());
+
+  json ping_ok = json{{DbQueryContract::kType, DbQueryContract::kTypePing},
+                      {DbQueryContract::kRequestId, "p-1"},
+                      {DbQueryContract::kDb, "oracle"}};
+  REQUIRE(parse_db_query_request(ping_ok).has_value());
+}
+
+TEST_CASE("[db-query-utils] parse_db_query_request validates params/limits",
+          "[db-query-utils]") {
+  json bad_params = json{
+      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
+      {DbQueryContract::kSql, "SELECT 1"},
+      {DbQueryContract::kParams, json::array()}};
+  REQUIRE_FALSE(parse_db_query_request(bad_params).has_value());
+
+  json nested_params = json{
+      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
+      {DbQueryContract::kSql, "SELECT 1"},
+      {DbQueryContract::kParams, json{{"arr", json::array()}}}};
+  REQUIRE_FALSE(parse_db_query_request(nested_params).has_value());
+
+  json null_params = json{
+      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
+      {DbQueryContract::kSql, "SELECT 1"},
+      {DbQueryContract::kParams, nullptr}};
+  const auto parsed = parse_db_query_request(null_params);
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->m_params.empty());
+
+  for (const int bad_timeout : {0, -2}) {
+    json j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                  {DbQueryContract::kSql, "SELECT 1"},
+                  {DbQueryContract::kTimeoutMs, bad_timeout}};
+    REQUIRE_FALSE(parse_db_query_request(j).has_value());
+  }
+  for (const int bad_rows : {0, -3}) {
+    json j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                  {DbQueryContract::kSql, "SELECT 1"},
+                  {DbQueryContract::kMaxRows, bad_rows}};
+    REQUIRE_FALSE(parse_db_query_request(j).has_value());
+  }
+
+  json limited = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                      {DbQueryContract::kSql, "SELECT 1"},
+                      {DbQueryContract::kTimeoutMs, 5000},
+                      {DbQueryContract::kMaxRows, 100}};
+  const auto limited_parsed = parse_db_query_request(limited);
+  REQUIRE(limited_parsed.has_value());
+  REQUIRE(limited_parsed->m_timeout_ms == 5000);
+  REQUIRE(limited_parsed->m_max_rows == 100);
+}
+
+TEST_CASE("[db-query-utils] resolve_positive_or and nonempty_or",
+          "[db-query-utils]") {
+  REQUIRE(resolve_positive_or(5, 100) == 5);
+  REQUIRE(resolve_positive_or(0, 100) == 100);
+  REQUIRE(resolve_positive_or(-1, 100) == 100);
+  REQUIRE(nonempty_or("orch", "unknown") == "orch");
+  REQUIRE(nonempty_or("", "unknown") == "unknown");
+}
+
+TEST_CASE("[db-query-utils] error bodies carry code/message and set status",
+          "[db-query-utils]") {
+  int status = 200;
+  const json ua = make_db_unavailable(status);
+  REQUIRE(status == 503);
+  REQUIRE(ua[DbResponseContract::kStatus] == DbResponseContract::kStatusError);
+  REQUIRE(ua[DbResponseContract::kError][DbResponseContract::kCode] ==
+          "DB_UNAVAILABLE");
+
+  status = 200;
+  const json sql_err = make_db_sql_error(status, "bad column");
+  REQUIRE(status == 422);
+  REQUIRE(sql_err[DbResponseContract::kError][DbResponseContract::kCode] ==
+          "SQL_ERROR");
+  REQUIRE(sql_err[DbResponseContract::kError][DbResponseContract::kMessage] ==
+          "bad column");
+
+  const json body =
+      make_db_error_body(404, "UNKNOWN_DATABASE", "no such db");
+  REQUIRE(body[DbResponseContract::kStatus] ==
+          DbResponseContract::kStatusError);
+  REQUIRE(body[DbResponseContract::kError][DbResponseContract::kMessage] ==
+          "no such db");
+}
+
+TEST_CASE("[db-query-utils] success response bodies carry the contract fields",
+          "[db-query-utils]") {
+  const json ping = make_db_ping_response("postgres", 7);
+  REQUIRE(ping[DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+  REQUIRE(ping[DbResponseContract::kDb] == "postgres");
+  REQUIRE(ping[DbResponseContract::kLatencyMs] == 7);
+
+  const json columns =
+      make_db_columns_json({{"id", "BIGINT"}, {"name", "VARCHAR"}});
+  REQUIRE(columns.size() == 2);
+  REQUIRE(columns[0][DbResponseContract::kName] == "id");
+  REQUIRE(columns[1][DbResponseContract::kType] == "VARCHAR");
+
+  const json rows = json::array({json::array({1, "a"}), json::array({2, "b"})});
+  const json query = make_db_query_response("postgres", columns, rows, 2, false,
+                                            3);
+  REQUIRE(query[DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+  REQUIRE(query[DbResponseContract::kRowCount] == 2);
+  REQUIRE(query[DbResponseContract::kTruncated] == false);
+  REQUIRE(query[DbResponseContract::kDurationMs] == 3);
+  REQUIRE(query[DbResponseContract::kRows].size() == 2);
+}
+
+TEST_CASE("[db-query-utils] build_db_query_request forwards the wire fields",
+          "[db-query-utils]") {
+  const json payload = json{
+      {DbQueryContract::kSql, "SELECT * FROM t"},
+      {DbQueryContract::kParams, json{{"id", 1}}},
+      {DbQueryContract::kTimeoutMs, 5000},
+      {DbQueryContract::kMaxRows, 50}};
+  const json q = build_db_query_request(DbQueryContract::kTypeQuery, "req-1",
+                                        "postgres", payload);
+  REQUIRE(q[DbQueryContract::kType] == DbQueryContract::kTypeQuery);
+  REQUIRE(q[DbQueryContract::kRequestId] == "req-1");
+  REQUIRE(q[DbQueryContract::kDb] == "postgres");
+  REQUIRE(q[DbQueryContract::kSql] == "SELECT * FROM t");
+  REQUIRE(q[DbQueryContract::kParams]["id"] == 1);
+  REQUIRE(q[DbQueryContract::kTimeoutMs] == 5000);
+  REQUIRE(q[DbQueryContract::kMaxRows] == 50);
+
+  const json p = build_db_query_request(DbQueryContract::kTypePing, "p-1",
+                                        "oracle", json::object());
+  REQUIRE(p[DbQueryContract::kType] == DbQueryContract::kTypePing);
+  REQUIRE_FALSE(p.contains(DbQueryContract::kSql));
+  REQUIRE_FALSE(p.contains(DbQueryContract::kParams));
+
+  const json env = make_db_response_envelope(503, make_db_error_body(
+                                                      503, "X", "m"));
+  REQUIRE(env[DbQueryContract::kStatus] == 503);
+  REQUIRE(env[DbQueryContract::kBody][DbResponseContract::kError]
+             [DbResponseContract::kCode] == "X");
+}
+
+TEST_CASE("[db-query-utils] DbRowCollector enforces the row cap",
+          "[db-query-utils]") {
+  DbRowCollector collector(2);
+  REQUIRE(collector.try_add(json::array({1})));
+  REQUIRE(collector.try_add(json::array({2})));
+  REQUIRE_FALSE(collector.try_add(json::array({3})));
+  REQUIRE(collector.truncated());
+  REQUIRE(collector.size() == 2);
+  REQUIRE(collector.take_rows().size() == 2);
+
+  DbRowCollector exact(1);
+  REQUIRE(exact.try_add(json::array({9})));
+  REQUIRE_FALSE(exact.truncated());
+  REQUIRE(exact.size() == 1);
 }
 
 
