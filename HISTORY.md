@@ -1,3 +1,26 @@
+# chore(cpp): 8t — DB-гейтвей: E2E-сценарий восстановления после рестарта NATS
+
+## Date: 2026-09-07
+
+### Контекст
+README декларирует устойчивость к простою/рестарту NATS для основного пути
+(503/504 без тихих потерь, reconnect). Для DB-гейтвея (отдельный subject
+`service.db.query`) такой сценарий не проверялся автоматически: работа
+воркера зависит от NATS, и регрессия re-подписки ловилась бы только вручную.
+
+### Что сделано
+- `scripts/db-gateway-e2e-test.py --nats-restart`: базовые проверки
+  (list/ping/query, вынесены в `baseline_checks`) → `docker compose -f
+  <repo>/docker-compose.yml restart nats-server` → поллинг `GET
+  /v1/sql/postgres/ping` до восстановления (до 90с; в окне сбоя допустимы
+  503/504, но не вечная воронка) → повторный базовый прогон.
+
+### Проверка
+- `--nats-restart` → 9/9 PASS: шлюз пережил рестарт `nats-server` и вернулся
+  к 200;
+- `--parallel 8` после рефактора → по-прежнему 8/8 PASS;
+- `scripts/lint-python.py` → 0 issues.
+
 # docs(cpp): 8r — README: таблица env HTTP DB Gateway + семантика пулов
 
 ## Date: 2026-09-07

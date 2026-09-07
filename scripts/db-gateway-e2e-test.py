@@ -15,6 +15,8 @@ Runs the read-only SQL gateway checks against a running compose stack:
 Usage:
   scripts/db-gateway-e2e-test.py
   scripts/db-gateway-e2e-test.py --base-url http://localhost:8888
+  scripts/db-gateway-e2e-test.py --parallel 25
+  scripts/db-gateway-e2e-test.py --nats-restart   # recovery scenario
 
 Exit code 0 = all checks passed, 1 = any check failed.
 """
@@ -95,35 +97,14 @@ def http_error_json(error):
         return {}
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=PROXY_BASE_URL)
-    parser.add_argument("--parallel", type=int, default=0,
-                        help="run N concurrent marker queries (default: 0 = "
-                             "sequential mode only)")
-    args = parser.parse_args()
-    base = args.base_url.rstrip("/")
-
-    failures = []
-    checks = 0
-
-    def expect(ok, message):
-        nonlocal checks, failures
-        checks += 1
-        marker = "PASS" if ok else "FAIL"
-        print(f"[{marker}] {message}")
-        if not ok:
-            failures.append(message)
-
-    def is_504(code):
-        return code == 504
-
+def baseline_checks(base, expect):
+    """List / ping / query checks shared by the sequential and scenario
+    runs. Needs the `expect(ok, message)` callback from the caller."""
     # 1. database list
     try:
         code, body = http_get(f"{base}/v1/sql")
         expect(code == 200 and isinstance(body.get("databases"), list),
                "GET /v1/sql returns the database list (200)")
-        db_names = [d.get("name") for d in body.get("databases", [])]
         postgres = next(
             (d for d in body.get("databases", []) if d.get("name") == "postgres"),
             None,
@@ -161,6 +142,90 @@ def main():
         expect(False, f"query failed: HTTP {e.code} ({e.read()[:200]})")
     except Exception as e:  # noqa: BLE001
         expect(False, f"query failed: {e}")
+
+
+def ping_ok(base):
+    """True when the gateway answers a postgres ping with 200 ok."""
+    try:
+        code, body = http_get(f"{base}/v1/sql/postgres/ping")
+        return code == 200 and body.get("status") == "ok"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def wait_gateway_recovery(base, expect, max_seconds):
+    """Polls the postgres ping until it succeeds again. During the window any
+    non-200/error response is acceptable (503/504 while NATS is down); only a
+    gateway that never comes back fails the gate."""
+    import time as _time
+
+    deadline = _time.monotonic() + max_seconds
+    while _time.monotonic() < deadline:
+        if ping_ok(base):
+            expect(True, "gateway recovered after the NATS restart")
+            return True
+        _time.sleep(1.0)
+    expect(False, f"gateway did not recover within {max_seconds}s")
+    return False
+
+
+def run_nats_restart_scenario(base, expect, compose_dir):
+    import subprocess
+
+    baseline_checks(base, expect)
+    compose_file = compose_dir / "docker-compose.yml"
+    print(f"[SCENARIO] restarting NATS ({compose_file})...")
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(compose_file), "restart", "nats-server"],
+        capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        expect(False, f"docker compose restart nats-server failed: "
+                      f"{result.stderr.strip()[:300]}")
+        return
+    wait_gateway_recovery(base, expect, max_seconds=90)
+    baseline_checks(base, expect)
+
+
+def main():
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default=PROXY_BASE_URL)
+    parser.add_argument("--parallel", type=int, default=0,
+                        help="run N concurrent marker queries (default: 0 = "
+                             "sequential mode only)")
+    parser.add_argument("--nats-restart", action="store_true",
+                        help="run the NATS-restart recovery scenario "
+                             "(baseline -> restart NATS -> recovery -> baseline)")
+    parser.add_argument("--compose-dir", default=str(repo_root),
+                        help="directory with docker-compose.yml (default: "
+                             "repo root)")
+    args = parser.parse_args()
+    base = args.base_url.rstrip("/")
+    compose_dir = pathlib.Path(args.compose_dir)
+
+    failures = []
+    checks = 0
+
+    def expect(ok, message):
+        nonlocal checks, failures
+        checks += 1
+        marker = "PASS" if ok else "FAIL"
+        print(f"[{marker}] {message}")
+        if not ok:
+            failures.append(message)
+
+    def is_504(code):
+        return code == 504
+
+    if args.nats_restart:
+        run_nats_restart_scenario(base, expect, compose_dir)
+        print(f"\nDB gateway E2E (NATS restart): "
+              f"{checks - len(failures)}/{checks} checks passed")
+        return 1 if failures else 0
+
+    baseline_checks(base, expect)
 
     # 4. read-only gate (non-SELECT is rejected)
     try:
