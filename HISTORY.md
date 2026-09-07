@@ -1,3 +1,27 @@
+# docs(cpp): 8r — README: таблица env HTTP DB Gateway + семантика пулов
+
+## Date: 2026-09-07
+
+### Контекст
+Раздел README «HTTP DB Gateway» перечислял переменные окружения только
+ссылкой на `docker-compose.yml`; пуловый размер сессий
+(`DB_{POSTGRES,ORACLE}_POOL_{MIN,MAX}`) не документировался вовсе, хотя
+парсится config.cpp, валидируется (`pool_min >= 1`, `pool_max >= pool_min`)
+и передаётся executor-ам.
+
+### Что сделано
+- README «HTTP DB Gateway»: добавлена таблица «Переменные окружения
+  гейтвея» с дефолтами из docker-compose (22 переменные: DB_QUERY_*,
+  DB_POSTGRES_*, DB_ORACLE_*, включая POOL_MIN/POOL_MAX).
+- Описана семантика пула по коду
+  (`db_query_executor_postgres.cpp`: acquire создаёт conn до `pool_max`,
+  при исчерпании — 503 DB_UNAVAILABLE без очереди; release возвращает conn
+  в idle). Ссылка на сценарий `--parallel N`.
+
+### Проверка
+- Правки только README (docs) — без пересборки стека; факты сверены с
+  config.cpp и db_query_executor_postgres.cpp.
+
 # chore(cpp): 8q — clang-tidy: полный свип, закрыты project-warning-и
 
 ## Date: 2026-09-07

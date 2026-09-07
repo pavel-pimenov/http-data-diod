@@ -150,6 +150,30 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 Ключевые переменные окружения см. в `docker-compose.yml` (`DB_QUERY_*`, `DB_POSTGRES_*`, `DB_ORACLE_*`); метрики воркера по шлюзу эмитируются через `l2_worker_*` (см. дашборд `L2 Воркер`).
 
+### Переменные окружения гейтвея (defaults из docker-compose)
+
+| Переменная | Default | Сервис | Описание |
+|---|---|---|---|
+| `DB_QUERY_ENABLED` | `true` | proxy, worker | Выключает весь шлюз |
+| `DB_QUERY_NATS_SUBJECT` | `service.db.query` | proxy, worker | Subject запросов шлюза |
+| `DB_QUERY_NATS_QUEUE_GROUP` | `db_workers` | worker | Queue group |
+| `DB_QUERY_NATS_TIMEOUT_MS` | `30000` | proxy, worker | Окно ожидания ответа воркера (504) |
+| `DB_QUERY_DEFAULT_TIMEOUT_MS` | `5000` | worker | Дефолтный бюджет исполнения SQL |
+| `DB_QUERY_DEFAULT_MAX_ROWS` | `1000` | worker | Дефолтное ограничение строк ответа |
+| `DB_POSTGRES_ENABLED` | `true` | proxy, worker | Регистрация драйвера postgres |
+| `DB_POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` | `postgres`/`5432`/`app_db`/`app_user`/`app_password` | worker | Подключение к postgres (libpq) |
+| `DB_POSTGRES_POOL_MIN` / `DB_POSTGRES_POOL_MAX` | `1` / `5` | worker | Размер пула сессий postgres |
+| `DB_ORACLE_ENABLED` | `false` | proxy, worker | Регистрация драйвера oracle (profile `oracle`) |
+| `DB_ORACLE_HOST`/`PORT`/`SERVICE`/`USER`/`PASSWORD` | `oracle`/`1521`/`XEPDB1`/`app_user`/`app_password` | worker | Подключение к Oracle (ODPI-C) |
+| `DB_ORACLE_POOL_MIN` / `DB_ORACLE_POOL_MAX` | `1` / `5` | worker | Размер пула сессий Oracle |
+
+Пул ограничивает суммарное число соединений сверху (`POOL_MAX`):
+соединения создаются по требованию и возвращаются в пул idle; при всплеске
+количество растёт до `POOL_MAX`, при исчерпании лимита запросы не вешаются
+в очередь — им сразу возвращается 503 `DB_UNAVAILABLE`. Сценарий
+`--parallel N` (> `POOL_MAX`) в `scripts/db-gateway-e2e-test.py` проверяет
+рост пула и отсутствие потерь/перепутывания ответов.
+
 ### Контракт ответов
 
 | HTTP | `error.code` | Когда |
