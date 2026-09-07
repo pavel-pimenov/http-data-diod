@@ -185,6 +185,9 @@ private:
 
 private:
   bool send_batch(const std::vector<SpanData> &batch);
+  // Sends one batch with retries and records timing/queue/counter metrics.
+  void send_batch_with_retry(const std::vector<SpanData> &batch,
+                             const std::stop_token &st);
 
   // Fast random hex generation (thread-local, no re-initialization)
   static std::string random_hex_fast(size_t len);

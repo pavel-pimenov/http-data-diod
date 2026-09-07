@@ -35,7 +35,8 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
   Logger::info("JaegerLogger initialized: batch_size={} flush_interval={}ms "
                "sample_rate={}",
                m_batch_size, m_flush_interval_ms, m_sample_rate);
-  m_sender_thread = std::jthread([this](std::stop_token st) { sender_loop(st); });
+  m_sender_thread =
+      std::jthread([this](const std::stop_token &st) { sender_loop(st); });
 }
 
 JaegerLogger::~JaegerLogger() {
@@ -250,52 +251,7 @@ void JaegerLogger::sender_loop(std::stop_token st) {
     }
 
     if (!batch.empty()) {
-      const auto start_time = std::chrono::steady_clock::now();
-      uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now().time_since_epoch())
-                            .count();
-      double avg_queue_time_s = 0.0;
-      for (const auto &span : batch) {
-        avg_queue_time_s +=
-            TimeUtils::duration_seconds(span.m_enqueue_time_us, now_us);
-      }
-      avg_queue_time_s /= batch.size();
-      m_tracing_queue_time_histogram.Observe(avg_queue_time_s);
-
-      bool success = false;
-      int retries = 0;
-      int delay_ms = g_tracing_retry_base_delay_ms;
-
-      while (!success && retries < g_tracing_max_retries && !st.stop_requested()) {
-        if (send_batch(batch)) {
-          success = true;
-          m_consecutive_failures = 0;
-        } else {
-          retries++;
-          m_consecutive_failures++;
-          Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
-                       g_tracing_max_retries, delay_ms);
-          if (retries < g_tracing_max_retries) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-            delay_ms *= 2;
-          }
-        }
-      }
-
-      if (success) {
-        m_tracing_spans_sent_counter.Increment(batch.size());
-      } else {
-        m_tracing_spans_failed_counter.Increment(batch.size());
-        Logger::error(
-            "Jaeger batch send failed after {} retries, dropped {} spans",
-            retries, batch.size());
-      }
-
-      const auto end_time = std::chrono::steady_clock::now();
-      double duration =
-          std::chrono::duration<double>(end_time - start_time).count();
-      m_tracing_last_send_duration_gauge.Set(duration);
-      m_tracing_send_latency_histogram.Observe(duration);
+      send_batch_with_retry(batch, st);
     }
   }
 
@@ -324,6 +280,56 @@ void JaegerLogger::sender_loop(std::stop_token st) {
                     final_batch.size());
     }
   }
+}
+
+void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
+                                         const std::stop_token &st) {
+  const auto start_time = std::chrono::steady_clock::now();
+  uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+  double avg_queue_time_s = 0.0;
+  for (const auto &span : batch) {
+    avg_queue_time_s +=
+        TimeUtils::duration_seconds(span.m_enqueue_time_us, now_us);
+  }
+  avg_queue_time_s /= batch.size();
+  m_tracing_queue_time_histogram.Observe(avg_queue_time_s);
+
+  bool success = false;
+  int retries = 0;
+  int delay_ms = g_tracing_retry_base_delay_ms;
+
+  while (!success && retries < g_tracing_max_retries && !st.stop_requested()) {
+    if (send_batch(batch)) {
+      success = true;
+      m_consecutive_failures = 0;
+    } else {
+      retries++;
+      m_consecutive_failures++;
+      Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
+                   g_tracing_max_retries, delay_ms);
+      if (retries < g_tracing_max_retries) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+        delay_ms *= 2;
+      }
+    }
+  }
+
+  if (success) {
+    m_tracing_spans_sent_counter.Increment(batch.size());
+  } else {
+    m_tracing_spans_failed_counter.Increment(batch.size());
+    Logger::error(
+        "Jaeger batch send failed after {} retries, dropped {} spans",
+        retries, batch.size());
+  }
+
+  const auto end_time = std::chrono::steady_clock::now();
+  double duration =
+      std::chrono::duration<double>(end_time - start_time).count();
+  m_tracing_last_send_duration_gauge.Set(duration);
+  m_tracing_send_latency_histogram.Observe(duration);
 }
 
 bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {

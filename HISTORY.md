@@ -1,3 +1,31 @@
+# refactor(cpp): направление 6b — вынос фазы отправки пачки Jaeger с ретраями
+
+## Date: 2026-09-07
+
+### Контекст
+`sender_loop` JaegerLogger (97 строк) смешивал цикл ожидания/демпфирования пачки
+и 55-строчную фазу «отправка + метрики»: тайм-лог батча, avg queue time,
+ретрай-цикл с экспоненциальным бэкоффом (g_tracing_retry_base_delay_ms/max),
+счётчики sent/failed, gauge длительности отправки.
+
+### Что сделано
+- `trace_logger.hpp`: приватный `bool`→`void send_batch_with_retry(
+  const std::vector<SpanData> &batch, const std::stop_token &st)`
+- `trace_logger.cpp::sender_loop`: тело `if (!batch.empty())` (55 строк) заменено
+  на один вызов `send_batch_with_retry(batch, st)`; цикл сокращён до ~25 строк
+- `trace_logger.cpp::send_batch_with_retry` — перенесена фаза отправки с ретраями
+  и метриками 1-в-1 (порядок, тексты логов, счётчики без изменений; вызов только
+  при непустой пачке — деление на batch.size() безопасно)
+- jthread-лямбда конструктора переведена на `const std::stop_token &st`
+  (устранён `performance-unnecessary-value-param`, как в 5c)
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по trace_logger.cpp/.hpp: чисто (после const-ref)
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
+- Спаны до Jaeger подтверждены: GET /api/services → l2-proxy-proxy, NATS, worker;
+  traces через /api/traces (по 7-8 спанов на trace), ни одного
+  «Jaeger batch send failed» / «Tracing queue full»
 # refactor(cpp): направление 6a — вынос настройки опций и колбеков NatsClient::connect
 
 ## Date: 2026-09-07
