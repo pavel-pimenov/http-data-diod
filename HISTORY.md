@@ -1,3 +1,30 @@
+# refactor(cpp): направление 7b — дедупликация http/https-запуска слушателя в main.cpp
+
+## Date: 2026-09-07
+
+### Контекст
+`run_proxy` и `run_l2_server` содержали идентичные по форме if/else-блоки выбора
+протокола: в ветке https конструировался `httplib::SSLServer` с сертификатом и
+ключом, в ветке http — `httplib::Server`; обе ветки вызывали
+`configure_httplib_server` + `run_server`. Блок повторялся 2 раза (~14 строк каждый).
+
+### Что сделано
+- `main.cpp`: новый шаблонный хелпер `run_httplib_server(app_ctx, handler, port,
+  protocol, https_name, http_name, use_in_flight, on_request_start,
+  on_response)` — сохранил ветвление https/http 1-в-1 (комментарии «// HTTPS
+  mode»/«// HTTP mode», порядок configure_httplib_server → run_server)
+- `run_proxy` и `run_l2_server`: оба if/else-блока заменены одним вызовом хелпера
+  (имена серверов «httplib proxy»/«httplib» и «cpp-httplib SSL»/«cpp-httplib»
+  переданы как параметры, use_in_flight=true/false сохранён)
+- `run_server` и `run_httplib_server`: параметры `std::function` переведены на
+  `const &` (устранён performance-unnecessary-value-param; время жизни рефов
+  валидно — run_server вызывается только из хелпера и блокирует до завершения
+  полного выражения вызова)
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по main.cpp: нет errors/warnings
+- `./rebuild-and-run.sh` → все 13 сервисов healthy; message_counter успешно (GET+favicon)
 # refactor(cpp): направление 7a — чистка оставшихся clang-tidy warning в заголовках
 
 ## Date: 2026-09-07

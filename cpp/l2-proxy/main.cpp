@@ -57,10 +57,10 @@ template <typename ServerType, typename HandlerType>
 void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
                 int port, const std::string &server_name,
                 bool use_in_flight_tracker = false,
-                std::function<void()> on_request_start = {},
-                std::function<void(const httplib::Request &,
-                                   const httplib::Response &)>
-                    on_response = {}) {
+                const std::function<void()> &on_request_start = {},
+                const std::function<void(const httplib::Request &,
+                                         const httplib::Response &)>
+                    &on_response = {}) {
 
   // Register request handlers
   server.Get(R"(/.*)",
@@ -148,6 +148,33 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
   }
 }
 
+// Builds the listening server (plain HTTP or TLS per `protocol`) with the
+// common httplib options and runs it via run_server. Deduplicates the
+// https/http branches that proxy and l2-server modes shared.
+template <typename HandlerType>
+void run_httplib_server(
+    AppContext &app_ctx, HandlerType &handler, int port,
+    const std::string &protocol, const std::string &https_server_name,
+    const std::string &http_server_name, bool use_in_flight_tracker,
+    const std::function<void()> &on_request_start = {},
+    const std::function<void(const httplib::Request &, const httplib::Response &)>
+        &on_response = {}) {
+  if (protocol == "https") {
+    // HTTPS mode
+    httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
+                              app_ctx.m_config.m_ssl_server_key_file.c_str());
+    configure_httplib_server(server, app_ctx.m_config);
+    run_server(server, app_ctx, handler, port, https_server_name,
+               use_in_flight_tracker, on_request_start, on_response);
+  } else {
+    // HTTP mode
+    httplib::Server server;
+    configure_httplib_server(server, app_ctx.m_config);
+    run_server(server, app_ctx, handler, port, http_server_name,
+               use_in_flight_tracker, on_request_start, on_response);
+  }
+}
+
 std::unique_ptr<prometheus::Exposer>
 create_metrics_exposer(int port,
                        const std::shared_ptr<prometheus::Registry> &registry) {
@@ -205,20 +232,10 @@ void run_proxy(AppContext &app_ctx) {
             .Increment();
       };
 
-  if (app_ctx.m_config.m_proxy_protocol == "https") {
-    // HTTPS mode
-    httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
-                              app_ctx.m_config.m_ssl_server_key_file.c_str());
-    configure_httplib_server(server, app_ctx.m_config);
-    run_server(server, app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
-               "httplib proxy", true, on_proxy_request_start, on_proxy_response);
-  } else {
-    // HTTP mode
-    httplib::Server server;
-    configure_httplib_server(server, app_ctx.m_config);
-    run_server(server, app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
-               "httplib", true, on_proxy_request_start, on_proxy_response);
-  }
+  run_httplib_server(app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
+                     app_ctx.m_config.m_proxy_protocol, "httplib proxy",
+                     "httplib", true, on_proxy_request_start,
+                     on_proxy_response);
 }
 
 void run_worker(AppContext &app_ctx) {
@@ -315,22 +332,10 @@ void run_l2_server(AppContext &app_ctx) {
   // probe runs (the server healthcheck probes /metrics, not /health/ready).
   app_ctx.m_server.m_metrics->m_health_ready.Set(1.0);
 
-  if (app_ctx.m_config.m_l2_server_protocol == "https") {
-    // HTTPS mode
-    httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
-                              app_ctx.m_config.m_ssl_server_key_file.c_str());
-    configure_httplib_server(server, app_ctx.m_config);
-    run_server(server, app_ctx, server_handler,
-               app_ctx.m_config.m_l2_server_port, "cpp-httplib SSL", false, {},
-               on_server_response);
-  } else {
-    // HTTP mode
-    httplib::Server server;
-    configure_httplib_server(server, app_ctx.m_config);
-    run_server(server, app_ctx, server_handler,
-               app_ctx.m_config.m_l2_server_port, "cpp-httplib", false, {},
-               on_server_response);
-  }
+  run_httplib_server(app_ctx, server_handler,
+                     app_ctx.m_config.m_l2_server_port,
+                     app_ctx.m_config.m_l2_server_protocol, "cpp-httplib SSL",
+                     "cpp-httplib", false, {}, on_server_response);
 }
 
 void init_tracer(AppContext &app_ctx) {
