@@ -19,6 +19,8 @@
 #include <thread>
 #include <vector>
 
+class RetryHandler;
+
 using json = nlohmann::json;
 
 class L2Worker {
@@ -70,6 +72,11 @@ private:
   // Subscribes to the DB query subject when the gateway is enabled; returns
   // true when there is nothing to subscribe to (gateway disabled/uninitialized).
   bool subscribe_db_query_subject();
+  // Attempts to bring the DB query subscription up: initializes the DB gateway
+  // until every configured database is ready, then subscribes. Returns true
+  // when the subscription is active (or nothing to subscribe to); the worker
+  // loop calls it repeatedly until true.
+  bool ensure_db_query_subscription(RetryHandler &backoff);
   void process_request_from_nats(const std::string &request_json,
                                  const std::string &reply_to);
   void process_db_query_from_nats(const std::string &request_json,

@@ -148,32 +148,9 @@ void L2Worker::run_with_nats() {
     // init() is incremental, so repeated calls only create the missing
     // executors; we wait until every configured database is ready before
     // subscribing.
-    if (m_nats_client && m_nats_client->is_connected() &&
-        subscription_active && !db_subscription_active) {
-      if (!m_db_query_handler) {
-        db_subscription_active = true;
-      } else if (!m_db_query_handler->all_configured()) {
-        m_db_query_handler->init(m_ctx.m_config.m_databases);
-        if (!m_db_query_handler->all_configured()) {
-          Logger::warn("DB gateway is not ready yet (database(s) "
-                       "unavailable?), will retry");
-          backoff.record_failure();
-        } else if (!subscribe_db_query_subject()) {
-          Logger::warn("DB subscription failed, will retry in {}ms",
-                       backoff.get_current_delay_ms());
-          backoff.record_failure();
-        } else {
-          db_subscription_active = true;
-          backoff.record_success();
-        }
-      } else if (!subscribe_db_query_subject()) {
-        Logger::warn("DB subscription failed, will retry in {}ms",
-                     backoff.get_current_delay_ms());
-        backoff.record_failure();
-      } else {
-        db_subscription_active = true;
-        backoff.record_success();
-      }
+    if (m_nats_client && m_nats_client->is_connected() && subscription_active &&
+        !db_subscription_active) {
+      db_subscription_active = ensure_db_query_subscription(backoff);
     }
 
     if (m_nats_client && !m_nats_client->is_connected()) {
@@ -240,6 +217,29 @@ bool L2Worker::subscribe_db_query_subject() {
   Logger::info("Worker subscribed to DB NATS subject: {} (queue group {})",
                m_ctx.m_config.m_db_query_nats_subject,
                m_ctx.m_config.m_db_query_nats_queue_group);
+  return true;
+}
+
+bool L2Worker::ensure_db_query_subscription(RetryHandler &backoff) {
+  if (!m_db_query_handler) {
+    return true;
+  }
+  if (!m_db_query_handler->all_configured()) {
+    m_db_query_handler->init(m_ctx.m_config.m_databases);
+    if (!m_db_query_handler->all_configured()) {
+      Logger::warn("DB gateway is not ready yet (database(s) "
+                   "unavailable?), will retry");
+      backoff.record_failure();
+      return false;
+    }
+  }
+  if (!subscribe_db_query_subject()) {
+    Logger::warn("DB subscription failed, will retry in {}ms",
+                 backoff.get_current_delay_ms());
+    backoff.record_failure();
+    return false;
+  }
+  backoff.record_success();
   return true;
 }
 

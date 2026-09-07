@@ -1,3 +1,27 @@
+# refactor(cpp): направление 8b — вынос ensure_db_query_subscription из run_with_nats
+
+## Date: 2026-09-07
+
+### Контекст
+`L2Worker::run_with_nats` содержал 30-строчный вложенный if/else-блок
+подъёма DB-подписки (инициализация гейтвея до готовности каждой БД + подписка)
+с тремя ветками `record_failure`/`record_success` и двумя идентичными текстами
+warn-логов. Блок смешивал состояние петли с логикой гейтвея.
+
+### Что сделано
+- `l2_worker.hpp`: forward-decl `class RetryHandler;` + приватный метод
+  `bool ensure_db_query_subscription(RetryHandler &backoff)`
+- `l2_worker_nats.cpp`: новый метод переносит инициализацию `DbQueryHandler`
+  (early-exit когда гейтвея нет), init до `all_configured`, подписку и все
+  backoff-переходы 1-в-1 (тексты логов, порядок record_success/failure)
+- Цикл `run_with_nats`: блок из ~30 вложенных строк заменён на
+  `db_subscription_active = ensure_db_query_subscription(backoff)`; комментарий
+  про независимость DB-гейтвея сохранён на месте вызова
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по l2_worker_nats.cpp/l2_worker.hpp: чисто
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
 # test(cpp): направление 8a — юнит-тесты наблюдаемости (stats_page / metrics_history)
 
 ## Date: 2026-09-07
