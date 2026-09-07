@@ -104,7 +104,7 @@ private:
       const std::string &traceparent, const httplib::Headers &forwarded_headers,
       const std::string &method, int &final_attempt);
   void record_l2_call_metrics(uint64_t start_us);
-  void metrics_ticker_loop(std::stop_token st);
+  void metrics_ticker_loop(const std::stop_token &st);
   // Samples the thread-pool queue depth into the worker queue-size gauge.
   void update_queue_size_metric();
   // Records the outgoing NATS response payload size into m_bytes_sent.

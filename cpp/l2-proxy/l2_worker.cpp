@@ -325,7 +325,7 @@ void L2Worker::run() {
 
   // Sample pool saturation in the background so the queue-depth gauge is not
   // flat between requests. jthread auto-joins and respects stop_token.
-  m_metrics_ticker = std::jthread([this](std::stop_token st) {
+  m_metrics_ticker = std::jthread([this](const std::stop_token &st) {
     metrics_ticker_loop(st);
   });
 
@@ -357,7 +357,7 @@ void L2Worker::record_bytes_sent(size_t bytes) {
       static_cast<double>(bytes));
 }
 
-void L2Worker::metrics_ticker_loop(std::stop_token st) {
+void L2Worker::metrics_ticker_loop(const std::stop_token &st) {
   const auto step = std::chrono::milliseconds(100);
   const int steps_per_sample = 50; // ~5s between samples
   int step_count = 0;

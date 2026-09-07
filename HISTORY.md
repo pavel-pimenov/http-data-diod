@@ -1,3 +1,34 @@
+# refactor(cpp): направление 5c — clang-tidy: чистый --all + правка stop_token-предупреждений
+
+## Date: 2026-09-07
+
+### Контекст
+Проект уже интегрирует clang-tidy (Dockerfile `lint`-стадия + скрипт
+`scripts/run-clang-tidy.sh` как pre-commit gate). Полный прогон (`--all`) падал
+из-за bundled `prometheus-cpp/push` (нужны curl-dev хедеры, которых нет в lint-
+окружении; push-модуль в проекте не используется). В `l2_worker.cpp` были два
+`performance-unnecessary-value-param` предупреждения на `std::stop_token st`.
+
+### Что сделано
+- `scripts/run-clang-tidy.sh`: в `IGNORE_PATH_RE` добавлен `prometheus-cpp/`
+  (bundled 3rd-party, как httplib/base64/nats) — `--all` теперь проходит
+- `l2_worker.cpp:328`: jthread-лямбда и `metrics_ticker_loop` принимают
+  `const std::stop_token &` вместо by-value (оба предупреждения ушли; jthread
+  по-прежнему транслирует свой stop_token в лямбду — is_invocable с const-ref
+  параметром выполняется, булево-семантика не изменилась)
+- объявление `metrics_ticker_loop` в l2_worker.hpp синхронизировано
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+- `./scripts/run-clang-tidy.sh --all` — ошибок нет; файлы request_handler*,
+  l2_worker*, l2_worker_nats* — без предупреждений (остаток — pre-existing
+  naming-кейсы в metrics_history.hpp/json_utils.hpp и тестах, неблокирующие)
+
+---
+
 # refactor(cpp): направление 5b — вынос ответной фазы process_db_query_from_nats
 
 ## Date: 2026-09-07
