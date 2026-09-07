@@ -5,13 +5,28 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
+
+// Optional Prometheus metrics wiring for the pool (each slot may be unset when
+// the corresponding metric is not tracked).
+struct PoolMetrics {
+  std::optional<std::reference_wrapper<prometheus::Gauge>> m_active_clients;
+  std::optional<std::reference_wrapper<prometheus::Gauge>> m_available_clients;
+  std::optional<std::reference_wrapper<prometheus::Counter>> m_acquisitions;
+  std::optional<std::reference_wrapper<prometheus::Counter>> m_releases;
+  std::optional<std::reference_wrapper<prometheus::Counter>> m_acquisition_timeouts;
+  std::optional<std::reference_wrapper<prometheus::Histogram>>
+      m_acquisition_duration;
+  std::optional<std::reference_wrapper<prometheus::Counter>> m_stale_evictions;
+};
 
 // Optimized HTTP Client Pool with per-host connection reuse
 // Key improvements:
@@ -39,13 +54,7 @@ private:
   std::chrono::seconds m_max_idle_time{300};
   std::atomic<size_t> m_stale_evictions{0};
 
-  prometheus::Gauge *m_active_clients_gauge = nullptr;
-  prometheus::Gauge *m_available_clients_gauge = nullptr;
-  prometheus::Counter *m_acquisitions_counter = nullptr;
-  prometheus::Counter *m_releases_counter = nullptr;
-  prometheus::Counter *m_acquisition_timeouts_counter = nullptr;
-  prometheus::Histogram *m_acquisition_duration_histogram = nullptr;
-  prometheus::Counter *m_stale_evictions_counter = nullptr;
+  PoolMetrics m_metrics;
 
 public:
   // Constructor with acquire timeout (default 30 seconds)
@@ -58,13 +67,7 @@ public:
       const std::string &ssl_ca_cert_path = "",
       int max_idle_timeout_seconds = 300);
 
-  void set_metrics(prometheus::Gauge *active_clients,
-                   prometheus::Gauge *available_clients,
-                   prometheus::Counter *acquisitions,
-                   prometheus::Counter *releases,
-                   prometheus::Counter *acquisition_timeouts = nullptr,
-                   prometheus::Histogram *acquisition_duration = nullptr,
-                   prometheus::Counter *stale_evictions = nullptr);
+  void set_metrics(const PoolMetrics &metrics);
 
   // Acquire connection with timeout
   [[nodiscard]] std::unique_ptr<HttpClient> acquire_connection();

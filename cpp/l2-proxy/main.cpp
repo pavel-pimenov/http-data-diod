@@ -161,7 +161,7 @@ void run_proxy(AppContext &app_ctx) {
   StatsLogger stats_logger(app_ctx, g_shutdown_flag);
   stats_logger
       .start_periodic_logging(); // Start periodic logging in proxy mode too
-  RequestHandler request_handler(app_ctx, &stats_logger);
+  RequestHandler request_handler(app_ctx, stats_logger);
 
   auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry);
 

@@ -5,7 +5,6 @@
 #include "common_utils.hpp"
 #include "httplib/httplib.h"
 #include "nlohmann/json.hpp"
-#include "stats_logger.hpp"
 #include "trace_logger.hpp"
 #include <string>
 
@@ -15,7 +14,6 @@ void set_response_content(httplib::Response &res,
                           const std::string &request_id,
                           const TraceContext &trace_ctx,
                           const std::string &method, const std::string &path,
-                          uint64_t start_us, AppContext &ctx,
-                          StatsLogger *stats_logger);
+                          uint64_t start_us, AppContext &ctx);
 
 #endif // RESPONSE_BUILDER_HPP

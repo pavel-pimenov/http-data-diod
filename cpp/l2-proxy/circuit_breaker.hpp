@@ -5,13 +5,15 @@
 #include "time_utils.hpp"
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <string>
 #include <prometheus/gauge.h>
 
 struct CircuitBreaker {
   enum class State : std::uint8_t { CLOSED = 0, OPEN = 1, HALF_OPEN = 2 };
 
-  prometheus::Gauge *m_gauge = nullptr;
+  std::optional<std::reference_wrapper<prometheus::Gauge>> m_gauge;
   std::atomic<State> m_state{State::CLOSED};
   std::atomic<int> m_failure_count{0};
   std::atomic<int> m_success_count{0};
@@ -21,7 +23,7 @@ struct CircuitBreaker {
   static constexpr uint64_t g_open_timeout_us = 10'000'000; // 10 seconds
   static constexpr int g_half_open_success_threshold = 2;
 
-  void set_gauge(prometheus::Gauge *gauge);
+  void set_gauge(prometheus::Gauge &gauge);
   [[nodiscard]] bool allow_request();
   void record_success();
   void record_failure();

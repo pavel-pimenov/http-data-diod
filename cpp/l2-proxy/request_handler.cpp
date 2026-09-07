@@ -37,13 +37,9 @@
 
 // Named struct for RAII active client tracking
 struct ActiveClientTracker {
-  StatsLogger *m_stats_logger;
-  explicit ActiveClientTracker(StatsLogger *logger) : m_stats_logger(logger) {}
-  ~ActiveClientTracker() {
-    if (m_stats_logger) {
-      m_stats_logger->decrement_active_clients();
-    }
-  }
+  StatsLogger &m_stats_logger;
+  explicit ActiveClientTracker(StatsLogger &logger) : m_stats_logger(logger) {}
+  ~ActiveClientTracker() { m_stats_logger.decrement_active_clients(); }
 };
 
 // URL prefix of the HTTP DB Gateway endpoints (docs/openapi/http-db-gate.yaml).
@@ -57,7 +53,7 @@ void send_db_error(httplib::Response &res, int status, const std::string &code,
                   "application/json");
 }
 
-RequestHandler::RequestHandler(AppContext &ctx, StatsLogger *stats_logger)
+RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
       m_request_timeout_seconds(g_default_request_timeout_seconds),
       m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {
@@ -397,7 +393,7 @@ void RequestHandler::send_response(
     const std::string &request_id, const TraceContext &trace_ctx,
     const std::string &method, const std::string &path, long long start_us) {
   set_response_content(res, response_data, request_id, trace_ctx, method, path,
-                       start_us, m_ctx, m_stats_logger);
+                       start_us, m_ctx);
 
   size_t response_size = res.body.size();
   const long long end_us = get_current_timestamp_us();
@@ -419,11 +415,9 @@ bool RequestHandler::process_request(const std::string &method,
   // Track in-flight request for graceful shutdown
   const auto in_flight_guard = m_ctx.m_in_flight_tracker.track();
 
-  // Track active client if stats logger is available
-  if (m_stats_logger) {
-    m_stats_logger->increment_active_clients();
-    m_stats_logger->increment_total_requests();
-  }
+  // Track active client
+  m_stats_logger.increment_active_clients();
+  m_stats_logger.increment_total_requests();
 
   const RequestScopedTiming request_timing(
       m_ctx.m_proxy.m_metrics->m_request_duration_seconds,

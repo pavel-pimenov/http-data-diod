@@ -49,14 +49,14 @@ L2Worker::L2Worker(AppContext &context)
                     context.m_config.m_dedup_ttl_ms) {
 
   if (context.m_proxy.m_http_pool_metrics) {
+    const auto &metrics = *context.m_proxy.m_http_pool_metrics;
     m_http_client_pool->set_metrics(
-        &context.m_proxy.m_http_pool_metrics->m_active_clients,
-        &context.m_proxy.m_http_pool_metrics->m_available_clients,
-        &context.m_proxy.m_http_pool_metrics->m_client_acquisitions_total,
-        &context.m_proxy.m_http_pool_metrics->m_client_releases_total,
-        nullptr, // acquisition_timeouts (not tracked for worker pool)
-        nullptr, // acquisition_duration (not tracked for worker pool)
-        &context.m_proxy.m_http_pool_metrics->m_stale_evictions_total);
+        PoolMetrics{metrics.m_active_clients, metrics.m_available_clients,
+                    metrics.m_client_acquisitions_total,
+                    metrics.m_client_releases_total,
+                    std::nullopt, // acquisition_timeouts (not tracked)
+                    std::nullopt, // acquisition_duration (not tracked)
+                    metrics.m_stale_evictions_total});
   }
 
   Logger::info("Initializing NATS client for subject: {}, queue group: {}",
@@ -96,8 +96,7 @@ L2Worker::L2Worker(AppContext &context)
       pool_type, m_ctx.m_config.m_l2_worker_threads,
       static_cast<size_t>(m_ctx.m_config.m_l2_worker_queue_size));
 
-  m_circuit_breaker.set_gauge(
-      &m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
+  m_circuit_breaker.set_gauge(m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
 
   Logger::info("L2Worker initialized successfully");
 }

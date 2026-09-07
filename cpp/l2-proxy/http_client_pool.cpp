@@ -26,28 +26,17 @@ HttpClientPool::HttpClientPool(size_t max_pool_size, int timeout_seconds,
                 m_enable_connection_reuse, max_idle_timeout_seconds);
 }
 
-void HttpClientPool::set_metrics(prometheus::Gauge *active_clients,
-                                 prometheus::Gauge *available_clients,
-                                 prometheus::Counter *acquisitions,
-                                 prometheus::Counter *releases,
-                                 prometheus::Counter *acquisition_timeouts,
-                                 prometheus::Histogram *acquisition_duration,
-                                 prometheus::Counter *stale_evictions) {
-  m_active_clients_gauge = active_clients;
-  m_available_clients_gauge = available_clients;
-  m_acquisitions_counter = acquisitions;
-  m_releases_counter = releases;
-  m_acquisition_timeouts_counter = acquisition_timeouts;
-  m_acquisition_duration_histogram = acquisition_duration;
-  m_stale_evictions_counter = stale_evictions;
+void HttpClientPool::set_metrics(const PoolMetrics &metrics) {
+  m_metrics = metrics;
 }
 
 void HttpClientPool::update_metrics() {
-  if (m_active_clients_gauge) {
-    m_active_clients_gauge->Set(static_cast<double>(m_active_clients.load()));
+  if (m_metrics.m_active_clients) {
+    m_metrics.m_active_clients->get().Set(
+        static_cast<double>(m_active_clients.load()));
   }
-  if (m_available_clients_gauge) {
-    m_available_clients_gauge->Set(
+  if (m_metrics.m_available_clients) {
+    m_metrics.m_available_clients->get().Set(
         static_cast<double>(m_available_connections.size()));
   }
 }
@@ -79,8 +68,8 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
           "HttpClientPool: acquire timeout after {}s (max_size={}, total={})",
           m_acquire_timeout_seconds, m_max_pool_size, m_total_clients.load());
 
-      if (m_acquisition_timeouts_counter) {
-        m_acquisition_timeouts_counter->Increment();
+      if (m_metrics.m_acquisition_timeouts) {
+        m_metrics.m_acquisition_timeouts->get().Increment();
       }
 
       throw std::runtime_error(
@@ -109,15 +98,15 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
 
   update_metrics();
 
-  if (m_acquisitions_counter) {
-    m_acquisitions_counter->Increment();
+  if (m_metrics.m_acquisitions) {
+    m_metrics.m_acquisitions->get().Increment();
   }
 
-  if (m_acquisition_duration_histogram) {
+  if (m_metrics.m_acquisition_duration) {
     const auto duration = std::chrono::duration<double>(
                               std::chrono::steady_clock::now() - start_time)
                               .count();
-    m_acquisition_duration_histogram->Observe(duration);
+    m_metrics.m_acquisition_duration->get().Observe(duration);
   }
 
   return client;
@@ -135,8 +124,8 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
                       m_max_idle_time) {
       m_total_clients--;
       m_stale_evictions++;
-      if (m_stale_evictions_counter) {
-        m_stale_evictions_counter->Increment();
+      if (m_metrics.m_stale_evictions) {
+        m_metrics.m_stale_evictions->get().Increment();
       }
       Logger::warn("HttpClientPool: evicting stale connection (idle > {}s), "
                    "stale_evictions={}",
@@ -150,15 +139,16 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
 
     // Validate the connection
     if (client && client->is_valid()) {
-      if (m_acquisitions_counter) {
-        m_acquisitions_counter->Increment();
+      if (m_metrics.m_acquisitions) {
+        m_metrics.m_acquisitions->get().Increment();
       }
 
-      if (m_acquisition_duration_histogram) {
+      if (m_metrics.m_acquisition_duration) {
         const auto duration = std::chrono::duration<double>(
-                                  std::chrono::steady_clock::now() - start_time)
+                                  std::chrono::steady_clock::now() -
+                                  start_time)
                                   .count();
-        m_acquisition_duration_histogram->Observe(duration);
+        m_metrics.m_acquisition_duration->get().Observe(duration);
       }
 
       Logger::debug("HttpClientPool: acquired connection from pool (active={})",
@@ -211,8 +201,8 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 
   update_metrics();
 
-  if (m_releases_counter) {
-    m_releases_counter->Increment();
+  if (m_metrics.m_releases) {
+    m_metrics.m_releases->get().Increment();
   }
 }
 

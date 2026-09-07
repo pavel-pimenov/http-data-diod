@@ -25,7 +25,7 @@ private:
   static constexpr int g_max_retry_delay_ms = 2000;
 
   AppContext &m_ctx;
-  StatsLogger *m_stats_logger;
+  StatsLogger &m_stats_logger;
   int m_request_timeout_seconds = 30;
 
   RequestIdGenerator m_id_generator;
@@ -98,7 +98,7 @@ private:
                            uint64_t remaining);
 
 public:
-  explicit RequestHandler(AppContext &ctx, StatsLogger *stats_logger = nullptr);
+  explicit RequestHandler(AppContext &ctx, StatsLogger &stats_logger);
   ~RequestHandler();
   void handle_get(const httplib::Request &req, httplib::Response &res);
   void handle_post(const httplib::Request &req, httplib::Response &res);

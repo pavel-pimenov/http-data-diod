@@ -1,14 +1,14 @@
 #include "circuit_breaker.hpp"
 #include "logger.hpp"
 
-void CircuitBreaker::set_gauge(prometheus::Gauge *gauge) {
+void CircuitBreaker::set_gauge(prometheus::Gauge &gauge) {
   m_gauge = gauge;
   update_gauge();
 }
 
 void CircuitBreaker::update_gauge() {
-  if (m_gauge != nullptr) {
-    m_gauge->Set(static_cast<double>(m_state.load()));
+  if (m_gauge.has_value()) {
+    m_gauge->get().Set(static_cast<double>(m_state.load()));
   }
 }
 

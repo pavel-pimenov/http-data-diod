@@ -1,3 +1,40 @@
+# refactor(cpp): направление 2 — сырые указатели на метрики/loggers → reference/optional
+
+## Date: 2026-09-07
+
+### Контекст
+Раунд «средний риск»: убрать сырые nullable-указатели из интерфейсов, где
+опциональность можно закодировать в типе, а обязательные объекты передавать по
+ссылке.
+
+### Что сделано
+
+**1. `CircuitBreaker::m_gauge` (`prometheus::Gauge*`) → `std::optional<std::reference_wrapper<...>>`:**
+- `set_gauge` теперь принимает `prometheus::Gauge&`; `update_gauge` проверяет `has_value()`
+- тесты, конструирующие `CircuitBreaker` без метрики, не изменились
+
+**2. `RequestHandler::m_stats_logger` (`StatsLogger*`, nullable) → `StatsLogger&`:**
+- конструктор `RequestHandler(AppContext&, StatsLogger&)` без default `nullptr`
+  (в проде логгер всегда существует — стек-объект в main); убраны 3 null-guard
+- `ActiveClientTracker` держит ссылку вместо указателя
+- из `set_response_content` (response_builder.{hpp,cpp}) удалён **неиспользуемый**
+  параметр `StatsLogger*` + неиспользуемый include `stats_logger.hpp`
+
+**3. `HttpClientPool::set_metrics` (7 позиционных пром.указателей) → `PoolMetrics` (struct):**
+- новый `struct PoolMetrics` в http_client_pool.hpp: 7 слотов
+  `std::optional<std::reference_wrapper<...>>` (активные/доступные клиенты,
+  acquisitions, releases, timeouts, duration-histogram, stale-evictions)
+- 7 членов-указателей заменены на один `PoolMetrics m_metrics`
+- call-site в l2_worker.cpp собран агрегатной инициализацией из `HttpPoolMetrics`
+  (референсы в app_context), два неотслеживаемых слота — `std::nullopt`
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): раунд чистки — мёртвый mdspan-код, std::ranges::min_element, общий хелпер ?window=
 
 ## Date: 2026-09-07
