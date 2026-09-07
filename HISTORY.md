@@ -1,3 +1,29 @@
+# refactor(cpp): направление 7a — чистка оставшихся clang-tidy warning в заголовках
+
+## Date: 2026-09-07
+
+### Контекст
+После серии раундов в репозитории оставались не-блокирующие clang-tidy warning-и
+в проектных заголовках: `MetricsHistory::Series` нарушал схему именования
+`MemberPrefix: m_`; статические константы `get_response_body`/`get_body_response_ref`
+нарушали `StaticConstantPrefix: g_`; jthread-лямбда копировала стоп-токен
+(`performance-unnecessary-value-param`); в `build_sparkline_svg` были 4 замечания
+(умножение в int с последующим расширением до long + дублирование типа у
+`static_cast<double>`).
+
+### Что сделано
+- `metrics_history.hpp`: jthread-лямбда `[this](const std::stop_token &st)`; поля
+  структуры `Series` → `m_labels`/`m_points` (внутренние использования в
+  `get_series` и `series_view` обновлены)
+- `json_utils.hpp`: `empty_body` → `g_empty_body`, `empty` → `g_empty`
+- `stats_page.hpp`: чтение `s.labels`/`s.points`/`repr->points` → новые имена;
+  4 pre-existing замечания исправлены (`(window_minutes * 60L)`,
+  `const auto` для `static_cast<double>` инициализаций)
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по metrics_history.hpp/json_utils.hpp/stats_page.hpp: нет errors/warnings
+- `./rebuild-and-run.sh` → все сервисы healthy; message_counter успешно (1/1, 218 rps)
 # refactor(cpp): направление 6c — дедупликация acquisition-метрик HttpClientPool
 
 ## Date: 2026-09-07

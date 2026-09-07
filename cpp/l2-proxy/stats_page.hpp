@@ -91,7 +91,7 @@ inline std::string build_sparkline_svg(
     const std::vector<std::pair<std::time_t, double>> &raw_pts, bool as_rate,
     int window_minutes, int width = 188, int height = 26) {
   const std::time_t cutoff =
-      (raw_pts.empty() ? 0 : raw_pts.back().first) - window_minutes * 60;
+      (raw_pts.empty() ? 0 : raw_pts.back().first) - (window_minutes * 60L);
   std::vector<std::pair<std::time_t, double>> pts;
   for (const auto &p : raw_pts) {
     if (p.first >= cutoff) {
@@ -105,7 +105,7 @@ inline std::string build_sparkline_svg(
   vals.reserve(pts.size());
   if (as_rate) {
     for (size_t i = 1; i < pts.size(); ++i) {
-      const double dt = static_cast<double>(pts[i].first - pts[i - 1].first);
+      const auto dt = static_cast<double>(pts[i].first - pts[i - 1].first);
       double r = (pts[i].second - pts[i - 1].second) / (dt > 0.0 ? dt : 1.0);
       if (r < 0.0) {
         r = 0.0; // counter reset between samples
@@ -128,8 +128,8 @@ inline std::string build_sparkline_svg(
     }
   }
   const double range = (max_v - min_v) > 1e-12 ? (max_v - min_v) : 1.0;
-  const double w = static_cast<double>(width);
-  const double h = static_cast<double>(height);
+  const auto w = static_cast<double>(width);
+  const auto h = static_cast<double>(height);
   std::ostringstream pts_attr;
   for (size_t i = 0; i < vals.size(); ++i) {
     const double x = vals.size() == 1
@@ -283,11 +283,11 @@ inline std::string build_stats_html(
       const MetricsHistory::Series *repr = nullptr;
       double best = -1.0;
       for (const auto &s : series) {
-        if (s.labels.empty()) {
+        if (s.m_labels.empty()) {
           repr = &s;
           break;
         }
-        const double last = s.points.empty() ? 0.0 : s.points.back().second;
+        const double last = s.m_points.empty() ? 0.0 : s.m_points.back().second;
         if (last > best) {
           best = last;
           repr = &s;
@@ -295,7 +295,7 @@ inline std::string build_stats_html(
       }
       if (repr) {
         const std::string svg =
-            build_sparkline_svg(repr->points, as_rate, window_minutes);
+            build_sparkline_svg(repr->m_points, as_rate, window_minutes);
         if (!svg.empty()) {
           html << "<div class=\"sparkwrap\"><div class=\"cap\">last "
                << window_minutes << "m</div>" << svg << "</div>\n";

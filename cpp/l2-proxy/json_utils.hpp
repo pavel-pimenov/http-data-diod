@@ -163,23 +163,23 @@ inline json build_nats_response_envelope(
 
 // Reference to the nested body object (or a static empty object when absent).
 inline const json &get_response_body(const json &j) {
-  static const json empty_body = json::object();
+  static const json g_empty_body = json::object();
   const auto it = j.find(NatsResponseContract::kBody);
   if (it != j.end() && it->is_object()) {
     return *it;
   }
-  return empty_body;
+  return g_empty_body;
 }
 
 // Zero-copy reference to the actual response string, matching non-binary bodies
 // that are stored verbatim (not base64).
 inline const std::string &get_body_response_ref(const json &j) {
-  static const std::string empty;
+  static const std::string g_empty;
   const auto it = get_response_body(j).find(NatsResponseContract::kBodyResponse);
   if (it != get_response_body(j).end() && it->is_string()) {
     return it->get_ref<const std::string &>();
   }
-  return empty;
+  return g_empty;
 }
 
 // Fetch a string/bool field from the nested body object with a fallback.

@@ -75,7 +75,7 @@ public:
     if (m_thread.joinable()) {
       return;
     }
-    m_thread = std::jthread([this](std::stop_token st) { run(st); });
+    m_thread = std::jthread([this](const std::stop_token &st) { run(st); });
   }
 
   void stop() {
@@ -86,8 +86,8 @@ public:
   }
 
   struct Series {
-    std::string labels;
-    std::vector<std::pair<std::time_t, double>> points;
+    std::string m_labels;
+    std::vector<std::pair<std::time_t, double>> m_points;
   };
 
   bool has_family(const std::string &family) const {
@@ -109,8 +109,8 @@ public:
         break;
       }
       Series s;
-      s.labels = kv.first;
-      s.points.assign(kv.second.begin(), kv.second.end());
+      s.m_labels = kv.first;
+      s.m_points.assign(kv.second.begin(), kv.second.end());
       out.push_back(std::move(s));
     }
     return out;
@@ -126,8 +126,8 @@ public:
     for (const auto &kv : it->second) {
       if (n++ >= limit) break;
       Series s;
-      s.labels = kv.first;
-      s.points.assign(kv.second.begin(), kv.second.end());
+      s.m_labels = kv.first;
+      s.m_points.assign(kv.second.begin(), kv.second.end());
       co_yield s;
     }
   }
