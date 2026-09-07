@@ -1,3 +1,31 @@
+# refactor(cpp): направление 5d — чистый хелпер списка БД + юнит-тесты
+
+## Date: 2026-09-07
+
+### Контекст
+Вынесенный в 5a метод `handle_db_gateway_list` всё ещё требовал полный AppContext
+для тестирования. Построение JSON-списка из конфига БД — чистая функция
+`vector<DbConfig>` → array-json; перенос в header-only `db_gateway_routing`
+(свободный от AppContext/NATS, как остальные роутинг-хелперы) делает её
+юнит-тестируемой.
+
+### Что сделано
+- `db_gateway_routing.hpp`: новый шаблон `databases_list_json(DbRange)` — одна
+  запись `{name, driver, enabled:true}` на сконфигурированную БД; шаблон по
+  любому range с полями m_name/m_driver (AppContext-free)
+- `request_handler.cpp::handle_db_gateway_list`: цикл по БД заменён на вызов
+  `db_gateway_routing::databases_list_json` (сборка тела идентична)
+- `test_proxy_core.cpp`: 2 новых кейса `[db-gateway-list]` — по записи на БД
+  (2 БД) и пустой конфиг → пустой массив
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+- `GET /v1/sql/` → `{"databases":[{"driver":"oracle","enabled":true,"name":"oracle"}]}`
+
+---
+
 # refactor(cpp): направление 5c — clang-tidy: чистый --all + правка stop_token-предупреждений
 
 ## Date: 2026-09-07

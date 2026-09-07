@@ -744,12 +744,7 @@ void RequestHandler::handle_db_gateway_list(
                               "list", 405);
     return;
   }
-  json names = json::array();
-  for (const DbConfig &db : m_ctx.m_config.m_databases) {
-    names.push_back(json{{"name", db.m_name},
-                         {"driver", db.m_driver},
-                         {"enabled", true}});
-  }
+  json names = db_gateway_routing::databases_list_json(m_ctx.m_config.m_databases);
   res.status = 200;
   send_json_response(res, res.status, json{{"databases", names}});
   record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",

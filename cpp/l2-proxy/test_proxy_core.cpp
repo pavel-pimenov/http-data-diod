@@ -301,6 +301,35 @@ TEST_CASE("Gateway row collector: enforces the row limit", "[db-gateway-rows]") 
   REQUIRE(collector.take_rows().size() == 2);
 }
 
+TEST_CASE("Gateway list: builds one entry per configured database",
+          "[db-gateway-list]") {
+  struct DummyDb {
+    std::string m_name;
+    std::string m_driver;
+  };
+  const std::vector<DummyDb> dbs = {{"oracle", "oracle"}, {"pg", "postgres"}};
+  const json list = db_gateway_routing::databases_list_json(dbs);
+  REQUIRE(list.size() == 2);
+  REQUIRE(list[0] == json{{"name", "oracle"},
+                          {"driver", "oracle"},
+                          {"enabled", true}});
+  REQUIRE(list[1] == json{{"name", "pg"},
+                          {"driver", "postgres"},
+                          {"enabled", true}});
+}
+
+TEST_CASE("Gateway list: empty config produces an empty array",
+          "[db-gateway-list]") {
+  struct DummyDb {
+    std::string m_name;
+    std::string m_driver;
+  };
+  const std::vector<DummyDb> dbs;
+  const json list = db_gateway_routing::databases_list_json(dbs);
+  REQUIRE(list.is_array());
+  REQUIRE(list.empty());
+}
+
 TEST_CASE("Gateway helper: resolve_positive_or falls back on non-positive",
           "[db-gateway-helper]") {
   REQUIRE(resolve_positive_or(42, 5) == 42);

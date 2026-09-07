@@ -2,6 +2,7 @@
 #define DB_GATEWAY_ROUTING_HPP
 
 #include <format>
+#include <nlohmann/json.hpp>
 #include <string>
 
 // Pure helpers of the /v1/sql routing in the proxy request handler. Header-only
@@ -73,6 +74,21 @@ inline MethodDecision classify_method(const std::string &action,
                         method)};
   }
   return {};
+}
+
+// Builds the JSON list body of GET /v1/sql: one {name, driver, enabled} entry
+// per configured database. Templates over any range of objects exposing
+// m_name/m_driver so it stays AppContext-free (unit-testable with a dummy
+// struct); every configured database is enabled at startup.
+template <typename DbRange>
+inline nlohmann::json databases_list_json(const DbRange &dbs) {
+  nlohmann::json names = nlohmann::json::array();
+  for (const auto &db : dbs) {
+    names.push_back(nlohmann::json{{"name", db.m_name},
+                                   {"driver", db.m_driver},
+                                   {"enabled", true}});
+  }
+  return names;
 }
 
 } // namespace db_gateway_routing
