@@ -1,3 +1,36 @@
+# refactor(cpp): раунд чистки — мёртвый mdspan-код, std::ranges::min_element, общий хелпер ?window=
+
+## Date: 2026-09-07
+
+### Контекст
+Раунд «низкий риск» из плана рефакторинга: убрать мёртвый demo-код, заменить сырой
+цикл на STL-алгоритм, вынести дубликат парсинга `?window=` в общий хелпер.
+
+### Что сделано
+
+**1. Удалён мёртвый demo-код с `<mdspan>` (C++23, не в стандарте сборки):**
+- `db_query_executor_postgres.cpp`: удалён include `#if __has_include(<mdspan>)` и блок
+  демонстрации 2D mdspan-view над колонками [name,type] (был `(void)md[0,0]` — нет эффекта)
+- `l2_worker.cpp`: удалён неиспользуемый include `<mdspan>` (оставлен `<generator>`,
+  который реально используется в `attempt_sequence`)
+
+**2. `DuplicateDetector::evict_lowest_count_locked()` → `std::ranges::min_element`:**
+- ручной линейный цикл с tie-break по `m_first_seen_ms` заменён на
+  `std::ranges::min_element` с тем же компаратором (count, при равенстве — first_seen)
+
+**3. Общий хелпер `parse_stats_window` в `stats_page.hpp`:**
+- дубликат парсинга `?window=N` (clamp 1..120, default 30) вынесен в шаблонный хелпер
+  `parse_stats_window(params, default_min=30)` без зависимости от httplib
+- оба call-site (request_handler.cpp `/stats` и main.cpp worker `/stats`) используют его;
+  добавлен include `<algorithm>` для `std::clamp`
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): RequestIdGenerator на std::format без thread_local stringstream
 
 ## Date: 2026-09-04

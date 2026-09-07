@@ -10,9 +10,6 @@
 #if __has_include(<generator>)
 #include <generator>
 #endif
-#if __has_include(<mdspan>)
-#include <mdspan>
-#endif
 
 #include "common_utils.hpp"
 #include "http_client.hpp"

@@ -12,9 +12,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#if __has_include(<mdspan>)
-#include <mdspan>
-#endif
 
 namespace {
 // PostgreSQL built-in type OIDs used for JSON value conversion and column
@@ -402,18 +399,6 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   for (int c = 0; c < num_fields; ++c) {
     name_type.emplace_back(PQfname(res, c), pg_type_name(PQftype(res, c)));
   }
-#if __has_include(<mdspan>)
-  // C++23 mdspan — реальный 2D non-owning view над (num_fields × 2) строки [name,type] без копий
-  if (!name_type.empty()) {
-    // Flatten names/types в contiguous буфер для mdspan демонстрации
-    std::vector<std::string_view> flat;
-    flat.reserve(num_fields * 2);
-    for (const auto &[n,t] : name_type) { flat.emplace_back(n); flat.emplace_back(t); }
-    std::mdspan<const std::string_view, std::dextents<std::size_t, 2>> md(flat.data(), num_fields, 2);
-    (void)md[0,0]; // md[i,0]=name, md[i,1]=type
-    (void)md;
-  }
-#endif
   const json columns_json = make_db_columns_json(name_type);
   PQclear(res);
   m_impl->release_conn(conn);

@@ -119,13 +119,12 @@ void DuplicateDetector::evict_lowest_count_locked() {
   if (m_entries.empty()) {
     return;
   }
-  auto victim = m_entries.begin();
-  for (auto it = m_entries.begin(); it != m_entries.end(); ++it) {
-    if (it->second.m_count < victim->second.m_count ||
-        (it->second.m_count == victim->second.m_count &&
-         it->second.m_first_seen_ms < victim->second.m_first_seen_ms)) {
-      victim = it;
-    }
-  }
+  auto victim = std::ranges::min_element(
+      m_entries, [](const auto &a, const auto &b) {
+        if (a.second.m_count != b.second.m_count) {
+          return a.second.m_count < b.second.m_count;
+        }
+        return a.second.m_first_seen_ms < b.second.m_first_seen_ms;
+      });
   m_entries.erase(victim);
 }

@@ -2,6 +2,7 @@
 #define STATS_PAGE_HPP
 
 #include <chrono>
+#include <algorithm>
 #include <ctime>
 #include <memory>
 #include <ranges>
@@ -143,6 +144,21 @@ inline std::string build_sparkline_svg(
       << "\"><polyline fill=\"none\" stroke=\"#79c0ff\" stroke-width=\"1.5\" points=\""
       << pts_attr.str() << "\"/></svg>";
   return svg.str();
+}
+
+// Parses the optional ?window=N (minutes, default 30, clamped to 1..120)
+// lookback parameter shared by the proxy and worker stats pages.
+template <typename ParamsT>
+inline int parse_stats_window(const ParamsT &params, int default_min = 30) {
+  int window_min = default_min;
+  if (const auto wit = params.find("window"); wit != params.end()) {
+    const auto raw = wit->second;
+    const auto digits = raw.substr(0, raw.find_first_not_of("0123456789"));
+    if (!digits.empty()) {
+      window_min = std::clamp(std::stoi(digits), 1, 120);
+    }
+  }
+  return window_min;
 }
 
 inline std::string build_stats_html(

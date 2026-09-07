@@ -258,19 +258,10 @@ void run_worker(AppContext &app_ctx) {
   // Optional ?window=N (minutes, default 30) controls the sparkline lookback.
   health_server.Get("/stats", [&app_ctx](const httplib::Request &req,
                                          httplib::Response &res) {
-    int window_min = 30;
-    const auto wit = req.params.find("window");
-    if (wit != req.params.end()) {
-      const std::string raw = wit->second;
-      const std::string digits =
-          raw.substr(0, raw.find_first_not_of("0123456789"));
-      if (!digits.empty()) {
-        window_min = std::clamp(std::stoi(digits), 1, 120);
-      }
-    }
     res.set_content(
         build_stats_html("l2-worker", app_ctx.m_worker_registry,
-                         app_ctx.m_worker_stats_history.get(), window_min),
+                         app_ctx.m_worker_stats_history.get(),
+                         parse_stats_window(req.params)),
         "text/html; charset=utf-8");
   });
 
