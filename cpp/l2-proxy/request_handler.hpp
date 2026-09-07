@@ -97,6 +97,19 @@ private:
                            const std::string &message, uint64_t limit,
                            uint64_t remaining);
 
+  // Records a duplicate POST (by SHA-256 of the body) and, when
+  // DUPLICATE_REJECT_ENABLED, writes a 409 and returns true so the caller
+  // stops processing. Returns false to continue with the request.
+  bool record_and_maybe_reject_duplicate(const std::string &client_id,
+                                         const std::string &body,
+                                         httplib::Response &res);
+
+  // Admin/debug GET endpoints; dispatch helpers for handle_get.
+  void handle_crash_test(const httplib::Request &req, httplib::Response &res);
+  void handle_stacktrace(httplib::Response &res);
+  void handle_health_ready(httplib::Response &res);
+  void handle_duplicates(httplib::Response &res);
+
 public:
   explicit RequestHandler(AppContext &ctx, StatsLogger &stats_logger);
   ~RequestHandler();

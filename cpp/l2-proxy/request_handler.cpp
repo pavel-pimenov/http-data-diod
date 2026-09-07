@@ -64,9 +64,8 @@ RequestHandler::~RequestHandler() {}
 
 void RequestHandler::handle_get(const httplib::Request &req,
                                 httplib::Response &res) {
-  // Handle health check endpoints
+  // Liveness probe - just check if process is running
   if (req.path == kHealthLivePath || req.path == kHealthPath) {
-    // Liveness probe - just check if process is running
     set_health_alive(res, "l2-proxy");
     return;
   }
@@ -83,120 +82,22 @@ void RequestHandler::handle_get(const httplib::Request &req,
   }
 
   if (req.path == "/crash-test") {
-    // Intentionally crashes the process to test the crash handler. Guarded
-    // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
-    // not remotely SIGSEGV the proxy.
-    if (!m_ctx.m_config.m_enable_crash_test_endpoint) {
-      res.status = 404;
-      res.set_content(
-          R"json({"error": "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)"})json",
-          "application/json");
-      return;
-    }
-    Logger::error("CRASH TEST: intentional SIGSEGV via /crash-test endpoint");
-    volatile int *bad_ptr = nullptr;
-    // cppcheck-suppress nullPointer
-    *bad_ptr = 42; // NOLINT //-V522 triggers SIGSEGV for crash handler test
-    // unreachable
-    res.status = 200;
+    handle_crash_test(req, res);
     return;
   }
 
   if (req.path == "/debug/stacktrace") {
-#if __has_include(<stacktrace>)
-    auto trace = std::stacktrace::current();
-    nlohmann::json j = nlohmann::json::array();
-    for (std::size_t i = 0; i < trace.size(); ++i) {
-      const auto &e = trace[i];
-      j.push_back({{"index", i},
-                   {"description", e.description()},
-                   {"source_file", e.source_file()},
-                   {"source_line", e.source_line()}});
-    }
-    CrashHandler::log_current_stacktrace();
-    send_json_response(res, 200, {{"stacktrace", j}, {"frames", trace.size()}});
-#else
-    void *callstack[32];
-    int frames = backtrace(callstack, 32);
-    nlohmann::json j = nlohmann::json::array();
-    for (int i = 0; i < frames; ++i) {
-      char buf[32];
-      snprintf(buf, sizeof(buf), "%p", callstack[i]);
-      j.push_back({{"index", i}, {"address", buf}});
-    }
-    CrashHandler::log_current_stacktrace();
-    send_json_response(res, 200, {{"stacktrace", j}, {"frames", frames}});
-#endif
+    handle_stacktrace(res);
     return;
   }
 
   if (req.path == kHealthReadyPath) {
-    bool nats_healthy = false;
-    std::string error_msg;
-
-    try {
-      if (m_ctx.m_nats_client) {
-        if (m_ctx.m_config.m_health_ready_allow_connect) {
-          // Opt-in legacy path: ping() may attempt a (potentially blocking)
-          // reconnect when the connection was lost between the state read and
-          // the ping — enables readiness to recover connectivity on its own.
-          if (m_ctx.m_nats_client->is_connected()) {
-            nats_healthy = (m_ctx.m_nats_client->ping() == "PONG");
-            if (!nats_healthy) {
-              error_msg = "NATS ping failed";
-            }
-          }
-        } else {
-          // Default: never initiate a reconnect from the health endpoint.
-          // Only report the current connection state, so /health/ready answers
-          // fast for the load balancer even while NATS is down.
-          nats_healthy = m_ctx.m_nats_client->is_connected();
-        }
-      }
-      // A missing or disconnected client reports the same readable message
-      // (the legacy allow-connect path with a lost connection also lands here
-      // because nats_healthy stays false and error_msg is still empty).
-      if (!nats_healthy && error_msg.empty()) {
-        error_msg = "NATS connection not available";
-      }
-    } catch (const std::exception &e) {
-      error_msg = std::format("NATS health check failed: {}", e.what());
-      nats_healthy = false;
-    }
-
-    m_ctx.m_proxy.m_metrics->m_nats_connected.Set(nats_healthy ? 1.0 : 0.0);
-    m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
-
-    if (nats_healthy) {
-      res.status = 200;
-      res.set_content(
-          R"({"status": "ready", "service": "l2-proxy", "messaging": "nats"})",
-          "application/json");
-    } else {
-      res.status = 503;
-      nlohmann::json error_body;
-      error_body["status"] = "not_ready";
-      error_body["service"] = "l2-proxy";
-      error_body["error"] = error_msg;
-      send_json_response(res, res.status, error_body);
-    }
+    handle_health_ready(res);
     return;
   }
 
   if (req.path == "/debug/duplicates") {
-    // Simple report of duplicate POST requests detected from clients. When the
-    // detector is absent (non-proxy mode) or disabled, still answers 200 with
-    // the enabled flag so callers can distinguish "off" from "empty".
-    if (!m_ctx.m_proxy.m_duplicate_detector) {
-      res.status = 404;
-      res.set_content(
-          R"({"error": "duplicate detection not available in this mode"})",
-          "application/json");
-      return;
-    }
-    res.status = 200;
-    res.set_content(m_ctx.m_proxy.m_duplicate_detector->report().dump(2),
-                    "application/json");
+    handle_duplicates(res);
     return;
   }
 
@@ -206,6 +107,121 @@ void RequestHandler::handle_get(const httplib::Request &req,
   }
 
   handle_request(req, res, "GET", "");
+}
+
+void RequestHandler::handle_crash_test(const httplib::Request &req,
+                                       httplib::Response &res) {
+  // Intentionally crashes the process to test the crash handler. Guarded
+  // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
+  // not remotely SIGSEGV the proxy.
+  if (!m_ctx.m_config.m_enable_crash_test_endpoint) {
+    res.status = 404;
+    res.set_content(
+        R"json({"error": "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)"})json",
+        "application/json");
+    return;
+  }
+  Logger::error("CRASH TEST: intentional SIGSEGV via /crash-test endpoint");
+  volatile int *bad_ptr = nullptr;
+  // cppcheck-suppress nullPointer
+  *bad_ptr = 42; // NOLINT //-V522 triggers SIGSEGV for crash handler test
+  // unreachable
+  res.status = 200;
+}
+
+void RequestHandler::handle_stacktrace(httplib::Response &res) {
+#if __has_include(<stacktrace>)
+  auto trace = std::stacktrace::current();
+  nlohmann::json j = nlohmann::json::array();
+  for (std::size_t i = 0; i < trace.size(); ++i) {
+    const auto &e = trace[i];
+    j.push_back({{"index", i},
+                 {"description", e.description()},
+                 {"source_file", e.source_file()},
+                 {"source_line", e.source_line()}});
+  }
+  CrashHandler::log_current_stacktrace();
+  send_json_response(res, 200, {{"stacktrace", j}, {"frames", trace.size()}});
+#else
+  void *callstack[32];
+  int frames = backtrace(callstack, 32);
+  nlohmann::json j = nlohmann::json::array();
+  for (int i = 0; i < frames; ++i) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%p", callstack[i]);
+    j.push_back({{"index", i}, {"address", buf}});
+  }
+  CrashHandler::log_current_stacktrace();
+  send_json_response(res, 200, {{"stacktrace", j}, {"frames", frames}});
+#endif
+}
+
+void RequestHandler::handle_health_ready(httplib::Response &res) {
+  bool nats_healthy = false;
+  std::string error_msg;
+
+  try {
+    if (m_ctx.m_nats_client) {
+      if (m_ctx.m_config.m_health_ready_allow_connect) {
+        // Opt-in legacy path: ping() may attempt a (potentially blocking)
+        // reconnect when the connection was lost between the state read and
+        // the ping — enables readiness to recover connectivity on its own.
+        if (m_ctx.m_nats_client->is_connected()) {
+          nats_healthy = (m_ctx.m_nats_client->ping() == "PONG");
+          if (!nats_healthy) {
+            error_msg = "NATS ping failed";
+          }
+        }
+      } else {
+        // Default: never initiate a reconnect from the health endpoint.
+        // Only report the current connection state, so /health/ready answers
+        // fast for the load balancer even while NATS is down.
+        nats_healthy = m_ctx.m_nats_client->is_connected();
+      }
+    }
+    // A missing or disconnected client reports the same readable message
+    // (the legacy allow-connect path with a lost connection also lands here
+    // because nats_healthy stays false and error_msg is still empty).
+    if (!nats_healthy && error_msg.empty()) {
+      error_msg = "NATS connection not available";
+    }
+  } catch (const std::exception &e) {
+    error_msg = std::format("NATS health check failed: {}", e.what());
+    nats_healthy = false;
+  }
+
+  m_ctx.m_proxy.m_metrics->m_nats_connected.Set(nats_healthy ? 1.0 : 0.0);
+  m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
+
+  if (nats_healthy) {
+    res.status = 200;
+    res.set_content(
+        R"({"status": "ready", "service": "l2-proxy", "messaging": "nats"})",
+        "application/json");
+  } else {
+    res.status = 503;
+    nlohmann::json error_body;
+    error_body["status"] = "not_ready";
+    error_body["service"] = "l2-proxy";
+    error_body["error"] = error_msg;
+    send_json_response(res, res.status, error_body);
+  }
+}
+
+void RequestHandler::handle_duplicates(httplib::Response &res) {
+  // Simple report of duplicate POST requests detected from clients. When the
+  // detector is absent (non-proxy mode) or disabled, still answers 200 with
+  // the enabled flag so callers can distinguish "off" from "empty".
+  if (!m_ctx.m_proxy.m_duplicate_detector) {
+    res.status = 404;
+    res.set_content(
+        R"({"error": "duplicate detection not available in this mode"})",
+        "application/json");
+    return;
+  }
+  res.status = 200;
+  res.set_content(m_ctx.m_proxy.m_duplicate_detector->report().dump(2),
+                  "application/json");
 }
 
 void RequestHandler::handle_post(const httplib::Request &req,
@@ -288,6 +304,42 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
         m_ctx.m_proxy.m_rate_limiter->available_tokens());
   }
 
+  return true;
+}
+
+// ============================================================================
+// Duplicate POST detection
+// ============================================================================
+bool RequestHandler::record_and_maybe_reject_duplicate(
+    const std::string &client_id, const std::string &body,
+    httplib::Response &res) {
+  const auto body_hash = compute_sha256_hex(body);
+  if (!m_ctx.m_proxy.m_duplicate_detector->record(client_id, body_hash,
+                                                  body)) {
+    return false;
+  }
+  m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
+  if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
+    m_ctx.m_proxy.m_per_client_id_duplicate_collector->get(client_id, 0)
+        ->Increment();
+  }
+  Logger::warn("Duplicate POST detected: client_id={} body_bytes={}",
+               client_id, body.size());
+
+  // When enabled, reject the duplicate instead of forwarding it to the
+  // worker: the body was already delivered within the TTL window, so
+  // forwarding would only repeat a side effect. Off by default — the proxy
+  // then still counts and reports the duplicate (see /debug/duplicates and
+  // l2_proxy_per_client_id_duplicate_* metrics).
+  if (!m_ctx.m_config.m_duplicate_reject_enabled) {
+    return false;
+  }
+  if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
+    m_ctx.m_proxy.m_per_client_id_duplicate_collector->get(client_id, 1)
+        ->Increment();
+  }
+  res.status = 409;
+  send_json_response(res, res.status, make_error_json("duplicate request"));
   return true;
 }
 
@@ -537,36 +589,9 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // ignored; the hashing cost is skipped entirely when the feature is off.
   if (method == "POST" && !body.empty() &&
       m_ctx.m_config.m_duplicate_detection_enabled &&
-      m_ctx.m_proxy.m_duplicate_detector) {
-    const auto body_hash = compute_sha256_hex(body);
-    if (m_ctx.m_proxy.m_duplicate_detector->record(client_id, body_hash,
-                                                   body)) {
-      m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
-      if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-        m_ctx.m_proxy.m_per_client_id_duplicate_collector
-            ->get(client_id, 0)
-            ->Increment();
-      }
-      Logger::warn("Duplicate POST detected: client_id={} body_bytes={}",
-                   client_id, body.size());
-
-      // When enabled, reject the duplicate instead of forwarding it to the
-      // worker: the body was already delivered within the TTL window, so
-      // forwarding would only repeat a side effect. Off by default — the
-      // proxy then still counts and reports the duplicate (see
-      // /debug/duplicates and l2_proxy_per_client_id_duplicate_* metrics).
-      if (m_ctx.m_config.m_duplicate_reject_enabled) {
-        if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-          m_ctx.m_proxy.m_per_client_id_duplicate_collector
-              ->get(client_id, 1)
-              ->Increment();
-        }
-        res.status = 409;
-        send_json_response(res, res.status,
-                          make_error_json("duplicate request"));
-        return;
-      }
-    }
+      m_ctx.m_proxy.m_duplicate_detector &&
+      record_and_maybe_reject_duplicate(client_id, body, res)) {
+    return;
   }
 
   // Per-client latency: RAII observer into the labeled histogram, covers the

@@ -1,3 +1,30 @@
+# refactor(cpp): направление 4a — декомпозиция handle_get и duplicate-detection
+
+## Date: 2026-09-07
+
+### Контекст
+Продолжение декомпозиции request-пути. `handle_get` (144 строки роутинга по
+endpoint-ам) сводится к роутеру, каждый admin/debug-эндпоинт — отдельный метод.
+Блок duplicate-detection вынесен из `handle_request` в проверяемый хелпер.
+
+### Что сделано
+- `handle_get` → роутер (~60 строк): вынесены 4 endpoint-хендлера (перенос 1-в-1):
+  - `handle_crash_test(req, res)` — /crash-test
+  - `handle_stacktrace(res)` — /debug/stacktrace
+  - `handle_health_ready(res)` — /health/ready (NATS-проверка в try/catch)
+  - `handle_duplicates(res)` — /debug/duplicates
+- `handle_request`: блок duplicate-detection (35 строк, metrics + 409-on-reject)
+  → `record_and_maybe_reject_duplicate(client_id, body, res)` (bool «запрос
+  потреблён»); условие вызова свёрнуто в один `if (...) return;`
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 3 — декомпозиция Config::validate на 8 слайсов
 
 ## Date: 2026-09-07
