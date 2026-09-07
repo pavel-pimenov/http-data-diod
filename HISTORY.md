@@ -1,3 +1,37 @@
+# refactor(cpp): направление 5f — вынос действий NATS-poll цикла в методы
+
+## Date: 2026-09-07
+
+### Контекст
+`NatsPollService::poll_response` (203 строки) содержал 84-строчный цикл ожидания
+ответа с тремя сплетёнными блоками: reconnect (с бэкоффом и ограниченным числом
+метрик), инкремент re-send метрики (dedup-путь) и обработка пустого ответа
+(no-responders vs пустой ответ с разными задержками). Прошёл чёткие границы
+«переподключение», «повторная отправка» и «задержка перед повтором» — кандидаты
+на вынос.
+
+### Что сделано
+- `nats_poll_service.hpp`: приватные методы `poll_ensure_connected`,
+  `poll_notify_resend`, `poll_delay_for_empty_reply`; добавлен include
+  `retry_handler.hpp` (тип RetryHandler в сигнатурах)
+- `nats_poll_service.cpp::poll_response`: тело цикла сокращено с ~84 до ~24 строк;
+  логика и порядок проверок без изменений (1-в-1)
+- `poll_ensure_connected`: reconnect-блок (прежние строки 68-97); возвращает false
+  при неудачном `connect()` (caller делает `continue`), true — connected
+- `poll_notify_resend`: инкремент `m_duplicate_requests_total` + однократный warn
+  о re-send; `first_attempt` передан по ссылке (поведение `first_attempt=false`
+  после первой итерации сохранено)
+- `poll_delay_for_empty_reply`: ветки no-responders (задержка 1000мс, однократный
+  лог) и пустой ответ (250мс); локальная `no_responders_retry_delay_ms`
+  перемещена в метод как литерал, комментарии о 3544b39 и dedup-кэше сохранены
+
+### Проверка
+- Сборка в контейнере: EXIT=0; юнит-тесты (`test_components`, `test_proxy_core`)
+  run внутри Dockerfile builder — пройдены
+- clang-tidy по изменённым файлам: чист (остались только pre-existing warnings
+  metrics_history.hpp/json_utils.hpp из транзитивных include)
+- `./rebuild-and-run.sh` → все сервисы healthy; `message_counter.py`
+  (1x1 и 3x3): успешно, потерь нет
 # refactor(cpp): направление 5d — чистый хелпер списка БД + юнит-тесты
 
 ## Date: 2026-09-07

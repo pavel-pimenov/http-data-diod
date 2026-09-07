@@ -62,38 +62,11 @@ std::string NatsPollService::poll_response(const std::string &request_id,
     bool no_responders_logged = false;
     bool resend_logged = false;
     bool first_attempt = true;
-    int no_responders_retry_delay_ms = 1000;
 
     while (std::chrono::steady_clock::now() < request_deadline) {
-      if (!m_ctx.m_nats_client->is_connected()) {
-        if (!reconnect_logged) {
-          Logger::error(
-              "Proxy lost connection to NATS while waiting for response, "
-              "request_id={}. Waiting for server recovery...",
-              request_id);
-          reconnect_logged = true;
-        }
-
-        m_ctx.m_proxy.m_metrics->m_nats_connection_errors.Increment();
-
-        if (!m_ctx.m_nats_client->connect()) {
-          const int delay_ms = reconnect_backoff.get_current_delay_ms();
-          Logger::warn("Proxy reconnect to NATS failed for request_id={}, "
-                       "retry in {} ms. Last error: {}",
-                       request_id, delay_ms,
-                       m_ctx.m_nats_client->get_last_error().value_or(""));
-          std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-          reconnect_backoff.record_failure();
-          continue;
-        }
-
-        Logger::info("Proxy reconnected to NATS successfully for request_id={}",
-                     request_id);
-        // Count real connection (re)establishments only, not the retry loop
-        // iterations. Incrementing per-iteration inflated the Prometheus
-        // metric with false connection churn (see 3544b39).
-        m_ctx.m_proxy.m_metrics->m_nats_connection_creates.Increment();
-        reconnect_backoff.record_success();
+      if (!poll_ensure_connected(request_id, reconnect_backoff,
+                                 reconnect_logged)) {
+        continue;
       }
 
       const auto now = std::chrono::steady_clock::now();
@@ -105,20 +78,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
         break;
       }
 
-      if (!first_attempt) {
-        // First response was lost (empty reply / no responders / reconnect), so
-        // the proxy re-sends the request/reply. The worker answers from its
-        // dedup cache, so the L2 server is not called twice.
-        m_ctx.m_proxy.m_metrics->m_duplicate_requests_total.Increment();
-        if (!resend_logged) {
-          Logger::warn(
-              "Proxy re-sending NATS request/reply for request_id={} after "
-              "losing the first response (worker will serve from dedup cache)",
-              request_id);
-          resend_logged = true;
-        }
-      }
-      first_attempt = false;
+      poll_notify_resend(request_id, first_attempt, resend_logged);
 
       std::tie(reply, consume_span_id) =
           m_ctx.m_nats_client->request_with_consume_span_id(
@@ -131,22 +91,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
 
       const std::string last_error =
           m_ctx.m_nats_client->get_last_error().value_or("");
-      if (last_error.find("No responders available for request") !=
-          std::string::npos) {
-        if (!no_responders_logged) {
-          Logger::warn("NATS has no responders yet for request_id={}. Waiting "
-                       "for worker subscription to recover...",
-                       request_id);
-          no_responders_logged = true;
-        }
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(no_responders_retry_delay_ms));
-      } else {
-        Logger::warn("NATS request returned empty response for request_id={}, "
-                     "will retry while timeout budget remains. Last error: {}",
-                     request_id, last_error);
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-      }
+      poll_delay_for_empty_reply(request_id, last_error, no_responders_logged);
     }
 
     if (reply.m_data.empty()) {
@@ -199,5 +144,84 @@ std::string NatsPollService::poll_response(const std::string &request_id,
                                     op_span_id, parent_id, nats_poll_start,
                                     {{"nats.error", e.what()}});
     return "";
+  }
+}
+
+bool NatsPollService::poll_ensure_connected(const std::string &request_id,
+                                            RetryHandler &reconnect_backoff,
+                                            bool &reconnect_logged) {
+  if (m_ctx.m_nats_client->is_connected()) {
+    return true;
+  }
+
+  if (!reconnect_logged) {
+    Logger::error(
+        "Proxy lost connection to NATS while waiting for response, "
+        "request_id={}. Waiting for server recovery...",
+        request_id);
+    reconnect_logged = true;
+  }
+
+  m_ctx.m_proxy.m_metrics->m_nats_connection_errors.Increment();
+
+  if (!m_ctx.m_nats_client->connect()) {
+    const int delay_ms = reconnect_backoff.get_current_delay_ms();
+    Logger::warn("Proxy reconnect to NATS failed for request_id={}, "
+                 "retry in {} ms. Last error: {}",
+                 request_id, delay_ms,
+                 m_ctx.m_nats_client->get_last_error().value_or(""));
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    reconnect_backoff.record_failure();
+    return false;
+  }
+
+  Logger::info("Proxy reconnected to NATS successfully for request_id={}",
+               request_id);
+  // Count real connection (re)establishments only, not the retry loop
+  // iterations. Incrementing per-iteration inflated the Prometheus
+  // metric with false connection churn (see 3544b39).
+  m_ctx.m_proxy.m_metrics->m_nats_connection_creates.Increment();
+  reconnect_backoff.record_success();
+  return true;
+}
+
+void NatsPollService::poll_notify_resend(const std::string &request_id,
+                                         bool &first_attempt,
+                                         bool &resend_logged) {
+  if (first_attempt) {
+    first_attempt = false;
+    return;
+  }
+
+  // First response was lost (empty reply / no responders / reconnect), so
+  // the proxy re-sends the request/reply. The worker answers from its
+  // dedup cache, so the L2 server is not called twice.
+  m_ctx.m_proxy.m_metrics->m_duplicate_requests_total.Increment();
+  if (!resend_logged) {
+    Logger::warn(
+        "Proxy re-sending NATS request/reply for request_id={} after "
+        "losing the first response (worker will serve from dedup cache)",
+        request_id);
+    resend_logged = true;
+  }
+}
+
+void NatsPollService::poll_delay_for_empty_reply(
+    const std::string &request_id, const std::string &last_error,
+    bool &no_responders_logged) {
+  if (last_error.find("No responders available for request") !=
+      std::string::npos) {
+    if (!no_responders_logged) {
+      Logger::warn("NATS has no responders yet for request_id={}. Waiting "
+                   "for worker subscription to recover...",
+                   request_id);
+      no_responders_logged = true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  } else {
+    Logger::warn("NATS request returned empty response for request_id={}, "
+                 "will retry while timeout budget remains. Last error: {}",
+                 request_id, last_error);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
 }
