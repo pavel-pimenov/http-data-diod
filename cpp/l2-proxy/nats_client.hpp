@@ -167,7 +167,23 @@ private:
   mutable std::mutex m_error_mutex;
   std::string m_last_error;
 
-  bool setup_options();
+  // Builds all NATS options (callbacks, auth, TLS); returns false on any failed
+  // option without cleaning up (the next connect() iteration starts with
+  // cleanup()). Caller holds m_conn_mutex.
+  bool setup_options(const std::string &url);
+  // NATS option-callback handlers; invoked on the NATS async-callback thread.
+  void on_disconnected(natsConnection *nc);
+  void on_reconnected(natsConnection *nc);
+  void on_async_nats_error(natsStatus err);
+  void on_closed(natsConnection *nc);
+  // C thunks that cast the closure back to NatsClient and delegate. Static
+  // members so they convert to plain C callback pointers and can access the
+  // private handlers.
+  static void disconnected_cb(natsConnection *nc, void *closure);
+  static void reconnected_cb(natsConnection *nc, void *closure);
+  static void error_cb(natsConnection *nc, natsSubscription *sub,
+                       natsStatus err, void *closure);
+  static void closed_cb(natsConnection *nc, void *closure);
   // Teardown helpers — caller must hold m_conn_mutex
   void drain_subscription_locked(bool log_success);
   void destroy_subscription_locked();

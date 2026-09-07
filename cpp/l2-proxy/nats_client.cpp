@@ -129,195 +129,8 @@ bool NatsClient::connect() {
     try {
       cleanup();
 
-      // Options calls all follow the same pattern: any non-NATS_OK status is
-      // an unrecoverable setup failure — record it and abort the connect.
-      const auto check_ok = [this](natsStatus status,
-                                   const std::string &error_message) {
-        if (status != NATS_OK) {
-          set_error(error_message);
-          return false;
-        }
-        return true;
-      };
-
-      if (!check_ok(natsOptions_Create(&m_opts),
-                    "Failed to create NATS options")) {
+      if (!setup_options(url)) {
         return false;
-      }
-
-      if (!check_ok(natsOptions_SetURL(m_opts, url.c_str()),
-                    "Failed to set NATS URL: " + url)) {
-        return false;
-      }
-
-      // Enable infinite reconnect attempts and log lifecycle callbacks
-      if (!check_ok(natsOptions_SetAllowReconnect(m_opts, true),
-                    "Failed to enable NATS reconnects")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetMaxReconnect(m_opts, -1),
-                    "Failed to configure infinite NATS reconnect attempts")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetDisconnectedCB(
-                        m_opts,
-                        [](natsConnection *nc, void *closure) {
-                          (void)nc;
-                          auto *client = static_cast<NatsClient *>(closure);
-                          // Skip state updates during teardown: the destructor
-                          // may hold m_conn_mutex, and the object may be freed
-                          // right after the Closed callback is delivered.
-                          if (client != nullptr &&
-                              !client->m_shutdown.load(std::memory_order_acquire)) {
-                            client->mark_disconnected(
-                                "lost connection to NATS server");
-                          }
-                        },
-                        this),
-                    "Failed to set NATS disconnected callback")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetReconnectedCB(
-                        m_opts,
-                        [](natsConnection *nc, void *closure) {
-                          auto *client = static_cast<NatsClient *>(closure);
-                          if (client != nullptr &&
-                              !client->m_shutdown.load(std::memory_order_acquire)) {
-                            client->m_connected = true;
-
-                            std::string connected_url_suffix;
-                            if (nc != nullptr) {
-                              char connected_url[256] = {0};
-                              if (natsConnection_GetConnectedUrl(
-                                      nc, connected_url,
-                                      sizeof(connected_url)) == NATS_OK &&
-                                  connected_url[0] != '\0') {
-                                connected_url_suffix =
-                                    std::string(": ") + connected_url;
-                              }
-                            }
-
-                            Logger::info("NATS reconnected successfully{}",
-                                         connected_url_suffix);
-                          }
-                        },
-                        this),
-                    "Failed to set NATS reconnected callback")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetErrorHandler(
-                        m_opts,
-                        [](natsConnection *nc, natsSubscription *sub,
-                           natsStatus err, void *closure) {
-                          (void)nc;
-                          (void)sub;
-                          auto *client = static_cast<NatsClient *>(closure);
-                          const std::string error_text = nats_status_text(err);
-                          if (client != nullptr &&
-                              !client->m_shutdown.load(std::memory_order_acquire)) {
-                            client->set_error("asynchronous NATS error: " +
-                                              error_text);
-                          } else {
-                            Logger::error("NATS asynchronous error: {}",
-                                          error_text);
-                          }
-                        },
-                        this),
-                    "Failed to set NATS error callback")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetRetryOnFailedConnect(m_opts, true, nullptr,
-                                                        nullptr),
-                    "Failed to enable NATS retry-on-failed-connect")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetReconnectWait(m_opts, 1000),
-                    "Failed to set NATS reconnect wait")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetClosedCB(
-                        m_opts,
-                        [](natsConnection *nc, void *closure) {
-                          (void)nc;
-                          auto *client = static_cast<NatsClient *>(closure);
-                          if (client != nullptr) {
-                            client->m_connected = false;
-                            // This connection's Closed callback has now been
-                            // delivered on the NATS async-callback thread.
-                            client->m_closed_callbacks_delivered.fetch_add(
-                                1, std::memory_order_acq_rel);
-                            Logger::error("NATS connection closed permanently");
-                          }
-                        },
-                        this),
-                    "Failed to set NATS closed callback")) {
-        return false;
-      }
-
-      if (!check_ok(natsOptions_SetTimeout(m_opts, ms_to_seconds(m_timeout_ms)),
-                    "Failed to set NATS timeout")) {
-        return false;
-      }
-
-      if (!m_token.empty()) {
-        if (!check_ok(natsOptions_SetToken(m_opts, m_token.c_str()),
-                      "Failed to set NATS token")) {
-          return false;
-        }
-        Logger::debug("NATS token authentication configured");
-      } else if (!m_username.empty() || !m_password.empty()) {
-        if (!check_ok(natsOptions_SetUserInfo(m_opts, m_username.c_str(),
-                                              m_password.c_str()),
-                      "Failed to set NATS username/password")) {
-          return false;
-        }
-        Logger::debug("NATS username/password authentication configured");
-      }
-
-      if (!m_credentials_file.empty()) {
-        if (!check_ok(natsOptions_SetUserCredentialsFromFiles(
-                          m_opts, m_credentials_file.c_str(), nullptr),
-                      "Failed to set NATS credentials file: " +
-                          m_credentials_file)) {
-          return false;
-        }
-        Logger::debug("NATS credentials file configured: {}",
-                      m_credentials_file);
-      }
-
-      // Set TLS configuration
-      if (m_enable_tls) {
-        if (!check_ok(natsOptions_SetSecure(m_opts, true),
-                      "Failed to enable NATS TLS")) {
-          return false;
-        }
-
-        if (!m_tls_ca_cert_file.empty()) {
-          if (!check_ok(natsOptions_LoadCATrustedCertificates(
-                            m_opts, m_tls_ca_cert_file.c_str()),
-                        "Failed to load NATS CA certificate: " +
-                            m_tls_ca_cert_file)) {
-            return false;
-          }
-        }
-
-        if (!m_tls_cert_file.empty() && !m_tls_key_file.empty()) {
-          if (!check_ok(
-                  natsOptions_LoadCertificatesChain(
-                      m_opts, m_tls_cert_file.c_str(), m_tls_key_file.c_str()),
-                  "Failed to load NATS client certificates")) {
-            return false;
-          }
-        }
-
-        Logger::debug("NATS TLS configuration enabled");
       }
 
       if (first_attempt) {
@@ -349,6 +162,214 @@ bool NatsClient::connect() {
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+}
+
+bool NatsClient::setup_options(const std::string &url) {
+  // Options calls all follow the same pattern: any non-NATS_OK status is
+  // an unrecoverable setup failure — record it and abort the connect.
+  const auto check_ok = [this](natsStatus status,
+                               const std::string &error_message) {
+    if (status != NATS_OK) {
+      set_error(error_message);
+      return false;
+    }
+    return true;
+  };
+
+  if (!check_ok(natsOptions_Create(&m_opts),
+                "Failed to create NATS options")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetURL(m_opts, url.c_str()),
+                "Failed to set NATS URL: " + url)) {
+    return false;
+  }
+
+  // Enable infinite reconnect attempts and log lifecycle callbacks
+  if (!check_ok(natsOptions_SetAllowReconnect(m_opts, true),
+                "Failed to enable NATS reconnects")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetMaxReconnect(m_opts, -1),
+                "Failed to configure infinite NATS reconnect attempts")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetDisconnectedCB(m_opts,
+                                              &NatsClient::disconnected_cb,
+                                              this),
+                "Failed to set NATS disconnected callback")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetReconnectedCB(m_opts,
+                                             &NatsClient::reconnected_cb,
+                                             this),
+                "Failed to set NATS reconnected callback")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetErrorHandler(m_opts, &NatsClient::error_cb,
+                                            this),
+                "Failed to set NATS error callback")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetRetryOnFailedConnect(m_opts, true, nullptr,
+                                                    nullptr),
+                "Failed to enable NATS retry-on-failed-connect")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetReconnectWait(m_opts, 1000),
+                "Failed to set NATS reconnect wait")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetClosedCB(m_opts, &NatsClient::closed_cb, this),
+                "Failed to set NATS closed callback")) {
+    return false;
+  }
+
+  if (!check_ok(natsOptions_SetTimeout(m_opts, ms_to_seconds(m_timeout_ms)),
+                "Failed to set NATS timeout")) {
+    return false;
+  }
+
+  if (!m_token.empty()) {
+    if (!check_ok(natsOptions_SetToken(m_opts, m_token.c_str()),
+                  "Failed to set NATS token")) {
+      return false;
+    }
+    Logger::debug("NATS token authentication configured");
+  } else if (!m_username.empty() || !m_password.empty()) {
+    if (!check_ok(natsOptions_SetUserInfo(m_opts, m_username.c_str(),
+                                          m_password.c_str()),
+                  "Failed to set NATS username/password")) {
+      return false;
+    }
+    Logger::debug("NATS username/password authentication configured");
+  }
+
+  if (!m_credentials_file.empty()) {
+    if (!check_ok(natsOptions_SetUserCredentialsFromFiles(
+                      m_opts, m_credentials_file.c_str(), nullptr),
+                  "Failed to set NATS credentials file: " +
+                      m_credentials_file)) {
+      return false;
+    }
+    Logger::debug("NATS credentials file configured: {}", m_credentials_file);
+  }
+
+  // Set TLS configuration
+  if (m_enable_tls) {
+    if (!check_ok(natsOptions_SetSecure(m_opts, true),
+                  "Failed to enable NATS TLS")) {
+      return false;
+    }
+
+    if (!m_tls_ca_cert_file.empty()) {
+      if (!check_ok(natsOptions_LoadCATrustedCertificates(
+                        m_opts, m_tls_ca_cert_file.c_str()),
+                    "Failed to load NATS CA certificate: " +
+                        m_tls_ca_cert_file)) {
+        return false;
+      }
+    }
+
+    if (!m_tls_cert_file.empty() && !m_tls_key_file.empty()) {
+      if (!check_ok(
+              natsOptions_LoadCertificatesChain(
+                  m_opts, m_tls_cert_file.c_str(), m_tls_key_file.c_str()),
+              "Failed to load NATS client certificates")) {
+        return false;
+      }
+    }
+
+    Logger::debug("NATS TLS configuration enabled");
+  }
+
+  return true;
+}
+
+void NatsClient::on_disconnected(natsConnection *nc) {
+  (void)nc;
+  // Skip state updates during teardown: the destructor may hold m_conn_mutex,
+  // and the object may be freed right after the Closed callback is delivered.
+  if (!m_shutdown.load(std::memory_order_acquire)) {
+    mark_disconnected("lost connection to NATS server");
+  }
+}
+
+void NatsClient::on_reconnected(natsConnection *nc) {
+  if (!m_shutdown.load(std::memory_order_acquire)) {
+    m_connected = true;
+
+    std::string connected_url_suffix;
+    if (nc != nullptr) {
+      char connected_url[256] = {0};
+      if (natsConnection_GetConnectedUrl(nc, connected_url,
+                                         sizeof(connected_url)) == NATS_OK &&
+          connected_url[0] != '\0') {
+        connected_url_suffix = std::string(": ") + connected_url;
+      }
+    }
+
+    Logger::info("NATS reconnected successfully{}", connected_url_suffix);
+  }
+}
+
+void NatsClient::on_async_nats_error(natsStatus err) {
+  const std::string error_text = nats_status_text(err);
+  if (!m_shutdown.load(std::memory_order_acquire)) {
+    set_error("asynchronous NATS error: " + error_text);
+  } else {
+    Logger::error("NATS asynchronous error: {}", error_text);
+  }
+}
+
+void NatsClient::on_closed(natsConnection *nc) {
+  (void)nc;
+  m_connected = false;
+  // This connection's Closed callback has now been delivered on the NATS
+  // async-callback thread.
+  m_closed_callbacks_delivered.fetch_add(1, std::memory_order_acq_rel);
+  Logger::error("NATS connection closed permanently");
+}
+
+void NatsClient::disconnected_cb(natsConnection *nc, void *closure) {
+  auto *client = static_cast<NatsClient *>(closure);
+  if (client != nullptr) {
+    client->on_disconnected(nc);
+  }
+}
+
+void NatsClient::reconnected_cb(natsConnection *nc, void *closure) {
+  auto *client = static_cast<NatsClient *>(closure);
+  if (client != nullptr) {
+    client->on_reconnected(nc);
+  }
+}
+
+void NatsClient::error_cb(natsConnection *nc, natsSubscription *sub,
+                          natsStatus err, void *closure) {
+  (void)nc;
+  (void)sub;
+  auto *client = static_cast<NatsClient *>(closure);
+  if (client != nullptr) {
+    client->on_async_nats_error(err);
+  } else {
+    Logger::error("NATS asynchronous error: {}", nats_status_text(err));
+  }
+}
+
+void NatsClient::closed_cb(natsConnection *nc, void *closure) {
+  auto *client = static_cast<NatsClient *>(closure);
+  if (client != nullptr) {
+    client->on_closed(nc);
   }
 }
 

@@ -1,3 +1,36 @@
+# refactor(cpp): направление 6a — вынос настройки опций и колбеков NatsClient::connect
+
+## Date: 2026-09-07
+
+### Контекст
+`NatsClient::connect()` занимал 245 строк: ретрай-цикл, полностью инлайн-блок
+конфигурации опций (`natsOptions_*` через check_ok) и 4 C-колбека жизненного
+цикла (Disconnected/Reconnected/Error/Closed), каждый со своей логикой прямо в
+лямбде-сигнатуре C. В заголовке при этом уже несколько лет висело неиспользуемое
+объявление `bool setup_options();` — нигде не определённое.
+
+### Что сделано
+- `nats_client.hpp`: `setup_options()` обновлён под сигнатуру
+  `bool setup_options(const std::string &url)`; добавлены приватные обработчики
+  `on_disconnected`, `on_reconnected`, `on_async_nats_error`, `on_closed` и
+  C-tunk-статические методы `disconnected_cb`/`reconnected_cb`/`error_cb`/
+  `closed_cb` (кастуют closure→NatsClient и делегируют)
+- `nats_client.cpp::connect()`: 245 → ~50 строк; блок настроек опций, auth и TLS
+  переехал в `setup_options(url)`; поведение и тексты логов 1-в-1
+- 4 инлайн-лямбды заменены на статические tunk-методы + приватные обработчики:
+  guard `m_shutdown`, счётчик Closed-колбеков и комментарии про teardown/3544b39
+  сохранены; ветка «client==nullptr → лог» в error_cb перенесена в tunk (1-в-1)
+- Порядок операций в connect() не менялся: m_connected_instances/metrics/cleanup
+  на неуспех — как было
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты (test_components, test_proxy_core)
+  пройдены внутри builder
+- clang-tidy по nats_client.cpp/.hpp: чисто
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter (1x1) успешно
+- Живой reconnect: restart nats-server на работающем стеке → в логах
+  «NATS connection lost» и «NATS reconnected successfully: nats://...»,
+  message_counter без потерь
 # refactor(cpp): направление 5f — вынос действий NATS-poll цикла в методы
 
 ## Date: 2026-09-07
