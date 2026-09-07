@@ -47,6 +47,8 @@ inline std::string format_metric_value(const prometheus::ClientMetric &m,
   std::ostringstream os;
   switch (type) {
     case prometheus::MetricType::Counter:
+      os << m.counter.value;
+      break;
     case prometheus::MetricType::Gauge:
       os << m.gauge.value;
       break;
@@ -59,7 +61,7 @@ inline std::string format_metric_value(const prometheus::ClientMetric &m,
          << " sum=" << m.summary.sample_sum;
       break;
     default:
-      os << m.gauge.value;
+      os << m.untyped.value;
       break;
   }
   return os.str();

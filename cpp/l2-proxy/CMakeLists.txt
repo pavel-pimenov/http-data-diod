@@ -439,6 +439,7 @@ if(BUILD_TESTS)
     add_executable(test_components
         test_components.cpp
         test_http_pipeline.cpp
+        test_coverage_ext.cpp
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
@@ -448,6 +449,8 @@ if(BUILD_TESTS)
         http_client_pool.cpp
         request_id_generator.cpp
         request_data_preparer.cpp
+        metrics_manager.cpp
+        trace_context_extractor.cpp
         httplib/httplib.cc
     )
     target_include_directories(test_components PRIVATE

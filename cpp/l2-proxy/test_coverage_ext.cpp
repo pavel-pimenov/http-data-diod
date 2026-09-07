@@ -1,0 +1,504 @@
+// Unit tests closing coverage gaps in the remaining header-only and small
+// .cpp modules: exceptions, ScopedMetrics, ScopedProfiler, pool_executor,
+// metrics_manager, tracing_helpers, stats_page, trace_context_extractor and
+// ScopedRequestContext. These are dependency-light (no NATS / DB) and are
+// compiled into the test_components target alongside the existing suites.
+
+#include "common_utils.hpp"
+#include "exceptions.hpp"
+#include "metrics_manager.hpp"
+#include "pool_executor.hpp"
+#include "scoped_metrics.hpp"
+#include "scoped_profiler.hpp"
+#include "stats_page.hpp"
+#include "trace_context_extractor.hpp"
+#include "tracing_helpers.hpp"
+#include "url_utils.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "httplib/httplib.h"
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+// ============================================================================
+// exceptions.hpp
+// ============================================================================
+
+TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
+          "[exceptions]") {
+  L2ProxyException ex("boom");
+  REQUIRE_THROWS_AS(throw ex, std::runtime_error);
+  REQUIRE(std::string(ex.what()) == "boom");
+}
+
+TEST_CASE("Exceptions: TimeoutException prefixes the message",
+          "[exceptions]") {
+  TimeoutException ex("read failed");
+  REQUIRE_THROWS_AS(throw ex, L2ProxyException);
+  REQUIRE_THROWS_AS(throw ex, std::runtime_error);
+  REQUIRE(std::string(ex.what()) == "Timeout error: read failed");
+}
+
+// ============================================================================
+// scoped_metrics.hpp
+// ============================================================================
+
+TEST_CASE("ScopedMetrics: increments the counter on scope exit",
+          "[scoped-metrics]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &counter = prometheus::BuildCounter()
+                      .Name("scoped_count")
+                      .Help("scoped test")
+                      .Register(*registry)
+                      .Add({});
+  {
+    ScopedMetrics guard(counter);
+    REQUIRE(counter.Value() == 0.0);
+  }
+  REQUIRE(counter.Value() == 1.0);
+}
+
+// ============================================================================
+// scoped_profiler.hpp
+// ============================================================================
+
+TEST_CASE("ScopedProfiler: observes the duration histogram on scope exit",
+          "[scoped-profiler]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &hist = prometheus::BuildHistogram()
+                   .Name("scoped_prof")
+                   .Help("scoped test")
+                   .Register(*registry)
+                   .Add({}, std::vector<double>{0.001, 1.0});
+  {
+    ScopedProfiler profiler(hist);
+    REQUIRE(hist.Collect().histogram.sample_count == 0);
+  }
+  const auto collected = hist.Collect();
+  REQUIRE(collected.histogram.sample_count == 1);
+  REQUIRE(collected.histogram.sample_sum > 0.0);
+}
+
+TEST_CASE("ScopedLabeledProfiler: null collector is a no-op",
+          "[scoped-profiler]") {
+  ScopedLabeledProfiler profiler(nullptr, "client-1");
+  REQUIRE_NOTHROW(ScopedLabeledProfiler(nullptr, "client-2"));
+}
+
+TEST_CASE("ScopedLabeledProfiler: records under the label value",
+          "[scoped-profiler]") {
+  DynamicLabeledFamily<prometheus::Histogram> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Histogram>::Series>{
+          {"client_latency", "per client latency"}},
+      {}, 0, 10, std::vector<double>{0.001, 1.0});
+  {
+    ScopedLabeledProfiler profiler(&family, "alice");
+  }
+  auto families = family.Collect();
+  REQUIRE(families.size() == 1);
+  REQUIRE(families[0].metric.size() == 1);
+  REQUIRE(families[0].metric[0].label[0].value == "alice");
+  REQUIRE(families[0].metric[0].histogram.sample_count == 1);
+}
+
+// ============================================================================
+// pool_executor.hpp
+// ============================================================================
+
+namespace {
+
+// Minimal mock pool satisfying the requirements of
+// execute_http_command_with_status: client_type, acquire_connection(),
+// release_connection(), and the client's is_valid/get_last_status_code/
+// invalidate.
+struct MockHttpClient {
+  bool m_valid = true;
+  int m_last_status = 200;
+  bool m_invalidated = false;
+
+  bool is_valid() const { return m_valid; }
+  int get_last_status_code() const { return m_last_status; }
+  void invalidate() { m_invalidated = true; }
+};
+
+struct MockPool {
+  using client_type = MockHttpClient;
+  int m_acquires = 0;
+  int m_releases = 0;
+
+  std::unique_ptr<MockHttpClient> acquire_connection() {
+    ++m_acquires;
+    return std::make_unique<MockHttpClient>();
+  }
+  void release_connection(std::unique_ptr<MockHttpClient>) { ++m_releases; }
+};
+
+std::string run_probe(MockHttpClient *) { return "probe"; }
+
+} // namespace
+
+TEST_CASE("Pool executor: null pool throws", "[pool-executor]") {
+  using FuncT = decltype(run_probe);
+  REQUIRE_THROWS_AS(
+      (execute_http_command_with_status<MockPool, FuncT>(nullptr, run_probe)),
+      std::runtime_error);
+}
+
+TEST_CASE("Pool executor: returns result and status code", "[pool-executor]") {
+  MockPool pool;
+  auto result = execute_http_command_with_status(&pool, [](MockHttpClient *c) {
+    c->m_last_status = 201;
+    return std::string("response body");
+  });
+  REQUIRE(result.first == "response body");
+  REQUIRE(result.second == 201);
+  REQUIRE(pool.m_acquires == 1);
+  REQUIRE(pool.m_releases == 1);
+}
+
+TEST_CASE("Pool executor: invalid client is released and throws",
+          "[pool-executor]") {
+  struct InvalidPool {
+    using client_type = MockHttpClient;
+    int m_releases = 0;
+    std::unique_ptr<MockHttpClient> acquire_connection() {
+      auto c = std::make_unique<MockHttpClient>();
+      c->m_valid = false;
+      return c;
+    }
+    void release_connection(std::unique_ptr<MockHttpClient>) { ++m_releases; }
+  };
+  InvalidPool pool;
+  REQUIRE_THROWS_AS(
+      execute_http_command_with_status(&pool, [](MockHttpClient *) {
+        return std::string("never reached");
+      }),
+      std::runtime_error);
+  REQUIRE(pool.m_releases == 1);
+}
+
+TEST_CASE("Pool executor: exception in func invalidates and releases then "
+          "rethrows", "[pool-executor]") {
+  MockPool pool;
+  REQUIRE_THROWS_AS(
+      execute_http_command_with_status(&pool, [](MockHttpClient *) -> int {
+        throw std::runtime_error("func failed");
+      }),
+      std::runtime_error);
+  REQUIRE(pool.m_acquires == 1);
+  REQUIRE(pool.m_releases == 1);
+}
+
+// ============================================================================
+// metrics_manager.cpp
+// ============================================================================
+
+TEST_CASE("MetricsManager: creates and increments a counter",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &counter = MetricsManager::create_counter(registry, "mm_count", "mm");
+  counter.Increment();
+  REQUIRE(counter.Value() == 1.0);
+}
+
+TEST_CASE("MetricsManager: creates a gauge and sets a value",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &gauge = MetricsManager::create_gauge(registry, "mm_gauge", "mm");
+  gauge.Set(42.0);
+  REQUIRE(gauge.Value() == 42.0);
+}
+
+TEST_CASE("MetricsManager: creates a histogram and observes a value",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &hist = MetricsManager::create_histogram(
+      registry, "mm_hist", "mm", std::vector<double>{0.5, 1.0});
+  hist.Observe(0.75);
+  const auto collected = hist.Collect();
+  REQUIRE(collected.histogram.sample_count == 1);
+  REQUIRE(collected.histogram.sample_sum == 0.75);
+}
+
+TEST_CASE("MetricsManager: family creators behave as collectables",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &cfam = MetricsManager::create_counter_family(registry, "mm_cfam", "");
+  REQUIRE(cfam.Collect().empty());
+  cfam.Add({}).Increment();
+  auto ccollected = cfam.Collect();
+  REQUIRE(ccollected.front().metric.size() == 1);
+  REQUIRE(ccollected.front().metric[0].counter.value == 1.0);
+
+  auto &gfam = MetricsManager::create_gauge_family(registry, "mm_gfam", "");
+  REQUIRE(gfam.Collect().empty());
+
+  auto &hfam = MetricsManager::create_histogram_family(
+      registry, "mm_hfam", "", std::vector<double>{0.1, 1.0});
+  hfam.Add({{"db", "x"}}, std::vector<double>{0.1, 1.0}).Observe(0.2);
+  auto hcollected = hfam.Collect();
+  REQUIRE(hcollected.front().metric.size() == 1);
+  REQUIRE(hcollected.front().metric[0].histogram.sample_count == 1);
+}
+
+TEST_CASE("MetricsManager: array-arg creators forward bucket bounds",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &hist = MetricsManager::create_histogram(
+      registry, "mm_hist_arr", "", histogram_buckets::g_k_latency_ms_to_10s);
+  hist.Observe(5.0);
+  auto &fam = MetricsManager::create_histogram_family(
+      registry, "mm_hfam_arr", "", histogram_buckets::g_k_latency_ms_to_5s);
+  REQUIRE(fam.Collect().empty());
+}
+
+TEST_CASE("MetricsManager: record_db_request_metrics increments labelled "
+          "series", "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &fam = MetricsManager::create_counter_family(registry, "db_total", "");
+  record_db_request_metrics(fam, "oracle", "query", 200);
+  record_db_request_metrics(fam, "oracle", "query", 200);
+  record_db_request_metrics(fam, "oracle", "", 500);
+  auto collected = fam.Collect();
+  REQUIRE(collected.front().metric.size() == 2);
+  double seen_ok = 0.0;
+  double seen_unknown = 0.0;
+  for (const auto &m : collected.front().metric) {
+    if (m.counter.value == 2.0) {
+      seen_ok = m.counter.value;
+    }
+    if (m.counter.value == 1.0) {
+      seen_unknown = m.counter.value;
+    }
+    for (const auto &label : m.label) {
+      if (label.name == "type") {
+        if (label.value == "query") {
+          seen_ok = m.counter.value;
+        }
+        if (label.value == "unknown") {
+          seen_unknown = m.counter.value;
+        }
+      }
+    }
+  }
+  // The two identical calls land on one series, the empty-type call maps to
+  // "unknown".
+  REQUIRE(seen_ok == 2.0);
+  REQUIRE(seen_unknown == 1.0);
+}
+
+TEST_CASE("MetricsManager: observe_db_request_duration observes seconds",
+          "[metrics-manager]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &fam = MetricsManager::create_histogram_family(
+      registry, "db_dur", "", latency_buckets_ms_to_10s());
+  observe_db_request_duration(fam, "pg", 1'000'000, 1'100'000);
+  auto collected = fam.Collect();
+  REQUIRE(collected.front().metric.size() == 1);
+  REQUIRE(collected.front().metric[0].histogram.sample_count == 1);
+  REQUIRE_THAT(collected.front().metric[0].histogram.sample_sum,
+               Catch::Matchers::WithinRel(0.1, 0.001));
+}
+
+// ============================================================================
+// tracing_helpers.hpp (pure helpers)
+// ============================================================================
+
+TEST_CASE("Tracing helpers: proxy_service_name prefixes the mode",
+          "[tracing-helpers]") {
+  REQUIRE(proxy_service_name("proxy") == "l2-proxy-proxy");
+  REQUIRE(proxy_service_name("worker") == "l2-proxy-worker");
+}
+
+TEST_CASE("Tracing helpers: get_traceparent_header reads the header",
+          "[tracing-helpers]") {
+  httplib::Headers headers;
+  REQUIRE(get_traceparent_header(headers) == "");
+  headers.emplace("traceparent", "00-abc-def-01");
+  REQUIRE(get_traceparent_header(headers) == "00-abc-def-01");
+}
+
+TEST_CASE("Tracing helpers: resolve_trace_id uses context then generator",
+          "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "known-trace";
+  REQUIRE(resolve_trace_id(nullptr, ctx) == "known-trace");
+  TraceContext empty;
+  REQUIRE(resolve_trace_id(nullptr, empty) == "");
+}
+
+TEST_CASE("Tracing helpers: make_span_and_traceparent with null tracer",
+          "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "";
+  ctx.m_traceparent_header = "";
+  auto [span_id, tp] = make_span_and_traceparent(nullptr, ctx);
+  REQUIRE(span_id == "");
+  REQUIRE(tp == "");
+
+  TraceContext with_tp;
+  with_tp.m_trace_id = "";
+  with_tp.m_traceparent_header = "00-abc-def-01";
+  auto [sp2, tp2] = make_span_and_traceparent(nullptr, with_tp, "hint");
+  REQUIRE(sp2 == "hint");
+  REQUIRE(tp2 == "00-abc-def-01");
+}
+
+TEST_CASE("Tracing helpers: set_traceparent_response_header sets when non-empty",
+          "[tracing-helpers]") {
+  httplib::Response res;
+  TraceContext empty;
+  set_traceparent_response_header(res, empty);
+  REQUIRE(res.get_header_value("traceparent") == "");
+
+  TraceContext ctx;
+  ctx.m_traceparent_header = "00-a-b-01";
+  set_traceparent_response_header(res, ctx);
+  REQUIRE(res.get_header_value("traceparent") == "00-a-b-01");
+}
+
+TEST_CASE("Tracing helpers: begin_request_trace with null tracer",
+          "[tracing-helpers]") {
+  httplib::Headers headers;
+  std::string inlet;
+  const TraceContext ctx =
+      begin_request_trace(nullptr, headers, "req-1", "/p", 1234, inlet);
+  REQUIRE(ctx.m_trace_id == "");
+  REQUIRE(ctx.m_span_id == "");
+  REQUIRE(inlet == "");
+}
+
+TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with null tracer",
+          "[tracing-helpers]") {
+  const TraceContext ctx =
+      TraceContextHelper::extract_from_raw("", nullptr, "test");
+  REQUIRE(ctx.m_trace_id == "");
+}
+
+TEST_CASE("Tracing helpers: make_span_and_traceparent with traced context and "
+          "hint", "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "abc123";
+  ctx.m_traceparent_header = "00-abc123-def-01";
+  auto [span_id, tp] = make_span_and_traceparent(nullptr, ctx, "my-span");
+  REQUIRE(span_id == "my-span");
+  REQUIRE(tp == "00-abc123-def-01");
+}
+
+// ============================================================================
+// stats_page.hpp (format helpers + build_stats_html)
+// ============================================================================
+
+TEST_CASE("Stats page: format_metric_value per type", "[stats-page-ext]") {
+  prometheus::ClientMetric counter;
+  counter.counter.value = 12.5;
+  REQUIRE(format_metric_value(counter, prometheus::MetricType::Counter) ==
+          "12.5");
+
+  prometheus::ClientMetric gauge;
+  gauge.gauge.value = 3.0;
+  REQUIRE(format_metric_value(gauge, prometheus::MetricType::Gauge) == "3");
+
+  prometheus::ClientMetric untyped;
+  untyped.untyped.value = 3.0;
+  REQUIRE(format_metric_value(untyped, prometheus::MetricType::Untyped) == "3");
+
+  prometheus::ClientMetric hist;
+  hist.histogram.sample_count = 5;
+  hist.histogram.sample_sum = 2.5;
+  const std::string h = format_metric_value(hist, prometheus::MetricType::Histogram);
+  REQUIRE(h.find("count=5") != std::string::npos);
+  REQUIRE(h.find("sum=2.5") != std::string::npos);
+
+  prometheus::ClientMetric summary;
+  summary.summary.sample_count = 7;
+  summary.summary.sample_sum = 1.0;
+  const std::string s = format_metric_value(summary, prometheus::MetricType::Summary);
+  REQUIRE(s.find("count=7") != std::string::npos);
+  REQUIRE(s.find("sum=1") != std::string::npos);
+}
+
+TEST_CASE("Stats page: format_labels renders braces", "[stats-page-ext]") {
+  REQUIRE(format_labels({}) == "");
+  const std::vector<prometheus::ClientMetric::Label> labels = {
+      {"job", "proxy"}, {"state", "ok"}};
+  REQUIRE(format_labels(labels) == "{job=proxy, state=ok}");
+}
+
+TEST_CASE("Stats page: build_stats_html renders banner and tiles",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
+  gauge.Set(1.0);
+  auto &counter = prometheus::BuildCounter()
+                      .Name("requests_total")
+                      .Help("requests")
+                      .Register(*registry)
+                      .Add({});
+  counter.Increment();
+
+  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("OPERATIONAL") != std::string::npos);
+  REQUIRE(html.find("proxy-test") != std::string::npos);
+  REQUIRE(html.find("health_ready") != std::string::npos);
+  REQUIRE(html.find("requests_total") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html flags degraded when health not ready",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
+  gauge.Set(0.0);
+  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("DEGRADED") != std::string::npos);
+}
+
+// ============================================================================
+// trace_context_extractor.cpp
+// ============================================================================
+
+TEST_CASE("Trace context extractor: null tracer returns empty context",
+          "[trace-context-extractor]") {
+  httplib::Request req;
+  std::string backend_push_span_id;
+  std::string traceparent_for_backend;
+  const TraceContext ctx = extract_trace_context(
+      req, nullptr, backend_push_span_id, traceparent_for_backend);
+  REQUIRE(ctx.m_trace_id == "");
+  REQUIRE(ctx.m_span_id == "");
+}
+
+TEST_CASE("Trace context extractor: forwards traceparent header key",
+          "[trace-context-extractor]") {
+  httplib::Request req;
+  req.headers.emplace("traceparent", "00-aa-bb-01");
+  std::string backend_push_span_id;
+  std::string traceparent_for_backend;
+  const TraceContext ctx = extract_trace_context(
+      req, nullptr, backend_push_span_id, traceparent_for_backend);
+  REQUIRE(ctx.m_traceparent_header == "");
+}
+
+// ============================================================================
+// ScopedRequestContext (common_utils.hpp)
+// ============================================================================
+
+TEST_CASE("ScopedRequestContext: defaults client ip to unknown",
+          "[scoped-request-context]") {
+  httplib::Request req;
+  req.remote_addr = "";
+  ScopedRequestContext ctx(req);
+  REQUIRE(ctx.client_ip() == "unknown");
+}
+
+TEST_CASE("ScopedRequestContext: uses x-real-ip when present",
+          "[scoped-request-context]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-real-ip", "1.2.3.4");
+  ScopedRequestContext ctx(req);
+  REQUIRE(ctx.client_ip() == "1.2.3.4");
+}
