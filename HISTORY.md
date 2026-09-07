@@ -1,3 +1,33 @@
+# chore(cpp): 8m — E2E-гейт HTTP DB Gateway (скрипт + подсказка в rebuild-and-run)
+
+## Date: 2026-09-07
+
+### Контекст
+После rebuild стекautomatically проверяется только прогоном
+`message_counter.py`. DB-гейтвей (зависимость от NATS-работника и пулов БД)
+не имел автоматизированного E2E-гейта — регрессия вроде зависшего воркера
+(504 на ping/query, направление 8f) оставалась незамеченной до ручного
+curl-обхода.
+
+### Что сделано
+- `scripts/db-gateway-e2e-test.py` (stdlib, exit 0/1, `--base-url`) — 7 проверок:
+  1. `GET /v1/sql` → список, postgres зарегистрирован и enabled;
+  2. `GET /v1/sql/postgres/ping` → 200 ok;
+  3. `POST /v1/sql/postgres/query` (SELECT) → 200 с columns/rows/row_count≥1;
+  4. `UPDATE` через query → 400 BAD_REQUEST (read-only gate);
+  5. `POST` на ping → 405 METHOD_NOT_ALLOWED;
+  6. `GET /v1/sql/oracle/ping` → 404 (не зарегистрирован) или 503 (недоступен),
+     504/зависание = FAIL (ловит регрессию блокирующего init);
+  7. у каждого запроса свой таймаут (10c).
+- `rebuild-and-run.sh`: добавлена строка-подсказка
+  `python3 scripts/db-gateway-e2e-test.py` в блок «Quick test».
+
+### Проверка
+- `python3 scripts/lint-python.py` → 0 issues;
+- `python3 scripts/db-gateway-e2e-test.py` → 7/7 PASS (стек после 8l,
+  oracle не зарегистрирован);
+- message_counter и health не затронуты (правок C++ нет).
+
 # chore(cpp): 8l — align вышек DB-гейтвея с документацией (oracle off по умолчанию)
 
 ## Date: 2026-09-07

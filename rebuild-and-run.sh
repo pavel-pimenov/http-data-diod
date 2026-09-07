@@ -285,6 +285,7 @@ echo ""
 
 echo "Quick test:"
 echo "  python3 message_counter.py --iterations 1 --concurrent 1"
+echo "  python3 scripts/db-gateway-e2e-test.py"
 echo ""
 echo "Health check:"
 echo "  ./health-check.sh all"
