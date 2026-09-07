@@ -167,6 +167,36 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 
 # Keep debug info (DWARF) for crash handler stack trace resolution
 
+# Coverage stage: build with --coverage (no Unity Build, no ccache so the
+# objects carry per-file .gcno), run the unit tests and render the HTML report
+# with gcovr inside the container. The report lands in /app/out/coverage/
+# (coverage.html + per-file details): `scripts/run-coverage.sh` copies it out
+# of the image. Covers only project sources (cpp/l2-proxy), excluding bundled
+# third-party dirs (prometheus-cpp, httplib, base64).
+#
+# Note: the gcovr --filter must stay as a single backslash here. A doubled one
+# (`\\.`) is passed literally to the regex and matches nothing (0% report).
+FROM builder AS coverage
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcovr \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN rm -rf build-cov && mkdir build-cov && cd build-cov && \
+    cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON \
+          -DCMAKE_UNITY_BUILD=OFF \
+          -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O0 -g --coverage" \
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage" .. && \
+    ninja -j$(nproc) test_components test_proxy_core
+RUN cd build-cov && ./test_components && ./test_proxy_core
+RUN mkdir -p /app/out/coverage && cd build-cov && \
+    gcovr --object-directory . --root /app \
+          --filter '/app/.*\.(cpp|hpp|h)$' \
+          --exclude '/app/prometheus-cpp/.*' \
+          --exclude '/app/httplib/.*' \
+          --exclude '/app/base64/.*' \
+          --html --html-details -o /app/out/coverage/coverage.html \
+          --gcov-ignore-errors=all && \
+    echo "=== coverage report rendered ==="
+
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.
 # Uses a fresh build dir so per-file compile_commands.json entries are generated
 # (a reused Unity build dir would leave only unity_* entries and clang-tidy would

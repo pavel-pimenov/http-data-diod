@@ -88,3 +88,4 @@ build-pvs/
 pvs-studio.log
 *.pvs.raw
 
+coverage-report/

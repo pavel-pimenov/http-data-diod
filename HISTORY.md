@@ -1,3 +1,45 @@
+# chore(cpp): 8v — тулинг: HTML-отчёт покрытия юнит-тестов (gcovr в образе)
+
+## Date: 2026-09-07
+
+### Контекст
+Замер покрытия требовал `gcovr`/`lcov` на хосте и ручной склейки путей
+(`/workspace/...`). Утилит на хосте нет, поэтому было решено строить отчёт
+прямо в Docker-образе (стадия `coverage`) и вытаскивать файлы `docker cp`.
+
+### Что сделано
+- `cpp/l2-proxy/Dockerfile`: стадия `coverage` (FROM builder) —
+  установка `gcovr` отдельным RUN, сборка `build-cov` с
+  `-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O0 -g --coverage"` и
+  `-DCMAKE_EXE_LINKER_FLAGS="--coverage"`, `-DCMAKE_UNITY_BUILD=OFF`;
+  прогон `test_components`/`test_proxy_core` своим RUN; `gcovr --html
+  --html-details` в `/app/out/coverage/` с фильтром по `/app/.*\.(cpp|hpp|h)$`
+  и исключениями вендоренных каталогов (prometheus-cpp, httplib, base64).
+- `scripts/run-coverage.sh`: build `--target coverage` → `docker create` →
+  `docker cp`, отчёт в `<repo>/coverage-report` (по умолчанию).
+- `.gitignore`: `coverage-report/`.
+- README: раздел «Покрытие юнит-тестов (coverage)».
+- `test_components.cpp`: в fuzz-тесте парсеров `Config::get_env_*` логгер
+  подавляется на время цикла (`Logger::set_level(ERROR)`) — иначе сборка
+  издавала каскад предупреждений на каждый мусорный вход (тысячи строк).
+
+### Диагностика (важно для поддержки)
+Первые сборки давали отчёт 0% из 3 файлов при работающем ручном запуске с теми
+же флагами. Корень: экранирование в файле Dockerfile — `--filter
+'/app/.*\\.(cpp|hpp|h)$'` в одинарных кавычках oshell передаёт regex ровно
+`\\.` (backslash + любой символ), который ничего не матчит. Нужен одинарный
+backslash. Также `apt-get install gcovr` в том же RUN, что и компиляция,
+падал с «no free space in /var/cache/apt/archives» — установка вынесена в
+отдельный RUN.
+
+### Проверка
+- `./scripts/run-coverage.sh` → `coverage-report/coverage.html` + 40 страниц
+  деталей; итог **86.6% строк** (4700+/5500) по файлам проекта.
+- `./rebuild-and-run.sh` → сборка успешна, 11 healthy; unit-тесты
+  (test_components 929/216, test_proxy_core 742/73) проходят.
+- `db-gateway-e2e-test.py --parallel 8` → 8/8; `--nats-restart` → 9/9;
+  `message_counter.py` → success, потерь нет.
+
 # chore(cpp): 8t — DB-гейтвей: E2E-сценарий восстановления после рестарта NATS
 
 ## Date: 2026-09-07

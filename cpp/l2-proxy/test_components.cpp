@@ -1901,6 +1901,10 @@ TEST_CASE("Fuzz: validator type mismatches do not crash", "[fuzz]") {
 }
 
 TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
+  // The parser logs a warning per parse failure; the fuzz loop feeds garbage
+  // on purpose, so suppress the log for the loop and restore the level after.
+  const auto prev_log_level = Logger::get_level();
+  Logger::set_level(Logger::Level::ERROR);
   Xorshift64 rng(0xFEEDBEEF);
   for (int i = 0; i < 5000; ++i) {
     const std::string value = random_ascii_string(rng, 64);
@@ -1910,6 +1914,7 @@ TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
     (void)Config::get_env_bool("FUZZ_VALUE", true);
     (void)Config::get_env_protocol("FUZZ_VALUE", "http");
   }
+  Logger::set_level(prev_log_level);
 }
 
 // ============================================================================
