@@ -4,9 +4,11 @@
 #include "nats_client.hpp"
 #include "nlohmann/json.hpp"
 #include "string_utils.hpp"
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <format>
+#include <initializer_list>
 #include <sstream>
 
 namespace {
@@ -26,6 +28,270 @@ void log_env_default(const std::string &env_name,
                      const std::string &default_val) {
   Logger::info("Using default {}: {} (override with {} environment variable)",
                env_name, default_val, env_name);
+}
+} // namespace
+
+namespace {
+// Accumulates Config::validate() issues. Errors set the final result to false
+// (and log when requested); warnings only log.
+struct ConfigChecker {
+  explicit ConfigChecker(bool log_issues) : m_log_issues(log_issues) {}
+  void operator()(bool cond, const std::string &msg, bool is_error = true) {
+    check(cond, msg, is_error);
+  }
+  void check(bool cond, const std::string &msg, bool is_error = true) {
+    if (cond) {
+      return;
+    }
+    if (is_error) {
+      if (m_log_issues) {
+        Logger::error("{}", msg);
+      }
+      m_valid = false;
+    } else if (m_log_issues) {
+      Logger::warn("{}", msg);
+    }
+  }
+  [[nodiscard]] bool valid() const { return m_valid; }
+
+private:
+  bool m_log_issues;
+  bool m_valid = true;
+};
+
+bool in_range(int val, int lo, int hi) { return val >= lo && val <= hi; }
+bool positive(int val) { return val > 0; }
+bool non_negative(int val) { return val >= 0; }
+bool one_of(const std::string &val,
+            std::initializer_list<std::string> opts) {
+  return std::ranges::contains(opts, val);
+}
+
+void validate_ports_and_timeouts(const Config &cfg, ConfigChecker &check) {
+  // Ports
+  check(in_range(cfg.m_proxy_port, 1, 65535),
+        std::format("Invalid proxy port: {} (must be 1-65535)",
+                    cfg.m_proxy_port));
+  check(in_range(cfg.m_l2_server_port, 1, 65535),
+        std::format("Invalid L2 server port: {} (must be 1-65535)",
+                    cfg.m_l2_server_port));
+
+  // Timeouts
+  check(positive(cfg.m_request_timeout_seconds),
+        std::format("Invalid request timeout: {} (must be > 0)",
+                    cfg.m_request_timeout_seconds));
+  check(positive(cfg.m_http_timeout_seconds),
+        std::format("Invalid HTTP timeout: {} (must be > 0)",
+                    cfg.m_http_timeout_seconds));
+}
+
+void validate_mode_and_urls(const Config &cfg, ConfigChecker &check) {
+  // Mode & log level
+  check(one_of(cfg.m_mode, {"proxy", "worker", "l2-server"}),
+        std::format(
+            "Invalid mode: {} (must be 'proxy', 'worker', or 'l2-server')",
+            cfg.m_mode));
+  check(
+      one_of(cfg.m_log_level, {"DEBUG", "INFO", "WARN", "ERROR"}),
+      std::format(
+          "Invalid log level: {} (must be 'DEBUG', 'INFO', 'WARN', or 'ERROR')",
+          cfg.m_log_level));
+
+  // URLs (only proxy/worker build a real URL; l2-server leaves them empty)
+  if (cfg.m_mode != "l2-server") {
+    check(!cfg.m_l2_server_url.empty(), "L2 server URL cannot be empty");
+    check(!cfg.m_l2_server_urls.empty(), "L2 server URLs cannot be empty");
+  }
+}
+
+void validate_protocols_and_ssl(const Config &cfg, ConfigChecker &check) {
+  // Protocols
+  check(
+      one_of(cfg.m_l2_server_protocol, {"http", "https"}),
+      std::format("Invalid L2 server protocol: {} (must be 'http' or 'https')",
+                  cfg.m_l2_server_protocol));
+  check(one_of(cfg.m_proxy_protocol, {"http", "https"}),
+        std::format("Invalid proxy protocol: {} (must be 'http' or 'https')",
+                    cfg.m_proxy_protocol));
+
+  // SSL for proxy
+  if (cfg.m_proxy_protocol == "https") {
+    check(!cfg.m_ssl_server_cert_file.empty(),
+          "SSL_SERVER_CERT_FILE is required when PROXY_PROTOCOL=https");
+    check(!cfg.m_ssl_server_key_file.empty(),
+          "SSL_SERVER_KEY_FILE is required when PROXY_PROTOCOL=https");
+  }
+
+  // SSL for L2 server
+  if (cfg.m_l2_server_protocol == "https") {
+    check(!cfg.m_ssl_server_cert_file.empty(),
+          "SSL_SERVER_CERT_FILE is required when L2_SERVER_PROTOCOL=https");
+    check(!cfg.m_ssl_server_key_file.empty(),
+          "SSL_SERVER_KEY_FILE is required when L2_SERVER_PROTOCOL=https");
+  }
+}
+
+void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
+  // Server threads, timeout, pool type, worker threads, retries, HTTP pool
+  check(one_of(cfg.m_thread_pool_type, {"custom", "none"}),
+        std::format("Invalid thread pool type: {} (must be 'custom' or 'none')",
+                    cfg.m_thread_pool_type));
+  check(positive(cfg.m_l2_worker_threads),
+        std::format("Invalid L2 worker threads: {} (must be > 0)",
+                    cfg.m_l2_worker_threads));
+  check(non_negative(cfg.m_l2_worker_queue_size),
+        std::format("Invalid L2 worker queue size: {} (must be >= 0, "
+                    "0 = auto)",
+                    cfg.m_l2_worker_queue_size));
+  check(non_negative(cfg.m_max_retries),
+        std::format("Invalid max retries: {} (must be >= 0)",
+                    cfg.m_max_retries));
+  check(positive(cfg.m_http_pool_size),
+        std::format("Invalid HTTP pool size: {} (must be > 0)",
+                    cfg.m_http_pool_size));
+  check(cfg.m_http_pool_size <= 1000,
+        std::format("Very large HTTP pool size: {} (recommended: < 1000)",
+                    cfg.m_http_pool_size),
+        false);
+  check(positive(cfg.m_http_pool_idle_timeout_seconds),
+        std::format("Invalid HTTP_POOL_IDLE_TIMEOUT_SECONDS: {} (must be > 0)",
+                    cfg.m_http_pool_idle_timeout_seconds));
+}
+
+void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
+  // NATS (used only in proxy/worker modes)
+  if (cfg.m_mode == "proxy" || cfg.m_mode == "worker") {
+    check(in_range(cfg.m_nats_port, 1, 65535),
+          std::format("Invalid NATS port: {} (must be 1-65535)",
+                      cfg.m_nats_port));
+    check(!cfg.m_nats_host.empty(), "NATS host cannot be empty");
+    check(!cfg.m_nats_subject.empty(), "NATS subject cannot be empty");
+    check(positive(cfg.m_nats_timeout_ms),
+          std::format("Invalid NATS timeout: {} (must be > 0)",
+                      cfg.m_nats_timeout_ms));
+
+    // NATS TLS
+    if (cfg.m_nats_enable_tls) {
+      check(!cfg.m_nats_tls_ca_cert_file.empty(),
+            "NATS_TLS_CA_CERT_FILE is required when NATS_ENABLE_TLS=true");
+      check(cfg.m_nats_tls_cert_file.empty() == cfg.m_nats_tls_key_file.empty(),
+            "NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together");
+    }
+
+    // DB Gateway
+    if (cfg.m_db_query_enabled) {
+      check(!cfg.m_db_query_nats_subject.empty(),
+            "DB_QUERY_NATS_SUBJECT cannot be empty");
+      check(positive(cfg.m_db_query_nats_timeout_ms),
+            std::format("Invalid DB_QUERY_NATS_TIMEOUT_MS: {} (must be > 0)",
+                        cfg.m_db_query_nats_timeout_ms));
+      check(positive(cfg.m_db_query_default_timeout_ms),
+            std::format("Invalid DB_QUERY_DEFAULT_TIMEOUT_MS: {} (must be > 0)",
+                        cfg.m_db_query_default_timeout_ms));
+      check(positive(cfg.m_db_query_default_max_rows),
+            std::format("Invalid DB_QUERY_DEFAULT_MAX_ROWS: {} (must be > 0)",
+                        cfg.m_db_query_default_max_rows));
+      for (const auto &db : cfg.m_databases) {
+        check(db.m_driver == "oracle" || db.m_driver == "postgres",
+              std::format("DB '{}': unknown driver '{}'", db.m_name,
+                          db.m_driver));
+        // Proxy mode registers DBs for routing/validation only; the connection
+        // fields are checked by the worker (which owns the pools).
+        if (cfg.m_mode == "proxy") {
+          continue;
+        }
+        check(!db.m_host.empty(),
+              std::format("DB '{}': host cannot be empty", db.m_name));
+        check(in_range(db.m_port, 1, 65535),
+              std::format("DB '{}': invalid port {} (must be 1-65535)",
+                          db.m_name, db.m_port));
+        if (db.m_driver == "oracle") {
+          check(!db.m_service.empty(),
+                std::format("DB '{}': service cannot be empty", db.m_name));
+        } else {
+          check(!db.m_database.empty(),
+                std::format("DB '{}': database cannot be empty", db.m_name));
+        }
+        check(!db.m_user.empty(),
+              std::format("DB '{}': user cannot be empty", db.m_name));
+        check(db.m_pool_min >= 1 && db.m_pool_max >= db.m_pool_min,
+              std::format("DB '{}': invalid pool (min={} max={})", db.m_name,
+                          db.m_pool_min, db.m_pool_max));
+      }
+    }
+  }
+}
+
+void validate_rate_limiting(const Config &cfg, ConfigChecker &check) {
+  // Per-IP Rate Limiting
+  if (cfg.m_enable_per_ip_rate_limiting) {
+    check(positive(cfg.m_per_ip_max_tokens),
+          std::format("Invalid PER_IP_MAX_TOKENS: {} (must be > 0)",
+                      cfg.m_per_ip_max_tokens));
+    check(positive(cfg.m_per_ip_refill_rate),
+          std::format("Invalid PER_IP_REFILL_RATE: {} (must be > 0)",
+                      cfg.m_per_ip_refill_rate));
+    check(positive(cfg.m_per_ip_max_ips),
+          std::format("Invalid PER_IP_MAX_IPS: {} (must be > 0)",
+                      cfg.m_per_ip_max_ips));
+    check(non_negative(cfg.m_per_ip_cleanup_ttl_seconds),
+          std::format("Invalid PER_IP_CLEANUP_TTL_SECONDS: {} (must be >= 0)",
+                      cfg.m_per_ip_cleanup_ttl_seconds));
+  }
+
+  // Global Rate Limiting
+  if (cfg.m_enable_global_rate_limiting) {
+    check(positive(cfg.m_global_max_tokens),
+          std::format("Invalid GLOBAL_RATE_LIMIT_MAX_TOKENS: {} (must be > 0)",
+                      cfg.m_global_max_tokens));
+    check(positive(cfg.m_global_refill_rate),
+          std::format("Invalid GLOBAL_RATE_LIMIT_REFILL_RATE: {} (must be > 0)",
+                      cfg.m_global_refill_rate));
+  }
+}
+
+void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
+  // Dedup cache
+  if (cfg.m_dedup_enabled) {
+    check(positive(cfg.m_dedup_max_entries),
+          std::format("Invalid DEDUP_MAX_ENTRIES: {} (must be > 0)",
+                      cfg.m_dedup_max_entries));
+    check(positive(cfg.m_dedup_ttl_ms),
+          std::format("Invalid DEDUP_TTL_MS: {} (must be > 0)",
+                      cfg.m_dedup_ttl_ms));
+  }
+
+  // Duplicate detection
+  if (cfg.m_duplicate_detection_enabled) {
+    check(positive(cfg.m_duplicate_detection_top_n),
+          std::format("Invalid DUPLICATE_DETECTION_TOP_N: {} (must be > 0)",
+                      cfg.m_duplicate_detection_top_n));
+    check(
+        positive(cfg.m_duplicate_detection_max_entries),
+        std::format(
+            "Invalid DUPLICATE_DETECTION_MAX_ENTRIES: {} (must be > 0)",
+            cfg.m_duplicate_detection_max_entries));
+    check(positive(cfg.m_duplicate_detection_ttl_ms),
+          std::format("Invalid DUPLICATE_DETECTION_TTL_MS: {} (must be > 0)",
+                      cfg.m_duplicate_detection_ttl_ms));
+    check(non_negative(cfg.m_duplicate_detection_max_body_bytes),
+          std::format(
+              "Invalid DUPLICATE_DETECTION_MAX_BODY_BYTES: {} (must be >= 0)",
+              cfg.m_duplicate_detection_max_body_bytes));
+  }
+}
+
+void validate_tracing(const Config &cfg, ConfigChecker &check) {
+  // Tracing settings
+  check(cfg.m_tracing_batch_size > 0,
+        std::format("Invalid tracing batch size: {} (must be > 0)",
+                    cfg.m_tracing_batch_size));
+  check(positive(cfg.m_tracing_flush_interval_ms),
+        std::format("Invalid tracing flush interval: {} (must be > 0)",
+                    cfg.m_tracing_flush_interval_ms));
+  check(cfg.m_tracing_sample_rate >= 0.0 && cfg.m_tracing_sample_rate <= 1.0,
+        std::format("Invalid tracing sample rate: {} (must be 0.0-1.0)",
+                    cfg.m_tracing_sample_rate));
 }
 } // namespace
 
@@ -401,239 +667,18 @@ double Config::get_env_double(const std::string &env_name, double default_val,
 }
 
 bool Config::validate(bool log_issues) const {
-  bool valid = true;
+  ConfigChecker checker(log_issues);
 
-  const auto &check = [&](bool cond, const std::string &msg,
-                          bool is_error = true) {
-    if (!cond) {
-      if (is_error) {
-        if (log_issues) {
-          Logger::error("{}", msg);
-        }
-        valid = false;
-      } else if (log_issues) {
-        Logger::warn("{}", msg);
-      }
-    }
-  };
-  const auto in_range = [](int val, int lo, int hi) {
-    return val >= lo && val <= hi;
-  };
-  const auto positive = [](int val) { return val > 0; };
-  const auto non_negative = [](int val) { return val >= 0; };
-  const auto one_of = [](const std::string &val,
-                         std::initializer_list<std::string> opts) {
-    return std::ranges::contains(opts, val);
-  };
+  validate_ports_and_timeouts(*this, checker);
+  validate_mode_and_urls(*this, checker);
+  validate_protocols_and_ssl(*this, checker);
+  validate_threading_and_pool(*this, checker);
+  validate_nats_and_db_query(*this, checker);
+  validate_rate_limiting(*this, checker);
+  validate_dedup_and_duplicates(*this, checker);
+  validate_tracing(*this, checker);
 
-  // Ports
-  check(in_range(m_proxy_port, 1, 65535),
-        std::format("Invalid proxy port: {} (must be 1-65535)", m_proxy_port));
-  check(in_range(m_l2_server_port, 1, 65535),
-        std::format("Invalid L2 server port: {} (must be 1-65535)",
-                    m_l2_server_port));
-
-  // Timeouts
-  check(positive(m_request_timeout_seconds),
-        std::format("Invalid request timeout: {} (must be > 0)",
-                    m_request_timeout_seconds));
-  check(positive(m_http_timeout_seconds),
-        std::format("Invalid HTTP timeout: {} (must be > 0)",
-                    m_http_timeout_seconds));
-
-  // Mode & log level
-  check(one_of(m_mode, {"proxy", "worker", "l2-server"}),
-        std::format(
-            "Invalid mode: {} (must be 'proxy', 'worker', or 'l2-server')",
-            m_mode));
-  check(
-      one_of(m_log_level, {"DEBUG", "INFO", "WARN", "ERROR"}),
-      std::format(
-          "Invalid log level: {} (must be 'DEBUG', 'INFO', 'WARN', or 'ERROR')",
-          m_log_level));
-
-  // URLs (only proxy/worker build a real URL; l2-server leaves them empty)
-  if (m_mode != "l2-server") {
-    check(!m_l2_server_url.empty(), "L2 server URL cannot be empty");
-    check(!m_l2_server_urls.empty(), "L2 server URLs cannot be empty");
-  }
-
-  // Protocols
-  check(
-      one_of(m_l2_server_protocol, {"http", "https"}),
-      std::format("Invalid L2 server protocol: {} (must be 'http' or 'https')",
-                  m_l2_server_protocol));
-  check(one_of(m_proxy_protocol, {"http", "https"}),
-        std::format("Invalid proxy protocol: {} (must be 'http' or 'https')",
-                    m_proxy_protocol));
-
-  // SSL for proxy
-  if (m_proxy_protocol == "https") {
-    check(!m_ssl_server_cert_file.empty(),
-          "SSL_SERVER_CERT_FILE is required when PROXY_PROTOCOL=https");
-    check(!m_ssl_server_key_file.empty(),
-          "SSL_SERVER_KEY_FILE is required when PROXY_PROTOCOL=https");
-  }
-
-  // SSL for L2 server
-  if (m_l2_server_protocol == "https") {
-    check(!m_ssl_server_cert_file.empty(),
-          "SSL_SERVER_CERT_FILE is required when L2_SERVER_PROTOCOL=https");
-    check(!m_ssl_server_key_file.empty(),
-          "SSL_SERVER_KEY_FILE is required when L2_SERVER_PROTOCOL=https");
-  }
-
-  // Server threads, timeout, pool type, worker threads, retries, HTTP pool
-  check(one_of(m_thread_pool_type, {"custom", "none"}),
-        std::format("Invalid thread pool type: {} (must be 'custom' or 'none')",
-                    m_thread_pool_type));
-  check(positive(m_l2_worker_threads),
-        std::format("Invalid L2 worker threads: {} (must be > 0)",
-                    m_l2_worker_threads));
-  check(non_negative(m_l2_worker_queue_size),
-        std::format("Invalid L2 worker queue size: {} (must be >= 0, "
-                    "0 = auto)",
-                    m_l2_worker_queue_size));
-  check(non_negative(m_max_retries),
-        std::format("Invalid max retries: {} (must be >= 0)", m_max_retries));
-  check(positive(m_http_pool_size),
-        std::format("Invalid HTTP pool size: {} (must be > 0)",
-                    m_http_pool_size));
-  check(m_http_pool_size <= 1000,
-        std::format("Very large HTTP pool size: {} (recommended: < 1000)",
-                    m_http_pool_size),
-        false);
-  check(positive(m_http_pool_idle_timeout_seconds),
-        std::format("Invalid HTTP_POOL_IDLE_TIMEOUT_SECONDS: {} (must be > 0)",
-                    m_http_pool_idle_timeout_seconds));
-
-  // NATS (used only in proxy/worker modes)
-  if (uses_nats()) {
-    check(in_range(m_nats_port, 1, 65535),
-          std::format("Invalid NATS port: {} (must be 1-65535)", m_nats_port));
-    check(!m_nats_host.empty(), "NATS host cannot be empty");
-    check(!m_nats_subject.empty(), "NATS subject cannot be empty");
-    check(positive(m_nats_timeout_ms),
-          std::format("Invalid NATS timeout: {} (must be > 0)",
-                      m_nats_timeout_ms));
-
-    // NATS TLS
-    if (m_nats_enable_tls) {
-      check(!m_nats_tls_ca_cert_file.empty(),
-            "NATS_TLS_CA_CERT_FILE is required when NATS_ENABLE_TLS=true");
-      check(m_nats_tls_cert_file.empty() == m_nats_tls_key_file.empty(),
-            "NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together");
-    }
-
-    // DB Gateway
-    if (m_db_query_enabled) {
-      check(!m_db_query_nats_subject.empty(),
-            "DB_QUERY_NATS_SUBJECT cannot be empty");
-      check(positive(m_db_query_nats_timeout_ms),
-            std::format("Invalid DB_QUERY_NATS_TIMEOUT_MS: {} (must be > 0)",
-                        m_db_query_nats_timeout_ms));
-      check(positive(m_db_query_default_timeout_ms),
-            std::format("Invalid DB_QUERY_DEFAULT_TIMEOUT_MS: {} (must be > 0)",
-                        m_db_query_default_timeout_ms));
-      check(positive(m_db_query_default_max_rows),
-            std::format("Invalid DB_QUERY_DEFAULT_MAX_ROWS: {} (must be > 0)",
-                        m_db_query_default_max_rows));
-      for (const auto &db : m_databases) {
-        check(db.m_driver == "oracle" || db.m_driver == "postgres",
-              std::format("DB '{}': unknown driver '{}'", db.m_name,
-                          db.m_driver));
-        // Proxy mode registers DBs for routing/validation only; the connection
-        // fields are checked by the worker (which owns the pools).
-        if (m_mode == "proxy") {
-          continue;
-        }
-        check(!db.m_host.empty(),
-              std::format("DB '{}': host cannot be empty", db.m_name));
-        check(in_range(db.m_port, 1, 65535),
-              std::format("DB '{}': invalid port {} (must be 1-65535)",
-                          db.m_name, db.m_port));
-        if (db.m_driver == "oracle") {
-          check(!db.m_service.empty(),
-                std::format("DB '{}': service cannot be empty", db.m_name));
-        } else {
-          check(!db.m_database.empty(),
-                std::format("DB '{}': database cannot be empty", db.m_name));
-        }
-        check(!db.m_user.empty(),
-              std::format("DB '{}': user cannot be empty", db.m_name));
-        check(db.m_pool_min >= 1 && db.m_pool_max >= db.m_pool_min,
-              std::format("DB '{}': invalid pool (min={} max={})", db.m_name,
-                          db.m_pool_min, db.m_pool_max));
-      }
-    }
-  }
-
-  // Per-IP Rate Limiting
-  if (m_enable_per_ip_rate_limiting) {
-    check(positive(m_per_ip_max_tokens),
-          std::format("Invalid PER_IP_MAX_TOKENS: {} (must be > 0)",
-                      m_per_ip_max_tokens));
-    check(positive(m_per_ip_refill_rate),
-          std::format("Invalid PER_IP_REFILL_RATE: {} (must be > 0)",
-                      m_per_ip_refill_rate));
-    check(positive(m_per_ip_max_ips),
-          std::format("Invalid PER_IP_MAX_IPS: {} (must be > 0)",
-                      m_per_ip_max_ips));
-    check(non_negative(m_per_ip_cleanup_ttl_seconds),
-          std::format("Invalid PER_IP_CLEANUP_TTL_SECONDS: {} (must be >= 0)",
-                      m_per_ip_cleanup_ttl_seconds));
-  }
-
-  // Global Rate Limiting
-  if (m_enable_global_rate_limiting) {
-    check(positive(m_global_max_tokens),
-          std::format("Invalid GLOBAL_RATE_LIMIT_MAX_TOKENS: {} (must be > 0)",
-                      m_global_max_tokens));
-    check(positive(m_global_refill_rate),
-          std::format("Invalid GLOBAL_RATE_LIMIT_REFILL_RATE: {} (must be > 0)",
-                      m_global_refill_rate));
-  }
-
-  // Dedup cache
-  if (m_dedup_enabled) {
-    check(positive(m_dedup_max_entries),
-          std::format("Invalid DEDUP_MAX_ENTRIES: {} (must be > 0)",
-                      m_dedup_max_entries));
-    check(
-        positive(m_dedup_ttl_ms),
-        std::format("Invalid DEDUP_TTL_MS: {} (must be > 0)", m_dedup_ttl_ms));
-  }
-
-  // Duplicate detection
-  if (m_duplicate_detection_enabled) {
-    check(positive(m_duplicate_detection_top_n),
-          std::format("Invalid DUPLICATE_DETECTION_TOP_N: {} (must be > 0)",
-                      m_duplicate_detection_top_n));
-    check(
-        positive(m_duplicate_detection_max_entries),
-        std::format("Invalid DUPLICATE_DETECTION_MAX_ENTRIES: {} (must be > 0)",
-                    m_duplicate_detection_max_entries));
-    check(positive(m_duplicate_detection_ttl_ms),
-          std::format("Invalid DUPLICATE_DETECTION_TTL_MS: {} (must be > 0)",
-                      m_duplicate_detection_ttl_ms));
-    check(non_negative(m_duplicate_detection_max_body_bytes),
-          std::format(
-              "Invalid DUPLICATE_DETECTION_MAX_BODY_BYTES: {} (must be >= 0)",
-              m_duplicate_detection_max_body_bytes));
-  }
-
-  // Tracing settings
-  check(m_tracing_batch_size > 0,
-        std::format("Invalid tracing batch size: {} (must be > 0)",
-                    m_tracing_batch_size));
-  check(positive(m_tracing_flush_interval_ms),
-        std::format("Invalid tracing flush interval: {} (must be > 0)",
-                    m_tracing_flush_interval_ms));
-  check(m_tracing_sample_rate >= 0.0 && m_tracing_sample_rate <= 1.0,
-        std::format("Invalid tracing sample rate: {} (must be 0.0-1.0)",
-                    m_tracing_sample_rate));
-
-  return valid;
+  return checker.valid();
 }
 
 NatsConfig Config::create_nats_config() const {

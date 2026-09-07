@@ -1,3 +1,39 @@
+# refactor(cpp): направление 3 — декомпозиция Config::validate на 8 слайсов
+
+## Date: 2026-09-07
+
+### Контекст
+Раунд «высокий риск»: разбить большую функцию на осмысленные слайсы.
+`Config::validate` — самая безопасная цель (чистая функция, ~15+ тестов).
+Тела слайсов — 1-в-1 перенесённые блоки оригинальной функции, порядок проверок
+и тексты логов не менялись.
+
+### Что сделано
+- `Config::validate` (234 строки → 11 строк-диспетчер) вызывает 8 приватных
+  slice-функций и возвращает `checker.valid()`
+- в анонимном namespace config.cpp:
+  - `struct ConfigChecker` — аккумулятор ошибок/предупреждений (semantics старой
+    лямбды `check`: ошибка → `valid=false` + лог, предупреждение → только лог);
+    есть `operator()` для сохранения синтаксиса `check(...)`
+  - предикаты `in_range/positive/non_negative/one_of` — свободные функции
+  - слайсы: `validate_ports_and_timeouts`, `validate_mode_and_urls`,
+    `validate_protocols_and_ssl`, `validate_threading_and_pool`,
+    `validate_nats_and_db_query`, `validate_rate_limiting`,
+    `validate_dedup_and_duplicates`, `validate_tracing`
+- `uses_nats()` (private) в слайсе NATS заменён на инлайн-проверку режима
+  (`m_mode == "proxy" || m_mode == "worker"`) — свободная функция не имеет
+  доступа к private-методу
+- config.hpp не изменён; добавлены includes `<algorithm>`, `<initializer_list>`
+  в config.cpp
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` (включая ~15 кейсов на
+  Config::validate) + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 2 — сырые указатели на метрики/loggers → reference/optional
 
 ## Date: 2026-09-07
