@@ -1,3 +1,24 @@
+# refactor(cpp): направление 6c — дедупликация acquisition-метрик HttpClientPool
+
+## Date: 2026-09-07
+
+### Контекст
+`HttpClientPool` записывал метрики успешного получения соединения двумя
+идентичными 12-строчными блоками: в `acquire_connection` (новое соединение) и в
+`try_acquire_from_queue` (соединение из пула) — counter `m_acquisitions` +
+наблюдение `m_acquisition_duration`.
+
+### Что сделано
+- `http_client_pool.hpp`: приватный `record_acquisition(
+  std::chrono::steady_clock::time_point start_time)`
+- `http_client_pool.cpp`: оба блока заменены на один вызов; метод записывает
+  счётчик и длительность приобретения 1-в-1 (порядок инкрементов и observe
+  сохранён; в try_acquire_from_queue вызов остался внутри if(is_valid))
+
+### Проверка
+- Сборка в контейнере: EXIT=0; unit-тесты пройдены внутри builder
+- clang-tidy по http_client_pool.cpp/.hpp: чисто
+- `./rebuild-and-run.sh` → сервисы healthy; message_counter успешно
 # refactor(cpp): направление 6b — вынос фазы отправки пачки Jaeger с ретраями
 
 ## Date: 2026-09-07

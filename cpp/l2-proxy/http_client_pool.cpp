@@ -98,16 +98,7 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
 
   update_metrics();
 
-  if (m_metrics.m_acquisitions) {
-    m_metrics.m_acquisitions->get().Increment();
-  }
-
-  if (m_metrics.m_acquisition_duration) {
-    const auto duration = std::chrono::duration<double>(
-                              std::chrono::steady_clock::now() - start_time)
-                              .count();
-    m_metrics.m_acquisition_duration->get().Observe(duration);
-  }
+  record_acquisition(start_time);
 
   return client;
 }
@@ -139,17 +130,7 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
 
     // Validate the connection
     if (client && client->is_valid()) {
-      if (m_metrics.m_acquisitions) {
-        m_metrics.m_acquisitions->get().Increment();
-      }
-
-      if (m_metrics.m_acquisition_duration) {
-        const auto duration = std::chrono::duration<double>(
-                                  std::chrono::steady_clock::now() -
-                                  start_time)
-                                  .count();
-        m_metrics.m_acquisition_duration->get().Observe(duration);
-      }
+      record_acquisition(start_time);
 
       Logger::debug("HttpClientPool: acquired connection from pool (active={})",
                     m_active_clients.load());
@@ -209,4 +190,18 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 size_t HttpClientPool::available_count() const {
   std::lock_guard lock(m_pool_mutex);
   return m_available_connections.size();
+}
+
+void HttpClientPool::record_acquisition(
+    std::chrono::steady_clock::time_point start_time) {
+  if (m_metrics.m_acquisitions) {
+    m_metrics.m_acquisitions->get().Increment();
+  }
+
+  if (m_metrics.m_acquisition_duration) {
+    const auto duration = std::chrono::duration<double>(
+                              std::chrono::steady_clock::now() - start_time)
+                              .count();
+    m_metrics.m_acquisition_duration->get().Observe(duration);
+  }
 }

@@ -80,6 +80,7 @@ public:
 
 private:
   void update_metrics();
+  void record_acquisition(std::chrono::steady_clock::time_point start_time);
   std::unique_ptr<HttpClient>
   try_acquire_from_queue(std::chrono::steady_clock::time_point start_time);
 };
