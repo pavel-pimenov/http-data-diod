@@ -1,3 +1,29 @@
+# refactor(cpp): направление 4d — вынос subscribe-лямбд из run_with_nats
+
+## Date: 2026-09-07
+
+### Контекст
+`run_with_nats` (165 строк) — цикл reconnect/subscribe с двумя длинными
+inline-лямбдами `subscribe_worker` и `subscribe_db` (обе захватывают только
+`[this]` и возвращают bool). Лямбды раздувают тело цикла и прячут логику
+подписки; перенос в приватные методы убирает ~40 строк вложенности.
+
+### Что сделано
+- `subscribe_worker` → `bool subscribe_worker_subject()`: подписка на основной
+  request-субджект, хендлер `process_request_from_nats`
+- `subscribe_db` → `bool subscribe_db_query_subject()`: подписка на DB-субджект
+  (если gateway выключен/не инициализирован — возвращает true «нечего
+  подписывать»), хендлер `process_db_query_from_nats`
+- тела перенесены 1-в-1, call-sites в `run_with_nats` заменены на вызовы методов
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 4c — унификация NATS round-trip спан-логов в route_db_request
 
 ## Date: 2026-09-07

@@ -95,48 +95,6 @@ void L2Worker::run_with_nats() {
   bool db_subscription_active = false;
   bool was_connected = m_nats_client && m_nats_client->is_connected();
 
-  auto subscribe_worker = [this]() -> bool {
-    Logger::info("Subscribing worker to NATS subject: {} queue group: {}",
-                 m_ctx.m_config.m_nats_subject,
-                 m_ctx.m_config.m_nats_queue_group);
-    const bool subscribed =
-        subscribe_nats_subject(m_ctx.m_config.m_nats_subject,
-                               m_ctx.m_config.m_nats_queue_group,
-                               "NATS request", [this](const std::string &data,
-                                                      const std::string &reply_to) {
-                                 process_request_from_nats(data, reply_to);
-                               });
-    if (!subscribed) {
-      Logger::error("Failed to subscribe worker to NATS subject: {}",
-                    m_ctx.m_config.m_nats_subject);
-      return false;
-    }
-    Logger::info("Worker subscribed to NATS successfully");
-    return true;
-  };
-
-  auto subscribe_db = [this]() -> bool {
-    if (!m_db_query_handler || !m_db_query_handler->is_enabled()) {
-      return true;
-    }
-    const bool subscribed =
-        subscribe_nats_subject(m_ctx.m_config.m_db_query_nats_subject,
-                               m_ctx.m_config.m_db_query_nats_queue_group,
-                               "DB query", [this](const std::string &data,
-                                                  const std::string &reply_to) {
-                                 process_db_query_from_nats(data, reply_to);
-                               });
-    if (!subscribed) {
-      Logger::error("Failed to subscribe worker to DB NATS subject: {}",
-                    m_ctx.m_config.m_db_query_nats_subject);
-      return false;
-    }
-    Logger::info("Worker subscribed to DB NATS subject: {} (queue group {})",
-                 m_ctx.m_config.m_db_query_nats_subject,
-                 m_ctx.m_config.m_db_query_nats_queue_group);
-    return true;
-  };
-
   while (!g_shutdown_flag) {
     const bool is_connected = m_nats_client && m_nats_client->is_connected();
 
@@ -174,7 +132,7 @@ void L2Worker::run_with_nats() {
 
     if (m_nats_client && m_nats_client->is_connected() &&
         !subscription_active) {
-      if (!subscribe_worker()) {
+      if (!subscribe_worker_subject()) {
         Logger::warn("Subscription is not active yet, will retry in {}ms",
                      backoff.get_current_delay_ms());
       } else {
@@ -200,7 +158,7 @@ void L2Worker::run_with_nats() {
           Logger::warn("DB gateway is not ready yet (database(s) "
                        "unavailable?), will retry");
           backoff.record_failure();
-        } else if (!subscribe_db()) {
+        } else if (!subscribe_db_query_subject()) {
           Logger::warn("DB subscription failed, will retry in {}ms",
                        backoff.get_current_delay_ms());
           backoff.record_failure();
@@ -208,7 +166,7 @@ void L2Worker::run_with_nats() {
           db_subscription_active = true;
           backoff.record_success();
         }
-      } else if (!subscribe_db()) {
+      } else if (!subscribe_db_query_subject()) {
         Logger::warn("DB subscription failed, will retry in {}ms",
                      backoff.get_current_delay_ms());
         backoff.record_failure();
@@ -242,6 +200,47 @@ void L2Worker::run_with_nats() {
     // Drain waits for in-flight messages to finish processing before closing
     m_nats_client->drain(5000);
   }
+}
+
+bool L2Worker::subscribe_worker_subject() {
+  Logger::info("Subscribing worker to NATS subject: {} queue group: {}",
+               m_ctx.m_config.m_nats_subject, m_ctx.m_config.m_nats_queue_group);
+  const bool subscribed =
+      subscribe_nats_subject(m_ctx.m_config.m_nats_subject,
+                             m_ctx.m_config.m_nats_queue_group,
+                             "NATS request", [this](const std::string &data,
+                                                    const std::string &reply_to) {
+                               process_request_from_nats(data, reply_to);
+                             });
+  if (!subscribed) {
+    Logger::error("Failed to subscribe worker to NATS subject: {}",
+                  m_ctx.m_config.m_nats_subject);
+    return false;
+  }
+  Logger::info("Worker subscribed to NATS successfully");
+  return true;
+}
+
+bool L2Worker::subscribe_db_query_subject() {
+  if (!m_db_query_handler || !m_db_query_handler->is_enabled()) {
+    return true;
+  }
+  const bool subscribed =
+      subscribe_nats_subject(m_ctx.m_config.m_db_query_nats_subject,
+                             m_ctx.m_config.m_db_query_nats_queue_group,
+                             "DB query", [this](const std::string &data,
+                                                const std::string &reply_to) {
+                               process_db_query_from_nats(data, reply_to);
+                             });
+  if (!subscribed) {
+    Logger::error("Failed to subscribe worker to DB NATS subject: {}",
+                  m_ctx.m_config.m_db_query_nats_subject);
+    return false;
+  }
+  Logger::info("Worker subscribed to DB NATS subject: {} (queue group {})",
+               m_ctx.m_config.m_db_query_nats_subject,
+               m_ctx.m_config.m_db_query_nats_queue_group);
+  return true;
 }
 
 namespace {

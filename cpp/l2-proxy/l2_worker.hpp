@@ -64,6 +64,12 @@ private:
                                const std::string &path);
   // NATS mode methods
   void run_with_nats();
+  // Subscribes the worker to the main request subject; returns false on
+  // subscription failure (the caller retries via backoff).
+  bool subscribe_worker_subject();
+  // Subscribes to the DB query subject when the gateway is enabled; returns
+  // true when there is nothing to subscribe to (gateway disabled/uninitialized).
+  bool subscribe_db_query_subject();
   void process_request_from_nats(const std::string &request_json,
                                  const std::string &reply_to);
   void process_db_query_from_nats(const std::string &request_json,
