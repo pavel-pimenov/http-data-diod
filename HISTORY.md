@@ -1,3 +1,33 @@
+# refactor(cpp): направление 4c — унификация NATS round-trip спан-логов в route_db_request
+
+## Date: 2026-09-07
+
+### Контекст
+`route_db_request` (135 строк) дублировал два почти одинаковых блока записи
+Jaeger-спана NATS round-trip: один для пустого ответа (status 500 + атрибуты
+`nats.success=false` и опциональный `nats.last_error`), второй для успешного
+(ststatus 200 + `nats.response_size`). Блоки отличались только флагом успеха и
+набором атрибутов — кандидат на слияние без изменения поведения.
+
+### Что сделано
+- дублирующиеся блоки `JaegerSpanLogger::log_nats_span("NATS_db_request", …)`
+  (failure и success) заменены одной лямбдой `log_db_nats_roundtrip(success,
+  last_error, response_size, nats_end_us)` внутри `route_db_request`
+- лямбда захватывает `nats_parent_id` по ссылке — success-call расположен после
+  обновления `nats_parent_id = consume_span_id`, failure-call до него (порядок
+  как в оригинале)
+- форма атрибутов идентична: `nats.success`, `nats.destination`,
+  `nats.duration_us`, `db.name` + `nats.response_size` (success) или
+  `nats.last_error` (failure, если непустой)
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 4b — декомпозиция process_request_from_nats (worker)
 
 ## Date: 2026-09-07

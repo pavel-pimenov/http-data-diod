@@ -821,6 +821,32 @@ void RequestHandler::route_db_request(
   auto nats_parent_id =
       resolve_parent_id(inlet_span_id, trace_ctx.m_parent_id);
 
+  // Records the NATS round-trip span in both outcomes (empty reply vs. reply
+  // received); the attribute set is the same in reversed form in each branch.
+  auto log_db_nats_roundtrip = [&](bool success,
+                                   const std::string &last_error,
+                                   size_t response_size,
+                                   int64_t nats_end_us) {
+    if (!m_ctx.m_tracer || trace_id.empty()) {
+      return;
+    }
+    nlohmann::json attrs = {
+        {"nats.success", success},
+        {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
+        {"nats.duration_us", nats_end_us - nats_start_us},
+        {"db.name", db_name},
+    };
+    if (success) {
+      attrs["nats.response_size"] = response_size;
+    } else if (!last_error.empty()) {
+      attrs["nats.last_error"] = last_error;
+    }
+    JaegerSpanLogger::log_nats_span(
+        m_ctx.m_tracer.get(), "NATS_db_request", success ? 200 : 500,
+        request_id, trace_id, nats_db_span_id, nats_parent_id, nats_start_us,
+        attrs);
+  };
+
   // request_with_consume_span_id also returns the worker's consume span id
   // (NATS header), which links the round-trip span to the worker's consume
   // span.
@@ -833,21 +859,7 @@ void RequestHandler::route_db_request(
   if (reply.m_data.empty()) {
     const auto last_error =
         m_ctx.m_nats_client->get_last_error().value_or("");
-    if (m_ctx.m_tracer && !trace_id.empty()) {
-      nlohmann::json attrs = {
-          {"nats.success", false},
-          {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
-          {"nats.duration_us", nats_end_us - nats_start_us},
-          {"db.name", db_name},
-      };
-      if (!last_error.empty()) {
-        attrs["nats.last_error"] = last_error;
-      }
-      JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_db_request",
-                                      500, request_id, trace_id,
-                                      nats_db_span_id, nats_parent_id,
-                                      nats_start_us, attrs);
-    }
+    log_db_nats_roundtrip(false, last_error, 0, nats_end_us);
     if (!m_ctx.m_nats_client->is_connected()) {
       reject_db_request(503, "NATS connection is not available");
     } else {
@@ -863,19 +875,7 @@ void RequestHandler::route_db_request(
     nats_parent_id = consume_span_id;
   }
 
-  if (m_ctx.m_tracer && !trace_id.empty()) {
-    nlohmann::json attrs = {
-        {"nats.success", true},
-        {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
-        {"nats.response_size", reply.m_data.size()},
-        {"nats.duration_us", nats_end_us - nats_start_us},
-        {"db.name", db_name},
-    };
-    JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_db_request",
-                                    200, request_id, trace_id,
-                                    nats_db_span_id, nats_parent_id,
-                                    nats_start_us, attrs);
-  }
+  log_db_nats_roundtrip(true, "", reply.m_data.size(), nats_end_us);
 
   const auto envelope = JsonUtils::try_parse(reply.m_data);
   if (!envelope || !envelope->is_object()) {
