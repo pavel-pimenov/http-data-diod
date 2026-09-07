@@ -1,3 +1,21 @@
+# docs(cpp): 8p — README: контракт ответов HTTP DB Gateway
+
+## Date: 2026-09-07
+
+### Контекст
+README описывал шлюз на уровне «какие СУБД и какие флаги», но не фиксировал
+контракт статус-кодов/`error.code`. После появления E2E-гейта
+(8m/8n), ассертящего эти коды, контракт существовал только в тестах.
+
+### Что сделано
+- README «HTTP DB Gateway»: добавлена таблица «Контракт ответов» —
+  200 / 400 BAD_REQUEST (read-only гейт) / 404 UNKNOWN_DATABASE /
+  404 NOT_FOUND / 405 METHOD_NOT_ALLOWED / 422 SQL_ERROR /
+  503 DB_UNAVAILABLE / 504 TIMEOUT, каждая строка сверена с кодом
+  (`request_handler.cpp` `reject_db_request`, `db_query_utils.hpp`) и E2E.
+- Упоминание `scripts/db-gateway-e2e-test.py [--parallel N]` как
+  автоматизированного гейта по контракту.
+
 # chore(cpp): 8o — docker build: тесты в отдельном кешируемом RUN-шаге
 
 ## Date: 2026-09-07

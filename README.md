@@ -150,6 +150,21 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 Ключевые переменные окружения см. в `docker-compose.yml` (`DB_QUERY_*`, `DB_POSTGRES_*`, `DB_ORACLE_*`); метрики воркера по шлюзу эмитируются через `l2_worker_*` (см. дашборд `L2 Воркер`).
 
+### Контракт ответов
+
+| HTTP | `error.code` | Когда |
+|---|---|---|
+| `200` | — | `GET /v1/sql` (список БД), `GET /v1/sql/{db}/ping`, `POST /v1/sql/{db}/query` (SELECT/WITH) |
+| `400` | `BAD_REQUEST` | SQL не начинается с `SELECT`/`WITH` (read-only гейт), невалидный JSON-запрос/параметры/лимит |
+| `404` | `UNKNOWN_DATABASE` | БД не зарегистрирована (напр. oracle при `DB_ORACLE_ENABLED=false`) |
+| `404` | `NOT_FOUND` | Неизвестное действие (`/v1/sql/{db}/bogus`) |
+| `405` | `METHOD_NOT_ALLOWED` | `GET` на `query` / `POST` на `ping` |
+| `422` | `SQL_ERROR` | Ошибка исполнения в СУБД |
+| `503` | `DB_UNAVAILABLE` | Пул БД не готов/СУБД недоступна |
+| `504` | `TIMEOUT` | Воркер не ответил за `DB_QUERY_NATS_TIMEOUT_MS` (завис/недостижим) |
+
+Автоматизированный E2E-гейт по контракту (включая параллельный маркерный прогон) — `python3 scripts/db-gateway-e2e-test.py [--parallel N]`.
+
 ---
 
 ## Rate limiting
