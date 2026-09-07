@@ -74,6 +74,12 @@ private:
                                  const std::string &reply_to);
   void process_db_query_from_nats(const std::string &request_json,
                                   const std::string &reply_to);
+  // Wraps the DB result {status, body} into the NATS response envelope, records
+  // the per-db/type/status counter and publishes it to reply_to.
+  void send_db_query_response(const std::string &reply_to, int status,
+                              const json &body,
+                              const std::string &consume_span_id,
+                              const json &request_data);
   // Subscribes the worker to a NATS subject with the shared reply_to
   // validation + enqueue + catch handling. Enqueued task is `fn` (the concrete
   // process_*_from_nats handler); error_context is the log prefix (e.g. the

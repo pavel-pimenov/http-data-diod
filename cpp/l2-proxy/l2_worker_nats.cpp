@@ -550,7 +550,15 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   }
 
   task.m_activity.m_status = status;
-  json envelope = make_db_response_envelope(status, body);
+  send_db_query_response(reply_to, status, body, consume_span_id, request_data);
+}
+
+void L2Worker::send_db_query_response(const std::string &reply_to, int status,
+                                      const json &body,
+                                      const std::string &consume_span_id,
+                                      const json &request_data) {
+  const std::string envelope_dump =
+      make_db_response_envelope(status, body).dump();
   const std::string db_name =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =
@@ -559,6 +567,6 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       m_ctx.m_worker.m_metrics->m_db_requests_total,
       nonempty_or(db_name, "unknown"), nonempty_or(type, "unknown"), status);
   const NatsHeaders response_headers = make_consume_span_headers(consume_span_id);
-  send_nats_response(reply_to, envelope.dump(), response_headers);
-  record_bytes_sent(envelope.dump().size());
+  send_nats_response(reply_to, envelope_dump, response_headers);
+  record_bytes_sent(envelope_dump.size());
 }

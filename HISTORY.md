@@ -1,3 +1,32 @@
+# refactor(cpp): направление 5b — вынос ответной фазы process_db_query_from_nats
+
+## Date: 2026-09-07
+
+### Контекст
+`process_db_query_from_nats` (89 строк) — worker-хендлер DB-запросов: фаза
+parse/execute в try/catch + хвост «envelope → метрики → send». Хвост (~12 строк)
+самодостаточен и перенос; вынос повторяет тот же паттерн, что 4b для основного
+NATS-хендлера.
+
+### Что сделано
+- хвост → новый метод `send_db_query_response(reply_to, status, body,
+  consume_span_id, request_data)`: `make_db_response_envelope(...).dump()` →
+  record_db_request_metrics (db/type/status) → `make_consume_span_headers` →
+  `send_nats_response` → `record_bytes_sent`
+- вызов в `process_db_query_from_nats` заменён на
+  `task.m_activity.m_status = status; send_db_query_response(...)` (guard читает
+  m_status в деструкторе, порядок не важен)
+- `envelope.dump()` теперь выполняется один раз (было дважды — для send и для
+  record_bytes_sent); результат детерминирован, поведение не изменилось
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 5a — вынос GET /v1/sql/ listing из handle_db_gateway
 
 ## Date: 2026-09-07
