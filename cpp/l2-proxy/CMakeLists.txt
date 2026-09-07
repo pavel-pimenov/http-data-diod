@@ -438,6 +438,7 @@ if(BUILD_TESTS)
     # Component tests
     add_executable(test_components
         test_components.cpp
+        test_http_pipeline.cpp
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp

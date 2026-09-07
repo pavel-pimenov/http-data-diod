@@ -1,3 +1,41 @@
+# chore(cpp): юнит-тесты HTTP-конвейера (HttpClient + HttpClientPool)
+
+## Date: 2026-09-07
+
+### Контекст
+Раунд улучшений 9a — юнит-тесты для пула HTTP-клиентов и обёртки над
+cpp-httplib. Модули `HttpClient` и `HttpClientPool` уже линкуются в
+`test_components`, но покрытия юнитами не имели (0 упоминаний в test_*.cpp).
+
+### Что сделано
+- Новый тестовый TU `cpp/l2-proxy/test_http_pipeline.cpp` (добавлен в таргет
+  `test_components` в CMakeLists.txt).
+- `[http-client]` — 10 тестов: POST/GET round-trip против local-thread
+  `httplib::Server` на loopback с эфемерным портом (bind_to_any_port +
+  wait_until_ready), проброс заголовков (Content-Length, Content-Type,
+  traceparent, кастомный), non-200 как корректный ответ с
+  get_last_status_code(), кастомные response-заголовки, post_no_response,
+  невалидные URL (пустой хост, порт вне диапазона), отказ соединения
+  (RuntimeError), invalidate(), статические счётчики инстансов,
+  make_error_json/make_error_response.
+- `[http-client-pool]` — 9 тестов: acquire создаёт соединение, release в пул +
+  переиспользование (total_clients не растёт), уважение max_pool_size,
+  acquire-timeout бросает и инкрементит метрику, waiter блокируется на полном
+  пуле и разбужен release-ом (std::async), release невалидного соединения
+  уничтожает его, stale-соединение эвиктится по max_idle (метрика
+  stale_evictions), метрики active/available/аcquisitions/releases/histogram
+  отражают состояние, release nullptr — no-op.
+- Ограничение области: RequestHandler/ResponseBuilder не покрыты — они требуют
+  AppContext (app_context.cpp + NATS client + worker), тестовый бинарь это не
+  тянет (отмечено как follow-up).
+
+### Проверка
+- clang-tidy по новому файлу — без замечаний.
+- Сборка в контейнере ./rebuild-and-run.sh: компиляция + прогон
+  `./test_components && ./test_proxy_core` в builder-стадии (сборка падает при
+  провале тестов) — успешно.
+- E2E: python3 message_counter.py --iterations 1 --concurrent 1 — ✅.
+
 # chore(cpp): урезание вендоренного civetweb до минимальной отдачи метрик
 
 ## Date: 2026-09-07
