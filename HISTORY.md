@@ -1,3 +1,29 @@
+# chore(cpp): 8l — align вышек DB-гейтвея с документацией (oracle off по умолчанию)
+
+## Date: 2026-09-07
+
+### Контекст
+Аудит README-раздела «HTTP DB Gateway» и env-governance vs код:
+- каталог метрик Prometheus (включая `l2_{proxy,worker}_db_*`) полностью
+  совпадает с регистрациями в app_context.cpp — правок не требовалось
+- env-набор config.cpp `get_env_*` ↔ docker-compose совпадает (22/22 DB_*);
+  «висячие» в compose — только build-args/лимиты/таргеты, не из числа env конфига
+- найдено расхождение: README документирует Oracle как «отключён по умолчанию»
+  (profile `oracle` + явный `DB_ORACLE_ENABLED=true`), а docker-compose по
+  умолчанию держал `DB_ORACLE_ENABLED=${DB_ORACLE_ENABLED:-true}` (совпадает
+  с config.cpp default=false). Воркер регистрировал oracle и фоновый
+  самовосстанавливающийся init (8j) молча ретраил недоступный oracle.
+
+### Что сделано
+- `docker-compose.yml`: `DB_ORACLE_ENABLED` default `false` (proxy и worker) —
+  стек приведён к документированному контракту. Postgres остаётся включён
+  по умолчанию; oracle включается явно (`DB_ORACLE_ENABLED=true` + profile).
+
+### Проверка
+- `./rebuild-and-run.sh` → 11 healthy; `GET /v1/sql` → только postgres;
+  postgres ping → 200; oracle ping → 404 UNKNOWN_DATABASE (не зарегистрирован);
+  `message_counter.py` → no message loss; воркер логирует один executor (postgres).
+
 # test(cpp): направление 8k — юнит-тесты хелперов контракта DB-гейтвея (db_query_utils)
 
 ## Date: 2026-09-07
