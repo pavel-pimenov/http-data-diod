@@ -1,3 +1,41 @@
+# chore(cpp): обновление встроенного клиента nats.c
+
+## Date: 2026-09-07
+
+### Контекст
+Пользователь обновил встроенные исходники C-клиента `nats.c`
+(`cpp/l2-proxy/nats`). Требовалось проверить диф, обеспечить сборку в Docker
+и закоммитить изменения.
+
+### Что сделано
+- Обновлены исходники `cpp/l2-proxy/nats` (см. диф): добавлены async get
+  (`js_getMsgAsync`, `js_directGetMsgAsync`, `kvStore_GetAsync`), async watcher
+  KV (`kvWatchOptions.Callback`/`Closure`, `kvWatchCb`), `natsMsg_SetData`,
+  `natsMsgHeader_EncodedLength`, `natsOptions_SetFlusherWaitMicros`
+  (`flusherWait`), рефакторинг `js_DirectGetMsg`/`kvStore_WatchMulti`,
+  таймауты в микросекундах (`TimedWaitMicros`), новые файлы `CLAUDE.md`,
+  `CODE-OF-CONDUCT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`.
+- `cpp/l2-proxy/nats/CMakeLists.txt`: исправлена сборка — обновлённый
+  CMakeLists безусловно вызывал `add_subdirectory(examples/*)` и
+  `add_subdirectory(test/*)`, которых нет в скопированной исходнике:
+  `add_subdirectory(examples/*)` обёрнуто в `if(NATS_BUILD_EXAMPLES)`,
+  `add_subdirectory(test/*)` — в `if(BUILD_TESTING)`. Без этого стадия
+  сборки NATS C client падала (в проекте `-DNATS_BUILD_EXAMPLES=OFF
+  -DBUILD_TESTING=OFF`).
+
+### Диагностика
+Первая сборка `./rebuild-and-run.sh` упала на стадии cmake конфигурации
+NATS-клиента: `CMake Error ... add_subdirectory given source "examples"
+which is not an existing directory`. Объяснение: в этой копии репозитория
+отсутствуют каталоги `examples/`, `test/` (вырезаны при встраивании), а
+новый root CMakeLists добавлял их безусловно.
+
+### Проверка
+- `./rebuild-and-run.sh` — сборка и все сервисы (healthy) прошли, у союзных
+  юнит-тестов 929+742 assertions, все passed.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ успешно
+  (1/1, без потерь и пересечений).
+
 # chore(cpp): 8v — тулинг: HTML-отчёт покрытия юнит-тестов (gcovr в образе)
 
 ## Date: 2026-09-07
