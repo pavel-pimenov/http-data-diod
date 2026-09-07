@@ -6,6 +6,7 @@
 #include <format>
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
+  std::lock_guard lock(m_mutex);
   m_expected_count = databases.size();
   for (const DbConfig &db : databases) {
     if (m_executors.contains(db.m_name)) {
@@ -46,11 +47,14 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   const DbQueryRequest &req = *parsed;
 
   DbQueryExecutor *executor = nullptr;
-  if (req.m_db.empty() && m_executors.size() == 1) {
-    executor = m_executors.begin()->second.get();
-  } else if (const auto it = m_executors.find(req.m_db);
-             it != m_executors.end()) {
-    executor = it->second.get();
+  {
+    std::lock_guard lock(m_mutex);
+    if (req.m_db.empty() && m_executors.size() == 1) {
+      executor = m_executors.begin()->second.get();
+    } else if (const auto it = m_executors.find(req.m_db);
+               it != m_executors.end()) {
+      executor = it->second.get();
+    }
   }
   if (!executor) {
     status_code = 404;

@@ -31,6 +31,10 @@ struct OracleQueryExecutor::ConnGuard {
 namespace {
 constexpr uint32_t g_max_lob_bytes = 1024 * 1024;
 constexpr uint32_t g_max_inline_bytes = 1024 * 1024;
+// Bounds per-connection establishment performed by the pool (OCI SPOOL
+// TIMEOUT): applies to lazy connects from acquire_conn(), keeping a request
+// from blocking a pool thread indefinitely when the Oracle host is unreachable.
+constexpr uint32_t g_db_connect_timeout_seconds = 5;
 
 std::string oracle_type_name(dpiOracleTypeNum type) {
   switch (type) {
@@ -186,10 +190,11 @@ struct OracleQueryExecutor::Impl {
                     m_db.m_name, describe_error());
       return false;
     }
-    pool_params.minSessions = static_cast<uint32_t>(m_db.m_pool_min);
+    pool_params.minSessions = 0;
     pool_params.maxSessions = static_cast<uint32_t>(m_db.m_pool_max);
     pool_params.sessionIncrement = 1;
     pool_params.homogeneous = 1;
+    pool_params.timeout = g_db_connect_timeout_seconds;
     const std::string connect_string =
         std::format("{}:{}/{}", m_db.m_host, m_db.m_port, m_db.m_service);
     if (dpiPool_create(m_context, m_db.m_user.data(),
@@ -203,8 +208,8 @@ struct OracleQueryExecutor::Impl {
                     m_db.m_name, connect_string, describe_error());
       return false;
     }
-    Logger::info("DB executor '{}': pool ready ({}..{} sessions, connect {} )",
-                 m_db.m_name, m_db.m_pool_min, m_db.m_pool_max, connect_string);
+    Logger::info("DB executor '{}': pool ready (0..{} sessions, connect {})",
+                 m_db.m_name, m_db.m_pool_max, connect_string);
     return true;
   }
 
@@ -253,9 +258,30 @@ OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
     : DbExecutorBase(std::move(db)),
       m_impl(std::make_unique<Impl>(m_db, this)) {}
 
-OracleQueryExecutor::~OracleQueryExecutor() = default;
+OracleQueryExecutor::~OracleQueryExecutor() {
+  if (m_init_thread.joinable()) {
+    m_init_thread.join();
+  }
+}
 
-bool OracleQueryExecutor::init() { return m_impl->init(); }
+// Runs the driver pool/context creation on a detached-from-caller background
+// thread: dpiPool_create can block for a long time when the Oracle host is
+// unreachable, and blocking the worker's main loop here would stall the NATS
+// subscription (and thus the whole HTTP flow) until the DB becomes reachable.
+// Returns true once the thread is scheduled so the caller registers the
+// executor immediately; queries are answered with DB_UNAVAILABLE until
+// m_ready flips.
+bool OracleQueryExecutor::init() {
+  if (m_init_thread.joinable()) {
+    return true;
+  }
+  m_init_thread = std::thread([this]() {
+    if (m_impl->init()) {
+      m_ready.store(true, std::memory_order_release);
+    }
+  });
+  return true;
+}
 
 void OracleQueryExecutor::release_conn(dpiConn *conn) {
   m_impl->release_conn(conn);
@@ -269,6 +295,11 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
                                         const json &params, int timeout_ms,
                                         int max_rows, int &status_code) {
   status_code = 200;
+  if (!m_ready.load(std::memory_order_acquire)) {
+    Logger::warn("DB executor '{}': pool not ready yet, rejecting query",
+                 m_impl->m_db.m_name);
+    return make_db_unavailable(status_code, "database is still initializing");
+  }
   const uint64_t start_ms = TimeUtils::steady_ms();
 
   auto maybe_conn = m_impl->acquire_conn(timeout_ms);
@@ -491,6 +522,11 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
 }
 
 bool OracleQueryExecutor::ping(int timeout_ms) {
+  if (!m_ready.load(std::memory_order_acquire)) {
+    Logger::warn("DB executor '{}': pool not ready yet, ping failed",
+                 m_impl->m_db.m_name);
+    return false;
+  }
   auto maybe_conn = m_impl->acquire_conn(timeout_ms);
   if (!maybe_conn) {
     return false;

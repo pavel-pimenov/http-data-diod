@@ -3,7 +3,9 @@
 
 #include "config.hpp"
 #include "db_query_executor_base.hpp"
+#include <atomic>
 #include <memory>
+#include <thread>
 
 struct dpiConn;
 
@@ -26,6 +28,14 @@ protected:
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
+
+  // True once the background init() reported the ODPI pool ready. Requests
+  // arrive only after init() returns, so until this flips they are answered
+  // with DB_UNAVAILABLE instead of touching a not-yet-created pool.
+  std::atomic<bool> m_ready{false};
+  // Runs the (potentially long) ODPI pool creation off the worker main loop so
+  // an unreachable Oracle host cannot block the worker's NATS subscription.
+  std::thread m_init_thread;
 
   // Returns the pooled connection to the pool and refreshes pool gauges.
   void release_conn(dpiConn *conn);

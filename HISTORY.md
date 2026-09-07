@@ -1,3 +1,48 @@
+# feat(cpp): включение DB-гейтвея для postgres E2E (async init oracle + fast/slow-decoupling)
+
+## Date: 2026-09-07
+
+### Контекст
+Задел «включить DB-гейтвей для postgres» был задекларирован, но не работал E2E:
+`OracleQueryExecutor::init()` вызывал `dpiPool_create` (minSessions=1) синхронно
+в главном цикле воркера; при недоступном oracle (сервис не запущен) это
+блокировало main loop навсегда (лог обрывался после «NATS worker is ready»),
+DB-подписка не активировалась, и `POST/GET /v1/sql/postgres/ping` отвечал
+504/таймаут. Правка postgres-драйвера (docker-compose `DB_POSTGRES_ENABLED=true`)
+без фикса oracle_init высветила этот pre-existing баг.
+
+### Что сделано
+- `docker-compose.yml`: `DB_POSTGRES_ENABLED` переведён в `true` (proxy и worker).
+- `l2_worker_nats.cpp`: `ensure_db_query_subscription` переведён с `all_configured()`
+  на `is_enabled()` — подписка активируется при первой готовой БД, fast (postgres)
+  больше не ждёт slow (oracle). Добавлен инкрементальный доинит отстающих БД
+  в главном цикле (`m_db_init_retry_count % kDbInitRetryEveryPasses == 0`,
+  константа `kDbInitRetryEveryPasses = 50`).
+- `l2_worker.hpp`: member `m_db_init_retry_count = 0`.
+- `db_query_executor_oracle.{hpp,cpp}`: `init()` переведён на фоновый поток
+  (`m_init_thread` + `m_ready` atomic). Блокирующий `dpiPool_create` выполняется
+  вне main loop; executor регистрируется сразу, а `execute_query`/`ping` до
+  готовности пула отвечают DB_UNAVAILABLE. `minSessions` возведён в 0 (ленивые
+  коннекты) + `timeout` пула (SPOOL_TIMEOUT) 5с ограничивает lazy connect.
+- `db_query_handler.{hpp,cpp}`: `m_mutex` сериализует `init()` (main loop) против
+  диспетчера запросов (pool-треды); `is_enabled()/all_configured()`/`handle_request`
+  читают карту под мьютексом.
+
+### Правка блокирующего init: детали
+- Эмпирически подтверждено, что `dpiPoolCreateParams.timeout` НЕ ограничивает
+  создание пула (воркер всё равно зависал при unreachable oracle), поэтому
+  выбран архитектурный фикс — асинхронный init в фоновом потоке.
+- С `minSessions=0` `dpiPool_create` сам по себе не разблокировал main loop —
+  подтверждено на промежуточной сборке; решающим оказался вынос на фоновый поток.
+
+### Проверка (E2E)
+- `POST /v1/sql/postgres/query` с корректным SQL → полный результат с колонками/типами.
+- `GET /v1/sql/postgres/ping` → 200 ok.
+- oracle (зарегистрирован, сервис не запущен) → корректный 503 DB_UNAVAILABLE,
+  не блокирует воркер.
+- `./rebuild-and-run.sh` → 11 healthy; `message_counter.py --iterations 1 --concurrent 1`
+  успешно (no message loss).
+
 # test(cpp): направление 8e — юнит-тесты prepare_request_data + чистка include-графа
 
 ## Date: 2026-09-07

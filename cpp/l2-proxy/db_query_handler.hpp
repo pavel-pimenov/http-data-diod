@@ -6,6 +6,7 @@
 #include "nlohmann/json.hpp"
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <variant>
 #if __has_include(<flat_map>)
@@ -28,12 +29,16 @@ public:
   // start). Returns false when no executor could be initialized.
   bool init(const std::vector<DbConfig> &databases);
 
-  [[nodiscard]] bool is_enabled() const { return !m_executors.empty(); }
+  [[nodiscard]] bool is_enabled() const {
+    std::lock_guard lock(m_mutex);
+    return !m_executors.empty();
+  }
 
   // True when every configured database has an initialized executor. The
   // worker retries init() until this holds so a fast-starting database (e.g.
   // PostgreSQL) cannot mask a slow one (Oracle cold start).
   [[nodiscard]] bool all_configured() const {
+    std::lock_guard lock(m_mutex);
     return m_expected_count > 0 && m_executors.size() >= m_expected_count;
   }
 
@@ -57,6 +62,10 @@ private:
 #else
   std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
 #endif
+  // Serializes init() (runs on the worker main loop) against request dispatch
+  // (runs on pool threads) so a slow/blocked executor creation can never race
+  // with reads of m_executors.
+  mutable std::mutex m_mutex;
   size_t m_expected_count = 0;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 };

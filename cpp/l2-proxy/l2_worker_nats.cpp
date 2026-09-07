@@ -78,6 +78,12 @@ bool L2Worker::subscribe_nats_subject(const std::string &subject,
   return subscribed;
 }
 
+// Loop-passes between incremental DB init retries once the DB subscription is
+// active. With a healthy ~200ms loop cadence this retries every ~10s, which
+// keeps picking up late-starting databases (Oracle cold start) without
+// spamming logs while they are still unreachable.
+inline constexpr int kDbInitRetryEveryPasses = 50;
+
 void L2Worker::run_with_nats() {
   Logger::info("Starting NATS worker mode. Subscribing to subject: {} with "
                "queue group: {}",
@@ -145,12 +151,23 @@ void L2Worker::run_with_nats() {
     // The DB gateway is independent from the worker path: databases (Oracle in
     // particular) may be cold-starting for minutes, so its retries must never
     // tear down the worker subscription (that would drop the main HTTP flow).
-    // init() is incremental, so repeated calls only create the missing
-    // executors; we wait until every configured database is ready before
-    // subscribing.
+    // We subscribe as soon as at least one database is ready so a fast-starting
+    // one (e.g. PostgreSQL) is never blocked by a slow one; per-request
+    // dispatch answers DB_UNAVAILABLE/UNKNOWN_DATABASE for databases whose
+    // executor is not up yet.
     if (m_nats_client && m_nats_client->is_connected() && subscription_active &&
         !db_subscription_active) {
       db_subscription_active = ensure_db_query_subscription(backoff);
+    } else if (m_nats_client && m_nats_client->is_connected() &&
+               subscription_active && db_subscription_active &&
+               m_db_query_handler && !m_db_query_handler->all_configured() &&
+               ++m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
+      // Pick up databases that came up after the subscription became active
+      // (e.g. Oracle cold start): init() is incremental and only creates the
+      // missing executors, so this never disturbs already-served databases.
+      Logger::info("DB gateway: retrying init for {} configured database(s)",
+                   m_ctx.m_config.m_databases.size());
+      m_db_query_handler->init(m_ctx.m_config.m_databases);
     }
 
     if (m_nats_client && !m_nats_client->is_connected()) {
@@ -224,9 +241,13 @@ bool L2Worker::ensure_db_query_subscription(RetryHandler &backoff) {
   if (!m_db_query_handler) {
     return true;
   }
-  if (!m_db_query_handler->all_configured()) {
+  // Subscribe once at least one executor is ready: a fast-starting database
+  // must not wait for a slow one (Oracle cold start). Databases that are still
+  // unavailable are picked up later by the incremental init retry in the main
+  // loop.
+  if (!m_db_query_handler->is_enabled()) {
     m_db_query_handler->init(m_ctx.m_config.m_databases);
-    if (!m_db_query_handler->all_configured()) {
+    if (!m_db_query_handler->is_enabled()) {
       Logger::warn("DB gateway is not ready yet (database(s) "
                    "unavailable?), will retry");
       backoff.record_failure();

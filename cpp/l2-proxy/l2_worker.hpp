@@ -38,6 +38,9 @@ private:
   // HTTP DB Gateway: initialized only in NATS worker mode when
   // DB_QUERY_ENABLED=true.
   std::unique_ptr<DbQueryHandler> m_db_query_handler;
+  // Loop-pass counter throttling the incremental DB init retry that picks up
+  // databases which come up after the subscription became active.
+  int m_db_init_retry_count = 0;
   // Background ticker samples pool saturation so the queue-depth gauge stays
   // meaningful between requests (otherwise it only moves on request arrival).
   std::jthread m_metrics_ticker;
