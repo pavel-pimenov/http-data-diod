@@ -357,54 +357,8 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     TracingSpans spans =
         create_tracing_spans(metadata.m_trace_ctx, worker_parent_span_id);
 
-    L2Response l2_response = execute_l2_call(metadata, spans);
-
-    ResponseData response_data = prepare_response_data(l2_response, spans);
-
-    task.m_activity.m_status = l2_response.m_status_code;
-
-    HttpResponse http_response;
-    http_response.m_body = l2_response.m_body;
-    http_response.m_headers = l2_response.m_headers;
-    http_response.m_status = l2_response.m_status_code;
-    json response_headers_json = prepare_response_headers(http_response);
-
-    std::string l2_response_stored = l2_response.m_body;
-    if (response_data.m_is_binary) {
-      l2_response_stored = base64::to_base64(l2_response.m_body);
-    }
-
-    const nlohmann::json response_json = build_nats_response_envelope(
-        l2_response.m_status_code, metadata.m_request_id, l2_response_stored,
-        response_data.m_timestamp_us, response_data.m_is_binary,
-        response_data.m_content_type, response_headers_json,
-        spans.m_traceparent_header);
-
-    // Send nats_consume_span_id as NATS header instead of JSON body
-    const NatsHeaders response_headers =
-        make_consume_span_headers(nats_consume_span_id);
-
-    const std::string response_json_dump = response_json.dump();
-    m_dedup_cache.store(metadata.m_request_id, response_json_dump);
-    send_nats_response(reply_to, response_json_dump, response_headers);
-
-    record_bytes_sent(response_json_dump.size());
-
-    if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
-      const uint64_t end_us = get_current_timestamp_us();
-      log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
-                      metadata.m_path, l2_response.m_status_code, start_us,
-                      end_us, m_ctx.m_config.m_mode, metadata.m_request_id,
-                      metadata.m_trace_ctx.m_trace_id,
-                      spans.m_worker_process_span_id, worker_parent_span_id);
-    }
-
-    record_l2_call_metrics(start_us);
-
-    m_ctx.m_worker.m_metrics->m_requests_processed.Increment();
-
-    Logger::debug("NATS request processed successfully: {}",
-                  metadata.m_request_id);
+    task.m_activity.m_status = send_l2_response(metadata, spans, reply_to,
+                                                nats_consume_span_id, start_us);
 
   } catch (const std::exception &e) {
     Logger::error("Error processing NATS request: {}", e.what());
@@ -416,6 +370,61 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
     record_l2_call_metrics(start_us);
   }
+}
+
+int L2Worker::send_l2_response(const RequestData &metadata,
+                               const TracingSpans &spans,
+                               const std::string &reply_to,
+                               const std::string &nats_consume_span_id,
+                               uint64_t start_us) {
+  L2Response l2_response = execute_l2_call(metadata, spans);
+
+  ResponseData response_data = prepare_response_data(l2_response, spans);
+
+  HttpResponse http_response;
+  http_response.m_body = l2_response.m_body;
+  http_response.m_headers = l2_response.m_headers;
+  http_response.m_status = l2_response.m_status_code;
+  json response_headers_json = prepare_response_headers(http_response);
+
+  std::string l2_response_stored = l2_response.m_body;
+  if (response_data.m_is_binary) {
+    l2_response_stored = base64::to_base64(l2_response.m_body);
+  }
+
+  const nlohmann::json response_json = build_nats_response_envelope(
+      l2_response.m_status_code, metadata.m_request_id, l2_response_stored,
+      response_data.m_timestamp_us, response_data.m_is_binary,
+      response_data.m_content_type, response_headers_json,
+      spans.m_traceparent_header);
+
+  // Send nats_consume_span_id as NATS header instead of JSON body
+  const NatsHeaders response_headers =
+      make_consume_span_headers(nats_consume_span_id);
+
+  const std::string response_json_dump = response_json.dump();
+  m_dedup_cache.store(metadata.m_request_id, response_json_dump);
+  send_nats_response(reply_to, response_json_dump, response_headers);
+
+  record_bytes_sent(response_json_dump.size());
+
+  if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
+    const uint64_t end_us = get_current_timestamp_us();
+    log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
+                    metadata.m_path, l2_response.m_status_code, start_us,
+                    end_us, m_ctx.m_config.m_mode, metadata.m_request_id,
+                    metadata.m_trace_ctx.m_trace_id,
+                    spans.m_worker_process_span_id, nats_consume_span_id);
+  }
+
+  record_l2_call_metrics(start_us);
+
+  m_ctx.m_worker.m_metrics->m_requests_processed.Increment();
+
+  Logger::debug("NATS request processed successfully: {}",
+                metadata.m_request_id);
+
+  return l2_response.m_status_code;
 }
 
 void L2Worker::send_nats_response(const std::string &reply_to,

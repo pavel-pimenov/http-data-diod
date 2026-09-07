@@ -142,8 +142,14 @@ private:
                                     const std::string &op_parent_span_id);
   L2Response execute_l2_call(const RequestData &metadata,
                              const TracingSpans &spans);
-  ResponseData prepare_response_data(const L2Response &l2_response,
-                                     const TracingSpans &spans);
+ResponseData prepare_response_data(const L2Response &l2_response,
+                                      const TracingSpans &spans);
+  // Runs the L2 call, wraps the result into the NATS response envelope, stores
+  // it in the dedup cache and publishes it. Returns the L2 status code.
+  int send_l2_response(const RequestData &metadata, const TracingSpans &spans,
+                       const std::string &reply_to,
+                       const std::string &nats_consume_span_id,
+                       uint64_t start_us);
 };
 
 #endif // L2_WORKER_HPP

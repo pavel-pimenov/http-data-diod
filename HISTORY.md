@@ -1,3 +1,35 @@
+# refactor(cpp): направление 4b — декомпозиция process_request_from_nats (worker)
+
+## Date: 2026-09-07
+
+### Контекст
+NATS-хендлер `process_request_from_nats` (128 строк) скомпонован из чётко
+разделяемых фаз: parse → metadata → dedup → spans → «выполнить L2 + собрать
+envelope + сохранить в dedup + отправить + метрики». Последняя фаза вынесена
+в отдельный метод, оставляя в хендлере только маршрутизацию фаз и точки выхода.
+
+### Что сделано
+- `process_request_from_nats` (128 → ~82 строки): фаза выполнения/отправки
+  (execute_l2_call → prepare_response_data → build_nats_response_envelope →
+  base64 для бинарных → dedup_cache.store → send_nats_response →
+  record_bytes_sent → log_worker_span → record_l2_call_metrics →
+  m_requests_processed) перенесена 1-в-1 в новый метод
+  `int send_l2_response(metadata, spans, reply_to, nats_consume_span_id,
+  start_us)`, возвращающий HTTP-код L2-ответа
+- вызов в хендлере заменён на `task.m_activity.m_status =
+  send_l2_response(...)` — семантика не изменилась (WorkerActivityGuard читает
+  m_status только в деструкторе, порядок выставления не важен)
+- `worker_parent_span_id` внутри метода заменён на переданный
+  `nats_consume_span_id` (это та же самая строка)
+- поведение/тексты логов/статусы не менялись
+
+### Проверка
+- Юнит-тесты в builder-контейнере: `test_components` + `test_proxy_core` — все прошли
+- `./rebuild-and-run.sh` — все сервисы healthy
+- `message_counter.py --iterations 1 --concurrent 1` — ✅
+
+---
+
 # refactor(cpp): направление 4a — декомпозиция handle_get и duplicate-detection
 
 ## Date: 2026-09-07
