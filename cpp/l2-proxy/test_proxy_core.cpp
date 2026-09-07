@@ -551,7 +551,10 @@ TEST_CASE("Schema validator: required fields, methods, paths, sizes",
   json too_big_body = {{"method", "POST"},
                        {"path", "/v1/sql"},
                        {"request_id", "r1"},
-                       {"body", std::string(11 * 1024 * 1024, 'a')}};
+                       {"body", std::string(
+                                    static_cast<std::size_t>(11) * 1024 *
+                                    1024,
+                                    'a')}};
   REQUIRE_FALSE(validator.validate(too_big_body, error));
   REQUIRE(error.find("Body too large") != std::string::npos);
 
@@ -583,7 +586,10 @@ TEST_CASE("Schema validator: response status and body rules",
   REQUIRE(error.find("body required but missing") != std::string::npos);
 
   json too_big = {{"status_code", 200},
-                  {"body", {{"response", std::string(51 * 1024 * 1024, 'b')}}}};
+                  {"body", {{"response",
+                              std::string(
+                                  static_cast<std::size_t>(51) * 1024 * 1024,
+                                  'b')}}}};
   REQUIRE_FALSE(validator.validate(too_big, error));
   REQUIRE(error.find("body too large") != std::string::npos);
 }
@@ -703,7 +709,15 @@ TEST_CASE("Dynamic labeled family: provider drops vanished labels",
 // Error categorization (error_categorizer.hpp)
 // ============================================================================
 
-using namespace error_categorizer;
+// Keep the import list explicit: no `using namespace` (google-build).
+using error_categorizer::categorize_http_error;
+using error_categorizer::HttpErrorType;
+using error_categorizer::categorize_l2_error;
+using error_categorizer::l2_error_type_to_string;
+using error_categorizer::L2ErrorType;
+using error_categorizer::categorize_processing_error;
+using error_categorizer::processing_error_type_to_string;
+using error_categorizer::ProcessingErrorType;
 
 TEST_CASE("Error categorizer: http keyword rules", "[error-categorizer]") {
   REQUIRE(categorize_http_error("Connection refused") ==

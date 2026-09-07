@@ -1,3 +1,35 @@
+# chore(cpp): 8q — clang-tidy: полный свип, закрыты project-warning-и
+
+## Date: 2026-09-07
+
+### Контекст
+Полный свип `scripts/run-clang-tidy.sh --all` (впервые за сессию по всем
+файлам) выявил в project-коде 3 warning-а:
+- `google-build-using-namespace` (test_proxy_core.cpp): `using namespace
+  error_categorizer;`.
+- `bugprone-implicit-widening-of-multiplication-result` (×2,
+  test_proxy_core.cpp): `std::string(11 * 1024 * 1024, 'a')` и
+  `std::string(51 * 1024 * 1024, 'b')` — умножение в int, неявное
+  расширение до size_type.
+- `modernize-use-auto` (circuit_breaker.cpp): дублирование типа в
+  initializer с кастом.
+
+### Что сделано
+- test_proxy_core.cpp: вместо `using namespace error_categorizer` — явные
+  using-declarations для 6 сущностей (categorize_http_error/HttpErrorType/
+  categorize_l2_error/l2_error_type_to_string/L2ErrorType/
+  categorize_processing_error/processing_error_type_to_string/
+  ProcessingErrorType); размеры тел — `static_cast<std::size_t>(N) * 1024 *
+  1024`.
+- circuit_breaker.cpp: `const auto now_us =
+  static_cast<uint64_t>(TimeUtils::epoch_us());`.
+
+### Проверка
+- Полный свип: в project-файлах error-ов и warning-ов нет (остались только
+  сторонние dpi.h из ODPI-C);
+- rebuild-and-run → exit 0, 11 healthy; message_counter ok;
+  db-gateway-e2e-test --parallel 8 → all passed.
+
 # docs(cpp): 8p — README: контракт ответов HTTP DB Gateway
 
 ## Date: 2026-09-07

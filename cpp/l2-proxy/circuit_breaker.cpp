@@ -21,7 +21,7 @@ bool CircuitBreaker::allow_request() {
     return true;
   }
   // OPEN state: check if timeout has elapsed
-  const uint64_t now_us = static_cast<uint64_t>(TimeUtils::epoch_us());
+  const auto now_us = static_cast<uint64_t>(TimeUtils::epoch_us());
   const uint64_t elapsed = now_us - m_last_failure_time_us.load();
   if (elapsed >= g_open_timeout_us) {
     Logger::info("Circuit breaker: OPEN -> HALF_OPEN (timeout elapsed)");
