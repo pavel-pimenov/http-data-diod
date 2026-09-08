@@ -1,3 +1,38 @@
+# test(cpp): валидация всего стека под ASan/LSan/UBSan (12a)
+
+## Date: 2026-09-08
+
+### Контекст
+Раунды 11b/11c добавили высоконагруженные юнит-тесты асинхронного
+sender_loop (JaegerLogger): burst на 10000 спанов с переполнением очереди,
+ретраи/фейлы на закрытом порту, HTTP-моки (httplib::Server), join потоков
+в деструкторах, трайт-пользующийся thread_local baggage. Перед тем как
+считать их надёжными, прогнали всю сборку, юнит-тесты и e2e с
+AddressSanitizer + LeakSanitizer + UndefinedBehaviorSanitizer.
+
+### Что сделано
+- `./rebuild-and-run.sh --asan` (ENABLE_ASAN=true, санитайзер-линковка,
+  builder-стадия компилит движком ccache со включённым ASan/LSan/UBSan):
+  - `test_components`: All tests passed (1349 assertions in 319 test cases);
+  - `test_proxy_core`: All tests passed (742 assertions in 73 test cases);
+  - утечек/out-of-bounds/UB не обнаружено (бинарники тестов линкуют
+    libasan, дефолтный halt_on_error=1 — при срабатывании процесс бы упал).
+- Сервисы (l2-proxy/l2-worker/l2-server) собраны в runtime-asan и подняты
+  в compose: все healthy; `ASAN_OPTIONS=detect_leaks=1:halt_on_error=0:
+  log_path=/memory-logs/*`, mount `/memory-logs` → ./docker-memory-analysis/.
+- e2e-проверки: message_counter (requests/s), db-gateway-e2e-test.py 7/7,
+  sentry-e2e-test.py PASS — все работают на ASan-бинарниках.
+- По завершении: `ls ./docker-memory-analysis/` пуст; в `docker compose
+  logs l2-proxy l2-worker l2-server` нет упоминаний
+  AddressSanitizer/LeakSanitizer/UBSan/`==ERROR` — санитайзерных находок
+  за ~6 минут работы сервисов нет.
+
+### Проверка
+- Юнит-тесты ASan: 319/1349 + 742/73 passed.
+- Все сервисы healthy; Grafana-дашборды обновлены.
+- message_counter ✅, db-gateway 7/7 ✅, sentry-e2e PASS ✅.
+- sanitizer-логов в ./docker-memory-analysis/ и docker-логах нет.
+
 # test(cpp): таргет-тесты на cover-пробелы sentry/http/trace (11c)
 
 ## Date: 2026-09-08
