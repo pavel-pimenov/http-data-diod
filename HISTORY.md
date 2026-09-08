@@ -1,3 +1,52 @@
+# test(cpp): таргет-тесты на cover-пробелы sentry/http/trace (11c)
+
+## Date: 2026-09-08
+
+### Контекст
+После 11b (trace_logger 8.3% → 88.3%) построчный анализ cobertura-XML
+(gcovr `--xml` из coverage-образа, `docker run --entrypoint gcovr`) показал
+оставшиеся реальные функциональные пробелы: HTTPS-путь HttpClient,
+edge-кейсы `parse_dsn`, `level_to_string`, не-string tags, `send_envelope`
+(реальный HTTP в юнит-тесте), `set_gauge` CircuitBreaker, traced-ветки
+`handle_trace_context`, VALIDATION ветка обработки ошибок. Остальные «слепые»
+строки — это тело `Logger::*` (spdlog-макросы) и NDOC-немый мусор gcovr.
+
+### Что сделано
+- `test_sentry_client.cpp` (+4 TEST_CASE):
+  - DSN: пустой public key (`http://:SECRET@host/proj`), пробел в host,
+    нормализация хвостовых `/` в path prefix (`/foo//proj` → `/foo`,
+    `//proj` → пусто);
+  - `level_to_string` для всех уровней (debug/info/warning/error/fatal,
+    fatal → exception);
+  - `transaction` и не-string теги (`attempt: 3` → `"3"`,
+    массив id → `"[1,2]"`);
+  - `send_envelope` по реальному HTTP: DSN на локальный `httplib::Server`
+    (`127.0.0.1:<ephemeral port>`), без транспорта — события доставляются
+    через встроенный sender, envelope приходит на `/api/42/envelope/`,
+    счётчик sent +1.
+- `test_http_pipeline.cpp` (+1): HTTPS-путь `HttpClient` — клиент с verify
+  настроен на `https://127.0.0.1:1/secure` → setup_ssl_client + SSL-ветка
+  `execute_request` → `runtime_error`.
+- `test_trace_logger.cpp` (+3): `log_request` с `additional_attributes`
+  (db/attempt в tags), `log_span_to_jaeger` (с tracer и с nullptr),
+  `handle_trace_context` с реальным tracer (parse-ветка и generate-ветка).
+- `test_components.cpp` (+2): `set_gauge` CircuitBreaker отслеживает
+  CLOSED=0 → OPEN=1 (в т.ч. no-op record_success в OPEN); `log_body_preview`
+  с длинным телом (обрезание + `(N bytes total)`).
+- `test_coverage_ext.cpp`: добавлен VALIDATION-кейс в
+  `handle_processing_error_with_category` (покрывает третий элемент массива
+  specific-счётчиков `std::array`).
+- Покрытие линий: sentry_client 82.9→94.3%, http_client 83.7→94.6%,
+  common_utils 90.8→96.2%, circuit_breaker 90.0→98.3%, trace_logger
+  →88.7%, общая сумма по проекту → 95.3%.
+
+### Проверка
+- ./rebuild-and-run.sh: сборка успешна; `test_components` 319/1349 passed,
+  `test_proxy_core` 742/73 passed; health-check ✅.
+- `message_counter.py --iterations 1 --concurrent 1` ✅,
+  `db-gateway-e2e-test.py` 7/7 ✅, `sentry-e2e-test.py` PASS ✅.
+- clang-tidy по изменённым файлам — без ошибок и предупреждений.
+
 # test(cpp): юнит-тесты передачи спанов JaegerLogger (11b)
 
 ## Date: 2026-09-08

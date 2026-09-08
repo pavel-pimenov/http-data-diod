@@ -1686,6 +1686,25 @@ TEST_CASE("CircuitBreaker: starts CLOSED and allows requests",
   REQUIRE(cb.allow_request() == true);
 }
 
+TEST_CASE("CircuitBreaker: set_gauge mirrors state transitions",
+          "[circuit-breaker]") {
+  prometheus::Registry registry;
+  auto &gauge =
+      prometheus::BuildGauge().Name("cb_test_state").Help("h").Register(
+          registry)
+          .Add({});
+  CircuitBreaker cb;
+  cb.set_gauge(gauge);
+  REQUIRE(gauge.Collect().gauge.value == 0.0); // CLOSED
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.allow_request() == false);
+  REQUIRE(gauge.Collect().gauge.value == 1.0); // OPEN
+  cb.record_success();                         // OPEN is a no-op
+  REQUIRE(gauge.Collect().gauge.value == 1.0);
+}
+
 TEST_CASE("CircuitBreaker: opens after the failure threshold",
           "[circuit-breaker]") {
   CircuitBreaker cb;
@@ -2200,6 +2219,15 @@ TEST_CASE("Common utils: handle_trace_context with null tracer",
   REQUIRE(ctx.m_span_id.empty());
   REQUIRE(ctx.m_parent_id.empty());
   REQUIRE(ctx.m_traceparent_header.empty());
+}
+
+TEST_CASE("Common utils: log_body_preview truncates long bodies",
+          "[common-utils]") {
+  REQUIRE(log_body_preview("short", 10) == "short");
+  const std::string long_body(40, 'x');
+  const auto preview = log_body_preview(long_body, 5);
+  REQUIRE(preview.starts_with("xxxxx... ("));
+  REQUIRE(preview.ends_with(" bytes total)"));
 }
 
 TEST_CASE("TraceLogger: parse_traceparent accepts valid traceparent",

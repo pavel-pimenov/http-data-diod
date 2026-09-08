@@ -653,8 +653,14 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
   REQUIRE(decomp_err.Value() == 1.0);
   REQUIRE(other_err.Value() == 0.0);
 
-  handle_processing_error_with_category("random mystery error", metrics);
+  handle_processing_error_with_category(
+      "validation failed: unknown field missing", metrics);
   REQUIRE(inv.Value() == 3.0);
+  REQUIRE(valid_err.Value() == 1.0);
+  REQUIRE(other_err.Value() == 0.0);
+
+  handle_processing_error_with_category("random mystery error", metrics);
+  REQUIRE(inv.Value() == 4.0);
   REQUIRE(other_err.Value() == 1.0);
 }
 

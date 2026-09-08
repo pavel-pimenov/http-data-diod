@@ -1,9 +1,10 @@
 // Unit tests for the Jaeger logger: span delivery (queue -> sender thread ->
 // POST batching), retry/failure accounting, sampling, ID generation,
-// traceparent validation and bagga. Delivery is verified against a local
+// traceparent validation and baggage. Delivery is verified against a local
 // loopback httplib::Server on an ephemeral port (bind_to_any_port), so no
 // external Jaeger service is required.
 
+#include "common_utils.hpp"
 #include "httplib/httplib.h"
 #include "nlohmann/json.hpp"
 #include "trace_logger.hpp"
@@ -82,62 +83,62 @@ struct TraceMockServer {
 };
 
 struct TraceLoggerEnv {
-  prometheus::Registry registry;
-  prometheus::Counter &spans_sent;
-  prometheus::Counter &spans_failed;
-  prometheus::Gauge &queue_size;
-  prometheus::Gauge &last_send_duration;
-  prometheus::Histogram &send_latency;
-  prometheus::Histogram &queue_time;
+  prometheus::Registry m_registry;
+  prometheus::Counter &m_spans_sent;
+  prometheus::Counter &m_spans_failed;
+  prometheus::Gauge &m_queue_size;
+  prometheus::Gauge &m_last_send_duration;
+  prometheus::Histogram &m_send_latency;
+  prometheus::Histogram &m_queue_time;
   std::unique_ptr<JaegerLogger> m_logger;
 
-  TraceLoggerEnv(const std::string &endpoint, size_t batch_size = 50,
-                 int flush_interval_ms = 1000, double sample_rate = 1.0)
-      : spans_sent(
+  explicit TraceLoggerEnv(const std::string &endpoint, size_t batch_size = 50,
+                          int flush_interval_ms = 1000, double sample_rate = 1.0)
+      : m_spans_sent(
             prometheus::BuildCounter()
                 .Name("l2_tracing_spans_sent_total")
                 .Help("h")
-                .Register(registry)
+                .Register(m_registry)
                 .Add({})),
-        spans_failed(
+        m_spans_failed(
             prometheus::BuildCounter()
                 .Name("l2_tracing_spans_failed_total")
                 .Help("h")
-                .Register(registry)
+                .Register(m_registry)
                 .Add({})),
-        queue_size(prometheus::BuildGauge()
-                       .Name("l2_tracing_queue_size")
-                       .Help("h")
-                       .Register(registry)
-                       .Add({})),
-        last_send_duration(
+        m_queue_size(prometheus::BuildGauge()
+                         .Name("l2_tracing_queue_size")
+                         .Help("h")
+                         .Register(m_registry)
+                         .Add({})),
+        m_last_send_duration(
             prometheus::BuildGauge()
                 .Name("l2_tracing_last_send_duration_seconds")
                 .Help("h")
-                .Register(registry)
+                .Register(m_registry)
                 .Add({})),
-        send_latency(prometheus::BuildHistogram()
-                         .Name("l2_tracing_send_latency_seconds")
+        m_send_latency(prometheus::BuildHistogram()
+                           .Name("l2_tracing_send_latency_seconds")
+                           .Help("h")
+                           .Register(m_registry)
+                           .Add({}, prometheus::Histogram::BucketBoundaries{
+                                       0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1,
+                                       5})),
+        m_queue_time(prometheus::BuildHistogram()
+                         .Name("l2_tracing_queue_time_seconds")
                          .Help("h")
-                         .Register(registry)
+                         .Register(m_registry)
                          .Add({}, prometheus::Histogram::BucketBoundaries{
                                      0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1,
                                      5})),
-        queue_time(prometheus::BuildHistogram()
-                       .Name("l2_tracing_queue_time_seconds")
-                       .Help("h")
-                       .Register(registry)
-                       .Add({}, prometheus::Histogram::BucketBoundaries{
-                                   0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1,
-                                   5})),
         m_logger(std::make_unique<JaegerLogger>(
-            endpoint, spans_sent, spans_failed, queue_size, last_send_duration,
-            send_latency, queue_time, batch_size, flush_interval_ms,
-            sample_rate)) {}
+            endpoint, m_spans_sent, m_spans_failed, m_queue_size,
+            m_last_send_duration, m_send_latency, m_queue_time, batch_size,
+            flush_interval_ms, sample_rate)) {}
 
-  double sent() const { return spans_sent.Collect().counter.value; }
-  double failed() const { return spans_failed.Collect().counter.value; }
-  double queued() const { return queue_size.Collect().gauge.value; }
+  double sent() const { return m_spans_sent.Collect().counter.value; }
+  double failed() const { return m_spans_failed.Collect().counter.value; }
+  double queued() const { return m_queue_size.Collect().gauge.value; }
 };
 
 bool is_hex_string(const std::string &s) {
@@ -348,4 +349,54 @@ TEST_CASE("TraceLogger: baggage set/get/get_all on the owning thread",
   REQUIRE_FALSE(all.contains("k3"));
   REQUIRE(env.m_logger->get_all_baggage("00000000000000000000000000000000")
               .size() == 0);
+}
+
+TEST_CASE("TraceLogger: log_request merges additional attributes",
+          "[tracing]") {
+  TraceMockServer server;
+  TraceLoggerEnv env(server.endpoint(), 50, 500, 1.0);
+  env.m_logger->log_request(
+      "PATCH", "http://svc/item", 201, 1000, 2000, "test", "req-2", "", "", "",
+      nlohmann::json{{"db", "postgres"}, {"attempt", 7}});
+  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 5000));
+  const auto arr = nlohmann::json::parse(server.snapshot_bodies().front());
+  REQUIRE(arr[0]["tags"]["http.method"] == "PATCH");
+  REQUIRE(arr[0]["tags"]["http.url"] == "http://svc/item");
+  REQUIRE(arr[0]["tags"]["request.id"] == "req-2");
+  REQUIRE(arr[0]["tags"]["db"] == "postgres");
+  REQUIRE(arr[0]["tags"]["attempt"] == "7");
+}
+
+TEST_CASE("TraceLogger: log_span_to_jaeger enqueues real traces",
+          "[tracing]") {
+  TraceMockServer server;
+  TraceLoggerEnv env(server.endpoint(), 50, 500, 1.0);
+  log_span_to_jaeger(env.m_logger.get(), "DELETE", "http://svc/item", 200,
+                     1000, 2000, "test", "req-3");
+  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 5000));
+  const auto arr = nlohmann::json::parse(server.snapshot_bodies().front());
+  REQUIRE(arr[0]["tags"]["http.method"] == "DELETE");
+  REQUIRE(arr[0]["tags"]["request.id"] == "req-3");
+
+  log_span_to_jaeger(nullptr, "GET", "http://svc/x", 200, 1000, 2000, "test",
+                     "req-4");
+}
+
+TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  const auto parsed = handle_trace_context(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01", tracer);
+  REQUIRE(parsed.m_trace_id == "0123456789abcdef0123456789abcdef");
+  REQUIRE(parsed.m_parent_id == "0123456789abcdef");
+  REQUIRE(parsed.m_sampled);
+  REQUIRE(parsed.m_span_id.size() == 16);
+  REQUIRE(parsed.m_traceparent_header.size() == 55);
+
+  const auto generated = handle_trace_context("garbage", tracer);
+  REQUIRE(generated.m_trace_id.size() == 32);
+  REQUIRE(generated.m_span_id.size() == 16);
+  REQUIRE(generated.m_parent_id.empty());
+  REQUIRE(generated.m_traceparent_header.size() == 55);
 }

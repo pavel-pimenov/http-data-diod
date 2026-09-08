@@ -173,6 +173,15 @@ TEST_CASE("HttpClient: connection failure throws", "[http-client]") {
   REQUIRE_THROWS_AS(acquire(), std::runtime_error);
 }
 
+TEST_CASE("HttpClient: https client setup and connection failure",
+          "[http-client]") {
+  HttpClient client(2, true, true, true);
+  auto acquire = [&client]() {
+    return client.get("https://127.0.0.1:1/secure");
+  };
+  REQUIRE_THROWS_AS(acquire(), std::runtime_error);
+}
+
 TEST_CASE("HttpClient: invalidate marks the client unusable", "[http-client]") {
   HttpClient client(5);
   REQUIRE(client.is_valid());

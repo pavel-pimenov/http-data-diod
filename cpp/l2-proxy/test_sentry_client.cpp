@@ -1,6 +1,8 @@
 // Unit tests for the dependency-light Sentry integration: DSN parsing, event
 // and envelope JSON builders (pure functions) and the async queue behaviour
-// via an injected transport. No network traffic is performed.
+// via an injected transport, and the real HTTP delivery path (send_envelope)
+// against a local loopback httplib::Server. No external network traffic.
+#include "httplib/httplib.h"
 #include "sentry_client.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <prometheus/counter.h>
@@ -108,6 +110,26 @@ TEST_CASE("Sentry DSN: invalid inputs are rejected", "[sentry-client]") {
   REQUIRE_FALSE(sentry::parse_dsn("https://key@host:99999/project").has_value());
 }
 
+TEST_CASE("Sentry DSN: rejects empty public key and whitespace host",
+          "[sentry-client]") {
+  REQUIRE_FALSE(sentry::parse_dsn("http://:SECRET@host/project").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("http://PUBLIC@ho st/project").has_value());
+}
+
+TEST_CASE("Sentry DSN: normalizes trailing slashes in the path prefix",
+          "[sentry-client]") {
+  const auto with_dup =
+      require_dsn("http://PUBLIC@host:8080/foo//proj");
+  REQUIRE(with_dup.m_host == "host");
+  REQUIRE(with_dup.m_port == 8080);
+  REQUIRE(with_dup.m_path_prefix == "/foo");
+  REQUIRE(with_dup.m_project_id == "proj");
+
+  const auto bare = require_dsn("http://PUBLIC@host//proj");
+  REQUIRE(bare.m_path_prefix.empty());
+  REQUIRE(bare.m_project_id == "proj");
+}
+
 TEST_CASE("Sentry event JSON: core fields", "[sentry-client]") {
   sentry::SentryEvent event;
   event.m_message = "boom";
@@ -149,6 +171,46 @@ TEST_CASE("Sentry event JSON: omits optional fields when empty",
   REQUIRE_FALSE(json.contains("tags"));
   REQUIRE_FALSE(json.contains("fingerprint"));
   REQUIRE_FALSE(json.contains("exception"));
+}
+
+TEST_CASE("Sentry event JSON: every level maps to its Sentry string",
+          "[sentry-client]") {
+  sentry::SentryEvent event;
+  const auto level = [&](sentry::EventLevel lv) {
+    sentry::SentryEvent e;
+    e.m_message = "m";
+    e.m_level = lv;
+    return std::string(sentry::build_event_json(e, "", "", "")["level"]);
+  };
+  REQUIRE(level(sentry::EventLevel::Debug) == "debug");
+  REQUIRE(level(sentry::EventLevel::Info) == "info");
+  REQUIRE(level(sentry::EventLevel::Warning) == "warning");
+  REQUIRE(level(sentry::EventLevel::Error) == "error");
+  {
+    const auto json = sentry::build_event_json(
+        [&] {
+          sentry::SentryEvent e;
+          e.m_message = "fatal boom";
+          e.m_level = sentry::EventLevel::Fatal;
+          return e;
+        }(),
+        "", "", "");
+    REQUIRE(json["level"] == "fatal");
+    REQUIRE(json["exception"]["values"][0]["value"] == "fatal boom");
+  }
+}
+
+TEST_CASE("Sentry event JSON: transaction and non-string tags are kept",
+          "[sentry-client]") {
+  sentry::SentryEvent event;
+  event.m_message = "tx";
+  event.m_transaction = "db.query";
+  event.m_tags = {{"attempt", 3}, {"ids", nlohmann::json::array({1, 2})}};
+
+  const auto json = sentry::build_event_json(event, "", "", "");
+  REQUIRE(json["transaction"] == "db.query");
+  REQUIRE(json["tags"]["attempt"] == "3");
+  REQUIRE(json["tags"]["ids"] == "[1,2]");
 }
 
 TEST_CASE("Sentry envelope: header, auth and item structure",
@@ -314,4 +376,34 @@ TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
   REQUIRE(m.m_failed_counter.Value() == 2.0);
   REQUIRE(m.m_sent_counter.Value() == 5.0);
   REQUIRE(m.m_queue_gauge.Value() == 0.0);
+}
+
+TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
+          "[sentry-client]") {
+  httplib::Server server;
+  std::string received;
+  server.Post(".*", [&](const httplib::Request &req, httplib::Response &res) {
+    received = req.body;
+    res.status = 200;
+  });
+  const int port = server.bind_to_any_port("127.0.0.1");
+  std::thread server_thread([&] { server.listen_after_bind(); });
+
+  SentryTestMetrics m;
+  SentryClient client(
+      "http://PUBLIC@127.0.0.1:" + std::to_string(port) + "/42",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      3000, 8);
+  REQUIRE(client.enabled());
+
+  client.capture_message("via real http");
+  client.flush();
+
+  REQUIRE(m.m_sent_counter.Value() == 1.0);
+  REQUIRE(m.m_failed_counter.Value() == 0.0);
+  REQUIRE(received.find("sent_version") != std::string::npos);
+  REQUIRE(received.find("via real http") != std::string::npos);
+
+  server.stop();
+  server_thread.join();
 }
