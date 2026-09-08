@@ -1,13 +1,9 @@
 build
 build-lint
-build_test
-build-tests
 build_tests
 build-asan
-build-cov
 profiles
 
-build_test/makefile
 build/makefile
 
 # Prerequisites
@@ -67,7 +63,6 @@ pvs-studio.log
 reports/
 crash-dumps/
 logs/
-!logs/.gitkeep
 CMakeFiles
 makefile
 CMakeCache.txt 
@@ -77,8 +72,6 @@ cmake_install.cmake
 .env.proxy.worker
 !.env.example
 
-# CA certificate file (users should place their own CA bundle here)
-ca-bundle.crt
 certs/
 certs_nats/
 ssl/

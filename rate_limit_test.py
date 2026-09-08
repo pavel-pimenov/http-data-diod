@@ -12,9 +12,11 @@ The expected behaviour is inferred from the ENABLE_GLOBAL_RATE_LIMITING env
 var (the same one passed to docker-compose), so the test adapts to the
 currently deployed configuration. Override with --expect-429 / --expect-zero.
 
-For a fast, deterministic trip test deploy with a small limiter override:
+For a fast, deterministic trip test deploy the proxy with a small global
+limiter (override values in the environment before `./rebuild-and-run.sh`):
 
-  docker compose -f docker-compose.yml -f docker-compose.ratelimit.yml up -d
+  ENABLE_GLOBAL_RATE_LIMITING=true \
+  GLOBAL_RATE_LIMIT_MAX_TOKENS=60 GLOBAL_RATE_LIMIT_REFILL_RATE=20 \
   python3 rate_limit_test.py --expect-429
 
 Usage:
@@ -136,9 +138,9 @@ async def run_trip_mode(url: str, concurrent: int,
         refill = int(os.environ.get("GLOBAL_RATE_LIMIT_REFILL_RATE", "1000"))
         print(f"{Colors.RED}❌ No 429 received: the proxy only sustained "
               f"{rate:.0f} req/s, below the configured refill of {refill} req/s. "
-              f"Deploy with the small-limiter override for a deterministic "
-              f"test: docker compose -f docker-compose.yml -f "
-              f"docker-compose.ratelimit.yml up -d{Colors.NC}")
+              f"Deploy with a small global limiter for a deterministic test, "
+              f"e.g. GLOBAL_RATE_LIMIT_MAX_TOKENS=60 "
+              f"GLOBAL_RATE_LIMIT_REFILL_RATE=20{Colors.NC}")
         return False
     if errors > 0:
         print(f"{Colors.RED}❌ {errors} request errors under load.{Colors.NC}")
