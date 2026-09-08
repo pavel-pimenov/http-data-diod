@@ -1,3 +1,45 @@
+# docs/ci/compose: README-тесты, clang-tidy фильтр, sentry-mock profile, coverage gate (13a.1-4)
+
+## Date: 2026-09-08
+
+### Контекст
+Раунды 11b–13a довели тестовую базу до 329/1379 и покрытие до ~95.7%.
+Осталось оформить процесс: документация юнит-тестов, фильтр шума
+clang-tidy для вендоренного ODPI-C, постоянный mock-Sentry в compose и
+порог покрытия в CI-сборке.
+
+### Что сделано
+- **README.md**:
+  - новая секция «Юнит-тесты» — команды запуска (`./rebuild-and-run.sh`,
+    e2e-скрипты), счётчики (329 test cases / 1 379 assertions), таблица
+    ключевых модулей → файлов тестов, команда clang-tidy;
+  - секция «Покрытие юнит-тестов» — актуальная таблица по модулям, рецепт
+    построчного Cobertura-XML, подсекция «Валидация под ASan/LSan/UBSan»
+    (флаг `--asan`, монтирование `/memory-logs`,
+    возврат production-бинарников), документация coverage gate (90%);
+  - секция Sentry — как поднять `sentry-mock` профиль для постоянной
+    интеграции.
+- **scripts/run-clang-tidy.sh**: `odpi` добавлен в `IGNORE_PATH_RE` —
+  полный sweep давал 772 warning'ов из вендоренного `odpi/include/dpi.h`
+  (наш код нуль warning'ов); теперь вендор исключён, sweep чист.
+- **docker-compose.yml**: опциональный сервис `sentry-mock` (профиль
+  `sentry-mock`) — standalone-контейнер `scripts/sentry-mock-receiver.py`
+  на `:9001` внутри `l2_network`; DSN из сервисов:
+  `http://sentry-e2e@sentry-mock:9001/1`. Проверен end-to-end:
+  контейнер принял реальный envelope (`POST /api/1/envelope/` → 200 OK) и
+  залогировал событие.
+- **cpp/l2-proxy/Dockerfile** (стадия coverage): `gcovr --fail-under-line 90`
+  — сборка coverage-образа падает при общем покрытии < 90%.
+- **scripts/run-coverage.sh**: явно сообщает про gate.
+
+### Проверка
+- `docker compose config --quiet` — валидно; `--profile sentry-mock`
+  активирует сервис; ручной POST в контейнер → `HTTP/1.1 200 OK`.
+- Coverage-образ пересобран, gate проходит: total **95.7%**.
+- Полный sweep clang-tidy: 0 warnings в project-файлах.
+- Финальный `./rebuild-and-run.sh` + e2e (message_counter, db-gateway 7/7,
+  sentry-e2e PASS).
+
 # test(cpp): покрытие stats_page/MetricsHistory + возврат production-образов (13a)
 
 ## Date: 2026-09-08
