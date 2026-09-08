@@ -516,12 +516,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - type: bind
-        source: ./ca-bundle.crt
-        target: /root/ca-bundle.crt
-        read_only: true
-        bind:
-          create_host_path: false
       - ./logs:/root/logs
       - ./docker-memory-analysis:/memory-logs
       - ./certs_nats:/etc/nats/certs_nats:ro
@@ -566,7 +560,6 @@ services:
       - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
       - ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION=false
       - ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION=false
-      #- SSL_CA_CERT_PATH=    # /root/ca-bundle.crt
       # NATS Configuration
       - NATS_HOST=${NATS_HOST:-nats-server}
       - NATS_PORT=${NATS_PORT:-4222}

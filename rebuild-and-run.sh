@@ -101,17 +101,6 @@ mkdir -p cpp/l2-proxy/build
 cp -a cpp/l2-proxy/build/l2-proxy-version.h cpp/l2-proxy/l2-proxy-version.h
 rm -f cpp/l2-proxy/build/l2-proxy
 
-# Ensure the CA bundle bind-mount source exists as a file.
-# Docker creates an empty directory (or fails) when the source is missing.
-if [ -f "ca-bundle.crt" ]; then
-    echo "Using existing ca-bundle.crt"
-elif [ -d "ca-bundle.crt" ]; then
-    echo "⚠️  ca-bundle.crt is a directory; remove it manually (sudo rm -rf ca-bundle.crt)"
-else
-    : > ca-bundle.crt
-    echo "Created empty ca-bundle.crt placeholder (mount source for optional CA bundle)"
-fi
-
 echo "Stopping existing containers..."
 docker compose down --remove-orphans 2>/dev/null || true
 
