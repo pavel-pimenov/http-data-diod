@@ -584,6 +584,85 @@ def create_tracing_dashboard() -> Dict:
     
     return dashboard
 
+def create_sentry_dashboard() -> Dict:
+    """Create Sentry delivery dashboard (worker registry)"""
+    dashboard = create_dashboard_base(
+        title="Доставка ошибок в Sentry",
+        uid="l2-sentry-delivery",
+        tags=["l2-worker", "sentry", "error-tracking"]
+    )
+
+    panels = dashboard["dashboard"]["panels"]
+    y = 0
+
+    # Row 1: Sentry Overview
+    panels.append(create_row_panel("Обзор доставки Sentry", 1, y))
+    y += 1
+
+    # Panel 2: Events Sent vs Failed
+    panels.append(create_timeseries_panel(
+        title="Событий отправлено vs ошибок",
+        id=2,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": 'rate(l2_worker_sentry_events_sent_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Отправлено/с", "refId": "A"},
+            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "B"}
+        ]
+    ))
+
+    # Panel 3: Sentry Queue Size
+    panels.append(create_timeseries_panel(
+        title="Размер очереди Sentry",
+        id=3,
+        x=12, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 128},
+                {"color": "red", "value": 240}
+            ]
+        },
+        targets=[
+            {"expr": "l2_worker_sentry_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "Размер очереди", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Row 2: Delivery Health
+    panels.append(create_row_panel("Здоровье доставки", 10, y))
+    y += 1
+
+    # Panel 11: Failed Events Rate
+    panels.append(create_timeseries_panel(
+        title="Скорость ошибок доставки",
+        id=11,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 50}
+            ]
+        },
+        targets=[
+            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "A"}
+        ]
+    ))
+
+    return dashboard
+
 # ============================================================================
 # Dashboard Definitions
 # ============================================================================
@@ -2329,6 +2408,25 @@ def create_worker_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 49: DB gateway readiness
+    panels.append(create_stat_panel(
+        title="Готовность DB gateway",
+        id=49,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_worker_db_gateway_ready{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}}", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     # Row 8: Статус-коды, насыщенность и доступность (обогащение метрик)
     panels.append(create_row_panel("Статус-коды, насыщенность и доступность", 90, y))
     y += 1
@@ -2667,6 +2765,7 @@ Examples:
 
     dashboard_definitions = [
         (create_tracing_dashboard, 'l2-distributed-tracing'),
+        (create_sentry_dashboard, 'l2-sentry-delivery'),
         (create_proxy_dashboard, 'l2-proxy'),
         (create_worker_dashboard, 'l2-worker'),
         (create_server_dashboard, 'l2-server'),

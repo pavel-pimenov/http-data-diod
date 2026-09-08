@@ -530,6 +530,7 @@ python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выро�
 | Дашборд | UID | Покрываемые метрики |
 |---|---|---|
 | Распределённая трассировка | `l2-distributed-tracing` | `l2_tracing_*` |
+| Доставка ошибок в Sentry | `l2-sentry-delivery` | `l2_worker_sentry_events_sent_total` / `l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size` |
 | L2 Прокси | `l2-proxy` | proxy + NATS + http-pool + rate limiter (global + per-IP) |
 | L2 Воркер | `l2-worker` | все `l2_worker_*` |
 | L2 Сервер | `l2-server` | все `l2_server_*` |
@@ -560,16 +561,16 @@ VM_NAME=my-node ./rebuild-and-run.sh        # переопределение н�
 
 ## Нагрузочное тестирование (baseline)
 
-Baseline зафиксирован 2026-08-06 на этом стеке через `python3 scripts/comprehensive-performance-test.py` (URL — через nginx, `http://localhost:7777`, запросы с payload метрик):
+Baseline зафиксирован 2026-08-06 на этом стеке через `python3 scripts/comprehensive-performance-test.py` (URL — через nginx, `http://localhost:7777`, запросы с payload метрик), переопределён 2026-09-08 после добавления tracing/Sentry-интеграции:
 
 | Сценарий | Итерации × concurrency | RPS | p50 | p95 | p99 | Avg latency |
 |---|---|---|---|---|---|---|
-| Low Load | 20 × 5 | 204.01 | 21.11 ms | 43.92 ms | 43.92 ms | 23.04 ms |
-| Medium Load | 50 × 10 | 201.33 | 42.08 ms | 68.68 ms | 72.14 ms | 41.64 ms |
-| High Load | 100 × 20 | 275.78 | 61.25 ms | 135.96 ms | 205.88 ms | 67.16 ms |
-| Stress Test | 200 × 50 | 341.07 | 118.35 ms | 211.57 ms | 286.38 ms | 125.13 ms |
+| Low Load | 20 × 5 | 346.13 | 15.90 ms | 23.54 ms | 23.54 ms | 15.43 ms |
+| Medium Load | 50 × 10 | 545.43 | 28.17 ms | 53.96 ms | 55.53 ms | 31.16 ms |
+| High Load | 100 × 20 | 455.89 | 50.04 ms | 90.60 ms | 114.33 ms | 51.14 ms |
+| Stress Test | 200 × 50 | 415.55 | 117.91 ms | 238.53 ms | 299.75 ms | 129.04 ms |
 
-Средний RPS ≈ **255**, максимум ≈ **341**, success rate **100%**, ошибок 0. Учтите: прогоны на этой машине заметно различаются (RPS по сценариям колебался от ~155 до ~340 между запусками) — сравнивайте не по одному прогону, а по тренду.
+Предыдущий baseline (2026-08-06): средний RPS ≈ 255, максимум ≈ 341; Low 204.01 / Medium 201.33 / High 275.78 / Stress 341.07. Текущий (2026-09-08): средний RPS ≈ **441**, максимум ≈ **545**, success rate **100%**, ошибок 0. Учтите: прогоны на этой машине заметно различаются (RPS по сценариям колебался от ~155 до ~545 между запусками) — сравнивайте не по одному прогону, а по тренду.
 
 Перцентили латентности измеряются **реально на клиенте** (`message_counter.py` замеряет время каждого запроса и печатает `Latency p50/p95/p99/avg/min/max`), а не оцениваются по RPS. Полные результаты каждого прогона сохраняются в машинно-читаемый отчёт `scripts/perf-report.json` — используйте его для регрессионного сравнения (например, `worst p99` по сценариям).
 

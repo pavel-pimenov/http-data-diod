@@ -10,9 +10,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#if __has_include(<execution>)
-#include <execution>
-#endif
 
 #include <prometheus/client_metric.h>
 #include <prometheus/metric_family.h>
@@ -169,9 +166,6 @@ inline std::string build_stats_html(
     const MetricsHistory *history = nullptr, int window_minutes = 30) {
   const auto families = registry->Collect();
   std::span<const prometheus::MetricFamily> fam_view(families);
-#if __has_include(<ranges>) && defined(__cpp_lib_ranges_chunk)
-  auto fam_chunks = fam_view | std::views::chunk(4); (void)fam_chunks; // chunk demo: плитка 4×N
-#endif
 
   // Derive an overall readiness banner from the *_health_ready gauges and the
   // *_nats_connected gauge when present.

@@ -1,3 +1,50 @@
+# docs/obs/perf: Sentry-дашборд, perf re-baseline, уборка dead-кода (13b)
+
+## Date: 2026-09-08
+
+### Контекст
+После 13a.1-4 (документация, `odpi` в clang-tidy-фильтре, `sentry-mock`,
+coverage gate 90%) проделанные раунды довели покрытие до ~95.7%.
+Дашборды Grafana не покрывали Sentry-метрики (гэп подтверждён
+`--check`), perf-базовые цифры устарели (2026-08-06, до добавления
+tracing/Sentry), и в коде остался неиспользуемый demo-код.
+
+### Что сделано
+- **scripts/generate-grafana-dashboards.py**:
+  - новый дашборд «Доставка ошибок в Sentry» (`l2-sentry-delivery`,
+    5 панелей: 2 row + 3 визуализации) — rate sent/failed, размер очереди
+    (пороги 128/240), скорость ошибок доставки;
+  - L2 Воркер: панель «Готовность DB gateway» (`l2_worker_db_gateway_ready`,
+    stat 0/1) — закрыл пред-существующий гэп в кросс-проверке `--check`
+    (на `main` не хватало 4 метрик; закрыты все, остался только
+    зарезервированный warning);
+  - `--check` теперь проходит полностью (оффлайн-валидация + кросс-сверка
+    с app_context.cpp).
+- **Perf re-baseline** (2026-09-08, `scripts/comprehensive-performance-test.py`):
+  средний RPS ≈ 441, максимум ≈ 545, success 100% / 0 ошибок.
+  Таблица в README обновлена (Low 346 / Medium 545 / High 456 / Stress 416),
+  прежний baseline 2026-08-06 сохранён рядом для сравнения.
+- **Уборка dead/demo-кода**:
+  - `metrics_history.hpp`: удалён неиспользуемый `total_points()`
+    (demo `std::execution::par`) и не нужные более `<numeric>`/`<execution>`;
+  - `stats_page.hpp`: удалён demo-фрагмент `std::views::chunk` и
+    `#include <execution>`.
+- **README.md**: дашборд в таблице Grafana (UID `l2-sentry-delivery`,
+  покрываемые метрики); таблица и текст секции «Нагрузочное
+  тестирование (baseline)» обновлены на свежий прогон.
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, сервисы healthy, все дашборды
+  обновлены (8/8), unit-тесты прошли на билд-стадии.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅.
+- `scripts/db-gateway-e2e-test.py`: 7/7 ✅.
+- `scripts/sentry-e2e-test.py`: PASS ✅.
+- `python3 scripts/generate-grafana-dashboards.py --check`: passed.
+- Grafana API: `l2-sentry-delivery` и обновлённый L2-воркер доступны
+  (`http://localhost:3000/dashboards`).
+
+---
+
 # docs/ci/compose: README-тесты, clang-tidy фильтр, sentry-mock profile, coverage gate (13a.1-4)
 
 ## Date: 2026-09-08

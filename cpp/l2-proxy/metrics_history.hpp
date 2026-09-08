@@ -8,7 +8,6 @@
 #include <deque>
 #include <map>
 #include <mutex>
-#include <numeric>
 #include <span>
 #include <string>
 #include <thread>
@@ -18,9 +17,6 @@
 #endif
 #if __has_include(<generator>)
 #include <generator>
-#endif
-#if __has_include(<execution>)
-#include <execution>
 #endif
 
 #include <prometheus/client_metric.h>
@@ -140,24 +136,6 @@ private:
       std::unique_lock lk(m_cv_mutex);
       m_cv.wait_for(lk, st, m_interval, [&] { return st.stop_requested(); });
     }
-  }
-
-  // execution::par demo: параллельный подсчёт тотала точек (read-only, без гонок)
-  size_t total_points() const {
-    std::lock_guard lk(m_mutex);
-    size_t total = 0;
-#if __has_include(<execution>) && defined(__cpp_lib_execution)
-    // par — считаем размеры деков параллельно (деки только читаются)
-    std::vector<size_t> sizes;
-    sizes.reserve(m_data.size());
-    for (const auto &kv : m_data) {
-      for (const auto &kv2 : kv.second) sizes.push_back(kv2.second.size());
-    }
-    total = std::reduce(std::execution::par, sizes.begin(), sizes.end(), size_t(0));
-#else
-    for (const auto &kv : m_data) for (const auto &kv2 : kv.second) total += kv2.second.size();
-#endif
-    return total;
   }
 
   void sample() {
