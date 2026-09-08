@@ -641,6 +641,11 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
   --xml --gcov-ignore-errors=all > /tmp/cov.xml
 ```
 
+**Coverage gate:** стадия `coverage` в `cpp/l2-proxy/Dockerfile` линкует
+`gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
+(exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
+Текущее значение: **95.7%**.
+
 **Текущие цифры** (раунды 11b–13a):
 
 | Модуль | Строк покрыто | Комментарий |
@@ -652,7 +657,7 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| **Общее по проекту** | **~95.3%** | Ключевые модули >88% |
+| **Общее по проекту** | **~95.7%** | Ключевые модули >88% |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 

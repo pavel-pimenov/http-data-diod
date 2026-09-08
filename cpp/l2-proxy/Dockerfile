@@ -194,7 +194,8 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/httplib/.*' \
           --exclude '/app/base64/.*' \
           --html --html-details -o /app/out/coverage/coverage.html \
-          --gcov-ignore-errors=all && \
+          --gcov-ignore-errors=all \
+          --fail-under-line 90 && \
     echo "=== coverage report rendered ==="
 
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.
