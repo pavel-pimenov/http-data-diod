@@ -1,3 +1,29 @@
+# test(cpp): юнит-тест полного события SentryClient::capture() (10e)
+
+## Date: 2026-09-08
+
+### Контекст
+После 10c (capture DB-гейтвея через `SentryClient::capture(SentryEvent)` с
+тегами/extra/fingerprint) под пути, используемые новой точкой захвата, не
+было прямого теста: `capture_message` тестировался, а полный event
+прогонялся только через чистую функцию `build_event_json`.
+
+### Что сделано
+- `test_sentry_client.cpp`: новый TEST_CASE «SentryClient: full SentryEvent
+  with tags/extra is delivered» — отправка полного события с тегами
+  `{db,type}`, `extra.status`, fingerprint `{db_query_error,
+  DB_UNAVAILABLE}` через `client.capture()` и проверка, что envelope на
+  транспорте содержит message, теги, fingerprint, extra и
+  `exception.values[0].value`.
+- Аудит покрытия: `json_utils`/`string_utils`/`common_utils`/
+  `error_types`/`time_utils`/`db_query_utils`/`stats_page`/Sentry — прямых
+  непокрытых чистых утилит не найдено (единственный кандидат `trim_copy`
+  в `db_query_executor_postgres.cpp` — приватный метод Impl, требует libpq).
+
+### Проверка
+- ./rebuild-and-run.sh: сборка успешна, `test_components` (+1 TEST_CASE,
+  ~12 assertions) и `test_proxy_core` — все прошли; health-check и e2e ✅.
+
 # feat(scripts): Sentry E2E — проверка реальной доставки через mock-приёмник (10d)
 
 ## Date: 2026-09-08

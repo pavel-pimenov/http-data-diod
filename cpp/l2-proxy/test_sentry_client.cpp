@@ -239,6 +239,46 @@ TEST_CASE("SentryClient: transport failure is counted, not propagated",
   REQUIRE(m.m_sent_counter.Value() == 0.0);
 }
 
+TEST_CASE("SentryClient: full SentryEvent with tags/extra is delivered",
+          "[sentry-client]") {
+  // Exercises the capture(SentryEvent) API used by the DB-gateway path:
+  // a full event carrying tags, extra and a fingerprint must round-trip
+  // through the async queue to the transport.
+  SentryTestMetrics m;
+  std::vector<std::string> delivered;
+  SentryClient client(
+      "http://PUBLIC@ingest.local/7", m.m_sent_counter, m.m_failed_counter,
+      m.m_queue_gauge, "l2-worker", "", "", 3000, 256,
+      [&](const std::string &envelope) {
+        delivered.push_back(envelope);
+        return true;
+      });
+
+  sentry::SentryEvent event;
+  event.m_message = "DB query failed: db=postgres type=query status=503";
+  event.m_request_id = "req-db-1";
+  event.m_tags = {{"db", "postgres"}, {"type", "query"}};
+  event.m_fingerprint = {"db_query_error", "DB_UNAVAILABLE"};
+  event.m_extra = {{"status", 503}};
+  client.capture(event);
+  client.flush();
+
+  REQUIRE(delivered.size() == 1);
+  REQUIRE(m.m_sent_counter.Value() == 1.0);
+  REQUIRE(m.m_failed_counter.Value() == 0.0);
+
+  const auto payload = nlohmann::json::parse(last_line(delivered[0]));
+  REQUIRE(payload["message"] == event.m_message);
+  REQUIRE(payload["tags"]["db"] == "postgres");
+  REQUIRE(payload["tags"]["type"] == "query");
+  REQUIRE(payload["tags"]["request_id"] == "req-db-1");
+  REQUIRE(payload["tags"]["service"] == "l2-worker");
+  REQUIRE(payload["fingerprint"] ==
+          std::vector<std::string>{"db_query_error", "DB_UNAVAILABLE"});
+  REQUIRE(payload["extra"]["status"] == 503);
+  REQUIRE(payload["exception"]["values"][0]["value"] == event.m_message);
+}
+
 TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
           "[sentry-client]") {
   SentryTestMetrics m;
