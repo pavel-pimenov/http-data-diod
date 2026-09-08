@@ -1,3 +1,38 @@
+# feat(cpp): интеграция с Sentry (10c) — DB-гейтвей + аудит env-переменных compose
+
+## Date: 2026-09-08
+
+### Контекст
+Следующие пункты плана после 10b: расширение точек захвата Sentry на
+DB-гейтвей (TODO п.2) и проверка висячих переменных окружения в
+docker-compose (TODO п.5).
+
+### Что сделано
+- `l2_worker_nats.cpp` (`process_db_query_from_nats`): Sentry-capture
+  операционных сбоев DB-гейтвея:
+  - после `handle_request`, когда статус >= 500 (503 DB_UNAVAILABLE / 500
+    INTERNAL_ERROR): полноценное событие через `capture()` — сообщение с
+    db/type/status/code/error, теги `db` и `type`, fingerprint
+    `{db_query_error, code}`, тег `request_id`. 4xx/SQL_ERROR намеренно не
+    захватываются (это клиентские ошибки SQL);
+  - в catch-блоке внутренняя ошибка обработки запроса (`INTERNAL_ERROR`),
+    fingerprint `{db_query_error, INTERNAL_ERROR}`.
+- `README.md`: в «Точки интеграции сейчас» добавлен пункт про DB-гейтвей.
+- Аудит env-переменных `config.cpp get_env_*` ↔ `docker-compose.yml`:
+  все переменные, читаемые из config.cpp, присутствуют в compose (в т.ч.
+  SENTRY_* из 10a); обратные кандидаты (APP_USER*, LOG_FORMAT, NATS_USER,
+  GF_*, POSTGRES_*, ORACLE_*, vmagent/jaeger/swagger/sanitizer) читаются
+  инфраструктурой или logger.hpp/main.cpp. Висячих переменных нет —
+  `docker-compose.ratelimit.yml` — валидный override поверх базового compose.
+
+### Проверка
+- clang-tidy по изменённому файлу (run-clang-tidy.sh): no errors or warnings
+  in project files.
+- Сборка в контейнере ./rebuild-and-run.sh: unit-тесты
+  (`All tests passed` для test_components/test_proxy_core), health-check — ✅.
+- e2e `python3 message_counter.py --iterations 1 --concurrent 1` и
+  `python3 scripts/db-gateway-e2e-test.py` — ✅.
+
 # feat(cpp): интеграция с Sentry (10b) — точки захвата в l2-proxy/l2-server + SKIP_CLANG_TIDY
 
 ## Date: 2026-09-08

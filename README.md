@@ -335,6 +335,9 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 - воркер: ошибки валидации запроса (`fingerprint = ["worker_validation_error",
   "schema"]`) и исчерпание попыток вызова L2-сервера
   (`fingerprint = ["l2_server_call_error", url]`);
+- воркер (DB-гейтвей): операционные сбои запросов к БД — 503/500 от
+  исполнителя (`fingerprint = ["db_query_error", code]`, теги `db`/`type`,
+  `request_id`; 4xx/SQL_ERROR намеренно не захватываются);
 - прокси: сбои обращения к бэкенду — постановка в NATS-очередь, таймаут ответа,
   пустой/невалидный ответ (`fingerprint = ["proxy_backend_error", category]`,
   тег `request_id`);

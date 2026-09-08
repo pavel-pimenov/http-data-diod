@@ -5,12 +5,14 @@
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 #include "retry_utils.hpp"
+#include "sentry_client.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 #include <base64.hpp>
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <nlohmann/json.hpp>
 #include <thread>
 
@@ -550,6 +552,36 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
         const uint64_t db_end_us = get_current_timestamp_us();
         const std::string db_name = JsonUtils::safe_get_string(
             request_data, DbQueryContract::kDb);
+        const std::string type = JsonUtils::safe_get_string(
+            request_data, DbQueryContract::kType);
+        if (status >= 500 && m_ctx.m_sentry) {
+          // Operational DB-gateway failures (DB down / pool exhausted /
+          // internal): client-side 4xx/SQL_ERROR are deliberately not
+          // captured to avoid noise.
+          std::string db_code;
+          std::string db_error;
+          if (body.contains(DbResponseContract::kError) &&
+              body[DbResponseContract::kError].is_object()) {
+            const auto &err = body[DbResponseContract::kError];
+            db_code =
+                JsonUtils::safe_get_string(err, DbResponseContract::kCode);
+            db_error =
+                JsonUtils::safe_get_string(err, DbResponseContract::kMessage);
+          }
+          sentry::SentryEvent event;
+          event.m_message = std::format(
+              "DB query failed: db={} type={} status={} code={} error={}",
+              nonempty_or(db_name, "unknown"), nonempty_or(type, "unknown"),
+              status, nonempty_or(db_code, "UNKNOWN"),
+              nonempty_or(db_error, "no message"));
+          event.m_request_id = JsonUtils::safe_get_string(
+              request_data, DbQueryContract::kRequestId);
+          event.m_tags = {{"db", nonempty_or(db_name, "unknown")},
+                          {"type", nonempty_or(type, "unknown")}};
+          event.m_fingerprint = {"db_query_error",
+                                 nonempty_or(db_code, "UNKNOWN")};
+          m_ctx.m_sentry->capture(event);
+        }
         observe_db_request_duration(
             m_ctx.m_worker.m_metrics->m_db_query_duration_seconds,
             nonempty_or(db_name, "unknown"), db_start_us, db_end_us);
@@ -576,6 +608,12 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     status = 500;
     task.m_activity.m_status = 500;
     body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
+    if (m_ctx.m_sentry) {
+      m_ctx.m_sentry->capture_message(
+          std::format("DB query internal error: {}", e.what()),
+          JsonUtils::safe_get_string(request_data, DbQueryContract::kRequestId),
+          {"db_query_error", "INTERNAL_ERROR"});
+    }
   }
 
   task.m_activity.m_status = status;

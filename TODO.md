@@ -1,16 +1,13 @@
 # TODO / Продолжение работы
 
-## Текущий статус (10b — Sentry: точки захвата)
+## Текущий статус (10c — Sentry: DB-гейтвей + аудит env)
 
-Раунд **10b «Sentry — расширение точек захвата»** завершён:
+Раунд **10c** завершён:
 
-- l2-proxy: capture в `fail_backend_request` (queue_failed / timeout /
-  empty_response / invalid_response) — fingerprint `{proxy_backend_error,
-  category}`, тег `request_id`.
-- l2-server: capture ошибки валидации тела — fingerprint
-  `{server_validation_error, schema}`.
-- `SKIP_CLANG_TIDY=1` в `scripts/pre-commit.sh` — опциональный пропуск
-  дорогого clang-tidy-гейта (ручной прогон: `./scripts/run-clang-tidy.sh`).
+- DB-гейтвей (воркер): Sentry-capture 503/500 ошибок
+  (`fingerprint {db_query_error, code}`, теги `db`/`type`) + INTERNAL_ERROR.
+- Аудит env: config.cpp ↔ docker-compose.yml — висячих переменных нет
+  (все get_env_* присутствуют; инфраструктурные переменные используются).
 
 ## Куда дальше (по приоритету)
 
@@ -18,8 +15,9 @@
    no-op. Проверить живую отправку на реальный DSN (self-hosted Sentry в
    compose или внешний) и что события доходят; при необходимости добавить
    панель Grafana для `l2_worker_sentry_*`.
-2. **Дальнейшие точки захвата**: при необходимости — ошибки DB-гейтвея
-   (db_query_handler), декомпрессия, NATS-подключение.
+2. **Sentry — e2e-проверка захвата**: запустить стек с mock/self-hosted
+   Sentry-receiver и убедиться, что capture из воркера/прокси/сервера
+   реально доставляется (метрики `l2_worker_sentry_*` растут).
 3. **Дальнейшие раунды покрытия юнит-тестами**:
    - `string_utils`/`json_response_utils`/`error_types` — уже покрыты напрямую.
    - Остаются тяжёлые модули: `nats_client.cpp`, AppContext-методы
@@ -28,11 +26,8 @@
 4. **README/дашборды**: пройтись по каталогу метрик — убедиться, что
    `l2_worker_sentry_*` отображаются и что семейства с метками
    (`status`, `db`, `type`, `ip`, `client_id`, `state`) описаны корректно.
-5. **docker-compose**: проверить висячие переменные окружения (после
-   удаления Redis-ветки и добавления Sentry-переменных) — по правилу
-   «environment ↔ config.cpp».
-6. **Мусор сессии**: удалить временные файлы в `/tmp/opencode/`
-   (rebuild-9s*.log, clang-tidy-9*.log).
+5. **Мусор сессии**: `/tmp/opencode/` пуст (чистка не требуется); если
+   появятся rebuild-*.log / clang-tidy-*.log — удалить.
 
 ## Замечание по окружению
 
