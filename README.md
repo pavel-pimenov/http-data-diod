@@ -563,6 +563,48 @@ Baseline зафиксирован 2026-08-06 на этом стеке через
 
 ---
 
+## Юнит-тесты
+
+Тесты компилируются и запускаются внутри Docker-контейнера на стадии `builder` (auc:
+`./rebuild-and-run.sh` собирает образ и прогоняет `test_components` + `test_proxy_core`).
+
+```bash
+# Полная сборка + все тесты + e2e + health-check (≈ 5–8 мин)
+./rebuild-and-run.sh
+
+# Только e2e после поднятого стека
+python3 message_counter.py --iterations 1 --concurrent 1
+python3 scripts/db-gateway-e2e-test.py   # 7/7 проверок
+python3 scripts/sentry-e2e-test.py       # PASS/FAIL
+```
+
+**Текущие счётчики** (после раундов 11b–13a):
+
+| Тестовый бинарь | Test cases | Assertions | Фокус |
+|---|---|---|---|
+| `test_components` | 329 | 1 379 | Core-компоненты (см. ключевые модули ниже) |
+| `test_proxy_core` | 73 | 742 | Интеграция (request lifecycle, NATS, DB) |
+
+**Ключевые модули, покрытые юнит-тестами:**
+
+| Модуль | Файл | Тесты (примеры) |
+|---|---|---|
+| `jaeger/logger.cpp` | `test_trace_logger.cpp` | Батчинг, queue-full, retry/backoff, сэмплинг, traceparent/baggage |
+| `sentry_client.cpp` | `test_sentry_client.cpp` | DSN-парсинг, envelope-доставка, все уровни, транспортный flush |
+| `http_client.cpp` | `test_http_pipeline.cpp` | HTTPS-путь, pool.acquire timeout, stale eviction, invalid release |
+| `common_utils.cpp` | `test_components.cpp`, `test_coverage_ext.cpp` | error categorizer, log_body_preview, MetricsHistory, escape_html, sparkline SVG |
+| `circuit_breaker.cpp` | `test_components.cpp` | set_gauge, state transitions |
+| `config.cpp` | `test_components.cpp` | Env-parsing, validations |
+
+Запуск clang-tidy (после изменений):
+
+```bash
+./scripts/run-clang-tidy.sh              # lint только изменённых файлов
+./scripts/run-clang-tidy.sh --all        # весь проект (медленно, ~20 мин)
+```
+
+---
+
 ## Покрытие юнит-тестов (coverage)
 
 Отчёт покрытия строится в Docker-образе (стадия `coverage` в `cpp/l2-proxy/Dockerfile`): проект компилируется с `--coverage`, прогоняются `test_components`/`test_proxy_core`, затем `gcovr` рендерит HTML-отчёт. Утилиты `gcovr`/`lcov` на хосте **не нужны**.
@@ -572,7 +614,47 @@ Baseline зафиксирован 2026-08-06 на этом стеке через
 ./scripts/run-coverage.sh /tmp/cov   # указать свой каталог
 ```
 
-Результат — `coverage.html` + постраничные детали по каждому файлу проекта (только `cpp/l2-proxy`, сторонние вендоренные каталоги — `prometheus-cpp`, `httplib`, `base64` — исключаются фильтром). Последний замер: **86.6% строк** (4700+/5500).
+Построчный отчёт (для анализа покрытия отдельных строк):
+
+```bash
+# Cobertura XML (gcovr внутри контейнера coverage)
+docker run --rm --entrypoint gcovr http-data-diod:coverage \
+  --object-directory /app/build-cov --root /app \
+  --filter '/app/.*\.(cpp|hpp|h)$' \
+  --exclude '/app/prometheus-cpp/.*' \
+  --exclude '/app/httplib/.*' \
+  --exclude '/app/base64/.*' \
+  --xml --gcov-ignore-errors=all > /tmp/cov.xml
+```
+
+**Текущие цифры** (раунды 11b–13a):
+
+| Модуль | Строк покрыто | Комментарий |
+|---|---|---|
+| `trace_logger.cpp` | 88.3% | Включая sender_loop, queue-full, retry |
+| `sentry_client.cpp` | 94.3% | HTTP-доставка, DSN, все уровни |
+| `http_client.cpp` | 94.6% | HTTPS/SSL-ветка, connection pool |
+| `common_utils.cpp` | 96.2% | Error categorizer, trace context, MetricsHistory |
+| `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
+| `request_data_preparer.cpp` | 94.7% | |
+| `config.cpp` | 97.1% | |
+| **Общее по проекту** | **~95.3%** | Ключевые модули >88% |
+
+### Валидация под AddressSanitizer / LeakSanitizer / UBSan
+
+Юнит-тесты и сервисы компилируются с санитайзерами через флаг `--asan`:
+
+```bash
+./rebuild-and-run.sh --asan   # ≈ 30–50 мин (ccache кэширует между запусками)
+```
+
+Это покрывает все маршруты, включая асинхронный `sender_loop` (JaegerLogger),
+очередь на 10000 элементов (queue-full), HTTP-моки и thread join в деструкторах.
+Логи санитайзеров пишутся в `./docker-memory-analysis/` (монтируется из контейнеров);
+пустой каталог = ошибок нет.
+
+**Важно:** после `--asan` production-образы заменяются на sanitizer-бинарники.
+Для возврата запустите обычный `./rebuild-and-run.sh` (без `--asan`).
 
 ---
 
