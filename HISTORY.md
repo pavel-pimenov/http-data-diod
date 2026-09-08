@@ -1,3 +1,44 @@
+# feat(scripts): Sentry E2E — проверка реальной доставки через mock-приёмник (10d)
+
+## Date: 2026-09-08
+
+### Контекст
+Пункт TODO «Sentry — e2e-проверка захвата»: нужно было доказать реальную
+доставку событий (асинхронная очередь → httplib → HTTP ingest), а не только
+наличие capture в коде.
+
+### Что сделано
+- `scripts/sentry-mock-receiver.py` — mock-приёмник Sentry ingest
+  (`POST /api/{project_id}/envelope/`, `Content-Type:
+  application/x-sentry-envelope`), разбор формата envelope (header/auth/item/
+  payload), режим `--wait-events N --timeout S` (exit 0/3).
+- `scripts/sentry-e2e-test.py` — оркестрация:
+  1) определяет gateway-IP compose-сети → `SENTRY_DSN=http://sentry-e2e@
+     <gw>:9001/1`;
+  2) пересоздаёт l2-server/l2-proxy/l2-worker с DSN (+ `docker restart
+     nginx`, т.к. у nginx `server l2-proxy:8888 resolve` без `resolver`
+     кэширует старый IP прокси после recreation — в штатном флоу это
+     исключено `docker rm -f nginx` в rebuild-and-run.sh);
+  3) останавливает `l2-worker` → POST в прокси → таймаут → capture
+     `proxy_backend_error` (empty_response, 504);
+  4) mock-приёмник должен получить ровно 1 событие c `fingerprint
+     =["proxy_backend_error","empty_response"]`, `tags.service="proxy"`,
+     `tags.request_id=<uuid>`;
+  5) возвращает worker и стек к рабочему состоянию.
+- Итог: доставка подтверждена — event дошёл на реальный HTTP-эндпоинт с
+  корректным envelope, уровнем `error`, fingerprint и тегами (см. лог выше).
+- Метрики `l2_worker_sentry_*` экспонируются на `19091/metrics` (реестр
+  l2-worker). В режимах proxy/server (19090/19092) счётчики Sentry не
+  экспонируются — как и `l2_tracing_*`: кросс-сервисные метрики
+  наблюдаемости регистрируются в общем worker-реестре. Это существующий
+  паттерн (не регресс Sentry-интеграции), задокументировано в README.
+
+### Проверка
+- `python3 scripts/sentry-e2e-test.py` → **PASS** дважды подряд
+  (направность и повторяемость подтверждены).
+- После E2E восстановлен штатный стек; `python3 message_counter.py
+  --iterations 1 --concurrent 1` и `scripts/db-gateway-e2e-test.py` — ✅.
+
 # feat(cpp): интеграция с Sentry (10c) — DB-гейтвей + аудит env-переменных compose
 
 ## Date: 2026-09-08

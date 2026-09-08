@@ -346,6 +346,21 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 Метрики доставки — `l2_worker_sentry_events_sent_total` /
 `l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size`
 
+> Видимость метрик: `l2_worker_sentry_*` (как и `l2_tracing_*`)
+> регистрируются в общем (worker) реестре и экспонируются только на порту
+> l2-worker (`19091/metrics`). В режимах l2-proxy (19090) и l2-server (19092)
+> счётчики доставки Sentry не экспонируются — это общий паттерн для
+> кросс-сервисных метрик наблюдаемости, не специфика Sentry.
+
+Проверка реальной доставки — E2E-скрипты (запускаются вручную):
+`python3 scripts/sentry-e2e-test.py` поднимает локальный mock-приёмник
+(`scripts/sentry-mock-receiver.py`, `POST /api/1/envelope/`), пересоздаёт
+сервисы с `SENTRY_DSN=http://sentry-e2e@<gateway-ip>:9001/1`, останавливает
+`l2-worker` и отправляет запрос в прокси — ожидается, что mock получит
+событие `["proxy_backend_error", "empty_response"]` (тег `service=proxy`),
+и это подтверждает доставку через асинхронную очередь и httplib на реальный
+HTTP-эндпоинт.
+
 ### l2-proxy
 
 | Метрика | Тип | Метки | Описание |
