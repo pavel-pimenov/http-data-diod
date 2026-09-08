@@ -1,3 +1,102 @@
+# refactor: PVS-Studio настройки и исправление 3 находок (co_return, g_hex)
+
+## Date: 2026-09-08
+
+### Контекст
+Проверка проекта PVS-Studio (v8.00, локальная лицензия) через
+`./run-pvs-studio.sh` выявила 38 предупреждений: 34 — в сторонней библиотеке
+Oracle ODPI-C (`odpi/`, встроена в target `l2-proxy` через `odpi/embed/dpi.c`),
+и только 4 — в собственном коде проекта. `odpi` не был исключён из анализа
+(в отличие от `httplib`, `nats`, `base64`), из-за чего отчёт утопал в шуме.
+
+### Что сделано
+- **cpp/l2-proxy/CMakeLists.txt**: `odpi` и `prometheus-cpp` добавлены в
+  `PVS_EXCLUDE_PATHS` (третьесторонние либы, как httplib/nats/base64) — с
+  отчёта ушли 34 сторонних предупреждения.
+- **cpp/l2-proxy/l2_worker.cpp** `attempt_sequence()`: добавлен `co_return`
+  после цикла `co_yield` (V591: не-void корутина-генератор заканчивала без
+  явного возврата).
+- **cpp/l2-proxy/metrics_history.hpp** `series_view()`: добавлен `co_return`
+  после цикла (V591, то же).
+- **cpp/l2-proxy/trace_logger.hpp**: `static constexpr char g_hex[]` внутри
+  inline static-метода `url_encode` заменён на namespace-level
+  `inline constexpr char g_url_encode_hex[]` (V1096: ODR-риск от `static` в
+  inline-функции; согласуется с правилом AGENTS.md «не использовать static в
+  *.h* — есть constexpr»).
+- V1051 (`sentry_client.cpp:93`, «возможно проверить port») — ложное
+  срабатывание, логика валидации DSN корректна, оставлено без изменений.
+
+### Проверка
+- `./run-pvs-studio.sh --clean` — предупреждений в собственном коде: 1
+  (V1051, известное ложное). Было 38, стало 1.
+- Сборка в контейнерах `./rebuild-and-run.sh` + `message_counter.py` — ниже.
+
+# refactor: ревизия файлов проекта (rem: ratelimit override, gitignore, artifacts)
+
+## Date: 2026-09-08
+
+### Контекст
+Ревизия файлов проекта на предмет лишнего/устаревшего выявила:
+- `docker-compose.ratelimit.yml` — отдельный override для детерминированного
+  trip-теста rate limiters. Заказчик не пользуется им и просит удалить вместе
+  со всеми зависимостями (малые лимиты можно задавать через env при запуске).
+- В `.gitignore` были избыточные/мёртвые build-правила (`build_test`,
+  `build-tests`, `build-cov`) и мёртвая строка `!logs/.gitkeep` (файл
+  `logs/.gitkeep` нигде не существует).
+- Артефакты на хосте: `logs/` (40MB, root-owned runtime-логи),
+  `cpp/l2-proxy/build-pvs/` (32MB), `reports/` (результаты PVS Studio) — все
+  gitignored, но засоряли диск.
+
+### Что сделано
+- **docker-compose.ratelimit.yml**: удалён (`git rm`).
+- **rate_limit_test.py**: убраны ссылки на удалённый override-файл; в
+  докстринге и сообщении об отсутствии 429 теперь подсказка задать малый
+  глобальный лимитер через env (`GLOBAL_RATE_LIMIT_MAX_TOKENS=60
+  GLOBAL_RATE_LIMIT_REFILL_RATE=20`).
+- **.gitignore**: удалены мёртвые/избыточные правила `build_test`,
+  `build-tests`, `build-cov`, `build_test/makefile` (живой остаётся
+  `build_tests`, используемый в `run_tests.sh`) и `!logs/.gitkeep`.
+- Очищены gitignored артефакты на хосте: `cpp/l2-proxy/build-pvs/`,
+  `reports/`. `logs/` (root-owned) не удалён — требуется sudo
+  (`sudo rm -rf logs`).
+
+### Проверка
+- `docker compose config` валиден после удаления override.
+- `rate_limit_test.py` синтаксически корректен (python3 -m py_compile).
+- Обойдено через `./rebuild-and-run.sh`.
+
+# refactor: удалён неиспользуемый bind-mount ca-bundle.crt (concat)
+
+## Date: 2026-09-08
+
+### Контекст
+На хосте после сборки появлялся файл `ca-bundle.crt` размером 0, создаваемый
+guard в `rebuild-and-run.sh` как placeholder для опционального bind-mount CA
+бандла. Сам mount (`./ca-bundle.crt:/root/ca-bundle.crt:ro`) для сервиса
+`l2-worker` был неиспользуемым: переменная `SSL_CA_CERT_PATH` там передаётся
+из `.env` (строка `- SSL_CA_CERT_PATH=${SSL_CA_CERT_PATH:-}`), а путь
+`/root/ca-bundle.crt` никуда не прокидывался (закомментированная строка
+`#- SSL_CA_CERT_PATH=    # /root/ca-bundle.crt`). Пустой файл не имел
+никакой функциональной роли, но появлялся на хосте и требовал хрупкого guard.
+
+### Что сделано
+- **docker-compose.yml** (`l2-worker`): удалён bind-mount
+  `./ca-bundle.crt:/root/ca-bundle.crt:ro` и закомментированная строка
+  `#- SSL_CA_CERT_PATH=    # /root/ca-bundle.crt` (путь больше не существует).
+  Активная передача `SSL_CA_CERT_PATH=${SSL_CA_CERT_PATH:-}` из `.env`
+  сохранена — пользователи по-прежнему могут указать путь к своему CA
+  бандлу для проверки SSL исходящих запросов.
+- **rebuild-and-run.sh**: удалён guard, создававший пустой placeholder
+  `ca-bundle.crt` на хосте.
+- **ca-bundle.crt** (пустой файл, был gitignore'd): удалён с хоста.
+- **.gitignore**: удалена запись `ca-bundle.crt` (файл больше не создаётся).
+
+### Проверка
+- Пробелов по `ca-bundle` / `ca_bundle` в `docker-compose.yml`, `*.sh`,
+  `.env*` не осталось.
+- Обойдено через `./rebuild-and-run.sh` (проверка сборки контейнеров) +
+  `python3 message_counter.py --iterations 1 --concurrent 1`.
+
 # refactor: NATS setup_options макрос, StatsLogger helper, сокращение кода (13e)
 
 ## Date: 2026-09-08

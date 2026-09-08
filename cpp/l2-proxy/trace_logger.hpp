@@ -34,6 +34,9 @@ inline constexpr int g_tracing_retry_base_delay_ms =
 inline constexpr int g_tracing_send_timeout_ms =
     5000; // HTTP send timeout in ms
 
+// RFC 3986 percent-encoding hex lookup table (shared, single definition)
+inline constexpr char g_url_encode_hex[] = "0123456789ABCDEF";
+
 // Structure to hold extracted traceparent info
 struct TraceInfo {
   std::string m_trace_id;
@@ -66,7 +69,6 @@ struct Baggage {
 
   // Percent-encodes a string per RFC 3986 (used by W3C Baggage).
   static std::string url_encode(std::string_view in) {
-    static constexpr char g_hex[] = "0123456789ABCDEF";
     std::string out;
     out.reserve(in.size());
     for (const unsigned char c : in) {
@@ -76,8 +78,8 @@ struct Baggage {
         out.push_back(static_cast<char>(c));
       } else {
         out.push_back('%');
-        out.push_back(g_hex[c >> 4]);
-        out.push_back(g_hex[c & 0x0f]);
+        out.push_back(g_url_encode_hex[c >> 4]);
+        out.push_back(g_url_encode_hex[c & 0x0f]);
       }
     }
     return out;

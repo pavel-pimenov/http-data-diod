@@ -126,6 +126,7 @@ public:
       s.m_points.assign(kv.second.begin(), kv.second.end());
       co_yield s;
     }
+    co_return;
   }
 #endif
 

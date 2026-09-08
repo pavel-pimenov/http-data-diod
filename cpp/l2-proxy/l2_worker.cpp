@@ -392,6 +392,7 @@ bool L2Worker::validate_l2_server_access(const std::string &path,
 // suspends between attempts, composes with ranges::filter/take.
 std::generator<int> attempt_sequence(int max) {
   for (int i = 1; i <= max; ++i) co_yield i;
+  co_return;
 }
 #endif
 

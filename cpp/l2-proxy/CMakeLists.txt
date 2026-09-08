@@ -549,9 +549,11 @@ if(ENABLE_PVS_STUDIO)
 
     # Exclude third-party libraries from analysis via ARGS -e
     set(PVS_EXCLUDE_PATHS
+        "${CMAKE_SOURCE_DIR}/odpi"
         "${CMAKE_SOURCE_DIR}/httplib"
         "${CMAKE_SOURCE_DIR}/nats"
         "${CMAKE_SOURCE_DIR}/base64"
+        "${CMAKE_SOURCE_DIR}/prometheus-cpp"
     )
 
     set(PVS_EXCLUDE_ARGS "")
