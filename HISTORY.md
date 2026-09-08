@@ -1,3 +1,46 @@
+# test(cpp): юнит-тесты передачи спанов JaegerLogger (11b)
+
+## Date: 2026-09-08
+
+### Контекст
+Замер покрытия (`scripts/run-coverage.sh`, gcovr) показал главный пробел —
+`trace_logger.cpp` на 8.3%: асинхронный Jaeger-экспортёр (sender_loop,
+batched POST, ретраи с backoff, queue-full, baggage, сэмплинг) не имел
+тестов под реальную доставку; покрыты были только чистые функции
+`build_span_json`/`parse_traceparent`.
+
+### Что сделано
+- Новый `cpp/l2-proxy/test_trace_logger.cpp` (13 TEST_CASE, ~94 assertions)
+  — доставка проверяется на локальном `httplib::Server`
+  (`bind_to_any_port("127.0.0.1")`), внешний Jaeger не нужен:
+  - батч из `enqueue_span` → sender_loop → POST `POST /api/traces` (Zipkin v2
+    JSON: traceId/id/parentId/name/localEndpoint/tags), `spans_sent == batch`;
+  - `send_span` — одиночный объект-спан и фейл с инкрементом `spans_failed`;
+  - недоступный endpoint (`http://127.0.0.1:1`) → ретраи
+    (`g_tracing_max_retries`) → `spans_failed`, очередь дрейнится;
+  - queue-full: burst 10100 спанов в «замороженный» mock → очередь держится на
+    `l2_tracing_queue_size == 10000`, дроп инкрементирует `failed`;
+  - сэмплинг: rate 1.0/0.0 (детерминированно), ошибки (>=400) всегда
+    сэмплируются даже при rate 0.0; успешный запрос при rate 0.0 ничего не
+    посылает;
+  - `generate_trace_id/span_id` (hex), `generate_traceparent` +
+    `validate_traceparent` (формат/длины/flags), `extract_trace_info`;
+  - baggage set/get/get_all (включая отсутствующий ключ);
+  - histogram/gauge (`send_latency`, `queue_time`, `last_send_duration`)
+    регистрируются с явными BucketBoundaries (для прометеус-histogram
+    `Add({})` без buckets не компилируется).
+- `cpp/l2-proxy/CMakeLists.txt`: `test_trace_logger.cpp` добавлен в
+  `test_components`.
+- Покрытие `trace_logger.cpp`: 8.3% → 88.3% (остались только
+  вероятностная ветка `m_sample_rate` и путь «pool exhausted»).
+
+### Проверка
+- ./rebuild-and-run.sh: сборка успешна; `test_components` 308/1298 passed,
+  `test_proxy_core` 742/73 passed; health-check ✅.
+- `message_counter.py --iterations 1 --concurrent 1` ✅,
+  `db-gateway-e2e-test.py` 7/7 ✅, `sentry-e2e-test.py` PASS ✅.
+- clang-tidy по изменённым файлам — без ошибок и предупреждений.
+
 # test(cpp): юнит-тест полного события SentryClient::capture() (10e)
 
 ## Date: 2026-09-08

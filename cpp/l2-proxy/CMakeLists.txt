@@ -443,6 +443,7 @@ if(BUILD_TESTS)
         test_coverage_ext.cpp
         test_db_executor_base.cpp
         test_sentry_client.cpp
+        test_trace_logger.cpp
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
