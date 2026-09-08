@@ -440,6 +440,7 @@ if(BUILD_TESTS)
         test_components.cpp
         test_http_pipeline.cpp
         test_coverage_ext.cpp
+        test_db_executor_base.cpp
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
@@ -451,6 +452,7 @@ if(BUILD_TESTS)
         request_data_preparer.cpp
         metrics_manager.cpp
         trace_context_extractor.cpp
+        db_query_executor_base.cpp
         httplib/httplib.cc
     )
     target_include_directories(test_components PRIVATE

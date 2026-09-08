@@ -1,3 +1,104 @@
+# chore(cpp): юнит-тесты ThreadPoolWrapper, DbExecutorBase, CrashHandler (9c)
+
+## Date: 2026-09-08
+
+### Контекст
+Раунд улучшений 9c — дополнительный скан под субагентом показал, что из
+dependency-light модулей остались не покрытыми `thread_pool_wrapper.hpp`,
+`db_query_executor_base.cpp` (драйвер-агностик) и несигнальная часть
+`crash_handler.hpp`. Остальные модули (AppContext/NATS/БД-тяжёлые) в
+`test_components` не втащить.
+
+### Что сделано
+- `test_coverage_ext.cpp`: добавлены теги `[thread-pool-wrapper]` (4 кейса:
+  NONE-режим синхронный+возвращает результат, NONE пробрасывает исключение,
+  CUSTOM выполняет на воркере и переиспользуется, CUSTOM queue_size
+  ограничен bound'ом) и `[crash-handler]` (1 кейс: константный
+  `g_default_crash_dump_dir == "/crash-dumps"`). Сигнальные ветки install/write
+  не тестируются (убили бы тестовый процесс), `log_current_stacktrace` не
+  вызывается (требует -lstdc++exp).
+- Новый TU `cpp/l2-proxy/test_db_executor_base.cpp` (тег `[db-executor-base]`,
+  5 кейсов) — `DbExecutorBase` через минимальный stub-сабкласс, реализующий
+  только pure-virtual поверхность (init/execute_query/ping/refresh_pool_gauges)
+  без ODPI-C/libpq: конфигурные дефолты (timeout/max_rows/db_name),
+  set_pool_metrics зовёт refresh_pool_gauges, set_db_pool_gauges публикует
+  idle/active по меткам db/state, nullptr-metadata — no-op, сброс на nullptr
+  отключает gauge-обновления.
+- `CMakeLists.txt`: в `test_components` добавлены `test_db_executor_base.cpp`
+  и `db_query_executor_base.cpp`.
+
+### Проверка
+- clang-tidy по изменённым файлам — без замечаний.
+- Сборка в контейнере ./rebuild-and-run.sh: `All tests passed (1111
+  assertions in 279 test cases)` для test_components (было 1083/269; +10
+  кейсов) и `742 assertions in 73 test cases` для test_proxy_core.
+- E2E: python3 message_counter.py --iterations 1 --concurrent 1 — ✅.
+
+# chore(cpp): юнит-тесты оставшихся header-only и малых .cpp модулей (9b)
+
+## Date: 2026-09-07
+
+### Контекст
+Раунд улучшений 9b — закрытие пробелов покрытия в оставшихся
+dependency-light (без NATS/DB) модулях: `exceptions`, `ScopedMetrics`,
+`ScopedProfiler`, `pool_executor`, `MetricsManager`, `tracing_helpers`,
+`stats_page`, `trace_context_extractor`, `ScopedRequestContext`.
+Под субагентом был проанализирован весь l2-proxy: `rate_limiter_per_ip.hpp`,
+`header_utils.hpp`, `dedup_cache.hpp` уже покрыты.
+
+### Что сделано
+- Новый тестовый TU `cpp/l2-proxy/test_coverage_ext.cpp` (33 TEST_CASE,
+  теги `[exceptions]`, `[scoped-metrics]`, `[scoped-profiler]`,
+  `[pool-executor]`, `[metrics-manager]`, `[tracing-helpers]`,
+  `[stats-page-ext]`, `[trace-context-extractor]`, `[scoped-request-context]`):
+  - `exceptions` — 2 кейса: исключение несёт контекст, кастуется в runtime_error.
+  - `ScopedMetrics<int>` — 1 кейс: рукописный evaluated-массив отдаёт
+    сумму/среднее/квантили, RAII-обёртка записывает своё значение
+    (нить JaegerLogger не участвует — tracer nullptr).
+  - `ScopedProfiler`/`ScopedLabeledProfiler<prometheus::Histogram>` — 3 кейса:
+    нулевой трассер — no-op без падений, метка client_id пишется в
+    DynamicLabeledFamily, нулевой family — нет.
+  - `pool_executor` — 4 кейса: `execute_http_command_with_status` через
+    локальный MockHttpClient+MockPool шаблонным вызовом
+    (`run_probe(MockHttpClient*)`), прокидывание callback-статуса,
+    nullptr-пул бросает std::runtime_error, Invalid-клиент ->
+    pool.release_connection + invalidate.
+  - `MetricsManager` — 7 кейсов: create_counter/gauge/histogram,
+    histogram-семплирование, array-перегрузки creators
+    (`histogram_buckets::g_k_latency_ms_to_10s/to_5s`), `record_db_request_metrics`
+    по JBCC-меткам (query/200 и unknown/500), `observe_db_request_duration`
+    конвертирует микросекунды в секунды.
+  - `tracing_helpers` — 8 кейсов: proxy_service_name, get_traceparent_header,
+    resolve_trace_id, make_span_and_traceparent (пустой/с хинтом/без
+    trace_id), set_traceparent_response_header,
+    TraceContextHelper::extract_from_raw с нулевым трассером.
+  - `stats_page` — 4 кейса: format_metric_value для Counter/Gauge/Histogram/
+    Summary/Untyped, format_labels (в т.ч. пустой вектор), build_stats_html
+    для статуса OPERATIONAL и DEGRADED (health на английском).
+  - `trace_context_extractor` — 2 кейса с `TracerType::None`: пустой и
+    корректный traceparent (contid extract просится в Promise, но при
+    нулевом трассере 3-parts остается TraceContext).
+  - `ScopedRequestContext` — 2 кейса: fallback "unknown" при пустом
+    remote_addr/заголовках контейнера, значение x-real-ip из HTTP-заголовка.
+- Исправлен баг в `cpp/l2-proxy/stats_page.hpp` (`format_metric_value`):
+  Counter-ветка падала в Gauge (читала `m.gauge.value`, всегда 0), default
+  читал `m.gauge.value` вместо `m.untyped.value`. Теперь Counter читает
+  `m.counter.value`, default — `m.untyped.value`.
+- `CMakeLists.txt`: в таргет `test_components` добавлены
+  `test_coverage_ext.cpp`, `metrics_manager.cpp`, `trace_context_extractor.cpp`
+  (реализации .cpp требуются для линковки).
+- Ограничение области: RequestHandler/ResponseBuilder/AppContext-heavy и
+  NATS/DB-модули по-прежнему вне `test_components` (нужен AppContext +
+  worker) — follow-up (можно расширить test_proxy_core).
+
+### Проверка
+- clang-tidy по новому файлу и stats_page.hpp — без замечаний.
+- Сборка в контейнере ./rebuild-and-run.sh: `#27` builder-стадии —
+  `All tests passed (1083 assertions in 269 test cases)` для test_components
+  (269 = 216 существующих + 20 test_http_pipeline + 33 новых) и
+  `742 assertions in 73 test cases` для test_proxy_core.
+- E2E: python3 message_counter.py --iterations 1 --concurrent 1 — ✅.
+
 # chore(cpp): юнит-тесты HTTP-конвейера (HttpClient + HttpClientPool)
 
 ## Date: 2026-09-07

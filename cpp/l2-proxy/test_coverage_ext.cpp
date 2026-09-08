@@ -5,19 +5,24 @@
 // compiled into the test_components target alongside the existing suites.
 
 #include "common_utils.hpp"
+#include "crash_handler.hpp"
 #include "exceptions.hpp"
 #include "metrics_manager.hpp"
 #include "pool_executor.hpp"
 #include "scoped_metrics.hpp"
 #include "scoped_profiler.hpp"
 #include "stats_page.hpp"
+#include "thread_pool_wrapper.hpp"
 #include "trace_context_extractor.hpp"
 #include "tracing_helpers.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "httplib/httplib.h"
+#include <chrono>
 #include <memory>
+#include <thread>
+#include <vector>
 #include <string>
 #include <utility>
 #include <vector>
@@ -501,4 +506,62 @@ TEST_CASE("ScopedRequestContext: uses x-real-ip when present",
   req.headers.emplace("x-real-ip", "1.2.3.4");
   ScopedRequestContext ctx(req);
   REQUIRE(ctx.client_ip() == "1.2.3.4");
+}
+
+// ============================================================================
+// ThreadPoolWrapper (thread_pool_wrapper.hpp)
+// ============================================================================
+
+TEST_CASE("ThreadPoolWrapper: NONE runs task synchronously",
+          "[thread-pool-wrapper]") {
+  ThreadPoolWrapper pool(ThreadPoolWrapper::Type::NONE, 4);
+  REQUIRE(pool.queue_size() == 0);
+  auto fut = pool.enqueue([](int a, int b) { return a + b; }, 20, 22);
+  REQUIRE(fut.get() == 42);
+  REQUIRE(pool.queue_size() == 0);
+}
+
+TEST_CASE("ThreadPoolWrapper: NONE propagates exceptions",
+          "[thread-pool-wrapper]") {
+  ThreadPoolWrapper pool(ThreadPoolWrapper::Type::NONE, 1);
+  auto fut = pool.enqueue([]() -> int {
+    throw std::runtime_error("sync boom");
+    return 1;
+  });
+  REQUIRE_THROWS_AS(fut.get(), std::runtime_error);
+}
+
+TEST_CASE("ThreadPoolWrapper: CUSTOM executes on the pool and reuses it",
+          "[thread-pool-wrapper]") {
+  ThreadPoolWrapper pool(ThreadPoolWrapper::Type::CUSTOM, 2, 8);
+  const size_t tasks = 8;
+  auto fut = pool.enqueue([]() { return std::this_thread::get_id(); });
+  REQUIRE(fut.get() != std::this_thread::get_id());
+  std::vector<std::future<int>> results;
+  for (size_t i = 0; i < tasks; ++i) {
+    results.push_back(
+        pool.enqueue([i]() { return static_cast<int>(i * i); }));
+  }
+  for (size_t i = 0; i < tasks; ++i) {
+    REQUIRE(results[i].get() == static_cast<int>(i * i));
+  }
+}
+
+TEST_CASE("ThreadPoolWrapper: CUSTOM queue_size reflects pending work",
+          "[thread-pool-wrapper]") {
+  ThreadPoolWrapper pool(ThreadPoolWrapper::Type::CUSTOM, 1, 2);
+  pool.enqueue([]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); });
+  REQUIRE(pool.queue_size() <= 2);
+  pool.enqueue([]() {});
+  pool.enqueue([]() {});
+  REQUIRE(pool.queue_size() <= 2);
+}
+
+// ============================================================================
+// CrashHandler (crash_handler.hpp) — non-signal surface
+// ============================================================================
+
+TEST_CASE("CrashHandler: default dump dir constant is exposed",
+          "[crash-handler]") {
+  REQUIRE(std::string(g_default_crash_dump_dir) == "/crash-dumps");
 }
