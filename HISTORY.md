@@ -1,3 +1,35 @@
+# refactor: NATS setup_options макрос, StatsLogger helper, сокращение кода (13e)
+
+## Date: 2026-09-08
+
+### Контекст
+Поиск крупных функций (сканирование .cpp) выявил кандидатов на сокращение:
+`NatsClient::setup_options` (129 строк повторяющихся `if(!check_ok(...))`) и
+`StatsLogger::start_periodic_logging` (3 копии выборки метрик по mode).
+Заказчик выбрал эти два (наибольший выигрыш при низком риске).
+
+### Что сделано
+- **cpp/l2-proxy/nats_client.cpp** `setup_options` (129→~80 строк):
+  локальный макрос `CHECK_NATS_OK(expr, msg)` (определён и `#undef` до/после
+  функции) + новый приватный хелпер `NatsClient::require_ok()` вместо
+  лямбды `check_ok`; 17 одинаковых if/return-блоков стали однострочными.
+  Поведение не изменилось: `set_error + false` на любом не-NATS_OK.
+- **cpp/l2-proxy/stats_logger.{hpp,cpp}**: удалена мёртвая декларация
+  `log_statistics()` (не была определена/вызвана); введены `ModeStats`
+  (агрегат счётчиков) и приватный `collect_mode_stats()` — выборка метрик по
+  mode (proxy/worker/l2-server) вынесена из вложенных веток
+  `start_periodic_logging`; функция сокращена ~109→~90 строк, дублирование
+  устранено.
+
+### Проверка
+- clang-tidy (run-clang-tidy.sh): no errors or warnings.
+- Полная сборка в контейнерах НЕ завершена — машина потеряла сеть/DNS
+  до docker.io (`dial tcp: lookup auth.docker.io: no such host`),
+  environmental, не код. Заказчик переносит работу на другой компьютер:
+  запустить `./rebuild-and-run.sh` + e2e там, до этого не тегировать релиз.
+
+---
+
 # ops/obs: тест-grafana-генератора, сверка каталога метрик, branch coverage (13d)
 
 ## Date: 2026-09-08

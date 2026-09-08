@@ -44,7 +44,17 @@ public:
   void start_periodic_logging();
 
 private:
-  void log_statistics();
+  // Counters read from the mode-specific Prometheus metrics for the periodic
+  // statistics log line.
+  struct ModeStats {
+    uint64_t m_bytes_received = 0;
+    uint64_t m_bytes_sent = 0;
+    uint64_t m_client_requests = 0;
+    uint64_t m_client_errors = 0;
+    uint64_t m_nats_requests = 0;
+    uint64_t m_nats_errors = 0;
+  };
+  ModeStats collect_mode_stats() const;
 };
 
 #endif // STATS_LOGGER_HPP

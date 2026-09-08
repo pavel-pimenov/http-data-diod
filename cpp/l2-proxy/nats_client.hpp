@@ -171,6 +171,9 @@ private:
   // option without cleaning up (the next connect() iteration starts with
   // cleanup()). Caller holds m_conn_mutex.
   bool setup_options(const std::string &url);
+  // Records error_message and reports failure when a natsOptions_* call
+  // returned a non-NATS_OK status (shared by every setup_options step).
+  bool require_ok(natsStatus status, const std::string &error_message);
   // NATS option-callback handlers; invoked on the NATS async-callback thread.
   void on_disconnected(natsConnection *nc);
   void on_reconnected(natsConnection *nc);

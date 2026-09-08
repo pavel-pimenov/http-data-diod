@@ -43,55 +43,13 @@ void StatsLogger::start_periodic_logging() {
       }
 
       if (!m_shutdown_flag) {
-        // Get current values from Prometheus metrics based on mode
-        uint64_t bytes_received = 0;
-        uint64_t bytes_sent = 0;
-        uint64_t client_requests = 0;
-        uint64_t client_errors = 0;
-        uint64_t nats_requests = 0;
-        uint64_t nats_errors = 0;
-
-        if (m_app_ctx.m_config.m_mode == "proxy") {
-          bytes_received = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_bytes_received.Value());
-          bytes_sent = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_bytes_sent.Value());
-          client_requests = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_client_requests.Value());
-          client_errors = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_client_errors.Value());
-
-          nats_requests = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_nats_requests.Value());
-          nats_errors = static_cast<uint64_t>(
-              m_app_ctx.m_proxy.m_metrics->m_nats_errors.Value());
-        } else if (m_app_ctx.m_config.m_mode == "worker") {
-          bytes_received = static_cast<uint64_t>(
-              m_app_ctx.m_worker.m_metrics->m_bytes_received.Value());
-          bytes_sent = static_cast<uint64_t>(
-              m_app_ctx.m_worker.m_metrics->m_bytes_sent.Value());
-          client_requests = static_cast<uint64_t>(
-              m_app_ctx.m_worker.m_metrics->m_requests_processed.Value());
-          client_errors = static_cast<uint64_t>(
-              m_app_ctx.m_worker.m_metrics->m_l2_errors.Value());
-
-        } else if (m_app_ctx.m_config.m_mode == "l2-server") {
-          bytes_received = static_cast<uint64_t>(
-              m_app_ctx.m_server.m_metrics->m_bytes_received.Value());
-          bytes_sent = static_cast<uint64_t>(
-              m_app_ctx.m_server.m_metrics->m_bytes_sent.Value());
-          client_requests = static_cast<uint64_t>(
-              m_app_ctx.m_server.m_metrics->m_requests.Value());
-          client_errors = static_cast<uint64_t>(
-              m_app_ctx.m_server.m_metrics->m_request_errors.Value());
-        }
-
+        const ModeStats s = collect_mode_stats();
         uint64_t active = m_active_clients.load();
         uint64_t max = m_max_clients.load();
-        uint64_t current_requests_for_rate = client_requests;
+        uint64_t current_requests_for_rate = s.m_client_requests;
 
         if (m_app_ctx.m_config.m_mode == "proxy") {
-          current_requests_for_rate = nats_requests;
+          current_requests_for_rate = s.m_nats_requests;
         }
 
         // Calculate requests per second over the last logging period
@@ -111,19 +69,20 @@ void StatsLogger::start_periodic_logging() {
         prev_time = now;
 
         const bool show_common_stats =
-            bytes_received > 0 || bytes_sent > 0 || client_requests > 0 ||
-            client_errors > 0 || requests_in_period > 0;
+            s.m_bytes_received > 0 || s.m_bytes_sent > 0 ||
+            s.m_client_requests > 0 || s.m_client_errors > 0 ||
+            requests_in_period > 0;
 
         if (show_common_stats) {
           Logger::info("Statistics - Bytes Received: {} bytes, Bytes Sent: {} "
                        "bytes, Client Requests: {}, Client Errors: {}",
-                       bytes_received, bytes_sent, client_requests,
-                       client_errors);
+                       s.m_bytes_received, s.m_bytes_sent, s.m_client_requests,
+                       s.m_client_errors);
         }
 
         if (m_app_ctx.m_config.m_mode == "proxy") {
           Logger::info("Statistics - NATS Requests: {}, NATS Errors: {}",
-                       nats_requests, nats_errors);
+                       s.m_nats_requests, s.m_nats_errors);
         }
 
         Logger::info("Statistics - Active Clients: {}, Max Clients: {}, "
@@ -132,4 +91,31 @@ void StatsLogger::start_periodic_logging() {
       }
     }
   });
+}
+
+StatsLogger::ModeStats StatsLogger::collect_mode_stats() const {
+  ModeStats s;
+  if (m_app_ctx.m_config.m_mode == "proxy") {
+    const auto &m = *m_app_ctx.m_proxy.m_metrics;
+    s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
+    s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
+    s.m_client_requests = static_cast<uint64_t>(m.m_client_requests.Value());
+    s.m_client_errors = static_cast<uint64_t>(m.m_client_errors.Value());
+    s.m_nats_requests = static_cast<uint64_t>(m.m_nats_requests.Value());
+    s.m_nats_errors = static_cast<uint64_t>(m.m_nats_errors.Value());
+  } else if (m_app_ctx.m_config.m_mode == "worker") {
+    const auto &m = *m_app_ctx.m_worker.m_metrics;
+    s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
+    s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
+    s.m_client_requests =
+        static_cast<uint64_t>(m.m_requests_processed.Value());
+    s.m_client_errors = static_cast<uint64_t>(m.m_l2_errors.Value());
+  } else if (m_app_ctx.m_config.m_mode == "l2-server") {
+    const auto &m = *m_app_ctx.m_server.m_metrics;
+    s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
+    s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
+    s.m_client_requests = static_cast<uint64_t>(m.m_requests.Value());
+    s.m_client_errors = static_cast<uint64_t>(m.m_request_errors.Value());
+  }
+  return s;
 }
