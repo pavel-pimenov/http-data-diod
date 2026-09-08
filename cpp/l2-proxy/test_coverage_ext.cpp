@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "httplib/httplib.h"
+#include "prometheus/summary.h"
 #include <chrono>
 #include <memory>
 #include <string>
@@ -458,6 +459,165 @@ TEST_CASE("Stats page: build_stats_html flags degraded when health not ready",
   gauge.Set(0.0);
   const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
   REQUIRE(html.find("DEGRADED") != std::string::npos);
+}
+
+TEST_CASE("Stats page: escape_html escapes special characters",
+          "[stats-page-ext]") {
+  REQUIRE(escape_html("a&b") == "a&amp;b");
+  REQUIRE(escape_html("<tag>") == "&lt;tag&gt;");
+  REQUIRE(escape_html("say \"hi\"") == "say &quot;hi&quot;");
+  REQUIRE(escape_html("plain") == "plain");
+}
+
+TEST_CASE("Stats page: parse_stats_window handles absent/invalid/clamped values",
+          "[stats-page-ext]") {
+  std::map<std::string, std::string> no_window;
+  REQUIRE(parse_stats_window(no_window) == 30);
+  REQUIRE(parse_stats_window(no_window, 60) == 60);
+
+  std::map<std::string, std::string> exact{{"window", "15"}};
+  REQUIRE(parse_stats_window(exact) == 15);
+
+  std::map<std::string, std::string> invalid{{"window", "abc"}};
+  REQUIRE(parse_stats_window(invalid) == 30);
+
+  std::map<std::string, std::string> clamped_high{{"window", "999"}};
+  REQUIRE(parse_stats_window(clamped_high) == 120);
+
+  std::map<std::string, std::string> clamped_low{{"window", "0"}};
+  REQUIRE(parse_stats_window(clamped_low) == 1);
+
+  std::map<std::string, std::string> partial{{"window", "7x"}};
+  REQUIRE(parse_stats_window(partial) == 7);
+}
+
+TEST_CASE("Stats page: build_sparkline_svg returns empty for <2 points",
+          "[stats-page-ext]") {
+  REQUIRE(build_sparkline_svg({}, false, 30) == "");
+  const std::time_t now = std::time(nullptr);
+  REQUIRE(build_sparkline_svg({{now, 1.0}}, true, 30) == "");
+}
+
+TEST_CASE("Stats page: build_sparkline_svg renders rate and clamps counter "
+          "resets",
+          "[stats-page-ext]") {
+  const std::time_t now = std::time(nullptr);
+  const std::vector<std::pair<std::time_t, double>> pts = {
+      {now - 2, 10.0}, {now - 1, 5.0}, {now, 8.0}};
+  const std::string svg = build_sparkline_svg(pts, true, 30);
+  REQUIRE(svg.find("<svg class=\"spark\"") != std::string::npos);
+  REQUIRE(svg.find("0,") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_sparkline_svg renders raw gauge and applies window",
+          "[stats-page-ext]") {
+  const std::time_t now = std::time(nullptr);
+  const std::vector<std::pair<std::time_t, double>> pts = {
+      {now - 3600, 1.0}, {now - 90, 2.0}, {now - 60, 3.0}};
+  const std::string svg = build_sparkline_svg(pts, false, 1);
+  REQUIRE(svg.find("<svg class=\"spark\"") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html flags degraded when nats disconnected",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &nats = MetricsManager::create_gauge(registry, "nats_connected", "nats");
+  nats.Set(0.0);
+  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("DEGRADED") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = prometheus::BuildGauge()
+                     .Name("per_ip_requests")
+                     .Help("per ip")
+                     .Register(*registry);
+  for (int i = 0; i < 8; ++i) {
+    family.Add({{"ip", "10.0.0." + std::to_string(i)}})
+        .Set(static_cast<double>(i));
+  }
+  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("+2 more") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html renders sparklines from history",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &counter = prometheus::BuildCounter()
+                      .Name("spark_requests_total")
+                      .Help("requests")
+                      .Register(*registry)
+                      .Add({});
+  counter.Increment();
+  MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
+  history.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(2300));
+  history.stop();
+  const std::string html = build_stats_html("proxy-test", registry, &history, 5);
+  REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
+}
+
+TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
+          "[metrics-history]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &cnt = prometheus::BuildCounter()
+                  .Name("mh_count")
+                  .Help("h")
+                  .Register(*registry)
+                  .Add({});
+  cnt.Increment();
+  auto &gauge = prometheus::BuildGauge()
+                    .Name("mh_gau")
+                    .Help("h")
+                    .Register(*registry);
+  gauge.Add({{"ip", "1"}}).Set(2.0);
+  gauge.Add({{"ip", "2"}}).Set(3.0);
+  auto &sum = prometheus::BuildSummary()
+                  .Name("mh_sum")
+                  .Help("h")
+                  .Register(*registry)
+                  .Add({}, prometheus::Summary::Quantiles{{0.5, 0.05}});
+  sum.Observe(3.0);
+
+  MetricsHistory history(registry, std::chrono::seconds(1), 1, 2);
+  history.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(2300));
+  history.stop();
+
+  REQUIRE(history.has_family("mh_count"));
+  REQUIRE_FALSE(history.has_family("mh_missing"));
+  REQUIRE(history.get_series("mh_missing", 5).empty());
+
+  const auto count_series = history.get_series("mh_count", 5);
+  REQUIRE(count_series.size() == 1);
+  REQUIRE(count_series[0].m_labels == "");
+  REQUIRE(count_series[0].m_points.size() >= 1);
+  REQUIRE(count_series[0].m_points.size() <= 2);
+
+  const auto gauge_series = history.get_series("mh_gau", 5);
+  REQUIRE(gauge_series.size() == 1);
+  REQUIRE((gauge_series[0].m_labels == "{ip=1}" ||
+           gauge_series[0].m_labels == "{ip=2}"));
+
+  REQUIRE(history.has_family("mh_sum"));
+}
+
+TEST_CASE("MetricsHistory: start is idempotent and null registry is tolerated",
+          "[metrics-history]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
+  history.start();
+  history.start();
+  history.stop();
+  history.stop();
+  REQUIRE_FALSE(history.has_family("whatever"));
+
+  MetricsHistory empty(nullptr, std::chrono::seconds(1), 8, 240);
+  empty.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  empty.stop();
 }
 
 // ============================================================================

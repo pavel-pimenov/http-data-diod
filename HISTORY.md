@@ -1,3 +1,48 @@
+# test(cpp): покрытие stats_page/MetricsHistory + возврат production-образов (13a)
+
+## Date: 2026-09-08
+
+### Контекст
+После ASAN-валидации (12a) стек крутится на runtime-asan-бинарниках.
+Задача: пересобрать обычный production-стек и одновременно закрыть
+оставшиеся покрытийные пробелы в stats_page.hpp (85.6%) и
+metrics_history.hpp (82.6%) — обе header-only, тестируются изолированно.
+
+### Что сделано
+- `test_coverage_ext.cpp` (11 новых TEST_CASE):
+  - `escape_html` — пять спецсимволов (`&<>"`) + plain;
+  - `parse_stats_window` — absent (def 30), digits "15", non-digit "abc" →
+    default 30, clamp high (999→120), clamp low (0→1), partial "7x"→7;
+  - `build_sparkline_svg` — empty (<2 pts), single-point; rate + counter
+    reset clamp (vals 10→5→8 → rate 0 clamped, then 3); raw gauge + window
+    filter (old point outside 1-min window filtered);
+  - `build_stats_html` + NATS disconnected (nats_connected=0 → DEGRADED);
+  - `build_stats_html` + dense labeled gauge (8 series, kMaxSeriesPerTile=6
+    → "+2 more" marker in HTML);
+  - `build_stats_html` + sparkline from MetricsHistory (registry with
+    counter, start/sleep 2.3s/stop → points ≥2 → SVG sparkline rendered);
+  - `MetricsHistory::samples registry...` — bounded ring buffer: counter
+    (no labels), gauge (2 label sets, max_series=1), Summary; start sleep
+    2.3s stop → has_family/get_series assertions, points ≤ max_samples,
+    labels exact with braces, Summary extract covered;
+  - `MetricsHistory::start is idempotent...` — double start/stop no-crash,
+    null-registry start/sleep/stop no-crash.
+- Включён явный `#include "prometheus/summary.h"` (BuildSummary и
+  Summary::Quantiles требуют полного типа; registry.h только forward-decl).
+- Ремап `gauge_series[0].m_labels` → `{ip=X}` (mh_format_labels добавляет
+  фигурные скобки вокруг всех labels).
+- Пересобыт `./rebuild-and-run.sh` (без --asan): production-образы
+  (runtime-db, runtime-server) восстановлены; `docker compose logs`
+  чисты от ASAN-спама.
+
+### Проверка
+- `test_components` 329/1379 passed, `test_proxy_core` 742/73 passed;
+  health-check ✅.
+- `message_counter.py` ✅, `db-gateway-e2e-test.py` 7/7 ✅,
+  `sentry-e2e-test.py` PASS ✅.
+- ASAN-отсутствие подтверждено (docker compose logs l2-proxy … —
+  нет AddressSanitizer/LeakSanitizer/runtime error строк).
+
 # test(cpp): валидация всего стека под ASan/LSan/UBSan (12a)
 
 ## Date: 2026-09-08
