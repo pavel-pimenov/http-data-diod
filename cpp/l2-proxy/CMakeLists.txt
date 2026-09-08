@@ -304,14 +304,15 @@ add_executable(l2-proxy
   metrics_manager.cpp
   http_client.cpp
   http_client_pool.cpp
-  stats_logger.cpp
-  db_query_handler.cpp
-  db_query_executor_base.cpp
-  db_query_executor_oracle.cpp
-  db_query_executor_postgres.cpp
-  db_query_executor_factory.cpp
-  httplib/httplib.cc
-  odpi/embed/dpi.c
+stats_logger.cpp
+   db_query_handler.cpp
+   db_query_executor_base.cpp
+   db_query_executor_oracle.cpp
+   db_query_executor_postgres.cpp
+   db_query_executor_factory.cpp
+   sentry_client.cpp
+   httplib/httplib.cc
+   odpi/embed/dpi.c
 )
 
 # Common compile options and definitions
@@ -346,7 +347,7 @@ set_source_files_properties(
     http_client.cpp http_client_pool.cpp stats_logger.cpp
     db_query_handler.cpp db_query_executor_base.cpp
     db_query_executor_oracle.cpp db_query_executor_postgres.cpp
-    db_query_executor_factory.cpp
+    db_query_executor_factory.cpp sentry_client.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
 # Include directories
@@ -441,6 +442,7 @@ if(BUILD_TESTS)
         test_http_pipeline.cpp
         test_coverage_ext.cpp
         test_db_executor_base.cpp
+        test_sentry_client.cpp
         config.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
@@ -453,6 +455,7 @@ if(BUILD_TESTS)
         metrics_manager.cpp
         trace_context_extractor.cpp
         db_query_executor_base.cpp
+        sentry_client.cpp
         httplib/httplib.cc
     )
     target_include_directories(test_components PRIVATE

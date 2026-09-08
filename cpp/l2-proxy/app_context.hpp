@@ -99,6 +99,10 @@ struct WorkerMetrics {
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
   prometheus::Gauge &m_health_ready;
+  // Sentry event delivery: sent/failed counters and the queued-pending gauge.
+  prometheus::Counter &m_sentry_events_sent;
+  prometheus::Counter &m_sentry_events_failed;
+  prometheus::Gauge &m_sentry_queue_size;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
@@ -155,6 +159,7 @@ class NatsClient;
 class RateLimiter;
 class PerIPRateLimiter;
 class DuplicateDetector;
+class SentryClient;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
 struct ProxyContext {
@@ -199,6 +204,7 @@ class AppContext {
 public:
   Config m_config;
   std::unique_ptr<JaegerLogger> m_tracer;
+  std::unique_ptr<SentryClient> m_sentry;
   std::shared_ptr<prometheus::Registry> m_proxy_registry;
   std::shared_ptr<prometheus::Registry> m_worker_registry;
   std::shared_ptr<prometheus::Registry> m_server_registry;

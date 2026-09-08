@@ -1,3 +1,62 @@
+# feat(cpp): интеграция с Sentry (10a) — лёгкий клиент, метрики, тесты
+
+## Date: 2026-09-08
+
+### Контекст
+Начата интеграция с Sentry для сбора ошибок воркера. Взято направление БЕЗ
+внешнего SDK `sentry-native`: написан облегчённый клиент на существующем
+`cpp-httplib` (civetweb-форк с OpenSSL), который отправляет события в формате
+Sentry Envelope (`POST {path}/api/{project_id}/envelope/`). DSN-парсер,
+генераторы event/envelope JSON и поведение асинхронной очереди покрыты
+юнит-тестами через инжектируемый transport (без сети).
+
+### Что сделано
+- Новый `cpp/l2-proxy/sentry_client.{hpp,cpp}`:
+  - `sentry::parse_dsn` (scheme/host/port/path_prefix/public/secret/project),
+    `build_event_json`, `build_envelope`, `level_to_string` — чистые функции;
+    валидный event_id из `RandomUtils::rng()`.
+  - `sentry::SentryClient`: async `std::jthread` + bounded-очередь
+    (`m_max_queue_size`, при переполнении отбрасывается самая старая запись);
+    `mutex+cv`; метрики sent/failed/queue_size (инжектируемый transport для
+    тестов, по умолчанию — реальный HTTP через `httplib::SSLClient`/`Client`
+    с set_connection/read/write timeout). По найденному в тестах багу: при
+    drop по переполнению корректно декрементится `m_pending` и записи
+    считаются failed (иначе `flush()` вешался навсегда).
+- `config.{hpp,cpp}`: `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
+  `SENTRY_TIMEOUT_MS` (default 3000), `SENTRY_MAX_QUEUE_SIZE` (default 256).
+- `app_context.{hpp,cpp}`: метрики `l2_worker_sentry_events_sent_total`,
+  `l2_worker_sentry_events_failed_total` (Counters) и
+  `l2_worker_sentry_queue_size` (Gauge); `AppContext` создаёт
+  `SentryClient` (service name = mode), агрегированно в l2-proxy/l2-server/
+  l2-worker бинарях.
+- `l2_worker.cpp`: `capture_message` при ошибке валидации схемы (fingerprint
+  `{worker_validation_error, schema}`) и при исчерпании попыток вызова
+  L2-сервера (fingerprint `{l2_server_call_error, url}`).
+- `CMakeLists.txt`: `sentry_client.cpp` в l2-proxy + UNITY_GROUP
+  `proxy-nats`; в `test_components` — `test_sentry_client.cpp` и
+  `sentry_client.cpp`.
+- `docker-compose.yml`: `SENTRY_*` окружение добавлено в l2-server,
+  l2-proxy, l2-worker.
+- `README.md`: раздел «Отслеживание ошибок (Sentry, воркер)» + строки
+  метрик l2_worker_sentry_* в каталоге метриков l2-worker.
+- Новый TU `cpp/l2-proxy/test_sentry_client.cpp` (тег `[sentry-client]`,
+  11 кейсов): разбор DSN (полный/secret опционален/self-hosted с путём/
+  невалидные), event JSON (поле core + пропуск пустых), envelope-структура
+  (3+ строка), disabled no-op, доставка через транспорт (последовательность,
+  метрики), транспортный сбой → failed-счётчик, bounded-очередь (drop
+  oldest → 5 delivered / 2 failed / gauge=0, детерминизм через atomics).
+
+### Проверка
+- clang-tidy по изменённым файлам — без замечаний.
+- Сборка в контейнере ./rebuild-and-run.sh: `All tests passed (1204
+  assertions in 295 test cases)` для test_components (было 1130/284;
+  +11 кейсов sentry) и `742 assertions in 73 test cases` для test_proxy_core.
+- e2e `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ (нет
+  потерь/перепутанных ответов; GET binary тоже ✅).
+- Окружение: заодно пофикшен несовместимый с `postgres:17-alpine` data-dir
+  PG16 — удалён named volume `http-data-diod_postgres-data`, `postgres`
+  поднят заново и healthy.
+
 # chore(cpp): юнит-тесты ThreadPoolWrapper, DbExecutorBase, CrashHandler + common_utils реализация (9c)
 
 ## Date: 2026-09-08

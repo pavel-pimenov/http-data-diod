@@ -362,6 +362,19 @@ void Config::load_l2_server_config() {
 
 void Config::load_server_timeout_config() {
   m_jaeger_url = get_env_string("JAEGER_URL", "");
+  m_sentry_dsn = get_env_string("SENTRY_DSN", "");
+  m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", "");
+  m_sentry_release = get_env_string("SENTRY_RELEASE", "");
+  m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", 3000);
+  m_sentry_max_queue_size =
+      get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);
+  if (!m_sentry_dsn.empty()) {
+    Logger::info(
+        "Sentry DSN configured: project={} release={} environment={} "
+        "queue_limit={}",
+        m_sentry_dsn.substr(m_sentry_dsn.find_last_of('/') + 1),
+        m_sentry_release, m_sentry_environment, m_sentry_max_queue_size);
+  }
   m_request_timeout_seconds = get_env_int("REQUEST_TIMEOUT_SECONDS", 30);
   m_http_timeout_seconds = get_env_int("HTTP_TIMEOUT_SECONDS", 30);
   m_test_response_delay_ms = get_env_int("L2_TEST_RESPONSE_DELAY_MS", 0);

@@ -37,6 +37,9 @@ public:
   std::string m_mode{"proxy"};
   std::string m_l2_server_url{"http://l2-server:8088"};
   std::string m_jaeger_url;
+  std::string m_sentry_dsn;
+  std::string m_sentry_environment;
+  std::string m_sentry_release;
   std::string m_log_level{"INFO"};
   std::string m_l2_server_protocol{"http"};
   std::string m_proxy_protocol{"http"};
@@ -73,6 +76,8 @@ public:
   // Group 4: size_t (8 bytes)
   // ========================================================================
   size_t m_tracing_batch_size{50}; // Batch size for sending spans to Jaeger
+  // Max Sentry events kept in the async queue before the oldest is dropped.
+  size_t m_sentry_max_queue_size{256};
 
   // ========================================================================
   // Group 5: int fields (4 bytes each) — sorted by logical group
@@ -87,6 +92,7 @@ public:
   int m_http_pool_idle_timeout_seconds{300};
   int m_max_retries{1};
   int m_tracing_flush_interval_ms{1000};
+  int m_sentry_timeout_ms{3000};
   int m_per_ip_max_tokens{100};
   int m_per_ip_refill_rate{10};
   int m_per_ip_max_ips{10000};

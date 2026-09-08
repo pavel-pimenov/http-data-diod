@@ -16,6 +16,7 @@
 #include "logger.hpp"
 #include "retry_utils.hpp"
 #include "scoped_profiler.hpp"
+#include "sentry_client.hpp"
 #include "thread_pool_wrapper.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
@@ -477,6 +478,13 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         handle_http_error(std::string(e.what()),
                           &m_ctx.m_worker.m_metrics->m_l2_errors,
                           "L2 server call", max_retries, url);
+        if (m_ctx.m_sentry) {
+          m_ctx.m_sentry->capture_message(
+              std::format(
+                  "L2 server call failed after {} attempts: {} url: {}",
+                  max_retries, e.what(), url),
+              "", {"l2_server_call_error", url});
+        }
       }
     }
   }
@@ -525,6 +533,15 @@ bool L2Worker::parse_request_data(const std::string &request_json,
                                        &m_ctx.m_worker.m_metrics
                                             ->m_processing_validation_errors},
                                "Request Schema Validation");
+                           if (m_ctx.m_sentry) {
+                             m_ctx.m_sentry->capture_message(
+                                 std::format(
+                                     "Worker request validation failed: {}",
+                                     parse_error),
+                                 j.value(NatsContract::kRequestId,
+                                         std::string{}),
+                                 {"worker_validation_error", "schema"});
+                           }
                            return std::unexpected(parse_error);
                          }
                          return j;

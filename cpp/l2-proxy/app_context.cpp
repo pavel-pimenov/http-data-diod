@@ -6,6 +6,7 @@
 #include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
+#include "sentry_client.hpp"
 #include "trace_logger.hpp"
 #include <cstdlib>
 
@@ -14,6 +15,13 @@ AppContext::AppContext() {
   init_proxy_metrics();
   init_worker_metrics();
   init_server_metrics();
+
+  m_sentry = std::make_unique<SentryClient>(
+      m_config.m_sentry_dsn, m_worker.m_metrics->m_sentry_events_sent,
+      m_worker.m_metrics->m_sentry_events_failed,
+      m_worker.m_metrics->m_sentry_queue_size, m_config.m_mode,
+      m_config.m_sentry_environment, m_config.m_sentry_release,
+      m_config.m_sentry_timeout_ms, m_config.m_sentry_max_queue_size);
 
   if (m_config.m_mode == "proxy") {
     init_proxy_components();
@@ -242,7 +250,17 @@ void AppContext::init_worker_metrics() {
        MetricsManager::create_gauge(
            m_worker_registry, "l2_worker_health_ready",
            "Readiness state (1 = ready, 0 = not ready) mirrored from "
-           "/health/ready")});
+           "/health/ready"),
+       MetricsManager::create_counter(
+           m_worker_registry, "l2_worker_sentry_events_sent_total",
+           "Sentry events successfully delivered"),
+       MetricsManager::create_counter(
+           m_worker_registry, "l2_worker_sentry_events_failed_total",
+           "Sentry events that failed to deliver or were dropped while the "
+           "queue was full"),
+       MetricsManager::create_gauge(m_worker_registry,
+                                    "l2_worker_sentry_queue_size",
+                                    "Sentry events pending in the async queue")});
 }
 
 void AppContext::init_server_metrics() {

@@ -1,0 +1,277 @@
+// Unit tests for the dependency-light Sentry integration: DSN parsing, event
+// and envelope JSON builders (pure functions) and the async queue behaviour
+// via an injected transport. No network traffic is performed.
+#include "sentry_client.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/registry.h>
+#include <nlohmann/json.hpp>
+#include <atomic>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace {
+
+std::vector<std::string> split_lines(const std::string &text) {
+  std::vector<std::string> lines;
+  size_t start = 0;
+  while (true) {
+    const size_t sep = text.find('\n', start);
+    if (sep == std::string::npos) {
+      lines.push_back(text.substr(start));
+      break;
+    }
+    lines.push_back(text.substr(start, sep - start));
+    start = sep + 1;
+  }
+  return lines;
+}
+
+std::string last_line(const std::string &text) {
+  const auto lines = split_lines(text);
+  return lines.empty() ? "" : lines.back();
+}
+
+sentry::DsnData require_dsn(const std::string &dsn) {
+  const auto parsed = sentry::parse_dsn(dsn);
+  if (!parsed.has_value()) {
+    throw std::runtime_error("test DSN must parse: " + dsn);
+  }
+  return *parsed;
+}
+
+struct SentryTestMetrics {
+  std::shared_ptr<prometheus::Registry> m_registry{new prometheus::Registry};
+  prometheus::Counter &m_sent_counter;
+  prometheus::Counter &m_failed_counter;
+  prometheus::Gauge &m_queue_gauge;
+  SentryTestMetrics()
+      : m_sent_counter(prometheus::BuildCounter()
+                         .Name("tst_sentry_sent")
+                         .Help("h")
+                         .Register(*m_registry)
+                         .Add({})),
+        m_failed_counter(prometheus::BuildCounter()
+                           .Name("tst_sentry_failed")
+                           .Help("h")
+                           .Register(*m_registry)
+                           .Add({})),
+        m_queue_gauge(prometheus::BuildGauge()
+                        .Name("tst_sentry_queue")
+                        .Help("h")
+                        .Register(*m_registry)
+                        .Add({})) {}
+};
+
+} // namespace
+
+TEST_CASE("Sentry DSN: parses a full DSN", "[sentry-client]") {
+  const auto data = require_dsn(
+      "https://PUBLICKEY:SECRETKEY@ingest.sentry.io/1234567");
+  REQUIRE(data.m_scheme == "https");
+  REQUIRE(data.m_host == "ingest.sentry.io");
+  REQUIRE(data.m_port == 443);
+  REQUIRE(data.m_path_prefix.empty());
+  REQUIRE(data.m_public_key == "PUBLICKEY");
+  REQUIRE(data.m_secret_key == "SECRETKEY");
+  REQUIRE(data.m_project_id == "1234567");
+}
+
+TEST_CASE("Sentry DSN: secret key is optional", "[sentry-client]") {
+  const auto data = require_dsn("https://PUBLIC@example.com:8443/proj-42");
+  REQUIRE(data.m_host == "example.com");
+  REQUIRE(data.m_port == 8443);
+  REQUIRE(data.m_public_key == "PUBLIC");
+  REQUIRE(data.m_secret_key.empty());
+  REQUIRE(data.m_project_id == "proj-42");
+}
+
+TEST_CASE("Sentry DSN: self-hosted path prefix is kept", "[sentry-client]") {
+  const auto data = require_dsn("http://PUBLIC@sentry.internal/base/sub/7");
+  REQUIRE(data.m_scheme == "http");
+  REQUIRE(data.m_host == "sentry.internal");
+  REQUIRE(data.m_port == 80);
+  REQUIRE(data.m_path_prefix == "/base/sub");
+  REQUIRE(data.m_project_id == "7");
+}
+
+TEST_CASE("Sentry DSN: invalid inputs are rejected", "[sentry-client]") {
+  REQUIRE_FALSE(sentry::parse_dsn("").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("no-at-sign").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("@host/project").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("ftp://key@host/project").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("https://key@host/").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("https://key@host").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("https://key@host:abc/project").has_value());
+  REQUIRE_FALSE(sentry::parse_dsn("https://key@host:99999/project").has_value());
+}
+
+TEST_CASE("Sentry event JSON: core fields", "[sentry-client]") {
+  sentry::SentryEvent event;
+  event.m_message = "boom";
+  event.m_level = sentry::EventLevel::Error;
+  event.m_request_id = "req-1";
+  event.m_fingerprint = {"http_error", "l2"};
+  event.m_tags = {{"db", "postgres"}};
+  event.m_extra = {{"attempts", 3}};
+
+  const auto json = sentry::build_event_json(event, "l2-worker", "prod",
+                                             "1.2.3");
+  REQUIRE(json["message"] == "boom");
+  REQUIRE(json["level"] == "error");
+  REQUIRE(json["platform"] == "native");
+  REQUIRE(json["event_id"].get<std::string>().size() == 32);
+  REQUIRE(json["release"] == "1.2.3");
+  REQUIRE(json["environment"] == "prod");
+  REQUIRE(json["tags"]["service"] == "l2-worker");
+  REQUIRE(json["tags"]["request_id"] == "req-1");
+  REQUIRE(json["tags"]["db"] == "postgres");
+  REQUIRE(json["fingerprint"] ==
+          std::vector<std::string>{"http_error", "l2"});
+  REQUIRE(json["extra"]["attempts"] == 3);
+  REQUIRE(json["exception"]["values"][0]["value"] == "boom");
+}
+
+TEST_CASE("Sentry event JSON: omits optional fields when empty",
+          "[sentry-client]") {
+  sentry::SentryEvent event;
+  event.m_message = "info only";
+  event.m_level = sentry::EventLevel::Info;
+
+  const auto json =
+      sentry::build_event_json(event, "", "", "");
+  REQUIRE(json["message"] == "info only");
+  REQUIRE(json["level"] == "info");
+  REQUIRE_FALSE(json.contains("release"));
+  REQUIRE_FALSE(json.contains("environment"));
+  REQUIRE_FALSE(json.contains("tags"));
+  REQUIRE_FALSE(json.contains("fingerprint"));
+  REQUIRE_FALSE(json.contains("exception"));
+}
+
+TEST_CASE("Sentry envelope: header, auth and item structure",
+          "[sentry-client]") {
+  sentry::SentryEvent event;
+  event.m_message = "boom";
+  const auto dsn = require_dsn(
+      "https://PUBLIC:SECRET@ingest.sentry.io/42");
+
+  const auto envelope =
+      sentry::build_envelope(event, dsn, "l2-worker", "", "");
+  const auto lines = split_lines(envelope);
+  REQUIRE(lines.size() >= 4);
+
+  const auto header = nlohmann::json::parse(lines[0]);
+  const auto auth = nlohmann::json::parse(lines[1]);
+  const auto item = nlohmann::json::parse(lines[2]);
+  const auto payload = nlohmann::json::parse(lines[3]);
+
+  REQUIRE(header["event_id"].get<std::string>().size() == 32);
+  REQUIRE(header["sdk"]["name"] == "http-data-diod");
+  REQUIRE(auth["sent_key"] == "PUBLIC:SECRET");
+  REQUIRE(auth["sent_version"] == "7");
+  REQUIRE(item["type"] == "event");
+  REQUIRE(payload["event_id"] == header["event_id"]);
+  REQUIRE(payload["message"] == "boom");
+}
+
+TEST_CASE("SentryClient: disabled without a DSN is a no-op",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  SentryClient client("", m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge,
+                      "srv");
+  REQUIRE_FALSE(client.enabled());
+  client.capture_message("should be dropped");
+  client.flush();
+  REQUIRE(m.m_sent_counter.Value() == 0.0);
+  REQUIRE(m.m_failed_counter.Value() == 0.0);
+}
+
+TEST_CASE("SentryClient: delivers queued events via the transport",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  std::vector<std::string> delivered;
+  SentryClient client(
+      "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
+      m.m_queue_gauge, "l2-worker", "prod", "1.0.0", 3000, 256,
+      [&](const std::string &envelope) {
+        delivered.push_back(envelope);
+        return true;
+      });
+  REQUIRE(client.enabled());
+
+  client.capture_message("err one", "req-1", {"worker_validation_error"});
+  client.capture_message("err two");
+  client.flush();
+
+  REQUIRE(delivered.size() == 2);
+  REQUIRE(m.m_sent_counter.Value() == 2.0);
+  REQUIRE(m.m_failed_counter.Value() == 0.0);
+  REQUIRE(m.m_queue_gauge.Value() == 0.0);
+  bool found_first = false;
+  for (const auto &envelope : delivered) {
+    const auto payload = nlohmann::json::parse(last_line(envelope));
+    if (payload["message"] == "err one") {
+      found_first = true;
+      REQUIRE(payload["tags"]["request_id"] == "req-1");
+      REQUIRE(payload["tags"]["service"] == "l2-worker");
+      REQUIRE(payload["environment"] == "prod");
+      REQUIRE(payload["release"] == "1.0.0");
+    }
+  }
+  REQUIRE(found_first);
+}
+
+TEST_CASE("SentryClient: transport failure is counted, not propagated",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  SentryClient client(
+      "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
+      m.m_queue_gauge, "srv", "", "", 3000, 256,
+      [&](const std::string &) { return false; });
+  REQUIRE(client.enabled());
+
+  client.capture_message("boom");
+  REQUIRE_NOTHROW(client.flush());
+  REQUIRE(m.m_failed_counter.Value() == 1.0);
+  REQUIRE(m.m_sent_counter.Value() == 0.0);
+}
+
+TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  std::vector<std::string> delivered;
+  const size_t k_limit = 4;
+  std::atomic<bool> started{false};
+  std::atomic<bool> release{false};
+  SentryClient client(
+      "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
+      m.m_queue_gauge, "srv", "", "", 3000, k_limit,
+      [&](const std::string &envelope) {
+        started.store(true);
+        while (!release.load()) {
+          std::this_thread::yield();
+        }
+        delivered.push_back(envelope);
+        return true;
+      });
+
+  client.capture_message("msg 0");
+  while (!started.load()) {
+    std::this_thread::yield();
+  }
+  for (size_t i = 1; i <= 6; ++i) {
+    client.capture_message("msg " + std::to_string(i));
+  }
+  release.store(true);
+  client.flush();
+
+  REQUIRE(delivered.size() == k_limit + 1);
+  const auto last = nlohmann::json::parse(last_line(delivered.back()));
+  REQUIRE(last["message"] == "msg 6");
+  REQUIRE(m.m_failed_counter.Value() == 2.0);
+  REQUIRE(m.m_sent_counter.Value() == 5.0);
+  REQUIRE(m.m_queue_gauge.Value() == 0.0);
+}

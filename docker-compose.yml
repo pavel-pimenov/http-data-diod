@@ -180,6 +180,12 @@ services:
       - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
       - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
       - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Sentry error tracking (empty DSN = disabled)
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - SENTRY_TIMEOUT_MS=${SENTRY_TIMEOUT_MS:-3000}
+      - SENTRY_MAX_QUEUE_SIZE=${SENTRY_MAX_QUEUE_SIZE:-256}
       # Crash test diagnostic (raises SIGSEGV on startup)
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
@@ -393,6 +399,12 @@ services:
       - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
       - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
       - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Sentry error tracking (empty DSN = disabled)
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - SENTRY_TIMEOUT_MS=${SENTRY_TIMEOUT_MS:-3000}
+      - SENTRY_MAX_QUEUE_SIZE=${SENTRY_MAX_QUEUE_SIZE:-256}
       # Crash test diagnostic (raises SIGSEGV on startup)
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
@@ -519,6 +531,12 @@ services:
       - TRACING_BATCH_SIZE=${TRACING_BATCH_SIZE:-50}
       - TRACING_FLUSH_INTERVAL_MS=${TRACING_FLUSH_INTERVAL_MS:-1000}
       - TRACING_SAMPLE_RATE=${TRACING_SAMPLE_RATE:-1.0}
+      # Sentry error tracking (empty DSN = disabled)
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - SENTRY_TIMEOUT_MS=${SENTRY_TIMEOUT_MS:-3000}
+      - SENTRY_MAX_QUEUE_SIZE=${SENTRY_MAX_QUEUE_SIZE:-256}
       # Crash test diagnostic (raises SIGSEGV on startup)
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)

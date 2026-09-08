@@ -314,6 +314,27 @@ python3 rate_limit_test.py --expect-zero
 | `l2_tracing_send_latency_seconds` | histogram | Латентность отправки партии спанов |
 | `l2_tracing_queue_time_seconds` | histogram | Время спана в очереди перед отправкой |
 
+### Отслеживание ошибок (Sentry, воркер)
+
+Лёгкий клиент без внешнего SDK: события собираются в асинхронную очередь и
+отправляются через встроенный HTTP-клиент (cpp-httplib) на ingest-эндпоинт
+Sentry (`POST /api/{project}/envelope/`, content-type
+`application/x-sentry-envelope`). Hot-path не блокируется: `capture()` только
+ставит событие в очередь (лимит `SENTRY_MAX_QUEUE_SIZE`, при переполнении
+сбрасывается самое старое). Отправка идёт в фоновом потоке; ошибки сети
+подсчитываются метриками и не пробрасываются в обработку запросов.
+
+Включение — переменная окружения `SENTRY_DSN` формата
+`https://PUBLIC[:SECRET]@HOST[:PORT][/PATH]/PROJECT` (пустой DSN = выключено).
+Дополнительно: `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TIMEOUT_MS`
+(по умолчанию 3000), `SENTRY_MAX_QUEUE_SIZE` (по умолчанию 256).
+
+Точки интеграции сейчас: ошибки валидации запроса воркера
+(`fingerprint = ["worker_validation_error", "schema"]`) и исчерпание попыток
+вызова L2-сервера (`fingerprint = ["l2_server_call_error", url]`).
+Метрики доставки — `l2_worker_sentry_events_sent_total` /
+`l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size`
+
 ### l2-proxy
 
 | Метрика | Тип | Метки | Описание |
@@ -391,6 +412,9 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_queue_size` | gauge | — | Глубина очереди пула потоков |
 | `l2_worker_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_worker_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
+| `l2_worker_sentry_events_sent_total` | counter | — | Sentry-события успешно доставлены |
+| `l2_worker_sentry_events_failed_total` | counter | — | Sentry-события не доставлены или сброшены при заполненной очереди |
+| `l2_worker_sentry_queue_size` | gauge | — | Sentry-события в асинхронной очереди |
 
 ### l2-server
 
