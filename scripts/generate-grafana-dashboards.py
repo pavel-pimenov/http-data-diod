@@ -1657,6 +1657,27 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 73: Top client-ids by rejected duplicate POST bodies (proxy answers
+    # 409 when duplicate_reject_enabled is on)
+    panels.append(create_timeseries_panel(
+        title="Топ client-id по отклонённым дублям POST-тел",
+        id=73,
+        x=0, y=y, w=24, h=8,
+        unit="reqps",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_duplicate_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1
@@ -2797,13 +2818,8 @@ Examples:
         extra_in_dash = all_dash_metrics - cpp_metrics
         extra_l2 = {m for m in extra_in_dash if m.startswith("l2_")}
         if missing_in_dash:
-            # l2_proxy_per_client_id_duplicate_rejected_total — зарезервирован, пока не в дашборде — warning, не error
-            real_missing = {m for m in missing_in_dash if m != "l2_proxy_per_client_id_duplicate_rejected_total"}
-            if real_missing:
-                all_ok = False
-                logger.error(f"Metrics in C++ but missing in dashboards ({len(real_missing)}): {sorted(real_missing)}")
-            else:
-                logger.warning(f"Metrics in C++ but missing (reserved, warning): {sorted(missing_in_dash)}")
+            all_ok = False
+            logger.error(f"Metrics in C++ but missing in dashboards ({len(missing_in_dash)}): {sorted(missing_in_dash)}")
         else:
             logger.info("All C++ metrics covered by dashboards")
         if extra_l2:

@@ -1,3 +1,33 @@
+# obs: строгий --check без исключений — дашборд покрыл duplicate_rejected (13c)
+
+## Date: 2026-09-08
+
+### Контекст
+В 13b все Sentry-метрики попали в дашборд, но `--check` оставался с
+whitelist: `l2_proxy_per_client_id_duplicate_rejected_total` считалась
+«зарезервированной». На деле она реально используется — инкрементится в
+`request_handler.cpp:339` при включённом `duplicate_reject_enabled`.
+Whitelist был устаревшим.
+
+### Что сделано
+- **scripts/generate-grafana-dashboards.py**:
+  - дашборд L2 Прокси: панель 73 «Топ client-id по отклонённым дублям
+    POST-тел» (`topk(10, rate(l2_proxy_per_client_id_duplicate_rejected_total
+    {vm=~"${vm:regex}",client_id!="unknown"}[5m]))`);
+  - `--check`: удалён whitelist для `l2_proxy_per_client_id_duplicate_rejected_total`.
+- **`--check` стал строгим**: отсутствие любой C++ метрики в дашбордах —
+  ошибка, исключений больше нет. Прогон проходит полностью («All C++
+  metrics covered by dashboards»).
+
+### Проверка
+- `python3 scripts/generate-grafana-dashboards.py --check` — passed,
+  покрыты все 74 метрики из app_context.cpp.
+- Деплой в Grafana (`--correct-dashboards`): панель 73 подтверждена через
+  Grafana API (`/api/dashboards/uid/l2-proxy`).
+- C++ не менялся — пересборка контейнеров не требовалась.
+
+---
+
 # docs/obs/perf: Sentry-дашборд, perf re-baseline, уборка dead-кода (13b)
 
 ## Date: 2026-09-08
