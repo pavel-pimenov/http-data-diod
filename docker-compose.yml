@@ -263,6 +263,27 @@ services:
       retries: 10
       start_period: 90s
 
+  # Mock Sentry ingest endpoint for E2E/integration testing of the Sentry client
+  # (sentry_client.cpp). Reuses scripts/sentry-mock-receiver.py as a standalone
+  # container. Started only on demand:
+  #   docker compose --profile sentry-mock up -d
+  # Point the stack at it with SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1
+  # (inside the compose network the services resolve the "sentry-mock" name).
+  sentry-mock:
+    container_name: sentry-mock
+    image: python:3.12-alpine
+    restart: unless-stopped
+    profiles:
+      - sentry-mock
+    working_dir: /app
+    volumes:
+      - ./scripts/sentry-mock-receiver.py:/app/sentry-mock-receiver.py:ro
+    command: ["python3", "sentry-mock-receiver.py", "--port", "9001"]
+    ports:
+      - "9001:9001"
+    networks:
+      - l2_network
+
   # PostgreSQL 16 for the HTTP DB gateway (l2-worker connects via libpq).
   # init scripts run on the first boot via /docker-entrypoint-initdb.d.
   postgres:

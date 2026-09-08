@@ -352,6 +352,20 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 > счётчики доставки Sentry не экспонируются — это общий паттерн для
 > кросс-сервисных метрик наблюдаемости, не специфика Sentry.
 
+Mock-приёмник также доступен как профиль docker-compose для постоянной
+(не E2E-разовой) интеграции стека с Sentry-каналом:
+
+```bash
+docker compose --profile sentry-mock up -d                      # поднять mock на :9001
+docker compose up -d --no-deps sentry-mock                      # или только mock-контейнер
+# Направить реальный трафик стека на mock:
+SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1 docker compose up -d --force-recreate
+```
+
+Контейнер запускает `scripts/sentry-mock-receiver.py` и пишет принятые envelope-события
+в stdout (`docker logs sentry-mock`). Имя сервиса `sentry-mock` разрешается внутри сети
+compose, поэтому из l2-proxy/l2-worker/l2-server DSN использует это hostname.
+
 Проверка реальной доставки — E2E-скрипты (запускаются вручную):
 `python3 scripts/sentry-e2e-test.py` поднимает локальный mock-приёмник
 (`scripts/sentry-mock-receiver.py`, `POST /api/1/envelope/`), пересоздаёт
