@@ -425,7 +425,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_proxy_per_client_id_rejected_total` | counter | `client_id` | Отказы по `X-DataHub-Client-Id` |
 | `l2_proxy_per_client_id_latency_seconds` | histogram | `client_id` | Латентность по `X-DataHub-Client-Id` |
 | `l2_proxy_per_client_id_duplicate_requests_total` | counter | `client_id` | Дубликаты POST-тел по `X-DataHub-Client-Id` |
-| `l2_proxy_per_client_id_duplicate_rejected_total` | counter | `client_id` | Отказы дублей (зарезервировано) |
+| `l2_proxy_per_client_id_duplicate_rejected_total` | counter | `client_id` | Отклонённые дубли POST-тел (ответ 409 при `DUPLICATE_REJECT_ENABLED=true`) |
 
 ### l2-worker
 
@@ -645,7 +645,30 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 **Coverage gate:** стадия `coverage` в `cpp/l2-proxy/Dockerfile` линкует
 `gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
 (exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
-Текущее значение: **95.7%**.
+Текущее значение: **95.7%**. Гейт по **ветвям** не ставится (см. ниже).
+
+**Ветвевое покрытие (branch, информационно):**
+
+| Замер | Branch |
+|---|---|
+| Полный (включая инстанцирование шаблонов в тестовых файлах) | ~41% |
+| Только project-файлы (без `test_*.cpp`) | ~53% |
+
+```bash
+# ветвевой отчёт gcovr (внутри контейнера coverage; HTML-детали в coverage-report/branch.*)
+docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:coverage \
+  --object-directory /app/build-cov --root /app \
+  --filter '/app/.*\.(cpp|hpp|h)$' \
+  --exclude '/app/prometheus-cpp/.*' --exclude '/app/httplib/.*' --exclude '/app/base64/.*' \
+  --branch --gcov-ignore-errors=all --html --html-details -o /out/branch.html
+```
+
+Ветвевой показатель сильно занижен тестовыми сборочными единицами
+(`test_*.cpp` дают 28.5k ветвей из-за инстанцирования шаблонных хедеров) и
+не покрывает эвристики, недостижимые модульными тестами (таймауты, сетевые
+ошибки, DB-экзекуторы). Слабейшие по ветвям: `logger.hpp` (~19%),
+`tracing_helpers.hpp` (~40%), `db_query_executor_base.cpp` (~42%),
+`rate_limiter_per_ip.hpp` (~49%). Рабочим гейтом остаётся построчный (90%).
 
 **Текущие цифры** (раунды 11b–13a):
 

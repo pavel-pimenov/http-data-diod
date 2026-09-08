@@ -20,7 +20,18 @@ docker run -d \
     grafana/grafana:latest
 
 echo "Waiting for Grafana to start..."
-sleep 10
+for i in $(seq 1 30); do
+    if curl -sf http://localhost:33000/api/health >/dev/null 2>&1; then
+        echo "Grafana is ready (after $((i * 2))s)"
+        break
+    fi
+    if [ "$i" -eq 30 ]; then
+        echo "Grafana did not become ready in time"
+        docker rm -f grafana-test > /dev/null 2>&1
+        exit 1
+    fi
+    sleep 2
+done
 
 # Test Grafana connection
 echo "Testing Grafana connection..."
