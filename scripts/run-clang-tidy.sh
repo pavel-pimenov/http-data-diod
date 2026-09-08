@@ -45,7 +45,7 @@ BUILD_DIR="$L2_DIR/build-lint"
 BUILD_DIR_CONTAINER="/app/build-lint"
 
 # Diagnostics located outside project sources (system headers and bundled 3rd-party code)
-IGNORE_PATH_RE='^(/usr/|/app/(nats/src|httplib|base64|prometheus-cpp)/)'
+IGNORE_PATH_RE='^(/usr/|/app/(nats/src|httplib|base64|prometheus-cpp|odpi)/)'
 
 changed_cpp_files() {
     local f
