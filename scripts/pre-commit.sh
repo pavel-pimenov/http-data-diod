@@ -83,8 +83,14 @@ run_message_test() {
     return 0
 }
 
-# Run clang-tidy on changed C++ files (in the builder container)
+# Run clang-tidy on changed C++ files (in the builder container).
+# SKIP_CLANG_TIDY=1 skips the check (clang-tidy is expensive; run it manually:
+# ./scripts/run-clang-tidy.sh after refactoring rounds).
 run_clang_tidy() {
+    if [ "${SKIP_CLANG_TIDY:-0}" = "1" ]; then
+        log_warn "SKIP_CLANG_TIDY=1 — clang-tidy check skipped (run ./scripts/run-clang-tidy.sh manually)"
+        return 0
+    fi
     log_info "Running clang-tidy on changed C++ files..."
     if ! ./scripts/run-clang-tidy.sh; then
         log_error "clang-tidy found errors in changed C++ files!"

@@ -5,6 +5,7 @@
 #include "prometheus/counter.h"
 #include "prometheus/registry.h"
 #include "scoped_profiler.hpp"
+#include "sentry_client.hpp"
 #include "tracing_helpers.hpp"
 #include <array>
 #include <chrono>
@@ -101,6 +102,11 @@ void ServerHandler::handle_post(const httplib::Request &req,
   // C++23 expected monadic: transform JSON → value, or_else logs & fails
   auto json_exp = validate_and_parse_json(body, "Server");
   if (!json_exp) {
+    if (m_ctx.m_sentry) {
+      m_ctx.m_sentry->capture_message(
+          std::format("Server request validation failed: {}", json_exp.error()),
+          "", {"server_validation_error", "schema"});
+    }
     fail_request(res, 400, "Invalid JSON",
                  &m_ctx.m_server.m_metrics->m_request_errors, "", json_exp.error());
     return;

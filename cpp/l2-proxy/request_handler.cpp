@@ -20,6 +20,7 @@
 #include "rate_limiter_per_ip.hpp"
 #include "retry_utils.hpp"
 #include "scoped_metrics.hpp"
+#include "sentry_client.hpp"
 #include "scoped_profiler.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
@@ -354,6 +355,13 @@ bool RequestHandler::fail_backend_request(
   BackendErrorSpanLogger::log_backend_error(
       m_ctx.m_tracer.get(), method, path, status, start_us, trace_ctx,
       m_ctx.m_config.m_mode, request_id, category, detail);
+  if (m_ctx.m_sentry) {
+    m_ctx.m_sentry->capture_message(
+        std::format("Backend request failed: category={} message={} detail={} "
+                    "path={}",
+                    category, message, detail, path),
+        request_id, {"proxy_backend_error", category});
+  }
   return fail_request(res, status, message,
                       &m_ctx.m_proxy.m_metrics->m_client_errors, request_id,
                       detail);

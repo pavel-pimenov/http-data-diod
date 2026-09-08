@@ -48,6 +48,8 @@ git commit -m "your message"
 
 **Исключения:**
 - Можно использовать SKIP_PRECOMMIT=1 для черновых коммитов в процессе разработки
+- Можно пропустить только clang-tidy-гейт: `SKIP_CLANG_TIDY=1 ./scripts/pre-commit.sh "msg"`
+  (clang-tidy дорогой — запускается руками: `./scripts/run-clang-tidy.sh`)
 - Но перед push в origin/main сборка должна быть успешной
 
 ## Git Commit с тестами

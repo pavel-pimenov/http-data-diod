@@ -1,3 +1,43 @@
+# feat(cpp): интеграция с Sentry (10b) — точки захвата в l2-proxy/l2-server + SKIP_CLANG_TIDY
+
+## Date: 2026-09-08
+
+### Контекст
+Продолжение интеграции с Sentry (после 10a): клиент уже собирает ошибки воркера,
+но точки захвата HTTP-ошибок l2-proxy/l2-server отсутствуют. Заодно сделан
+опциональный пропуск clang-tidy-гейта в pre-commit: полный прогон дорогой и
+долгий, его удобнее запускать руками после раундов рефакторинга.
+
+### Что сделано
+- `scripts/pre-commit.sh`: поддержка `SKIP_CLANG_TIDY=1` — пропускает шаг
+  `run_clang_tidy` с предупреждением (по конвенции `SKIP_PRECOMMIT=1`).
+  Документация — в AGENTS.md.
+- `request_handler.cpp` (l2-proxy): в `fail_backend_request` добавлен capture
+  сбоев обращения к бэкенду (постановка в NATS-очередь, таймаут ответа,
+  пустой/невалидный ответ) — `capture_message` с `request_id` и fingerprint
+  `{proxy_backend_error, category}`. Отдельные client-ошибки (400 invalid JSON,
+  429 rate-limit) НЕ отслеживаются — это ожидаемое поведение, не сбой сервиса.
+- `server_handler.cpp` (l2-server): capture ошибки валидации тела запроса
+  (400 invalid JSON) — fingerprint `{server_validation_error, schema}`.
+- `README.md`: раздел «Отслеживание ошибок (Sentry, воркер)» → «(Sentry)»,
+  описаны новые точки захвата (прокси/сервер) и то, что клиент создаётся во
+  всех режимах с тегом `service` = `MODE`.
+- Бонус: в рабочем дереве оставались clang-format-правки в
+  `httplib/httplib.{cc,h}` (перенос строк/фигурные скобки) — включены в коммит
+  как форматирование, логика не менялась.
+
+### Проверка
+- `SKIP_CLANG_TIDY=1` ручной прогон pre-commit — шаг clang-tidy пропускается,
+  остальные проверки идут как обычно.
+- Сборка в контейнере ./rebuild-and-run.sh: `All tests passed (1204
+  assertions in 295 test cases)` для test_components и `742 assertions in 73
+  test cases` для test_proxy_core (тестовые TU не менялись — счётчики как в
+  10a); `health-check.sh all` ✅.
+- e2e `python3 message_counter.py --iterations 1 --concurrent 1` — ✅ (нет
+  потерь/перепутанных ответов; GET binary тоже ✅).
+- clang-tidy по изменённым файлам (run-clang-tidy.sh): no errors or warnings
+  in project files.
+
 # feat(cpp): интеграция с Sentry (10a) — лёгкий клиент, метрики, тесты
 
 ## Date: 2026-09-08

@@ -4603,8 +4603,8 @@ private:
 };
 
 template <class Rep, class Period>
-inline void
-WebSocket::set_read_timeout(const std::chrono::duration<Rep, Period> &duration) {
+inline void WebSocket::set_read_timeout(
+    const std::chrono::duration<Rep, Period> &duration) {
   detail::duration_to_sec_and_usec(
       duration, [&](time_t sec, time_t usec) { set_read_timeout(sec, usec); });
 }

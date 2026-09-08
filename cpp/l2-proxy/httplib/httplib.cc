@@ -1753,8 +1753,7 @@ ssize_t select_impl(socket_t sock, short events, time_t sec,
 
   // A negative timeout waits forever, poll's own convention. 0 keeps meaning
   // "return immediately", which callers here rely on to probe a socket.
-  auto timeout =
-      sec < 0 ? -1 : static_cast<int>(sec * 1000 + usec / 1000);
+  auto timeout = sec < 0 ? -1 : static_cast<int>(sec * 1000 + usec / 1000);
 
   return handle_EINTR([&]() { return poll_wrapper(&pfd, 1, timeout); });
 }
@@ -2233,12 +2232,10 @@ int getaddrinfo_with_timeout(const char *node, const char *service,
   // actually finish before letting the stack frame go. The trade-off is that
   // a wedged DNS server can hold this thread for the system resolver timeout
   // (~30s by default) past the caller's connection timeout.
-  struct gaicb request {};
+  struct gaicb request{};
   struct gaicb *requests[1] = {&request};
-  struct sigevent sevp {};
-  struct timespec timeout {
-    timeout_sec, 0
-  };
+  struct sigevent sevp{};
+  struct timespec timeout{timeout_sec, 0};
 
   request.ar_name = node;
   request.ar_service = service;

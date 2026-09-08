@@ -314,7 +314,7 @@ python3 rate_limit_test.py --expect-zero
 | `l2_tracing_send_latency_seconds` | histogram | Латентность отправки партии спанов |
 | `l2_tracing_queue_time_seconds` | histogram | Время спана в очереди перед отправкой |
 
-### Отслеживание ошибок (Sentry, воркер)
+### Отслеживание ошибок (Sentry)
 
 Лёгкий клиент без внешнего SDK: события собираются в асинхронную очередь и
 отправляются через встроенный HTTP-клиент (cpp-httplib) на ingest-эндпоинт
@@ -328,10 +328,18 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 `https://PUBLIC[:SECRET]@HOST[:PORT][/PATH]/PROJECT` (пустой DSN = выключено).
 Дополнительно: `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TIMEOUT_MS`
 (по умолчанию 3000), `SENTRY_MAX_QUEUE_SIZE` (по умолчанию 256).
+Клиент создаётся во всех режимах (l2-proxy, l2-server, l2-worker), тег
+`service` = режим (`MODE`).
 
-Точки интеграции сейчас: ошибки валидации запроса воркера
-(`fingerprint = ["worker_validation_error", "schema"]`) и исчерпание попыток
-вызова L2-сервера (`fingerprint = ["l2_server_call_error", url]`).
+Точки интеграции сейчас:
+- воркер: ошибки валидации запроса (`fingerprint = ["worker_validation_error",
+  "schema"]`) и исчерпание попыток вызова L2-сервера
+  (`fingerprint = ["l2_server_call_error", url]`);
+- прокси: сбои обращения к бэкенду — постановка в NATS-очередь, таймаут ответа,
+  пустой/невалидный ответ (`fingerprint = ["proxy_backend_error", category]`,
+  тег `request_id`);
+- сервер: ошибки валидации тела запроса
+  (`fingerprint = ["server_validation_error", "schema"]`).
 Метрики доставки — `l2_worker_sentry_events_sent_total` /
 `l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size`
 

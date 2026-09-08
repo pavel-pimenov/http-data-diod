@@ -1,38 +1,26 @@
 # TODO / Продолжение работы
 
-## Текущий статус (10a — Sentry)
+## Текущий статус (10b — Sentry: точки захвата)
 
-Раунд **10a «Интеграция с Sentry»** завершён и запушен:
+Раунд **10b «Sentry — расширение точек захвата»** завершён:
 
-- Лёгкий Sentry-клиент `cpp/l2-proxy/sentry_client.{hpp,cpp}` (без `sentry-native`,
-  на `cpp-httplib`): DSN-парсер, event/envelope JSON, async `jthread` + bounded-queue,
-  метрики sent/failed/queue_size, инжектируемый transport для тестов.
-- Конфиг: `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`,
-  `SENTRY_TIMEOUT_MS`, `SENTRY_MAX_QUEUE_SIZE` (добавлены в docker-compose.yml
-  для l2-server / l2-proxy / l2-worker).
-- Интеграция в `l2_worker.cpp`: capture при ошибке валидации схемы и при
-  исчерпании попыток вызова L2-сервера.
-- README.md: раздел «Отслеживание ошибок (Sentry, воркер)» + метрики
-  `l2_worker_sentry_*`.
-- Проверено: clang-tidy чисто, сборка в контейнере ✅ (1204/295 + 742/73),
-  e2e message_counter ✅.
+- l2-proxy: capture в `fail_backend_request` (queue_failed / timeout /
+  empty_response / invalid_response) — fingerprint `{proxy_backend_error,
+  category}`, тег `request_id`.
+- l2-server: capture ошибки валидации тела — fingerprint
+  `{server_validation_error, schema}`.
+- `SKIP_CLANG_TIDY=1` в `scripts/pre-commit.sh` — опциональный пропуск
+  дорогого clang-tidy-гейта (ручной прогон: `./scripts/run-clang-tidy.sh`).
 
-## Где прервался
+## Куда дальше (по приоритету)
 
-Все проверки ради 10a зелёные, коммит+push выполнен. Дальнейшая работа
-не начиналась.
-
-## Планы дальше (по приоритету)
-
-1. **Sentry — реальная доставка**: сейчас `SENTRY_DSN` нигде не задан →
-   клиент работает в no-op режиме. Проверить живую отправку на реальный DSN
-   (self-hosted Sentry в compose или внешний) и что события доходят до
-   проекта/проекта-приёмника; при необходимости добавить панель в дашборд
-   Grafana для `l2_worker_sentry_*`.
-2. **Sentry — расширение точек захвата**: рассмотреть добавление ошибок
-   HTTP-запросов (логирование ошибок l2-proxy/l2-server), возможно через
-   существующую вспомогательную функцию инициализации.
-3. **Дальнейшие раунды покрытия юнит-тестами** (как 9a–9c):
+1. **Sentry — реальная доставка**: `SENTRY_DSN` нигде не задан → клиент в
+   no-op. Проверить живую отправку на реальный DSN (self-hosted Sentry в
+   compose или внешний) и что события доходят; при необходимости добавить
+   панель Grafana для `l2_worker_sentry_*`.
+2. **Дальнейшие точки захвата**: при необходимости — ошибки DB-гейтвея
+   (db_query_handler), декомпрессия, NATS-подключение.
+3. **Дальнейшие раунды покрытия юнит-тестами**:
    - `string_utils`/`json_response_utils`/`error_types` — уже покрыты напрямую.
    - Остаются тяжёлые модули: `nats_client.cpp`, AppContext-методы
      (NATS/БД-зависимые, в `test_components` не втащить — искать новые
