@@ -1,22 +1,28 @@
-# chore(cpp): юнит-тесты ThreadPoolWrapper, DbExecutorBase, CrashHandler (9c)
+# chore(cpp): юнит-тесты ThreadPoolWrapper, DbExecutorBase, CrashHandler + common_utils реализация (9c)
 
 ## Date: 2026-09-08
 
 ### Контекст
 Раунд улучшений 9c — дополнительный скан под субагентом показал, что из
 dependency-light модулей остались не покрытыми `thread_pool_wrapper.hpp`,
-`db_query_executor_base.cpp` (драйвер-агностик) и несигнальная часть
-`crash_handler.hpp`. Остальные модули (AppContext/NATS/БД-тяжёлые) в
-`test_components` не втащить.
+`db_query_executor_base.cpp` (драйвер-агностик), несигнальная часть
+`crash_handler.hpp` и ряд функций `common_utils.cpp` (логирование/счётчики).
+Остальные модули (AppContext/NATS/БД-тяжёлые) в `test_components` не
+втащить.
 
 ### Что сделано
-- `test_coverage_ext.cpp`: добавлены теги `[thread-pool-wrapper]` (4 кейса:
+- `test_coverage_ext.cpp`: добавлены `[thread-pool-wrapper]` (4 кейса:
   NONE-режим синхронный+возвращает результат, NONE пробрасывает исключение,
   CUSTOM выполняет на воркере и переиспользуется, CUSTOM queue_size
-  ограничен bound'ом) и `[crash-handler]` (1 кейс: константный
-  `g_default_crash_dump_dir == "/crash-dumps"`). Сигнальные ветки install/write
-  не тестируются (убили бы тестовый процесс), `log_current_stacktrace` не
-  вызывается (требует -lstdc++exp).
+  ограничен bound'ом), `[crash-handler]` (1 кейс: константный
+  `g_default_crash_dump_dir == "/crash-dumps"`; сигнальные ветки
+  install/write не тестируются — убили бы тестовый процесс,
+  `log_current_stacktrace` не вызывается — требует -lstdc++exp) и
+  `[common-utils-ext]` (5 кейсов: log_span_to_jaeger no-op на null
+  трассере, log_request_received/log_response_sent, increment_and_log_*
+  инкрементят счётчики, handle_processing_error_with_category разводит
+  JSON/валидацию/декомпрессию/прочее по своим счётчикам + терпит
+  nullptr-метрики).
 - Новый TU `cpp/l2-proxy/test_db_executor_base.cpp` (тег `[db-executor-base]`,
   5 кейсов) — `DbExecutorBase` через минимальный stub-сабкласс, реализующий
   только pure-virtual поверхность (init/execute_query/ping/refresh_pool_gauges)
@@ -29,9 +35,10 @@ dependency-light модулей остались не покрытыми `thread
 
 ### Проверка
 - clang-tidy по изменённым файлам — без замечаний.
-- Сборка в контейнере ./rebuild-and-run.sh: `All tests passed (1111
-  assertions in 279 test cases)` для test_components (было 1083/269; +10
-  кейсов) и `742 assertions in 73 test cases` для test_proxy_core.
+- Сборка в контейнере ./rebuild-and-run.sh: `All tests passed (1130
+  assertions in 284 test cases)` для test_components (было 1111/279; +5
+  кейсов common_utils) и `742 assertions in 73 test cases` для
+  test_proxy_core.
 - E2E: python3 message_counter.py --iterations 1 --concurrent 1 — ✅.
 
 # chore(cpp): юнит-тесты оставшихся header-only и малых .cpp модулей (9b)

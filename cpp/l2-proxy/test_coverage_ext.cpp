@@ -21,9 +21,8 @@
 #include "httplib/httplib.h"
 #include <chrono>
 #include <memory>
-#include <thread>
-#include <vector>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -564,4 +563,105 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM queue_size reflects pending work",
 TEST_CASE("CrashHandler: default dump dir constant is exposed",
           "[crash-handler]") {
   REQUIRE(std::string(g_default_crash_dump_dir) == "/crash-dumps");
+}
+
+// ============================================================================
+// common_utils.cpp — remaining logging / counter helpers
+// ============================================================================
+
+TEST_CASE("Common utils ext: log_span_to_jaeger no-op with null tracer",
+          "[common-utils-ext]") {
+  REQUIRE_NOTHROW(log_span_to_jaeger(
+      nullptr, "POST", "http://x/query", 200, 1'000, 2'000, "srv", "req-1",
+      "trace-1", "span-1", "parent-1", nlohmann::json::object()));
+}
+
+TEST_CASE("Common utils ext: log_request_received and log_response_sent",
+          "[common-utils-ext]") {
+  REQUIRE_NOTHROW(log_request_received("ctx", 42));
+  REQUIRE_NOTHROW(log_response_sent("ctx", "req-x", 200));
+  REQUIRE_NOTHROW(log_response_sent("ctx", "", 500));
+}
+
+TEST_CASE("Common utils ext: increment_and_log_* bump counters",
+          "[common-utils-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &recv = prometheus::BuildCounter()
+                   .Name("cu_recv")
+                   .Help("h")
+                   .Register(*registry)
+                   .Add({});
+  auto &sent = prometheus::BuildCounter()
+                   .Name("cu_sent")
+                   .Help("h")
+                   .Register(*registry)
+                   .Add({});
+  REQUIRE(recv.Value() == 0.0);
+  REQUIRE(sent.Value() == 0.0);
+  increment_and_log_request_received(recv, "ctx", 10);
+  increment_and_log_response_sent(sent, "ctx", "req-y", 200);
+  REQUIRE(recv.Value() == 1.0);
+  REQUIRE(sent.Value() == 1.0);
+}
+
+TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
+          "JSON errors to the dedicated counter",
+          "[common-utils-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &inv = prometheus::BuildCounter()
+                  .Name("cu_total")
+                  .Help("h")
+                  .Register(*registry)
+                  .Add({});
+  auto &json_err = prometheus::BuildCounter()
+                       .Name("cu_json")
+                       .Help("h")
+                       .Register(*registry)
+                       .Add({});
+  auto &valid_err = prometheus::BuildCounter()
+                        .Name("cu_valid")
+                        .Help("h")
+                        .Register(*registry)
+                        .Add({});
+  auto &decomp_err = prometheus::BuildCounter()
+                         .Name("cu_decomp")
+                         .Help("h")
+                         .Register(*registry)
+                         .Add({});
+  auto &other_err = prometheus::BuildCounter()
+                        .Name("cu_other")
+                        .Help("h")
+                        .Register(*registry)
+                        .Add({});
+  ProcessingErrorMetrics metrics;
+  metrics.m_total_errors = &inv;
+  metrics.m_json_errors = &json_err;
+  metrics.m_validation_errors = &valid_err;
+  metrics.m_decompression_errors = &decomp_err;
+  metrics.m_other_errors = &other_err;
+
+  handle_processing_error_with_category("invalid json: syntax error", metrics);
+  REQUIRE(inv.Value() == 1.0);
+  REQUIRE(json_err.Value() == 1.0);
+  REQUIRE(valid_err.Value() == 0.0);
+  REQUIRE(decomp_err.Value() == 0.0);
+  REQUIRE(other_err.Value() == 0.0);
+
+  handle_processing_error_with_category("bzip2 decompression failed",
+                                        metrics);
+  REQUIRE(inv.Value() == 2.0);
+  REQUIRE(decomp_err.Value() == 1.0);
+  REQUIRE(other_err.Value() == 0.0);
+
+  handle_processing_error_with_category("random mystery error", metrics);
+  REQUIRE(inv.Value() == 3.0);
+  REQUIRE(other_err.Value() == 1.0);
+}
+
+TEST_CASE("Common utils ext: handle_processing_error_with_category tolerates "
+          "null counters",
+          "[common-utils-ext]") {
+  ProcessingErrorMetrics metrics;
+  REQUIRE_NOTHROW(
+      handle_processing_error_with_category("invalid json: boom", metrics));
 }
