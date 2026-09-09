@@ -1,3 +1,40 @@
+# build: убран мёртвый apt-груз (libspdlog1.15, libzstd-dev, libfmt-dev, pkg-config)
+
+## Date: 2026-09-09
+
+### Контекст
+После вендоринга nlohmann/json (см. предыдущую запись) — ревизия списков apt
+в Dockerfile: что реально линкуется/используется, а что установлено «на всякий
+случай». Проверялось эмпирически: `ldd` runtime-бинарника (какие shared libs
+реально DT_NEEDED), `apt-cache depends/rdepends` и поиск упоминаний в
+CMakeLists/коде.
+
+### Что сделано
+- **Dockerfile (ubuntu-base, runtime)**: удалён `libspdlog1.15` — бинарник
+  НЕ линкует libspdlog (spdlog используется header-only, в `ldd` его нет).
+  Оставлены только реально нужные: `libfmt10` (линкуется вместе с spdlog-
+  header-only как внешний fmt), `libssl3t64`, `libpq5`, `ca-certificates`,
+  `curl`; транзитивно приходят libstdc++6/libzstd1/zlib1g.
+- **Dockerfile (builder)**: удалены:
+  - `libzstd-dev` — zstd нигде не используется (ни include, ни
+    `pkg_check_modules`; на этапе линковки libpq.so.5 требует только
+    runtime-библиотеку `libzstd1`, которая приходит через libssl3t64);
+  - `libfmt-dev` — жёсткая зависимость `libspdlog-dev` (ставится автоматически);
+  - `pkg-config` — ни в одном CMake-проекте нет `pkg_check_modules`
+    (NATS и приложение используют find_package/find_library).
+- **HISTORY.md**: комментарий в ubuntu-base поясняет, почему libspdlog не
+  нужен в runtime.
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, unit-тесты на билд-стадии прошли,
+  сервисы healthy.
+- Контейнер без `libspdlog1.15`: `dpkg -l` показывает только
+  libfmt10/libpq5/libssl3t64; `ldd /root/l2-proxy` → «no libspdlog linked».
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅
+  (POST 1/1 без потерь, GET binary ✅).
+
+---
+
 # build/refactor: завендорен nlohmann/json (снята apt-зависимость nlohmann-json3-dev)
 
 ## Date: 2026-09-09

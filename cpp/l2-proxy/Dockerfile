@@ -30,11 +30,13 @@ RUN set -eux; \
 # runtime-base and runtime need no apt of their own: one fewer
 # apt-get update per cold build and no apt lock contention between
 # the runtime and builder stages.
+# Only libs the l2-proxy binary actually links (ldd) are kept: libfmt10
+# (spdlog is used header-only, so libspdlog is NOT a runtime dep), libssl3t64
+# and libpq5 (plus their transitive deps libzstd1/zlib1g/libstdc++6).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libfmt10 \
-    libspdlog1.15 \
     libssl3t64 \
     libpq5 \
     ca-certificates \
@@ -52,6 +54,10 @@ FROM ubuntu-base AS builder
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies (stable layer — rarely changes)
+# libfmt-dev is omitted on purpose: it is a hard dependency of libspdlog-dev
+# (installed automatically). libzstd-dev and pkg-config are not referenced by
+# the application or either CMake build (zstd comes at link time from the
+# libzstd1 runtime lib, pulled in by libssl3t64).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -60,12 +66,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ninja-build \
     ca-certificates \
     cmake \
-    pkg-config \
     zlib1g-dev \
     libssl-dev \
-    libzstd-dev \
     libspdlog-dev \
-    libfmt-dev \
     libgoogle-perftools-dev \
     clang-tidy \
     clang-format \
