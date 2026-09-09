@@ -50,6 +50,9 @@ struct ProxyMetrics {
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
   prometheus::Gauge &m_health_ready;
+  // Client ids currently tracked by the duplicate detector (bounded by
+  // DUPLICATE_DETECTION_MAX_CLIENTS); updated from the periodic stats logger.
+  prometheus::Gauge &m_duplicate_tracked_clients;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

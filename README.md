@@ -231,6 +231,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_proxy_in_flight_requests` — число одновременно обрабатываемых HTTP-запросов прокси (gauge, насыщенность).
 - `l2_proxy_nats_connected` — состояние связи прокси с NATS (1/0, gauge).
 - `l2_proxy_health_ready` — готовность прокси по `/health/ready` (1/0, gauge).
+- `l2_proxy_duplicate_tracked_clients` — число client_id, отслеживаемых duplicate-детектором (gauge; ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит `DUPLICATE_DETECTION_CLIENT_TTL_MS`).
 - `l2_worker_responses_total{status="..."}` — ответы воркера, отданные по NATS, по HTTP-статусу (counter family).
 - `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
 - `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
@@ -419,12 +420,17 @@ HTTP-эндпоинт.
 | `l2_proxy_in_flight_requests` | gauge | — | Одновременно обрабатываемые HTTP-запросы |
 | `l2_proxy_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_proxy_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
+| `l2_proxy_duplicate_tracked_clients` | gauge | — | Число client_id, отслеживаемых duplicate-детектором (ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит TTL) |
 
 Наблюдаемость дубликатов POST-тел: когда клиент часто шлёт один и тот же body,
 прокси пишет WARN-сообщение со статистикой (`client_id`, `client_ip`, счётчик
 дублей). Логирование срабатывает каждые `DUPLICATE_LOG_THRESHOLD` дублей от
 одного `client_id` (по умолчанию `5`, `0` = отключено; счётчик — это общее
-число дублей клиента, инкрементируемое вкл. по разным телам).
+число дублей клиента, инкрементируемое вкл. по разным телам). Карта
+per-client счётчиков ограничена: `DUPLICATE_DETECTION_MAX_CLIENTS` (по
+умолчанию `1000`, `0` = без ограничения) и TTL-эvикцией простаивающих клиентов
+`DUPLICATE_DETECTION_CLIENT_TTL_MS` (по умолчанию 30 мин, `0` = без TTL) —
+защита памяти долго живущего прокси.
 
 HTTP-пул клиентов (gauge/counter, реестр прокси):
 

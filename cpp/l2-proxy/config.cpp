@@ -274,6 +274,16 @@ void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
     check(positive(cfg.m_duplicate_detection_ttl_ms),
           std::format("Invalid DUPLICATE_DETECTION_TTL_MS: {} (must be > 0)",
                       cfg.m_duplicate_detection_ttl_ms));
+    check(non_negative(cfg.m_duplicate_detection_max_clients),
+          std::format(
+              "Invalid DUPLICATE_DETECTION_MAX_CLIENTS: {} (must be >= 0, "
+              "0 = unbounded)",
+              cfg.m_duplicate_detection_max_clients));
+    check(non_negative(cfg.m_duplicate_detection_client_ttl_ms),
+          std::format(
+              "Invalid DUPLICATE_DETECTION_CLIENT_TTL_MS: {} (must be >= 0, "
+              "0 = no TTL eviction)",
+              cfg.m_duplicate_detection_client_ttl_ms));
     check(non_negative(cfg.m_duplicate_detection_max_body_bytes),
           std::format(
               "Invalid DUPLICATE_DETECTION_MAX_BODY_BYTES: {} (must be >= 0)",
@@ -457,13 +467,19 @@ void Config::load_feature_config() {
       get_env_int("DUPLICATE_DETECTION_TTL_MS", 60000);
   m_duplicate_log_threshold =
       get_env_int("DUPLICATE_LOG_THRESHOLD", 5);
+  m_duplicate_detection_max_clients =
+      get_env_int("DUPLICATE_DETECTION_MAX_CLIENTS", 1000);
+  m_duplicate_detection_client_ttl_ms =
+      get_env_int("DUPLICATE_DETECTION_CLIENT_TTL_MS", 1800000);
   Logger::info("Duplicate detection: enabled={} top_n={} max_entries={} "
-               "max_body_bytes={} ttl_ms={} reject_enabled={} log_threshold={}",
+               "max_body_bytes={} ttl_ms={} reject_enabled={} log_threshold={} "
+               "max_clients={} client_ttl_ms={}",
                m_duplicate_detection_enabled, m_duplicate_detection_top_n,
                m_duplicate_detection_max_entries,
                m_duplicate_detection_max_body_bytes,
                m_duplicate_detection_ttl_ms, m_duplicate_reject_enabled,
-               m_duplicate_log_threshold);
+               m_duplicate_log_threshold, m_duplicate_detection_max_clients,
+               m_duplicate_detection_client_ttl_ms);
 }
 
 void Config::load_nats_config() {

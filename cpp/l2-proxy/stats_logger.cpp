@@ -1,4 +1,5 @@
 #include "stats_logger.hpp"
+#include "duplicate_detector.hpp"
 #include "logger.hpp"
 
 StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag)
@@ -81,6 +82,12 @@ void StatsLogger::start_periodic_logging() {
         }
 
         if (m_app_ctx.m_config.m_mode == "proxy") {
+          if (m_app_ctx.m_proxy.m_duplicate_detector) {
+            m_app_ctx.m_proxy.m_metrics->m_duplicate_tracked_clients.Set(
+                static_cast<double>(
+                    m_app_ctx.m_proxy.m_duplicate_detector
+                        ->per_client_count_size()));
+          }
           Logger::info("Statistics - NATS Requests: {}, NATS Errors: {}",
                        s.m_nats_requests, s.m_nats_errors);
         }

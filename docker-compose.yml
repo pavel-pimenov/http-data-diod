@@ -415,6 +415,10 @@ services:
       - DUPLICATE_DETECTION_TTL_MS=${DUPLICATE_DETECTION_TTL_MS:-60000}
       # Log every N duplicate POST bodies from the same client_id (0 = off)
       - DUPLICATE_LOG_THRESHOLD=${DUPLICATE_LOG_THRESHOLD:-5}
+      # Bound on client ids tracked by the duplicate detector (0 = unbounded);
+      # idle client counters are dropped after CLIENT_TTL_MS of inactivity
+      - DUPLICATE_DETECTION_MAX_CLIENTS=${DUPLICATE_DETECTION_MAX_CLIENTS:-1000}
+      - DUPLICATE_DETECTION_CLIENT_TTL_MS=${DUPLICATE_DETECTION_CLIENT_TTL_MS:-1800000}
       # Reject (HTTP 409) a duplicate POST body within the detector TTL instead
       # of forwarding it (default false: only count/log duplicates)
       - DUPLICATE_REJECT_ENABLED=${DUPLICATE_REJECT_ENABLED:-false}

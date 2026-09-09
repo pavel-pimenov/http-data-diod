@@ -19,6 +19,11 @@ Scenarios:
                               them from its dedup cache without calling the L2
                               server again (l2_proxy_duplicate_requests_total
                               and l2_worker_duplicate_requests_total grow).
+   5. l2-proxy restart      - l2-proxy (the client-facing HTTP proxy) is
+                              restarted under continuous load: in-flight
+                              requests finish with 5xx or a dropped connection
+                              (never a hang), the proxy becomes ready again and
+                              message consistency is intact after recovery.
 
 Every scenario restores the services it stopped, even on failure, so the
 stack is left healthy at the end.
@@ -524,12 +529,74 @@ async def test_nats_dedup_resend() -> bool:
     return ok
 
 
+async def test_proxy_restart() -> bool:
+    print(f"\n{Colors.GREEN}{'=' * 60}\n[5/5] l2-proxy restarted under load\n"
+          f"{'=' * 60}{Colors.NC}")
+    ok = True
+    load_task: Optional[asyncio.Task] = None
+    statuses: List[dict] = []
+    try:
+        print("[5a] Starting continuous load, then restarting l2-proxy...")
+        connector = aiohttp.TCPConnector(limit=16, ssl=not SSL_VERIFY)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            load_task = asyncio.create_task(
+                run_duration_load(session, duration_s=10, concurrency=8,
+                                  body="proxy-restart-test"))
+
+            await asyncio.sleep(1.5)  # let the load ramp up
+
+            print("[5b] docker compose restart l2-proxy...")
+            r = run(["docker", "compose", "restart", "l2-proxy"])
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"docker compose restart l2-proxy failed: {r.stderr.strip()}")
+
+            print("[5c] Waiting for proxy recovery...")
+            ok = await wait_until(PROXY_READY_URL, 200, RECOVERY_TIMEOUT,
+                                  "proxy /health/ready") and ok
+
+            try:
+                statuses = await asyncio.wait_for(load_task, timeout=60)
+            except Exception as e:
+                logger.error("Load generation failed: %s", e)
+                ok = False
+
+        ok200 = sum(1 for s in statuses if s["status"] == 200)
+        hung = sum(1 for s in statuses if s["error"] == "timeout"
+                   and s["elapsed"] >= CLIENT_TIMEOUT - 1)
+        conn_errors = sum(1 for s in statuses if s["error"] == "conn_error")
+        print(f"  load results: 200={ok200}, connection errors={conn_errors}, "
+              f"hung={hung}, total={len(statuses)}")
+        if ok200 == 0:
+            print(f"{Colors.RED}  FAIL: no request returned 200 after "
+                  f"recovery{Colors.NC}")
+            ok = False
+        if hung > 0:
+            print(f"{Colors.RED}  FAIL: {hung} requests genuinely hung until "
+                  f"client timeout{Colors.NC}")
+            ok = False
+        if conn_errors > len(statuses) * 0.5:
+            print(f"{Colors.RED}  FAIL: the proxy restart dropped the majority "
+                  f"of in-flight client connections{Colors.NC}")
+            ok = False
+    except Exception as e:
+        logger.error("l2-proxy restart scenario raised: %s", e)
+        ok = False
+    finally:
+        await ensure_services_up(["l2-proxy"])
+
+    if ok:
+        print("[5d] Verifying message consistency after proxy restart...")
+        ok = run_message_counter()
+    return ok
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Fault tolerance integration tests for the HTTP-data-diod "
                     "stack")
     parser.add_argument("--skip", action="append", default=[],
-                        choices=["nats", "server", "worker", "dedup"],
+                        choices=["nats", "server", "worker", "dedup", "proxy"],
                         help="Skip a scenario (may be repeated)")
     return parser.parse_args()
 
@@ -545,6 +612,7 @@ async def main() -> int:
         ("server", test_l2_server_down),
         ("worker", test_worker_kill),
         ("dedup", test_nats_dedup_resend),
+        ("proxy", test_proxy_restart),
     ]
 
     for name, coro in scenarios:

@@ -1,3 +1,80 @@
+# feat(proxy): ограничение per-client счётчика дублей + gauge l2_proxy_duplicate_tracked_clients
+
+## Date: 2026-09-09
+
+### Что сделано
+- `duplicate_detector.{hpp,cpp}`: карта `m_per_client_count` (client_id →
+  счётчик дублей) больше не растёт бесконечно. Каждая запись теперь несёт
+  `last_seen_ms`; добавлены опции `m_per_client_max_entries` (default 1000,
+  `0` = без лимита) и `m_per_client_ttl_ms` (default 30 мин, `0` = без TTL):
+  - `evict_expired_clients_locked` — подчищает простаивающие счётчики при
+    каждом `record()` (вместе с эvикцией тел);
+  - при переполнении cap эvиктируется самый давний по активности (LRU).
+  Новый метод `per_client_count_size()`.
+- `config.{hpp,cpp}`: `DUPLICATE_DETECTION_MAX_CLIENTS` (default 1000) и
+  `DUPLICATE_DETECTION_CLIENT_TTL_MS` (default 1800000), валидация `>= 0`,
+  в лог старта.
+- `app_context.{hpp,cpp}`: новая gauge-метрика
+  `l2_proxy_duplicate_tracked_clients` («число client_id под наблюдением
+  duplicate-детектора»); значение обновляет периодический `StatsLogger` (раз в
+  600 с, proxy-режим).
+- `docker-compose.yml` / `.env.example`: новые переменные для l2-proxy.
+- `README.md`: метрика в «полном каталоге» и в observability-секции +
+  описание ограничений счётчика.
+- `test_components.cpp`: LRU-огранка по cap, TTL-эvикция простаивающих
+  клиентов, `max_clients=0` (без лимита); config: отрицательные значения
+  новых env фейлят валидацию.
+
+### Проверка
+- Сборка в контейнерах (l2-worker, гейт юнит-тестов `test_components` +
+  `test_proxy_core`) — зелёная; `./rebuild-and-run.sh` — health OK.
+- `message_counter.py --iterations 1 --concurrent 1 --dup-check` — ✅ (7×200,
+  WARN `total=5 threshold=5`).
+- Gauge экспонируется: `l2_proxy_duplicate_tracked_clients 0`.
+- Известный pre-existing warning golden-check: ленивые семейства
+  `l2_proxy_per_ip_{rejected,requests}_total` отсутствуют до первого rate-limit
+  события (не связано с этими изменениями).
+
+# test(tools): юнит-тесты чистых хелперов message_counter.py (unittest, без сети)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `message_counter.py`: из `_grep_proxy_logs` вынесена чистая функция
+  `_matches_duplicate_log(client_id, line)` (pure regex + re.escape).
+- Новый `tests/test_message_counter.py` (unittest stdlib, без docker/сети):
+  - распознавание WARN-строки, regex-спецсимволы в client_id, отсечение чужих
+    клиентов, равенство `DUPLICATE_CHECK_SENDS = threshold + 2`;
+  - `print_duplicate_check_results`: `log_matched=None` (skip, не fail),
+    пустой список (fail), найденные строки (pass);
+  - формат автогенерации `dup-check-<ts>` и контракт групп паттерна.
+- CI: новый шаг `Python unit tests (no network)`.
+
+### Проверка
+- `python3 -m unittest discover -s tests -v` — 9/9 OK.
+- `scripts/lint-python.py` на изменённых файлах — 0 issues (message_counter.py
+  только существующие LONG100).
+
+# test(e2e): fault_tolerance — сценарий «l2-proxy restarted under load»
+
+## Date: 2026-09-09
+
+### Что сделано
+- `fault_tolerance_test.py`: сценарий `[5/5] l2-proxy restart under load`
+  (флаг `--skip proxy`):
+  - непрерывная нагрузка (8 coroutine × 10 s) → посреди потока
+    `docker compose restart l2-proxy`;
+  - после восстановления `/health/ready` снова 200; assert: нет зависших
+    запросов, хоть один 200 после recovery, conn-errors не превышают 50%
+    (in-flight клиентские соединения при рестарте рвутся — ожидаемо);
+  - финальная проверка целостности `message_counter.py`.
+- Docstring сценариев обновлён (5-й пункт).
+
+### Проверка
+- `python3 fault_tolerance_test.py --skip nats --skip server --skip worker
+  --skip dedup` → `[PASS] proxy`: 1925×200, 8 conn-errors, hung=0,
+  message_counter ✅. Стек после теста снова healthy (ensure_services_up).
+
 # test(tools): message_counter --dup-check — проверка WARN-логирования частых дублей по клиенту
 
 ## Date: 2026-09-09

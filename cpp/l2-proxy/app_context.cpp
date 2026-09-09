@@ -157,7 +157,11 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_gauge(
           m_proxy_registry, "l2_proxy_health_ready",
           "Readiness state (1 = ready, 0 = not ready) mirrored from "
-          "/health/ready")});
+          "/health/ready"),
+      MetricsManager::create_gauge(
+          m_proxy_registry, "l2_proxy_duplicate_tracked_clients",
+          "Current number of client ids tracked by the duplicate detector "
+          "(bounded by DUPLICATE_DETECTION_MAX_CLIENTS)")});
 
   m_proxy.m_http_pool_metrics =
       std::make_unique<HttpPoolMetrics>(HttpPoolMetrics{
@@ -411,11 +415,18 @@ void AppContext::init_proxy_components() {
       m_config.m_duplicate_detection_max_body_bytes;
   dup_options.m_ttl_ms = m_config.m_duplicate_detection_ttl_ms;
   dup_options.m_duplicate_log_threshold = m_config.m_duplicate_log_threshold;
+  dup_options.m_per_client_max_entries =
+      m_config.m_duplicate_detection_max_clients;
+  dup_options.m_per_client_ttl_ms =
+      m_config.m_duplicate_detection_client_ttl_ms;
   m_proxy.m_duplicate_detector =
       std::make_unique<DuplicateDetector>(dup_options);
   Logger::info("Duplicate POST detector initialized: enabled={} top_n={} "
-               "max_entries={} max_body_bytes={} ttl_ms={} log_threshold={}",
+               "max_entries={} max_body_bytes={} ttl_ms={} log_threshold={} "
+               "max_clients={} client_ttl_ms={}",
                dup_options.m_enabled, dup_options.m_top_n,
                dup_options.m_max_entries, dup_options.m_max_body_bytes,
-               dup_options.m_ttl_ms, dup_options.m_duplicate_log_threshold);
+               dup_options.m_ttl_ms, dup_options.m_duplicate_log_threshold,
+               dup_options.m_per_client_max_entries,
+               dup_options.m_per_client_ttl_ms);
 }

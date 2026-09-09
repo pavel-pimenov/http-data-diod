@@ -855,6 +855,13 @@ async def run_duplicate_check(url: str, client_id: Optional[str] = None) -> Dict
             "sent": len(statuses), "log_matched": log_matched}
 
 
+def _matches_duplicate_log(client_id: str, line: str) -> bool:
+    """True when the proxy log line contains the frequent-duplicate WARN of
+    client_id. Kept as a pure function so the regex is unit-testable."""
+    pattern = re.compile(DUPLICATE_LOG_PATTERN.format(re.escape(client_id)))
+    return pattern.search(line) is not None
+
+
 async def _grep_proxy_logs(client_id: str, send_elapsed: float) -> Optional[List[str]]:
     """
     Grep l2-proxy container logs for the frequent-duplicate WARN of client_id.
@@ -882,8 +889,8 @@ async def _grep_proxy_logs(client_id: str, send_elapsed: float) -> Optional[List
         logger.warning(f"docker compose logs failed: {e}; "
                        "duplicate check skipped")
         return None
-    pattern = re.compile(DUPLICATE_LOG_PATTERN.format(re.escape(client_id)))
-    return [line for line in output.splitlines() if pattern.search(line)]
+    return [line for line in output.splitlines()
+            if _matches_duplicate_log(client_id, line)]
 
 
 def print_duplicate_check_results(results: dict) -> bool:

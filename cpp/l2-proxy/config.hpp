@@ -106,6 +106,8 @@ public:
   int m_duplicate_detection_max_body_bytes{500};
   int m_duplicate_detection_ttl_ms{60000};
   int m_duplicate_log_threshold{5};
+  int m_duplicate_detection_max_clients{1000};
+  int m_duplicate_detection_client_ttl_ms{1800000};
   int m_nats_port{4222};
   int m_nats_timeout_ms{30000};
   // DB Gateway NATS request timeout (how long the proxy waits for a worker

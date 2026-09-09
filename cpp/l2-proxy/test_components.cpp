@@ -474,6 +474,20 @@ TEST_CASE("Config: negative duplicate log threshold fails validation",
   REQUIRE(config.validate(false) == false);
 }
 
+TEST_CASE("Config: negative duplicate max clients fails validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_detection_max_clients = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: negative duplicate client TTL fails validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_detection_client_ttl_ms = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
 TEST_CASE("Config: zero tracing batch size fails validation", "[config]") {
   Config config;
   config.m_tracing_batch_size = 0;
@@ -1855,6 +1869,78 @@ TEST_CASE("DuplicateDetector: per-client duplicate count increments",
   REQUIRE(detector.record("client-b", "10.0.0.2", "hash-1",
                           R"({"v":1})")
               .second == 1);
+}
+
+TEST_CASE(
+    "DuplicateDetector: per-client counters are bounded by max_entries (LRU)",
+    "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_max_entries = 1;
+  DuplicateDetector detector(options);
+
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  REQUIRE(detector.per_client_count_size() == 1);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .second == 2);
+
+  // A second client overflows the cap; client-a (idle longest) is evicted.
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  REQUIRE(detector.per_client_count_size() == 1);
+
+  // After eviction client-a starts counting from scratch and re-enters the
+  // map by evicting client-b — the size always stays at the cap.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .second == 1);
+  REQUIRE(detector.per_client_count_size() == 1);
+}
+
+TEST_CASE("DuplicateDetector: idle per-client counters expire after TTL",
+          "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_ttl_ms = 40;
+  DuplicateDetector detector(options);
+
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  REQUIRE(detector.per_client_count_size() == 1);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+  // The idle counter was dropped: a first-ever body is not a duplicate and
+  // the per-client map is empty after the eviction pass.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-2",
+                          R"({"v":2})")
+              .second == 0);
+  REQUIRE(detector.per_client_count_size() == 0);
+  // The next duplicate starts the counter from scratch again.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-2",
+                          R"({"v":2})")
+              .second == 1);
+  detector.record("client-a", "10.0.0.1", "hash-3", R"({"v":3})");
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-3",
+                          R"({"v":3})")
+              .second == 2);
+}
+
+TEST_CASE("DuplicateDetector: max_clients=0 keeps unbounded tracking",
+          "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_max_entries = 0;
+  DuplicateDetector detector(options);
+
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+
+  REQUIRE(detector.per_client_count_size() == 2);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .second == 2);
 }
 
 // ============================================================================

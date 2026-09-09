@@ -39,6 +39,13 @@ public:
     size_t m_max_body_bytes = 500; // store body sample only if <= this size
     // When > 0, log a warning every N duplicates from the same client_id.
     size_t m_duplicate_log_threshold = 5;
+    // Bound on tracked client ids in m_per_client_count. Set to 0 to allow
+    // unbounded growth (memory risk on long-running proxies).
+    size_t m_per_client_max_entries = 1000;
+    // Inactivity window for a tracked client counter. 0 disables TTL eviction;
+    // with a nonzero value an idle client's counter is dropped so the map
+    // cannot grow forever.
+    uint64_t m_per_client_ttl_ms = 1800000;
   };
 
   // Default-constructed detector keeps the default Options (see .cpp; the
@@ -59,6 +66,10 @@ public:
   // How many distinct bodies were seen more than once (for metrics).
   size_t duplicate_bodies() const;
 
+  // How many client ids are currently tracked in the per-client duplicate
+  // counter map (for metrics gauges). Bounded by m_per_client_max_entries.
+  size_t per_client_count_size() const;
+
   // JSON report: {enabled, duplicate_bodies, duplicate_occurrences,
   // by_type: {same_client, cross_client}, top: [...]}.
   nlohmann::json report() const;
@@ -77,15 +88,26 @@ private:
     uint64_t m_count = 0;
   };
 
+  struct ClientCount {
+    size_t m_count = 0;
+    uint64_t m_last_seen_ms = 0;
+  };
+
   void evict_expired_locked(uint64_t now_ms);
   // Evicts the entry with the smallest occurrence count (oldest among ties)
   // so the most interesting duplicates survive when the map is full.
   void evict_lowest_count_locked();
+  // Drops idle client counters (m_per_client_ttl_ms) so the per-client map is
+  // bounded over time.
+  void evict_expired_clients_locked(uint64_t now_ms);
+  // Drops the counter idle for the longest (LRU) to honor m_per_client_max_entries.
+  void evict_oldest_client_locked();
 
   Options m_options;
   mutable std::mutex m_mutex;
   std::unordered_map<std::string, Entry> m_entries; // key: sha256 hex
-  std::unordered_map<std::string, size_t> m_per_client_count; // client_id -> total duplicates
+  std::unordered_map<std::string, ClientCount>
+      m_per_client_count; // client_id -> duplicate counter
 };
 
 #endif // DUPLICATE_DETECTOR_HPP
