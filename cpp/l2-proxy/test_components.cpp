@@ -1343,7 +1343,9 @@ TEST_CASE("ThreadPool: shutdown drains queued tasks", "[thread-pool]") {
 // ============================================================================
 
 #include "logger.hpp"
+#include <spdlog/details/log_msg.h>
 #include <sstream>
+#include <unordered_map>
 
 TEST_CASE("Logger: LogContext thread-local fields", "[logger]") {
   Logger::set_request_id("req-123");
@@ -1364,6 +1366,128 @@ TEST_CASE("Logger: LogContext set_service_name works", "[logger]") {
   // Just verify no crash
   REQUIRE(true);
   Logger::clear_correlation_context();
+}
+
+namespace {
+std::string format_via_formatter(spdlog::formatter &formatter,
+                                 spdlog::level::level_enum lvl,
+                                 const spdlog::source_loc &loc,
+                                 const char *logger_name,
+                                 const char *payload) {
+  spdlog::memory_buf_t buf;
+  spdlog::details::log_msg msg(loc, logger_name, lvl, payload);
+  formatter.format(msg, buf);
+  return std::string(buf.data(), buf.size());
+}
+} // namespace
+
+TEST_CASE("Logger: JsonFormatter emits structured fields from context",
+          "[logger]") {
+  Logger::clear_correlation_context();
+  Logger::set_service_name("svc-test");
+  Logger::set_request_id("req-abc");
+  Logger::set_trace_id("trace-xyz");
+  Logger::set_client_ip("10.1.2.3");
+
+  spdlog::custom::JsonFormatter formatter;
+  const spdlog::source_loc loc{"fake.cpp", 42, "fake_func"};
+  const auto out = format_via_formatter(
+      formatter, spdlog::level::info, loc, "test-logger", "hello world");
+
+  const auto j = nlohmann::json::parse(out);
+  REQUIRE(j["level"] == "info");
+  REQUIRE(j["message"] == "hello world");
+  REQUIRE(j["service"] == "svc-test");
+  REQUIRE(j["request_id"] == "req-abc");
+  REQUIRE(j["trace_id"] == "trace-xyz");
+  REQUIRE(j["client_ip"] == "10.1.2.3");
+  REQUIRE(j["thread_id"] >= 0);
+  REQUIRE(j["source"]["file"] == "fake.cpp");
+  REQUIRE(j["source"]["line"] == 42);
+  REQUIRE(j["source"]["func"] == "fake_func");
+  REQUIRE(j["timestamp"].is_string());
+  Logger::clear_correlation_context();
+}
+
+TEST_CASE("Logger: JsonFormatter clone and service fallback", "[logger]") {
+  Logger::clear_correlation_context();
+  Logger::set_service_name("");
+  spdlog::custom::JsonFormatter formatter;
+  const auto clone = formatter.clone();
+  REQUIRE(clone != nullptr);
+
+  const spdlog::source_loc empty_loc;
+  const auto out = format_via_formatter(
+      *clone, spdlog::level::warn, empty_loc, "bootstrap-logger", "no ctx");
+  const auto j = nlohmann::json::parse(out);
+  REQUIRE(j["service"] == "bootstrap-logger");
+  REQUIRE_FALSE(j.contains("request_id"));
+  REQUIRE_FALSE(j.contains("trace_id"));
+  REQUIRE_FALSE(j.contains("client_ip"));
+  REQUIRE_FALSE(j.contains("source"));
+  Logger::clear_correlation_context();
+}
+
+TEST_CASE("Logger: TextFormatter plain without colors", "[logger]") {
+  Logger::clear_correlation_context();
+  spdlog::custom::TextFormatter formatter(false);
+  const auto out = format_via_formatter(
+      formatter, spdlog::level::info, spdlog::source_loc{}, "tl", "plain msg");
+  REQUIRE(out.find("[info]") != std::string::npos);
+  REQUIRE(out.find("\033[") == std::string::npos);
+  REQUIRE(out.find("request_id=") == std::string::npos);
+  REQUIRE(out.find("[trace_id=") == std::string::npos);
+  REQUIRE(out.find("[client_ip=") == std::string::npos);
+  REQUIRE(out.find("[thread=") != std::string::npos);
+  REQUIRE(out.find("plain msg") != std::string::npos);
+}
+
+TEST_CASE("Logger: TextFormatter colors and correlation prefix", "[logger]") {
+  Logger::clear_correlation_context();
+  Logger::set_request_id("r1");
+  Logger::set_trace_id("t2");
+  Logger::set_client_ip("c3");
+
+  spdlog::custom::TextFormatter formatter(true);
+  REQUIRE(formatter.clone() != nullptr);
+  const std::unordered_map<spdlog::level::level_enum, std::string> colors{
+      {spdlog::level::debug, "90"}, {spdlog::level::info, "97"},
+      {spdlog::level::warn, "95"},  {spdlog::level::err, "91"}};
+  for (const auto &[lvl, code] : colors) {
+    const auto out = format_via_formatter(formatter, lvl,
+                                          spdlog::source_loc{}, "tl", "m");
+    REQUIRE(out.find("\033[" + code + "m[" + spdlog::level::to_string_view(lvl).data() + "]\033[0m") != std::string::npos);
+  }
+
+  const auto out = format_via_formatter(
+      formatter, spdlog::level::info, spdlog::source_loc{}, "tl", "correlated");
+  REQUIRE(out.find("[request_id=r1 trace_id=t2 client_ip=c3]") !=
+          std::string::npos);
+  Logger::clear_correlation_context();
+}
+
+TEST_CASE("Logger: get_level/set_level mapping and set_level_from_string",
+          "[logger]") {
+  Logger::set_level(Logger::INFO);
+  REQUIRE(Logger::get_level() == Logger::INFO);
+  Logger::set_level(Logger::WARN);
+  REQUIRE(Logger::get_level() == Logger::WARN);
+  Logger::set_level(Logger::ERROR);
+  REQUIRE(Logger::get_level() == Logger::ERROR);
+  Logger::set_level(Logger::DEBUG);
+  REQUIRE(Logger::get_level() == Logger::DEBUG);
+
+  Logger::set_level_from_string("INFO");
+  REQUIRE(Logger::get_level() == Logger::INFO);
+  Logger::set_level_from_string("warning");
+  REQUIRE(Logger::get_level() == Logger::WARN);
+  Logger::set_level_from_string("ERROR");
+  REQUIRE(Logger::get_level() == Logger::ERROR);
+  Logger::set_level_from_string("DEBUG");
+  REQUIRE(Logger::get_level() == Logger::DEBUG);
+  Logger::set_level_from_string("bogus");
+  REQUIRE(Logger::get_level() == Logger::INFO);
+  Logger::set_level(Logger::DEBUG);
 }
 
 TEST_CASE("TraceLogger: build_span_json emits Zipkin v2 parentId",

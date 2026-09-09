@@ -1,3 +1,38 @@
+# test(cpp): раунд покрытия 13c — logger.hpp 57->88%, tracing_helpers 81->98% (+7 тестов)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `test_components.cpp`: прямые тесты форматтеров логгера (`spdlog::custom::*`):
+  - `JsonFormatter` — структурированный JSON (timestamp/level/service/message/
+    thread_id/source), подстановка service из correlation-контекста и его
+    fallback на `logger_name`, `clone()`;
+  - `TextFormatter` — plain без цветов (нет ANSI, нет correlation-префикса),
+    цвета + префикс `[request_id=.. trace_id=.. client_ip=..]`, все ветки
+    `level_color` (debug/info/warn/err), `clone()`;
+  - `Logger::set_level`/`get_level`/`set_level_from_string` — маппинг всех
+    уровней (DEBUG/INFO/WARN/ERROR/unknown).
+- `test_trace_logger.cpp`: тесты `tracing_helpers.hpp` с реальным `JaegerLogger`:
+  - `make_span_and_traceparent` возвращает span_id/traceparent через tracer,
+  - `log_incoming_span` генерирует inlet span и логирует INCOMING-спан,
+  - `TraceContextHelper::extract_from_raw` с валидным traceparent (ветка
+    «traceparent найден», строка 67) и нормальным возвратом.
+- `README.md`: счётчики 342/1459, значения строкового покрытия (Totals),
+  обновлены слабейшие по ветвям модули.
+
+### Проверка
+- Покрытие строк: TOTAL 7638/7870 = **97.1%** (гейт `--fail-under-line 90` ✅).
+  `logger.hpp` **57% → 88%**, `tracing_helpers.hpp` **81% → 98%**,
+  `rate_limiter_per_ip.hpp` 89% (раунд 13b).
+- Ветви: `logger.hpp` ~47%, `tracing_helpers.hpp` ~58%, `rate_limiter_per_ip.hpp`
+  ~59% (росту аналитических оценок).
+- `./scripts/run-coverage.sh`: builder-стадия «All tests passed (1459 assertions
+  in 342 test cases)» + «(742 assertions in 73 test cases)».
+- Нюанс: предыдущий запуск coverage-сборки упал молча из-за нехватки места
+  (`/dev/sda4` 99%; `error writing to /tmp/*.s: No space left on device`) —
+  после `docker builder prune`/`docker image prune` сборка прошла.
+- clang-tidy по изменённым файлам — без замечаний.
+
 # test(cpp): раунд покрытия 13b — PerIPRateLimiter + string_utils (+6 тестов)
 
 ## Date: 2026-09-09

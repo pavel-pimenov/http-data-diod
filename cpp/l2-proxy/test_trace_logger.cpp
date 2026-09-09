@@ -8,6 +8,7 @@
 #include "httplib/httplib.h"
 #include "nlohmann/json.hpp"
 #include "trace_logger.hpp"
+#include "tracing_helpers.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -399,4 +400,43 @@ TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
   REQUIRE(generated.m_span_id.size() == 16);
   REQUIRE(generated.m_parent_id.empty());
   REQUIRE(generated.m_traceparent_header.size() == 55);
+}
+
+TEST_CASE("TraceLogger: make_span_and_traceparent uses the tracer",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_parent_id = "abcdef0123456789";
+  ctx.m_traceparent_header = "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
+
+  const auto [span_id, tp] = make_span_and_traceparent(tracer, ctx);
+  REQUIRE(span_id.size() == 16);
+  REQUIRE(tp.size() == 55);
+  REQUIRE(tp.rfind("00-0123456789abcdef0123456789abcdef-", 0) == 0);
+  REQUIRE(tp.find(span_id) != std::string::npos);
+}
+
+TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_parent_id = "abcdef0123456789";
+
+  const std::string inlet =
+      log_incoming_span(tracer, "POST /api/x", 1234, "req-in", ctx);
+  REQUIRE(inlet.size() == 16);
+  REQUIRE(inlet != ctx.m_parent_id);
+
+  const TraceContext parsed = TraceContextHelper::extract_from_raw(
+      "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01", tracer,
+      "test-ctx");
+  REQUIRE(parsed.m_trace_id == "0123456789abcdef0123456789abcdef");
+  REQUIRE(parsed.m_parent_id == "abcdef0123456789");
+  REQUIRE(parsed.m_span_id.size() == 16);
 }

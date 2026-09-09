@@ -602,11 +602,11 @@ python3 scripts/db-gateway-e2e-test.py   # 7/7 проверок
 python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 ```
 
-**Текущие счётчики** (после раундов 11b–13b):
+**Текущие счётчики** (после раундов 11b–13c):
 
 | Тестовый бинарь | Test cases | Assertions | Фокус |
 |---|---|---|---|
-| `test_components` | 335 | 1 411 | Core-компоненты (см. ключевые модули ниже) |
+| `test_components` | 342 | 1 459 | Core-компоненты (см. ключевые модули ниже) |
 | `test_proxy_core` | 73 | 742 | Интеграция (request lifecycle, NATS, DB) |
 
 **Ключевые модули, покрытые юнит-тестами:**
@@ -655,7 +655,7 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 **Coverage gate:** стадия `coverage` в `cpp/l2-proxy/Dockerfile` линкует
 `gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
 (exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
-Текущее значение: **95.7%**. Гейт по **ветвям** не ставится (см. ниже).
+Текущее значение: **97.1%**. Гейт по **ветвям** не ставится (см. ниже).
 
 **Ветвевое покрытие (branch, информационно):**
 
@@ -676,14 +676,17 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 Ветвевой показатель сильно занижен тестовыми сборочными единицами
 (`test_*.cpp` дают 28.5k ветвей из-за инстанцирования шаблонных хедеров) и
 не покрывает эвристики, недостижимые модульными тестами (таймауты, сетевые
-ошибки, DB-экзекуторы). Слабейшие по ветвям: `logger.hpp` (~19%),
-`tracing_helpers.hpp` (~40%), `db_query_executor_base.cpp` (~42%),
-`rate_limiter_per_ip.hpp` (~49%). Рабочим гейтом остаётся построчный (90%).
+ошибки, DB-экзекуторы). Слабейшие по ветвям: `logger.hpp` (~47% ветвей),
+`tracing_helpers.hpp` (~58%), `rate_limiter_per_ip.hpp` (~59%),
+`db_query_executor_base.cpp` (~42%). Рабочим гейтом остаётся построчный (90%).
 
-**Текущие цифры** (раунды 11b–13a):
+**Текущие цифры** (раунды 11b–13c):
 
 | Модуль | Строк покрыто | Комментарий |
 |---|---|---|
+| `logger.hpp` | 88% | JSON/Text-форматтеры, correlation-контекст, уровни |
+| `tracing_helpers.hpp` | 98% | TraceContextHelper, make_span_and_traceparent, log_incoming_span |
+| `rate_limiter_per_ip.hpp` | 89% | пер-IP изоляция, LRU, TTL-cleanup |
 | `trace_logger.cpp` | 88.3% | Включая sender_loop, queue-full, retry |
 | `sentry_client.cpp` | 94.3% | HTTP-доставка, DSN, все уровни |
 | `http_client.cpp` | 94.6% | HTTPS/SSL-ветка, connection pool |
@@ -691,7 +694,7 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| **Общее по проекту** | **~95.7%** | Ключевые модули >88% |
+| **Общее по проекту** | **~97.1%** | Ключевые модули >88% |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 
