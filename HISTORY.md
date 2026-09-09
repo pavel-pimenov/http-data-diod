@@ -1,4 +1,43 @@
+# refactor(grafana): datasource провижинится Python-скриптом вместо provisioning-каталога
+
+## Date: 2026-09-09
+
+### Контекст
+Датасорс VictoriaMetrics раньше конфигурировался двумя путями: статичным
+`grafana/provisioning/datasources/datasources.yml` (монтировался в контейнер
+Grafana) и bash-скриптом `scripts/setup-grafana-datasource.sh` (создавал
+datasource через API). Логика дублировалась. Решено провижинить datasource
+только из Python-скрипта `generate-grafana-dashboards.py`, который уже создаёт
+все дашборды, и убрать статичный каталог.
+
+### Что сделано
+- `scripts/generate-grafana-dashboards.py`: добавлен метод
+  `GrafanaAPI.create_datasource()` — проверяет наличие datasource с UID
+  `prometheus` (`GET /api/datasources/uid/prometheus`), при отсутствии создаёт
+  его через `POST /api/datasources` (name `VictoriaMetrics`, type `prometheus`,
+  URL `http://victoria-metrics:8428`, `isDefault: true`,
+  `jsonData: httpMethod POST / timeInterval 10s`). 409 на create трактуется
+  как «уже существует». Вызывается в `main()` сразу после успешной проверки
+  подключения к Grafana, до сохранения дашбордов (дашборды ссылаются на
+  UID `prometheus`). Добавлена константа `PROMETHEUS_URL`.
+- Удалён каталог `grafana/provisioning/datasources` и файл
+  `datasources.yml` (провижининг datasource через файлы больше не нужен).
+- `docker-compose.yml`: у сервиса `grafana` убрана привязка
+  `./grafana/provisioning:/etc/grafana/provisioning:ro` (каталог удалён).
+- Удалён `scripts/setup-grafana-datasource.sh` (дублировал логику —
+  теперь выполняет Python-скрипт).
+- `rebuild-and-run.sh`: убран вызов удалённого bash-скрипта; сообщение
+  «Updating dashboards...» заменено на «Updating dashboards and datasource...».
+- `README.md`: в раздел «Grafana-дашборды» добавлена пометка, что datasource
+  создаётся Python-скриптом через API, а provisioning-каталог удалён.
+
+### Проверка
+- `python3 -m py_compile scripts/generate-grafana-dashboards.py` — ок.
+- `./rebuild-and-run.sh`: сборка успешна, сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅.
+
 # chore(build): синк макета odpi на апстрим 26.0.0-b1
+
 
 ## Date: 2026-09-09
 

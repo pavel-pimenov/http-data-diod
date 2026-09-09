@@ -158,6 +158,9 @@ def load_configuration(config_file: Optional[str] = None) -> Dict[str, str]:
 
 PROMETHEUS_DATASOURCE = 'prometheus'
 PROMETHEUS_UID = 'prometheus'
+# URL, по которому Grafana ходит за метриками. В docker-compose это ядро
+# VictoriaMetrics доступно по имени контейнера (см. rebuild-and-run.sh).
+PROMETHEUS_URL = 'http://victoria-metrics:8428'
 
 # Dashboard refresh intervals
 DEFAULT_REFRESH = '10s'
@@ -1215,6 +1218,41 @@ class GrafanaAPI:
             return True
         except Exception as e:
             logger.error(f"Failed to connect to Grafana: {e}")
+            return False
+
+    def create_datasource(self, url: str = PROMETHEUS_URL) -> bool:
+        """Ensure the VictoriaMetrics (Prometheus-compatible) datasource exists,
+        creating it via API if absent. Dashboards reference it by UID 'prometheus'."""
+        try:
+            resp = self.session.get(f'{self.base_url}/api/datasources/uid/{PROMETHEUS_UID}', timeout=self.timeout)
+            if resp.status_code == 200:
+                logger.info(f"Datasource '{PROMETHEUS_UID}' (uid) already exists")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to check datasource: {e}")
+            return False
+
+        payload = {
+            "name": "VictoriaMetrics",
+            "type": "prometheus",
+            "uid": PROMETHEUS_UID,
+            "url": url,
+            "access": "proxy",
+            "isDefault": True,
+            "jsonData": {"httpMethod": "POST", "timeInterval": "10s"}
+        }
+        try:
+            self._request("post", f'{self.base_url}/api/datasources', json=payload)
+            logger.info(f"Datasource '{PROMETHEUS_UID}' created (url={url})")
+            return True
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                logger.info(f"Datasource '{PROMETHEUS_UID}' already exists (create returned 409)")
+                return True
+            logger.error(f"Failed to create datasource: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to create datasource: {e}")
             return False
 
     def get_dashboard(self, uid: str) -> Optional[Dict]:
@@ -2883,7 +2921,11 @@ Examples:
     if not api.test_connection():
         logger.error("Cannot connect to Grafana. Exiting.")
         return 1
-    
+
+    # Datasource (VictoriaMetrics) provisioning через API — заменяет
+    # grafana/provisioning/datasources. Дашборды ссылаются на UID 'prometheus'.
+    api.create_datasource()
+
     if args.discover_metrics:
         prometheus_url = args.prometheus_url or 'http://localhost:9090'
         prometheus_api = PrometheusAPI(prometheus_url, timeout=args.grafana_timeout)

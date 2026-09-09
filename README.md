@@ -520,8 +520,12 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):
 
+> **Датасорс** (VictoriaMetrics) больше не конфигурируется через
+> `grafana/provisioning/datasources` — он создаётся тем же скриптом через Grafana API
+> (UID `prometheus`, URL `http://victoria-metrics:8428`). Провижиниг-каталог удалён.
+
 ```bash
-python3 scripts/generate-grafana-dashboards.py                 # создать/обновить все дашборды
+python3 scripts/generate-grafana-dashboards.py                 # создать/обновить дашборды + datasource
 python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выровнять расхождения
 ```
 

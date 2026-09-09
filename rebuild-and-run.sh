@@ -312,18 +312,8 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
     if [ "$GRAFANA_READY" = true ] && curl -s --connect-timeout 2 --max-time 5 "$GRAFANA_URL/api/health" > /dev/null 2>&1; then
         echo "📊 Grafana detected at $GRAFANA_URL"
 
-        # Setup Prometheus datasource first
-        if [ -f "scripts/setup-grafana-datasource.sh" ]; then
-            echo "Setting up Prometheus datasource..."
-            GRAFANA_URL="$GRAFANA_URL" \
-            GRAFANA_USER="${GRAFANA_USER:-admin}" \
-            GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-admin}" \
-            PROMETHEUS_URL="${PROMETHEUS_URL:-http://victoria-metrics:8428}" \
-            bash scripts/setup-grafana-datasource.sh
-        fi
-
         echo ""
-        echo "Updating dashboards..."
+        echo "Updating dashboards and datasource..."
 
         # Run dashboard generator with credentials from environment or defaults
         if [ -n "${GRAFANA_API_KEY:-}" ]; then
