@@ -312,11 +312,12 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
 // Duplicate POST detection
 // ============================================================================
 bool RequestHandler::record_and_maybe_reject_duplicate(
-    const std::string &client_id, const std::string &body,
-    httplib::Response &res) {
+    const std::string &client_id, const std::string &client_ip,
+    const std::string &body, httplib::Response &res) {
   const auto body_hash = compute_sha256_hex(body);
-  if (!m_ctx.m_proxy.m_duplicate_detector->record(client_id, body_hash,
-                                                  body)) {
+  if (!m_ctx.m_proxy.m_duplicate_detector
+           ->record(client_id, client_ip, body_hash, body)
+           .first) {
     return false;
   }
   m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
@@ -324,8 +325,6 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
     m_ctx.m_proxy.m_per_client_id_duplicate_collector->get(client_id, 0)
         ->Increment();
   }
-  Logger::warn("Duplicate POST detected: client_id={} body_bytes={}",
-               client_id, body.size());
 
   // When enabled, reject the duplicate instead of forwarding it to the
   // worker: the body was already delivered within the TTL window, so
@@ -581,6 +580,11 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // Extract client IP (X-Real-IP/X-Forwarded-For from the trusted nginx).
   // Used consistently for per-IP rate limiting and the correlation context; the
   // value lives in the ScopedRequestContext created below.
+  // Correlate every log line of this request via the thread-local context.
+  // request_id/trace_id are set later in process_request once they exist;
+  // the scope restores the previous values on exit (covers keep-alive reuse).
+  ScopedRequestContext req_ctx(req);
+  const std::string &client_ip = req_ctx.client_ip();
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
   // clients that share one IP (e.g. behind NAT) in Grafana.
@@ -598,7 +602,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
   if (method == "POST" && !body.empty() &&
       m_ctx.m_config.m_duplicate_detection_enabled &&
       m_ctx.m_proxy.m_duplicate_detector &&
-      record_and_maybe_reject_duplicate(client_id, body, res)) {
+      record_and_maybe_reject_duplicate(client_id, client_ip, body, res)) {
     return;
   }
 
@@ -607,12 +611,6 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // path, like the global ScopedProfiler in process_request.
   const ScopedLabeledProfiler client_latency_profiler(
       m_ctx.m_proxy.m_per_client_id_latency_collector.get(), client_id);
-
-  // Correlate every log line of this request via the thread-local context.
-  // request_id/trace_id are set later in process_request once they exist;
-  // the scope restores the previous values on exit (covers keep-alive reuse).
-  ScopedRequestContext req_ctx(req);
-  const std::string &client_ip = req_ctx.client_ip();
 
   // Phase 1: Rate limiting
   if (!check_rate_limits(client_ip, client_id, req, res)) {

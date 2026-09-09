@@ -101,6 +101,7 @@ private:
   // DUPLICATE_REJECT_ENABLED, writes a 409 and returns true so the caller
   // stops processing. Returns false to continue with the request.
   bool record_and_maybe_reject_duplicate(const std::string &client_id,
+                                         const std::string &client_ip,
                                          const std::string &body,
                                          httplib::Response &res);
 

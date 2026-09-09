@@ -1,4 +1,5 @@
 #include "duplicate_detector.hpp"
+#include "logger.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -13,11 +14,12 @@ DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 DuplicateDetector::DuplicateDetector(const Options &options)
     : m_options(options) {}
 
-bool DuplicateDetector::record(std::string_view client_id,
-                               std::string_view body_hash,
-                               std::string_view body) {
+std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
+                                                  std::string_view client_ip,
+                                                  std::string_view body_hash,
+                                                  std::string_view body) {
   if (!m_options.m_enabled) {
-    return false;
+    return {false, 0};
   }
   const uint64_t now_ms = TimeUtils::steady_ms();
   std::lock_guard lock(m_mutex);
@@ -38,7 +40,7 @@ bool DuplicateDetector::record(std::string_view client_id,
       entry.m_body = std::string(body);
     }
     m_entries.emplace(key, std::move(entry));
-    return false;
+    return {false, 0};
   }
 
   Entry &entry = it->second;
@@ -48,7 +50,19 @@ bool DuplicateDetector::record(std::string_view client_id,
   if (entry.m_body.empty() && body.size() <= m_options.m_max_body_bytes) {
     entry.m_body = std::string(body);
   }
-  return entry.m_count >= 2;
+  if (entry.m_count < 2) {
+    return {false, 0};
+  }
+  const size_t client_count = ++m_per_client_count[std::string(client_id)];
+  if (m_options.m_duplicate_log_threshold > 0 &&
+      client_count % m_options.m_duplicate_log_threshold == 0) {
+    Logger::warn(
+        "Frequent duplicate POSTs from client_id={} client_ip={} total={} "
+        "threshold={} body_bytes={}",
+        client_id, client_ip, client_count, m_options.m_duplicate_log_threshold,
+        body.size());
+  }
+  return {true, client_count};
 }
 
 size_t DuplicateDetector::duplicate_bodies() const {

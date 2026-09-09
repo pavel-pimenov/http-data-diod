@@ -410,11 +410,12 @@ void AppContext::init_proxy_components() {
   dup_options.m_max_body_bytes =
       m_config.m_duplicate_detection_max_body_bytes;
   dup_options.m_ttl_ms = m_config.m_duplicate_detection_ttl_ms;
+  dup_options.m_duplicate_log_threshold = m_config.m_duplicate_log_threshold;
   m_proxy.m_duplicate_detector =
       std::make_unique<DuplicateDetector>(dup_options);
   Logger::info("Duplicate POST detector initialized: enabled={} top_n={} "
-               "max_entries={} max_body_bytes={} ttl_ms={}",
+               "max_entries={} max_body_bytes={} ttl_ms={} log_threshold={}",
                dup_options.m_enabled, dup_options.m_top_n,
                dup_options.m_max_entries, dup_options.m_max_body_bytes,
-               dup_options.m_ttl_ms);
+               dup_options.m_ttl_ms, dup_options.m_duplicate_log_threshold);
 }

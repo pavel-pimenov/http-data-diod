@@ -40,7 +40,7 @@ jobs:
         run: GRAFANA_URL=http://127.0.0.1:65530 ./rebuild-and-run.sh
 
       - name: Smoke test (NATS, 1 iteration)
-        run: python3 message_counter.py --iterations 1 --concurrent 1
+        run: python3 message_counter.py --iterations 1 --concurrent 1 --dup-check
 
       - name: Golden metrics check (full catalogue + traffic counters)
         run: python3 scripts/metrics-golden-check.py --traffic

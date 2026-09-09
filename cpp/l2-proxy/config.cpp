@@ -278,6 +278,9 @@ void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
           std::format(
               "Invalid DUPLICATE_DETECTION_MAX_BODY_BYTES: {} (must be >= 0)",
               cfg.m_duplicate_detection_max_body_bytes));
+    check(non_negative(cfg.m_duplicate_log_threshold),
+          std::format("Invalid DUPLICATE_LOG_THRESHOLD: {} (must be >= 0)",
+                      cfg.m_duplicate_log_threshold));
   }
 }
 
@@ -452,12 +455,15 @@ void Config::load_feature_config() {
       get_env_int("DUPLICATE_DETECTION_MAX_BODY_BYTES", 500);
   m_duplicate_detection_ttl_ms =
       get_env_int("DUPLICATE_DETECTION_TTL_MS", 60000);
+  m_duplicate_log_threshold =
+      get_env_int("DUPLICATE_LOG_THRESHOLD", 5);
   Logger::info("Duplicate detection: enabled={} top_n={} max_entries={} "
-               "max_body_bytes={} ttl_ms={} reject_enabled={}",
+               "max_body_bytes={} ttl_ms={} reject_enabled={} log_threshold={}",
                m_duplicate_detection_enabled, m_duplicate_detection_top_n,
                m_duplicate_detection_max_entries,
                m_duplicate_detection_max_body_bytes,
-               m_duplicate_detection_ttl_ms, m_duplicate_reject_enabled);
+               m_duplicate_detection_ttl_ms, m_duplicate_reject_enabled,
+               m_duplicate_log_threshold);
 }
 
 void Config::load_nats_config() {

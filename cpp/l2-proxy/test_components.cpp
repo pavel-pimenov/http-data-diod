@@ -467,6 +467,13 @@ TEST_CASE("Config: negative duplicate max body bytes fails validation",
   REQUIRE(config.validate(false) == false);
 }
 
+TEST_CASE("Config: negative duplicate log threshold fails validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_log_threshold = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
 TEST_CASE("Config: zero tracing batch size fails validation", "[config]") {
   Config config;
   config.m_tracing_batch_size = 0;
@@ -1684,9 +1691,15 @@ TEST_CASE("DuplicateDetector: second delivery of same body is a duplicate",
           "[duplicate-detector]") {
   DuplicateDetector detector(DuplicateDetector::Options{});
 
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == true);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == true);
 
   REQUIRE(detector.duplicate_bodies() == 1);
 }
@@ -1695,8 +1708,12 @@ TEST_CASE("DuplicateDetector: distinct bodies are not duplicates",
           "[duplicate-detector]") {
   DuplicateDetector detector(DuplicateDetector::Options{});
 
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
-  REQUIRE(detector.record("client-a", "hash-2", R"({"v":2})") == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-2",
+                          R"({"v":2})")
+              .first == false);
   REQUIRE(detector.duplicate_bodies() == 0);
 }
 
@@ -1706,8 +1723,12 @@ TEST_CASE("DuplicateDetector: disabled detector never reports duplicates",
   options.m_enabled = false;
   DuplicateDetector detector(options);
 
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
   REQUIRE(detector.duplicate_bodies() == 0);
 }
 
@@ -1715,10 +1736,10 @@ TEST_CASE("DuplicateDetector: report classifies same/cross client",
           "[duplicate-detector]") {
   DuplicateDetector detector(DuplicateDetector::Options{});
 
-  detector.record("client-a", "hash-1", R"({"v":1})");
-  detector.record("client-a", "hash-1", R"({"v":1})");
-  detector.record("client-b", "hash-2", R"({"v":2})");
-  detector.record("client-b", "hash-2", R"({"v":2})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
 
   const auto report = detector.report();
   REQUIRE(report["duplicate_bodies"] == 2);
@@ -1736,7 +1757,7 @@ TEST_CASE("DuplicateDetector: report classifies same/cross client",
   REQUIRE(bodies == std::set<std::string>{R"({"v":1})", R"({"v":2})"});
 
   // Same body delivered from a second client flips the entry to cross_client.
-  detector.record("client-b", "hash-1", R"({"v":1})");
+  detector.record("client-b", "10.0.0.2", "hash-1", R"({"v":1})");
   const auto report2 = detector.report();
   REQUIRE(report2["duplicate_bodies"] == 2);
   REQUIRE(report2["by_type"]["same_client"] == 1);
@@ -1760,8 +1781,8 @@ TEST_CASE("DuplicateDetector: body sample is capped by max_body_bytes",
   DuplicateDetector detector(options);
 
   const std::string long_body(50, 'x');
-  detector.record("client-a", "hash-1", long_body);
-  detector.record("client-a", "hash-1", long_body);
+  detector.record("client-a", "10.0.0.1", "hash-1", long_body);
+  detector.record("client-a", "10.0.0.1", "hash-1", long_body);
 
   const auto report = detector.report();
   REQUIRE(report["top"][0]["body"] == "");
@@ -1773,14 +1794,20 @@ TEST_CASE("DuplicateDetector: expired bodies stop being duplicates after TTL",
   options.m_ttl_ms = 40;
   DuplicateDetector detector(options);
 
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == true);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
   // The previous entry has expired (last_seen older than TTL), so the body is
   // treated as seen for the first time again.
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
   REQUIRE(detector.duplicate_bodies() == 0);
 }
 
@@ -1790,14 +1817,44 @@ TEST_CASE("DuplicateDetector: bounded cache evicts the lowest-count body",
   options.m_max_entries = 1;
   DuplicateDetector detector(options);
 
-  detector.record("client-a", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
   // The first body is evicted to make room for the second.
-  detector.record("client-a", "hash-2", R"({"v":2})");
+  detector.record("client-a", "10.0.0.1", "hash-2", R"({"v":2})");
 
   REQUIRE(detector.duplicate_bodies() == 0);
   // A fresh delivery of the evicted body is not a duplicate.
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == false);
-  REQUIRE(detector.record("client-a", "hash-1", R"({"v":1})") == true);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .first == true);
+}
+
+TEST_CASE("DuplicateDetector: per-client duplicate count increments",
+          "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_duplicate_log_threshold = 5;
+  DuplicateDetector detector(options);
+
+  // First delivery is not a duplicate; every duplicate increments the
+  // per-client counter returned alongside the result.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .second == 0);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
+                          R"({"v":1})")
+              .second == 1);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-2",
+                          R"({"v":2})")
+              .second == 0);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-2",
+                          R"({"v":2})")
+              .second == 2);
+  // A different client has an independent counter.
+  REQUIRE(detector.record("client-b", "10.0.0.2", "hash-1",
+                          R"({"v":1})")
+              .second == 1);
 }
 
 // ============================================================================

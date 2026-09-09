@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 #if __has_include(<flat_set>)
@@ -36,6 +37,8 @@ public:
     size_t m_max_entries = 1000;   // bound on tracked distinct bodies
     uint64_t m_ttl_ms = 60000;     // inactivity window for a tracked body
     size_t m_max_body_bytes = 500; // store body sample only if <= this size
+    // When > 0, log a warning every N duplicates from the same client_id.
+    size_t m_duplicate_log_threshold = 5;
   };
 
   // Default-constructed detector keeps the default Options (see .cpp; the
@@ -44,10 +47,14 @@ public:
   DuplicateDetector();
   explicit DuplicateDetector(const Options &options);
 
-  // Records one request body. Returns true when this delivery makes the body
-  // a duplicate (seen at least twice within the TTL window).
-  bool record(std::string_view client_id, std::string_view body_hash,
-              std::string_view body);
+  // Records one request body. Returns {is_duplicate, client_total_count}.
+  // is_duplicate is true when this delivery makes the body a duplicate
+  // (seen at least twice within the TTL window). client_total_count is the
+  // total number of duplicate deliveries from this client across all bodies.
+  std::pair<bool, size_t> record(std::string_view client_id,
+                                 std::string_view client_ip,
+                                 std::string_view body_hash,
+                                 std::string_view body);
 
   // How many distinct bodies were seen more than once (for metrics).
   size_t duplicate_bodies() const;
@@ -78,6 +85,7 @@ private:
   Options m_options;
   mutable std::mutex m_mutex;
   std::unordered_map<std::string, Entry> m_entries; // key: sha256 hex
+  std::unordered_map<std::string, size_t> m_per_client_count; // client_id -> total duplicates
 };
 
 #endif // DUPLICATE_DETECTOR_HPP

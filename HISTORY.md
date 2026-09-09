@@ -1,3 +1,56 @@
+# test(tools): message_counter --dup-check — проверка WARN-логирования частых дублей по клиенту
+
+## Date: 2026-09-09
+
+### Что сделано
+- `message_counter.py`: новый флаг `--dup-check`. Шлёт `DUPLICATE_CHECK_SENDS`
+  (threshold + 2, по умолчанию 7) одинаковых POST-тел с уникальным client_id
+  (`dup-check-<timestamp>`), затем грепает логи `l2-proxy` через
+  `docker compose logs --since <окно>` на `Frequent duplicate POSTs from
+  client_id=<id> ...total=N`. Порог читается из `DUPLICATE_LOG_THRESHOLD`
+  (default 5). Если docker недоступен — чек пропускается (не fail);
+  иначе отсутствие WARN в логе = провал теста.
+- Включён в smoke-пути: CI `Smoke test (NATS, 1 iteration)`,
+  `scripts/pre-commit.sh`, подсказка в `rebuild-and-run.sh`.
+
+### Проверка
+- `python3 message_counter.py --iterations 1 --concurrent 1 --dup-check` →
+  POST ✅, GET ✅, Duplicate-logging check ✅ (7×200, 1 WARN:
+  `total=5 threshold=5 client_ip=172.22.0.1`).
+- `python3 -m py_compile message_counter.py` — OK; lint — только существующие LONG100.
+
+# feat(proxy): WARN-логирование частых дубликатов POST-тел по клиенту (DUPLICATE_LOG_THRESHOLD)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `duplicate_detector.{hpp,cpp}`: `record()` теперь принимает `client_ip` и
+  возвращает `std::pair<bool, size_t>` — {это дубликат, общий счётчик дублей
+  клиента}. Добавлен per-client счётчик `m_per_client_count` и опция
+  `m_duplicate_log_threshold` (default 5): когда счётчик клиента кратен порогу,
+  пишется `Logger::warn` со статистикой:
+  `Frequent duplicate POSTs from client_id=... client_ip=... total=... threshold=... body_bytes=...`.
+  Счётчик инкрементируется по всем телам клиента и не сбрасывается TTL-эвикцией.
+- `request_handler.{hpp,cpp}`: `record_and_maybe_reject_duplicate()` принимает
+  `client_ip`; `ScopedRequestContext` поднят выше по `handle_request`, чтобы IP
+  был доступен для duplicate-детектора и залогирован уже в нём.
+- `config.{hpp,cpp}`: новый `DUPLICATE_LOG_THRESHOLD` (default 5, `0` = off),
+  валидация `>= 0`, логирование значения при старте.
+- `app_context.cpp`: порог прокинут из конфига в `DuplicateDetector::Options`.
+- `docker-compose.yml`: `DUPLICATE_LOG_THRESHOLD=${DUPLICATE_LOG_THRESHOLD:-5}`.
+- `test_components.cpp`: тесты обновлены под новый интерфейс `record()`
+  (+`client_ip`, сравнение `.first`); добавлены:
+  - per-client счётчик дублей инкрементируется (в т.ч. отдельно для каждого клиента);
+  - `DUPLICATE_LOG_THRESHOLD` отрицательный — фейл валидации.
+- `README.md`: примечание о WARN-логировании частых дублей в разделе метрик.
+
+### Проверка
+- Сборка в контейнерах: `./rebuild-and-run.sh` — health checks все OK.
+- Юнит-тесты (тест-гейт в Dockerfile, `test_components` + `test_proxy_core`) — прошли.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → ✅ Success 1/1.
+- Логирование вживую: 7 одинаковых POST с `X-DataHub-Client-Id: dlog-thresh-test` →
+  WARN на 5-м дубле: `Frequent duplicate POSTs from client_id=dlog-thresh-test client_ip=172.22.0.1 total=5 threshold=5 body_bytes=11`.
+
 # chore(tools): «золотой набор» метрик контракт-чека + починка DEDUP_ENABLED
 
 ## Date: 2026-09-09

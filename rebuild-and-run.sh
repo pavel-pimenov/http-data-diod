@@ -283,7 +283,7 @@ echo "  Total:               ${BUILD_MINUTES}m ${BUILD_SECONDS}s"
 echo ""
 
 echo "Quick test:"
-echo "  python3 message_counter.py --iterations 1 --concurrent 1"
+echo "  python3 message_counter.py --iterations 1 --concurrent 1 --dup-check"
 echo "  python3 scripts/db-gateway-e2e-test.py"
 echo ""
 echo "Health check:"

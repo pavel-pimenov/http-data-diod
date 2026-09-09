@@ -65,7 +65,7 @@ run_health_check() {
 run_message_test() {
     log_info "Running message consistency test (1 iteration, 1 concurrent)..."
 
-    if ! python3 message_counter.py --iterations 1 --concurrent 1 2>&1; then
+    if ! python3 message_counter.py --iterations 1 --concurrent 1 --dup-check 2>&1; then
         log_error "❌ Message counter test FAILED!"
         echo ""
         echo "=========================================="
