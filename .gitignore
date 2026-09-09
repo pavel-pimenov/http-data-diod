@@ -2,6 +2,7 @@ build
 build-lint
 build_tests
 build-asan
+build-tmp
 profiles
 
 build/makefile

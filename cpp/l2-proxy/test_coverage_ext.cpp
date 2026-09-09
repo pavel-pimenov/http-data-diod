@@ -12,6 +12,7 @@
 #include "scoped_metrics.hpp"
 #include "scoped_profiler.hpp"
 #include "stats_page.hpp"
+#include "string_utils.hpp"
 #include "thread_pool_wrapper.hpp"
 #include "trace_context_extractor.hpp"
 #include "tracing_helpers.hpp"
@@ -30,6 +31,13 @@
 // ============================================================================
 // exceptions.hpp
 // ============================================================================
+
+TEST_CASE("StringUtils: to_lower lowercases ASCII and passes non-ASCII through",
+          "[string-utils]") {
+  REQUIRE(to_lower("Hello WORLD") == "hello world");
+  REQUIRE(to_lower("AbC-123") == "abc-123");
+  REQUIRE(to_lower("") == "");
+}
 
 TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
           "[exceptions]") {

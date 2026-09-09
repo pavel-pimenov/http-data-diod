@@ -84,6 +84,87 @@ TEST_CASE("RateLimiter: available_tokens decreases with acquire",
   REQUIRE(after == before - 1);
 }
 
+TEST_CASE("PerIPRateLimiter: allows per-IP burst and rejects only the exhausted IP",
+          "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(3, 0, 10, 3600);
+  REQUIRE(limiter.acquire("1.1.1.1"));
+  REQUIRE(limiter.acquire("1.1.1.2"));
+  REQUIRE(limiter.acquire("1.1.1.1"));
+  REQUIRE(limiter.acquire("1.1.1.1"));
+  REQUIRE_FALSE(limiter.acquire("1.1.1.1"));
+  REQUIRE(limiter.acquire("1.1.1.2"));
+
+  const auto stats = limiter.get_stats();
+  REQUIRE(stats.m_total_requests == 6);
+  REQUIRE(stats.m_allowed_requests == 5);
+  REQUIRE(stats.m_rejected_requests == 1);
+  REQUIRE(stats.m_unique_ips == 2);
+  REQUIRE(stats.m_tracked_ips == 2);
+}
+
+TEST_CASE("PerIPRateLimiter: get_per_ip_stats reports counters most-recent-first",
+          "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(10, 0, 10, 3600);
+  limiter.acquire("a");
+  limiter.acquire("a");
+  limiter.acquire("b");
+  limiter.acquire("b");
+  limiter.acquire("b");
+
+  const auto stats = limiter.get_per_ip_stats();
+  REQUIRE(stats.size() == 2);
+  REQUIRE(stats[0].first == "b");
+  REQUIRE(stats[0].second.m_requests == 3);
+  REQUIRE(stats[1].first == "a");
+  REQUIRE(stats[1].second.m_requests == 2);
+}
+
+TEST_CASE("PerIPRateLimiter: LRU eviction frees oldest IPs when max_ips reached",
+          "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(5, 0, /*max_ips=*/2, 3600);
+  limiter.acquire("ip1");
+  limiter.acquire("ip2");
+  limiter.acquire("ip3");
+
+  auto stats = limiter.get_stats();
+  REQUIRE(stats.m_evictions == 1);
+  REQUIRE(stats.m_tracked_ips == 2);
+  // ip1 был вытеснен по LRU: повторный вызов пересоздаёт лимитер, tracked=2
+  REQUIRE(limiter.acquire("ip1"));
+  REQUIRE(limiter.get_stats().m_tracked_ips == 2);
+}
+
+TEST_CASE("PerIPRateLimiter: new IP evicts the LRU entry at capacity",
+          "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(5, 0, /*max_ips=*/1, 3600);
+  REQUIRE(limiter.acquire("a"));
+  // max_ips=1: новый IP вытесняет самый старый по LRU и принимается
+  REQUIRE(limiter.acquire("b"));
+  REQUIRE(limiter.acquire("a"));
+  const auto stats = limiter.get_stats();
+  REQUIRE(stats.m_unique_ips == 3);
+  REQUIRE(stats.m_evictions == 2);
+  REQUIRE(stats.m_tracked_ips == 1);
+}
+
+TEST_CASE("PerIPRateLimiter: expired entries are cleaned up by TTL",
+          "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(10, 0, 10, /*cleanup_interval_seconds=*/1);
+  limiter.acquire("1.1.1.1");
+  limiter.acquire("1.1.1.2");
+  REQUIRE(limiter.get_stats().m_tracked_ips == 2);
+
+  // TTL = 1с; ждём очистки (фоновая нить или ручной вызов — оба удаляют)
+  for (int i = 0; i < 40 && limiter.get_stats().m_tracked_ips > 0; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    limiter.cleanup_expired_ips();
+  }
+
+  const auto stats = limiter.get_stats();
+  REQUIRE(stats.m_tracked_ips == 0);
+  REQUIRE(stats.m_evictions == 2);
+}
+
 TEST_CASE("InFlightTracker: request_shutdown and is_shutdown_requested",
           "[in-flight]") {
   InFlightTracker tracker;

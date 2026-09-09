@@ -1,3 +1,35 @@
+# test(cpp): раунд покрытия 13b — PerIPRateLimiter + string_utils (+6 тестов)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `test_components.cpp`: добавлены 5 юнит-тестов `PerIPRateLimiter`
+  (`rate_limiter_per_ip.hpp`, до этого не покрывался вовсе):
+  - пер-IP изоляция: превышение лимита одним IP не трогает другой,
+    статистика total/allowed/rejected/unique_ips корректна;
+  - `get_per_ip_stats` — счётчики по IP, порядок «самые свежие первыми»;
+  - LRU-вытеснение при `max_ips` + пересоздание вытесненного IP;
+  - новый IP при заполненном `max_ips=1` вытесняет самый старый (LRU) и
+    принимается (проверка фактического поведения);
+  - TTL-cleanup истёкших entry (interval=1s, без флейка: ждём очистки в цикле).
+- `test_coverage_ext.cpp`: добавлен тест `string_utils::to_lower`
+  (header-модуль `string_utils.hpp` вообще не был включён ни в один тест).
+- `README.md`: счётчики тестов обновлены (test_components 335/1411),
+  добавлена строка про покрытие `rate_limiter_per_ip.hpp`.
+
+### Проверка
+- Покрытие (стадия coverage, gcovr): TOTAL 7413/7733 строк = **95.9%**
+  (гейт `--fail-under-line 90` проходит);
+  `rate_limiter_per_ip.hpp` 86% → **89%**.
+- Побочная находка: ветка «too many IPs → reject» в `get_or_create_limiter`
+  практически недостижима — при `size >= max_ips` всегда сначала выполняется
+  `evict_oldest_ips(1)`, освобождая одну позицию, поэтому `return nullptr`
+  никогда не срабатывает при `max_ips >= 1` (только `max_ips == 0`).
+- `./rebuild-and-run.sh`: сборка успешна, юнит-тесты
+  «All tests passed (1411 assertions in 335 test cases)» +
+  «(742 assertions in 73 test cases)», сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅.
+
 # refactor(tools): автономные улучшения инфраструктуры после datasource-рефакторинга
 
 ## Date: 2026-09-09

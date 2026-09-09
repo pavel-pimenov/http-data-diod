@@ -602,11 +602,11 @@ python3 scripts/db-gateway-e2e-test.py   # 7/7 проверок
 python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 ```
 
-**Текущие счётчики** (после раундов 11b–13a):
+**Текущие счётчики** (после раундов 11b–13b):
 
 | Тестовый бинарь | Test cases | Assertions | Фокус |
 |---|---|---|---|
-| `test_components` | 329 | 1 379 | Core-компоненты (см. ключевые модули ниже) |
+| `test_components` | 335 | 1 411 | Core-компоненты (см. ключевые модули ниже) |
 | `test_proxy_core` | 73 | 742 | Интеграция (request lifecycle, NATS, DB) |
 
 **Ключевые модули, покрытые юнит-тестами:**
@@ -618,6 +618,7 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 | `http_client.cpp` | `test_http_pipeline.cpp` | HTTPS-путь, pool.acquire timeout, stale eviction, invalid release |
 | `common_utils.cpp` | `test_components.cpp`, `test_coverage_ext.cpp` | error categorizer, log_body_preview, MetricsHistory, escape_html, sparkline SVG |
 | `circuit_breaker.cpp` | `test_components.cpp` | set_gauge, state transitions |
+| `rate_limiter_per_ip.hpp` | `test_components.cpp` | per-IP burst, LRU-вытеснение, TTL-cleanup, get_per_ip_stats |
 | `config.cpp` | `test_components.cpp` | Env-parsing, validations |
 
 Запуск clang-tidy (после изменений):
