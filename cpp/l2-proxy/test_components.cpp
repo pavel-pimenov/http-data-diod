@@ -147,6 +147,16 @@ TEST_CASE("PerIPRateLimiter: new IP evicts the LRU entry at capacity",
   REQUIRE(stats.m_tracked_ips == 1);
 }
 
+TEST_CASE("PerIPRateLimiter: max_ips=0 rejects every request", "[rate-limiter][per-ip]") {
+  PerIPRateLimiter limiter(5, 0, /*max_ips=*/0, 3600);
+  REQUIRE_FALSE(limiter.acquire("1.1.1.1"));
+  REQUIRE_FALSE(limiter.acquire("1.1.1.2"));
+  const auto stats = limiter.get_stats();
+  REQUIRE(stats.m_rejected_requests == 2);
+  REQUIRE(stats.m_unique_ips == 0);
+  REQUIRE(stats.m_tracked_ips == 0);
+}
+
 TEST_CASE("PerIPRateLimiter: expired entries are cleaned up by TTL",
           "[rate-limiter][per-ip]") {
   PerIPRateLimiter limiter(10, 0, 10, /*cleanup_interval_seconds=*/1);

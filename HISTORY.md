@@ -1,3 +1,22 @@
+# test(cpp): раунд покрытия 13e — PerIPRateLimiter max_ips=0 reject-path 89->95% (+1 тест)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `test_components.cpp`: тест `PerIPRateLimiter: max_ips=0 rejects every request`.
+  Покрывает ветку отказа `get_or_create_limiter` (double-check
+  `m_ip_entries.size() >= m_max_ips` → `return nullptr`), которая при
+  `max_ips >= 1` недостижима (LRU-эвикция всегда освобождает место) и была
+  зафиксирована как «мёртвая» в раунде 13b.
+  `rate_limiter_per_ip.hpp`: **89% → 95%**.
+- `README.md`: счётчик 344/1 470, значения покрытия.
+
+### Проверка
+- Покрытие строк: TOTAL 7699/7907 = **97.4%** (гейт `--fail-under-line 90` ✅).
+- `./scripts/run-coverage.sh`: «All tests passed (1470 assertions in 344
+  test cases)» + «(743 assertions in 74 test cases)».
+- clang-tidy по изменённому файлу — без замечаний.
+
 # test(cpp): раунд покрытия 13d — logger init-ветки (в test_proxy_core) + db_query_executor 100% (+2 теста)
 
 ## Date: 2026-09-09
