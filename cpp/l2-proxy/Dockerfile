@@ -71,7 +71,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     clang-format \
     catch2 \
     libcli11-dev \
-    nlohmann-json3-dev \
     libpq-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -172,7 +171,7 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 # with gcovr inside the container. The report lands in /app/out/coverage/
 # (coverage.html + per-file details): `scripts/run-coverage.sh` copies it out
 # of the image. Covers only project sources (cpp/l2-proxy), excluding bundled
-# third-party dirs (prometheus-cpp, httplib, base64).
+# third-party dirs (prometheus-cpp, httplib, base64, json).
 #
 # Note: the gcovr --filter must stay as a single backslash here. A doubled one
 # (`\\.`) is passed literally to the regex and matches nothing (0% report).
@@ -193,6 +192,7 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/prometheus-cpp/.*' \
           --exclude '/app/httplib/.*' \
           --exclude '/app/base64/.*' \
+          --exclude '/app/json/.*' \
           --html --html-details -o /app/out/coverage/coverage.html \
           --gcov-ignore-errors=all \
           --fail-under-line 90 && \

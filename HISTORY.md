@@ -1,3 +1,37 @@
+# build/refactor: завендорен nlohmann/json (снята apt-зависимость nlohmann-json3-dev)
+
+## Date: 2026-09-09
+
+### Контекст
+Nlohmann/json — header-only библиотека (используется в 26 файлах как
+`<nlohmann/json.hpp>`). Ранее ставилась из apt (`nlohmann-json3-dev`), что
+требовало сети/репозитория при каждой сборке. По образцу вендоренных
+httplib/base64/prometheus-cpp/nats — json завендорен в проект, apt-пакет
+исключён. Заодно обновлены вендорные nats и http-lib (исходники в дереве).
+
+### Что сделано
+- **cpp/l2-proxy/json/nlohmann/**: завендорен single-header `json.hpp`
+  (27 115 строк, самодостаточный, детальные `#include <nlohmann/detail/...>`
+  закомментированы) + `json_fwd.hpp`. Каталог добавлен в git (untracked →
+  tracked).
+- **cpp/l2-proxy/CMakeLists.txt**:
+  - include path `json/` добавлен для `l2-proxy`, `test_components`,
+    `test_proxy_core` — `#include <nlohmann/json.hpp>` теперь резолвится в
+    вендоренный хедер, системный apt-установленный не нужен;
+  - `json` добавлен в `PVS_EXCLUDE_PATHS` (третьесторонняя, как odpi/httplib/
+    nats/base64/prometheus-cpp) и в `-I` таргета cppcheck.
+- **cpp/l2-proxy/Dockerfile**: удалён `nlohmann-json3-dev` из builder-apt;
+  в coverage-стадии gcovr исключает `/app/json/.*` (иначе single-header
+  утопил бы отчёт как непокрытый файл); комментарий синхронизирован.
+- **scripts/run-clang-tidy.sh**: `json` добавлен в `IGNORE_PATH_RE` —
+  диагностики из вендоренного заголовка фильтруются как у остальных 3rd-party.
+
+### Проверка
+- Сборка в контейнерах `./rebuild-and-run.sh` + e2e
+  `python3 message_counter.py --iterations 1 --concurrent 1`.
+
+---
+
 # refactor: PVS-Studio настройки и исправление 3 находок (co_return, g_hex)
 
 ## Date: 2026-09-08

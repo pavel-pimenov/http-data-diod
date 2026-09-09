@@ -357,6 +357,7 @@ target_include_directories(l2-proxy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/httplib
     ${CMAKE_CURRENT_SOURCE_DIR}/base64
     ${CMAKE_CURRENT_SOURCE_DIR}/odpi/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/json
 )
 
 target_include_directories(l2-proxy PRIVATE ${NATS_C_INCLUDE_DIR})
@@ -462,6 +463,7 @@ if(BUILD_TESTS)
     target_include_directories(test_components PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/json
     )
     target_compile_options(test_components PRIVATE
         ${L2_PROXY_COMMON_COMPILE_OPTIONS}
@@ -507,6 +509,7 @@ if(BUILD_TESTS)
     )
     target_include_directories(test_proxy_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/json
     )
     target_compile_options(test_proxy_core PRIVATE
         ${L2_PROXY_COMMON_COMPILE_OPTIONS}
@@ -553,6 +556,7 @@ if(ENABLE_PVS_STUDIO)
         "${CMAKE_SOURCE_DIR}/httplib"
         "${CMAKE_SOURCE_DIR}/nats"
         "${CMAKE_SOURCE_DIR}/base64"
+        "${CMAKE_SOURCE_DIR}/json"
         "${CMAKE_SOURCE_DIR}/prometheus-cpp"
     )
 
@@ -606,6 +610,7 @@ if(ENABLE_CPPCHECK)
                 -I ${CMAKE_SOURCE_DIR}
                 -I ${CMAKE_SOURCE_DIR}/httplib
                 -I ${CMAKE_SOURCE_DIR}/base64
+                -I ${CMAKE_SOURCE_DIR}/json
                 ${CMAKE_SOURCE_DIR}/*.cpp
                 ${CMAKE_SOURCE_DIR}/*.hpp
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
