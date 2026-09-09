@@ -282,6 +282,25 @@ python3 rate_limit_test.py --expect-zero
 
 Пропуск сценария: `python3 fault_tolerance_test.py --skip nats --skip server --skip dedup`.
 
+### Проверка «золотого набора» метрик
+
+`python3 scripts/metrics-golden-check.py` сверяет экспонируемые метрики с
+каталогом Prometheus (см. ниже): каждый семейство из README обязано
+присутствовать в VictoriaMetrics (для гистограмм проверяются
+`_bucket/_sum/_count`). Это защищает от регрессий, когда метрика молча
+исчезает из кода. Флаги:
+
+- `--traffic` — после `python3 message_counter.py --iterations 1 --concurrent 1`
+  требует ненулевые счётчики happy-path за последние 5 минут
+  (`l2_proxy_client_requests_total`, `l2_worker_requests_processed_total`,
+  `l2_server_requests_total`, `l2_tracing_spans_sent_total` и др.).
+- `--all` — дополнительно проверяет лениво эмитируемые семейства
+  (`l2_proxy_per_client_id_duplicate_*`, появляются только после
+  дубликатного трафика с заголовком `X-DataHub-Client-Id`).
+
+Вызов с `--traffic` включён в CI после smoke-теста; presence-проверка без
+флагов выполняется в конце `./rebuild-and-run.sh`.
+
 ### Поведение при простое NATS (потери / reconnect)
 
 Что происходит, когда `nats-server` недоступен:

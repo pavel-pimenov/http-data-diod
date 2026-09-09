@@ -1,3 +1,36 @@
+# chore(tools): «золотой набор» метрик контракт-чека + починка DEDUP_ENABLED
+
+## Date: 2026-09-09
+
+### Что сделано
+- `scripts/metrics-golden-check.py`: сверяет экспонируемые метрики с полным
+  каталогом README (каждое семейство обязано присутствовать в VictoriaMetrics;
+  для гистограмм — `_bucket/_sum/_count`). Режимы:
+  - без флагов — presence-проверка каталога (67/67 семейств);
+  - `--traffic` — после `message_counter.py` требует ненулевые happy-path
+    счётчики за последние 5 минут; скрейп асинхронный по времени, поэтому
+    счётчики опрашиваются с поллингом (до 60 c, шаг 2 c), а не один раз сразу;
+  - `--all` — дополнительно лениво эмитируемые семейства
+    (`l2_proxy_per_client_id_duplicate_*`).
+- `rebuild-and-run.sh`: presence-проверка «золотого набора» в конце сборки.
+- CI: шаг `Golden metrics check (full catalogue + traffic counters)` после
+  smoke-теста.
+- **Найденная и исправленная регрессия**: `docker-compose.yml` откатил
+  `DEDUP_ENABLED` в `:-false` в коммите 599b644 (побочно, без упоминания в
+  описании), из-за чего `python3 dedup_test.py` падал: две доставки одного
+  `request_id` приводили к двум вызовам L2 (at-most-once не работал). Вернул
+  `DEDUP_ENABLED:-true` (как в 46c85b3, где сценарий проходил). Проверено:
+  `dedup_test.py` 1/1 (delta `l2_worker_l2_calls_total`=1,
+  `l2_worker_duplicate_requests_total`=1).
+- `README.md`: раздел про golden-check после fault_tolerance.
+
+### Проверка
+- `python3 scripts/metrics-golden-check.py --traffic` → OK 67/67 + счётчики
+  ненулевые; `--all` → корректно падает без дубликатного client-id трафика.
+- `python3 message_counter.py --iterations 1 --concurrent 1` → Success 1/1.
+- `python3 dedup_test.py` → All dedup checks passed.
+- `python3 scripts/lint-python.py` — новый файл без замечаний.
+
 # test(cpp): раунд покрытия 13e — PerIPRateLimiter max_ips=0 reject-path 89->95% (+1 тест)
 
 ## Date: 2026-09-09

@@ -42,6 +42,9 @@ jobs:
       - name: Smoke test (NATS, 1 iteration)
         run: python3 message_counter.py --iterations 1 --concurrent 1
 
+      - name: Golden metrics check (full catalogue + traffic counters)
+        run: python3 scripts/metrics-golden-check.py --traffic
+
       - name: Collect docker logs on failure
         if: failure()
         run: docker compose logs --no-color > /tmp/compose-logs.txt || true

@@ -256,6 +256,16 @@ echo "=========================================="
 echo "✅ Done! Services are running."
 echo ""
 
+# Golden-set check: every catalogue metric must be exported (VictoriaMetrics).
+if [ -f "./scripts/metrics-golden-check.py" ]; then
+    if python3 ./scripts/metrics-golden-check.py >/dev/null 2>&1; then
+        echo "✅ Golden metrics set complete."
+    else
+        echo "⚠️  Golden metrics check failed — a catalogue metric is missing."
+        python3 ./scripts/metrics-golden-check.py || true
+    fi
+fi
+
 # Calculate and display build time
 BUILD_END_TIME=$(date +%s)
 BUILD_DURATION=$((BUILD_END_TIME - BUILD_START_TIME))

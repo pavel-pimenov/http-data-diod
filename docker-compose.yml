@@ -536,7 +536,7 @@ services:
       - L2_WORKER_QUEUE_SIZE=${L2_WORKER_QUEUE_SIZE:-0}
       - MAX_RETRIES=1
       # Dedup cache for duplicate NATS requests (DEDUP_ENABLED=true enables at-most-once L2)
-      - DEDUP_ENABLED=${DEDUP_ENABLED:-false}
+      - DEDUP_ENABLED=${DEDUP_ENABLED:-true}
       - DEDUP_MAX_ENTRIES=${DEDUP_MAX_ENTRIES:-4096}
       - DEDUP_TTL_MS=${DEDUP_TTL_MS:-60000}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
