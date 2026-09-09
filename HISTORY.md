@@ -1,3 +1,32 @@
+# fix(tools): golden-check — per-IP семейства стали feature-flag conditional
+
+## Date: 2026-09-09
+
+### Проблема
+- CI с коммита 0c9499b (добавление golden-check) стабильно красный: шаг
+  «Golden metrics check (full catalogue + traffic counters)» падал —
+  `l2_proxy_per_ip_requests_total` и `l2_proxy_per_ip_rejected_total` всегда
+  «missing».
+- Причина: семейства создаются в `app_context.cpp` ТОЛЬКО внутри
+  `if (m_config.m_enable_per_ip_rate_limiting)`, а `.env` дефолт
+  `ENABLE_PER_IP_RATE_LIMITING=false` (docker-compose дефолт true). Серии
+  динамические (DynamicLabeledFamily, только IP с активностью) — поэтому они
+  не появляются ни при каком трафике, пока фича выключена.
+
+### Что сделано
+- `scripts/metrics-golden-check.py`: `l2_proxy_per_ip_requests_total` и
+  `l2_proxy_per_ip_rejected_total` переехали из обязательного CATALOG в
+  CONDITIONAL (проверяются только под `--all`), с комментарием про
+  feature-flag. Стабильные gauge/counter
+  `l2_proxy_per_ip_rate_limiter_ips_tracked` и
+  `l2_per_ip_rate_limiter_rejected_total` остались обязательными — они
+  регистрируются всегда (вне if-блока).
+
+### Проверка
+- `python3 scripts/metrics-golden-check.py --traffic` → `OK: golden metrics
+  set complete (65/65 families, ...)` + `OK: core happy-path counters are
+  non-zero (last 5m)`.
+
 # feat(proxy): ограничение per-client счётчика дублей + gauge l2_proxy_duplicate_tracked_clients
 
 ## Date: 2026-09-09

@@ -59,8 +59,6 @@ CATALOG = [
     "l2_rate_limiter_rejected_total",
     "l2_per_ip_rate_limiter_rejected_total",
     "l2_proxy_per_ip_rate_limiter_ips_tracked",
-    "l2_proxy_per_ip_requests_total",
-    "l2_proxy_per_ip_rejected_total",
     "l2_proxy_per_client_id_requests_total",
     "l2_proxy_per_client_id_rejected_total",
     "l2_proxy_per_client_id_latency_seconds",
@@ -108,6 +106,11 @@ CATALOG = [
 CONDITIONAL = [
     "l2_proxy_per_client_id_duplicate_requests_total",
     "l2_proxy_per_client_id_duplicate_rejected_total",
+    # Emitted by the per-IP DynamicLabeledFamily, which is registered only when
+    # ENABLE_PER_IP_RATE_LIMITING=true (off by default in the stack), so they
+    # are required exclusively under --all (feature + traffic dependent).
+    "l2_proxy_per_ip_requests_total",
+    "l2_proxy_per_ip_rejected_total",
 ]
 
 # Core happy-path counters asserted to be non-zero over the traffic window.
