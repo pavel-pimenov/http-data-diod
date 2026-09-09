@@ -155,11 +155,8 @@ RUN --mount=type=cache,target=/root/.ccache \
     NINJA_JOBS=$(nproc); if [ "$ENABLE_ASAN" = "true" ]; then NINJA_JOBS=2; fi; echo "ninja jobs: $NINJA_JOBS (nproc $(nproc))" && \
     ninja -j$NINJA_JOBS && \
     _T2=$(date +%s) && \
-    ninja -j$NINJA_JOBS test_components test_proxy_core && \
-    _T3=$(date +%s) && \
     echo "=== build timing ===" && \
     echo "  compile:    $((_T2 - _T1))s" && \
-    echo "  test build: $((_T3 - _T2))s" && \
     mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy && \
     echo "=== ccache stats ===" && ccache -s | head -14
 

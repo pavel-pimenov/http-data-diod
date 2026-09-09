@@ -1,3 +1,43 @@
+# chore(ci): GitHub Actions CI + фиксация вендоренных либ + чистка скриптов
+
+## Date: 2026-09-09
+
+### Контекст
+Выполнение рекомендаций по итогам разбора сборки: в проекте не было CI
+(нет `.github/workflows`), версии вендоренных библиотек нигде не фиксировались,
+а в `scripts/` лежали 4 скрипта проверки Dockerfile, написанные под эпоху
+явных COPY-списков файлов и ставшие мёртвыми после перехода на `COPY . .`
++ `.dockerignore`. Плюс в Dockerfile оставался no-op второй прогон
+`ninja test_components test_proxy_core` (первый `ninja` уже собирает тесты).
+
+### Что сделано
+- **НАТS-патч объяснён**: изменённые `nats/src/{conn.c, glib/glib.c,
+  include/n-unix.h, nats.h, natsp.h}` побайтно идентичны апстриму
+  `nats-io/nats.c` ветки `main` (SHA 9cae373, версия 3.14.0-beta) — это
+  апстрим-синк, а не локальный хак. Новый API `natsConnection_GetConnectedServerName`
+  проектом не используется; `_freeLib` больше не зануляет счётчик ссылок
+  `gLib.refs`; `sys/socket.h` включён без ARM-гуарда.
+- **Dockerfile**: удалён no-op второй `ninja -j$NINJA_JOBS test_components
+  test_proxy_core` (и замер `test build:`).
+- **Вендоренные либы**: создан `cpp/l2-proxy/VENDORED-LIBS.md` с зафиксированными
+  версиями и источниками: nlohmann/json 3.12.0, prometheus-cpp 1.2.4,
+  nats.c 3.14.0-beta (SHA 9cae373), cpp-httplib 0.54.1, base64 (latest),
+  ODPI-C 6.0.0.
+- **Чистка дублей**: удалены мёртвые `check_dockerfile.{sh,py}`,
+  `dockerfile_check.sh`, `update_dockerfile.py` — Dockerfile копирует контекст
+  целиком (`COPY . .`), а `.dockerignore` исключает `scripts/` и `.py`/`.sh` из
+  контекста; ничто их не вызывало (упоминание только в HISTORY.md).
+- **CI**: добавлен `.github/workflows/ci.yml` с тремя job'ами —
+  `build-and-smoke` (rebuild-and-run.sh + `message_counter.py
+  --iterations 1 --concurrent 1`, логи компоуза при падении),
+  `coverage` (run-coverage.sh, гейт >= 90% строк отдаёт сам Dockerfile),
+  `clang-tidy` (полный прогон, ошибки в проектных файлах блокируют).
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, unit-тесты прошли, сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅.
+- Диф вендоренного nats против апстрима: `diff` — все 5 файлов IDENTICAL.
+
 # perf(build): PCH для тестов + настройка ccache + чистка docker context
 
 ## Date: 2026-09-09
