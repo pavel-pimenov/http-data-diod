@@ -8,16 +8,33 @@
 #include "header_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
+#include "logger.hpp"
 #include "random_utils.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 
 using db_gateway_routing::classify_method;
 using db_gateway_routing::normalize_path_rest;
 using db_gateway_routing::parse_path;
+
+// Должен быть первым вызовом Logger в этом процессе: init() идёт в
+// std::call_once, и эта ветка (JSON-формат + LOG_LEVEL + MODE=worker) не
+// достижима в test_components (там init уже отработал с окружением по
+// умолчанию).
+TEST_CASE("Logger init: JSON format, LOG_LEVEL and worker MODE",
+          "[logger-init]") {
+  std::filesystem::create_directory("logs");
+  setenv("MODE", "worker", 1);
+  setenv("LOG_FORMAT", "json", 1);
+  setenv("LOG_LEVEL", "WARNING", 1);
+  Logger::init();
+  REQUIRE(Logger::get_level() == Logger::WARN);
+}
 
 TEST_CASE("Gateway path: trims leading/trailing slashes", "[db-gateway-path]") {
   REQUIRE(normalize_path_rest("oracle/ping") == "oracle/ping");

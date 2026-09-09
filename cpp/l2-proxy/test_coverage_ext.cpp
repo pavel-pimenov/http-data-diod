@@ -6,6 +6,7 @@
 
 #include "common_utils.hpp"
 #include "crash_handler.hpp"
+#include "db_query_executor.hpp"
 #include "exceptions.hpp"
 #include "metrics_manager.hpp"
 #include "pool_executor.hpp"
@@ -20,6 +21,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "httplib/httplib.h"
+#include "prometheus/family.h"
+#include "prometheus/gauge.h"
 #include "prometheus/summary.h"
 #include <chrono>
 #include <memory>
@@ -37,6 +40,36 @@ TEST_CASE("StringUtils: to_lower lowercases ASCII and passes non-ASCII through",
   REQUIRE(to_lower("Hello WORLD") == "hello world");
   REQUIRE(to_lower("AbC-123") == "abc-123");
   REQUIRE(to_lower("") == "");
+}
+
+namespace {
+class ReadyExec final : public DbQueryExecutor {
+public:
+  bool init() override { return true; }
+  bool is_ready() const override { return DbQueryExecutor::is_ready(); }
+  [[nodiscard]] int default_timeout_ms() const override { return 1000; }
+  [[nodiscard]] int default_max_rows() const override { return 10; }
+  [[nodiscard]] const std::string &db_name() const override {
+    static const std::string g_mock_db_name{"mock"};
+    return g_mock_db_name;
+  }
+  json execute_query(const std::string &, const json &, int, int,
+                     int &) override {
+    return json::object();
+  }
+  bool ping(int) override { return true; }
+  void set_pool_metrics(prometheus::Family<prometheus::Gauge> *) override {}
+};
+} // namespace
+
+TEST_CASE("DbQueryExecutor: default is_ready returns true", "[db-exec]") {
+  ReadyExec exec;
+  REQUIRE(exec.is_ready());
+  REQUIRE(exec.init());
+  REQUIRE(exec.ping(1));
+  REQUIRE(exec.default_timeout_ms() == 1000);
+  REQUIRE(exec.default_max_rows() == 10);
+  REQUIRE(exec.db_name() == "mock");
 }
 
 TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",

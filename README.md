@@ -602,12 +602,12 @@ python3 scripts/db-gateway-e2e-test.py   # 7/7 проверок
 python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 ```
 
-**Текущие счётчики** (после раундов 11b–13c):
+**Текущие счётчики** (после раундов 11b–13d):
 
 | Тестовый бинарь | Test cases | Assertions | Фокус |
 |---|---|---|---|
-| `test_components` | 342 | 1 459 | Core-компоненты (см. ключевые модули ниже) |
-| `test_proxy_core` | 73 | 742 | Интеграция (request lifecycle, NATS, DB) |
+| `test_components` | 343 | 1 465 | Core-компоненты (см. ключевые модули ниже) |
+| `test_proxy_core` | 74 | 743 | Интеграция (request lifecycle, NATS, DB) |
 
 **Ключевые модули, покрытые юнит-тестами:**
 
@@ -655,7 +655,7 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 **Coverage gate:** стадия `coverage` в `cpp/l2-proxy/Dockerfile` линкует
 `gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
 (exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
-Текущее значение: **97.1%**. Гейт по **ветвям** не ставится (см. ниже).
+Текущее значение: **97.3%**. Гейт по **ветвям** не ставится (см. ниже).
 
 **Ветвевое покрытие (branch, информационно):**
 
@@ -680,12 +680,13 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 `tracing_helpers.hpp` (~58%), `rate_limiter_per_ip.hpp` (~59%),
 `db_query_executor_base.cpp` (~42%). Рабочим гейтом остаётся построчный (90%).
 
-**Текущие цифры** (раунды 11b–13c):
+**Текущие цифры** (раунды 11b–13d):
 
 | Модуль | Строк покрыто | Комментарий |
 |---|---|---|
-| `logger.hpp` | 88% | JSON/Text-форматтеры, correlation-контекст, уровни |
+| `logger.hpp` | 95% | JSON/Text-форматтеры, correlation-контекст, уровни, init (JSON+LOG_LEVEL) |
 | `tracing_helpers.hpp` | 98% | TraceContextHelper, make_span_and_traceparent, log_incoming_span |
+| `db_query_executor.hpp` | 100% | Интерфейс + default is_ready |
 | `rate_limiter_per_ip.hpp` | 89% | пер-IP изоляция, LRU, TTL-cleanup |
 | `trace_logger.cpp` | 88.3% | Включая sender_loop, queue-full, retry |
 | `sentry_client.cpp` | 94.3% | HTTP-доставка, DSN, все уровни |
@@ -694,7 +695,7 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| **Общее по проекту** | **~97.1%** | Ключевые модули >88% |
+| **Общее по проекту** | **~97.3%** | Ключевые модули >88% |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 

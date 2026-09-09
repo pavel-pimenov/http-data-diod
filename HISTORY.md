@@ -1,3 +1,33 @@
+# test(cpp): раунд покрытия 13d — logger init-ветки (в test_proxy_core) + db_query_executor 100% (+2 теста)
+
+## Date: 2026-09-09
+
+### Что сделано
+- `test_proxy_core.cpp`: первый TEST_CASE (до любого другого вызова Logger в
+  этом процессе) задаёт env `MODE=worker`, `LOG_FORMAT=json`,
+  `LOG_LEVEL=WARNING` и вызывает `Logger::init()`. Покрыты init-ветки
+  `logger.hpp`, недостижимые в test_components (там `std::call_once` уже
+  отработал): JSON-форматтеры для консоль/файл, сообщение «Using structured
+  JSON log format», парсинг `LOG_LEVEL` (WARNING → warn) и применение уровня
+  ко всем синкам, имя логгера по `MODE=worker`.
+  `logger.hpp`: **88% → 95%**.
+- `test_coverage_ext.cpp`: мок `ReadyExec : public DbQueryExecutor`,
+  вызывающий базовый default `DbQueryExecutor::is_ready()` через квалификацию
+  + проверка остальных pure-virtual аксессоров. `db_query_executor.hpp`:
+  **66% → 100%**.
+- `README.md`: счётчики 343/1 465 и 74/743, значения покрытия.
+
+### Проверка
+- Покрытие строк: TOTAL 7681/7898 = **97.3%** (гейт `--fail-under-line 90` ✅).
+- `./scripts/run-coverage.sh`: «All tests passed (1465 assertions in 343
+  test cases)» + «(743 assertions in 74 test cases)».
+- Нерешённое: ветки `logger.hpp` 269-272 (спдлог уже содержит логгер — не
+  моделируется в тестах), 324 (text-init, взаимна с JSON-веткой),
+  339/342-347 (прочие значения LOG_LEVEL — по одной на процесс init),
+  507 (MODE=l2-server) — требуют отдельных процессов с другим env; остаются
+  сознательно.
+- clang-tidy по изменённым файлам — без замечаний.
+
 # test(cpp): раунд покрытия 13c — logger.hpp 57->88%, tracing_helpers 81->98% (+7 тестов)
 
 ## Date: 2026-09-09
