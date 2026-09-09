@@ -98,6 +98,7 @@ ensure_compile_commands() {
         "cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug \
                -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                -DCMAKE_UNITY_BUILD=OFF \
+               -DL2_PROXY_TEST_PCH=OFF \
                -S . -B build-lint >/dev/null"
 }
 

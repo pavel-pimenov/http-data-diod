@@ -1,5 +1,7 @@
 build
 build_test
+build-lint
+build-cov
 nats/build
 CMakeFiles
 *.o

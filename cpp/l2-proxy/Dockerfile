@@ -78,6 +78,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# ccache tuning: on 4-core hosts the 5 GiB default evicts unity batches between
+# Dockerfile tweaks; raise the cap and compress so hits survive longer. The
+# cache itself lives in the BuildKit cache mount at /root/.ccache and persists
+# across rebuilds.
+ENV CCACHE_MAXSIZE=10G \
+    CCACHE_COMPRESS=1
+
 WORKDIR /app
 
 # Build NATS C client (static) in its own COPY + RUN, BEFORE the app sources:
@@ -153,7 +160,8 @@ RUN --mount=type=cache,target=/root/.ccache \
     echo "=== build timing ===" && \
     echo "  compile:    $((_T2 - _T1))s" && \
     echo "  test build: $((_T3 - _T2))s" && \
-    mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy
+    mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy && \
+    echo "=== ccache stats ===" && ccache -s | head -14
 
 # Unit tests run in their own RUN step (same build dir via the cache mount):
 # the results stay at the end of the build output instead of scrolling past a
@@ -211,6 +219,7 @@ RUN rm -rf build-lint && mkdir build-lint && cd build-lint && \
     cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DCMAKE_UNITY_BUILD=OFF \
+          -DL2_PROXY_TEST_PCH=OFF \
           .. && \
     find /app -name '*.cpp' ! -path '*/httplib/*' ! -path '*/base64/*' | \
     xargs clang-tidy -p . \

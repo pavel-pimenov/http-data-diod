@@ -1,3 +1,50 @@
+# perf(build): PCH для тестов + настройка ccache + чистка docker context
+
+## Date: 2026-09-09
+
+### Контекст
+Полный rebuild образа (~7-8 мин на 4 ядрах) упирался в повторный парсинг
+тяжёлых хедеров (nlohmann/json ~27К строк, prometheus-cpp, Catch2, spdlog,
+httplib) каждым TU. Тестовые таргеты компилируются БЕЗ unity (каждый
+файл — своя единица трансляции), поэтому перепаринг хедеров был максимально
+расточителен. Дополнительно: ccache-состояние не было видно, а `build-lint`
+(1,1М cmake-кэша от run-clang-tidy.sh) попадал в docker context.
+
+### Что сделано
+- **CMakeLists.txt**: новая опция `L2_PROXY_TEST_PCH` (по умолчанию ON) +
+  `target_precompile_headers` для `test_components` (nlohmann/json, httplib,
+  Catch2 + matchers, prometheus registry/counter/histogram/gauge/summary,
+  spdlog) и `test_proxy_core` (nlohmann/json, Catch2, prometheus registry,
+  spdlog). Единый `.gch` на таргет вместо перепаринга в каждом TU.
+- **Dockerfile builder**: `ENV CCACHE_MAXSIZE=10G CCACHE_COMPRESS=1` (дефолт
+  5GiB на 4 ядрах вытеснял unity-батчи между правками Dockerfile) + вывод
+  `ccache -s` в конце app-сборки (видимость hit-rate).
+- **Dockerfile lint**: `-DL2_PROXY_TEST_PCH=OFF` — clang-tidy не умеет
+  переиспользовать GCC-шный `.gch`, поэтому анализ детерминирован.
+- **scripts/run-clang-tidy.sh**: та же `-DL2_PROXY_TEST_PCH=OFF` при генерации
+  compile_commands.json.
+- **.dockerignore**: исключены `build-lint`, `build-cov` (бесполезный вес
+  context'а).
+
+### Результаты замера
+- Полный rebuild образа: **4м49с** вместо ~7м48с.
+- `compile:` (cmake + ninja всё, включая PCH и тесты): 238с; unit-тесты: 20с.
+- ccache: 94/229 хитов (41%) в первом же прогретом прогоне, кэш 0.3/10GiB.
+- Прямое подтверждение PCH: в build.ninja есть таргеты `cmake_pch.hxx.gch`
+  и все 24 TU-команды тестов зависят от `.gch` (`-include ...cmake_pch.hxx`,
+  `-Winvalid-pch`).
+- Побочная находка: второй `ninja test_components test_proxy_core` — no-op
+  (первый `ninja` уже собирает тесты), замер показал `test build: 0s`.
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, unit-тесты прошли, сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅
+  (POST 1/1 без потерь, GET binary ✅).
+- Проверен PCH=OFF-путь: `cmake -DL2_PROXY_TEST_PCH=OFF` конфигурируется
+  чисто, в build.ninja нет ссылок на cmake_pch (lint/clang-tidy не сломаны).
+
+---
+
 # build: убран мёртвый apt-груз (libspdlog1.15, libzstd-dev, libfmt-dev, pkg-config)
 
 ## Date: 2026-09-09

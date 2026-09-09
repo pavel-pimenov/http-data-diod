@@ -52,6 +52,7 @@ set(L2_PROXY_COMMON_COMPILE_OPTIONS
 
 # Options for tracing backends
 option(BUILD_TESTS "Build unit tests with Catch2" OFF)
+option(L2_PROXY_TEST_PCH "Precompile common headers for unit test targets (nlohmann/json, prometheus, Catch2, httplib)" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer + LeakSanitizer" OFF)
 option(ENABLE_PROFILER "Enable gperftools heap profiling (links tcmalloc + profiler)" OFF)
 
@@ -532,6 +533,33 @@ if(BUILD_TESTS)
         )
     endif()
     catch_discover_tests(test_proxy_core)
+
+    # Precompile the heavy common headers once per target. The test targets
+    # compile WITHOUT unity (each TU is its own unit), so every TU re-parses
+    # nlohmann/json (~27k lines), prometheus, Catch2 and spdlog. PCH moves that
+    # parse into a single .gch built once. Disable with -DL2_PROXY_TEST_PCH=OFF
+    # for the clang-tidy stage (clang cannot reuse a GCC-built .gch, so it stays
+    # off there to keep the analysis deterministic).
+    if(L2_PROXY_TEST_PCH)
+        target_precompile_headers(test_components PRIVATE
+            <nlohmann/json.hpp>
+            <httplib/httplib.h>
+            <catch2/catch_test_macros.hpp>
+            <catch2/matchers/catch_matchers_floating_point.hpp>
+            <prometheus/registry.h>
+            <prometheus/counter.h>
+            <prometheus/histogram.h>
+            <prometheus/gauge.h>
+            <prometheus/summary.h>
+            <spdlog/spdlog.h>
+        )
+        target_precompile_headers(test_proxy_core PRIVATE
+            <nlohmann/json.hpp>
+            <catch2/catch_test_macros.hpp>
+            <prometheus/registry.h>
+            <spdlog/spdlog.h>
+        )
+    endif()
 
     # Enable testing
     enable_testing()
