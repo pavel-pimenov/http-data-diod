@@ -1,3 +1,36 @@
+# chore(build): синк макета odpi на апстрим 26.0.0-b1
+
+## Date: 2026-09-09
+
+### Контекст
+Обновлён вендоренный ODPI-C: 18 файлов (`odpi/src/*` + `odpi/include/dpi.h`)
+и добавлен `odpi/README.md`. Версия поднялась с 6.0.0 до 26.0.0-b1.
+
+### Что сделано
+- Синк на ветку `main` репозитория `oracle/odpi`: все 19 изменённых файлов
+  побайтно идентичны апстриму (проверено `diff`), `README.md` тоже.
+- Ключевые изменения апстрима: `dpiCredentials`-рефакторинг внутренних
+  сигнатур (`dpiConn__create`, `dpiPool__acquireConnection`), новый
+  `dpiConn_getTransactionPriority` / `dpiConn_setTransactionPriority` и поля
+  `transactionPriority` в `dpiCommonCreateParams`, атрибут
+  `DPI_OCI_ATTR_TXN_PRIORITY`.
+- API для проекта обратно совместимо: изменение `dpiCommonCreateParams`
+  аддитивно (поля добавлены в конец структуры), публичные `dpiConn_*`-функции
+  добавлены начисто. Отдельных правок в `db_query_executor_oracle.cpp` не нужно.
+- `odpi/embed/dpi.c` — amalgamation (`#include` всех `src/*.c`), отдельной
+  перегенерации не требует.
+- Обновлён `VENDORED-LIBS.md` (версия ODPI-C + заметка про `embed/dpi.c`).
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, unit-тесты прошли, сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅.
+- Oracle-путь с новой odpi проверен отдельно (стек с `DB_ORACLE_ENABLED=true`):
+  `GET /v1/sql/oracle/ping` → 200 ok (latency ~150ms), `SELECT` из
+  `app_user.demo_messages` вернул 2 строки с корректными типами колонок
+  (VARCHAR2, NUMBER), неверный SQL даёт читаемый ORA-00942 через
+  `dpiStmt_execute`.
+- `python3 scripts/db-gateway-e2e-test.py`: 7/7 PASS (на дефолтном стеке).
+
 # chore(ci): GitHub Actions CI + фиксация вендоренных либ + чистка скриптов
 
 ## Date: 2026-09-09
