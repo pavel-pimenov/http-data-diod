@@ -1,3 +1,43 @@
+# refactor(tools): автономные улучшения инфраструктуры после datasource-рефакторинга
+
+## Date: 2026-09-09
+
+### Что сделано
+- `scripts/generate-grafana-dashboards.py`: добавлен аргумент `--datasource-url`
+  и поддержка `prometheus_url` из конфиг-файла / `PROMETHEUS_URL` env.
+  Приоритет URL datasource: `--datasource-url` (CLI) > конфиг/окружение >
+  `http://victoria-metrics:8428`. URL из конфига также используется для
+  discovery метрик (`--discover-metrics`). Раньше `prometheus_url` из
+  `grafana-config-example.{json,yaml}` игнорировался скриптом.
+- `scripts/test-grafana-generator.sh`: убрано дублирующее ручное создание
+  datasource (curl) — теперь его создаёт генератор через
+  `--datasource-url http://localhost:9090`; перед стартом удаляется
+  оставшийся от прошлого запуска контейнер `grafana-test`.
+- `scripts/pre-commit.sh`: добавлена поддержка `SKIP_PRECOMMIT=1` — пропуск
+  тестов для черновых коммитов (заявлено в AGENTS.md, но не реализовано).
+- Новый `scripts/install-git-hooks.sh`: установщик `.git/hooks/pre-commit`
+  (тонкая обёртка над `pre-commit.sh`).
+- `scripts/PRE_COMMIT_README.md`: исправлено неверное утверждение «хук
+  автоматически устанавливается при клоне» — git не копирует хуки из
+  `scripts/`; описана ручная установка и снятие.
+- `scripts/run-clang-tidy.sh`: режим `--all` больше не гоняет vendored TUs
+  (`prometheus-cpp`, `civetweb`), только проектные файлы.
+- Lint-фиксы: `scripts/sentry-mock-receiver.py` — убран неиспользуемый импорт
+  `sys`; добавлены отсутствующие завершающие переводы строк
+  (`sentry-mock-receiver.py`, `sentry-e2e-test.py`).
+- `README.md`: в раздел «Grafana-дашборды» добавлено описание приоритета
+  URL datasource.
+
+### Проверка
+- `./scripts/run-clang-tidy.sh --all` — весь проект (36 TU) без ошибок и
+  предупреждений.
+- `./rebuild-and-run.sh` — сборка успешна, сервисы healthy, дашборды 8/8,
+  datasource-проверка (`already exists`) работает.
+- `python3 message_counter.py --iterations 1 --concurrent 1` ✅ (без потерь).
+- Проверено создание datasource с нуля: DELETE `/api/datasources/uid/prometheus`
+  → генератор пересоздаёт (VictoriaMetrics/prometheus/victoria-metrics:8428,
+  isDefault) ✅.
+
 # refactor(grafana): datasource провижинится Python-скриптом вместо provisioning-каталога
 
 ## Date: 2026-09-09

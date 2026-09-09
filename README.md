@@ -529,6 +529,11 @@ python3 scripts/generate-grafana-dashboards.py                 # создать/
 python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выровнять расхождения
 ```
 
+URL datasource берётся с приоритетом: `--datasource-url` (CLI) > `prometheus_url`
+в конфиг-файле/`PROMETHEUS_URL` env > значение по умолчанию
+(`http://victoria-metrics:8428`). Для discovery метрик используется
+`--prometheus_url` (тот же fallback на `prometheus_url` из конфига).
+
 Дашборды и их UID:
 
 | Дашборд | UID | Покрываемые метрики |

@@ -65,12 +65,14 @@ all_cpp_files() {
     # Full sweep lints translation units only: headers are covered via the
     # include graph of the .cpp files, so linting each header as its own TU
     # would be redundant and very slow (e.g. the bundled nats C headers).
+    # Bundled third-party libraries (httplib, base64, prometheus-cpp/civetweb)
+    # are skipped the same way as in the "changed" mode.
     local f
     for f in $(git ls-files "$L2_DIR"); do
         case "$f" in
             $L2_DIR/*.cpp|$L2_DIR/*.cc)
                 case "$f" in
-                    */httplib/*|*/base64/*) continue ;;
+                    */httplib/*|*/base64/*|*/prometheus-cpp/*) continue ;;
                 esac
                 echo "$f"
                 ;;

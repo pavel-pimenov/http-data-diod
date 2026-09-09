@@ -28,7 +28,7 @@ import time
 import re
 import pathlib
 import requests
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Dict, List, Any, Optional, Set
 import logging
 
 # Configure logging
@@ -47,7 +47,7 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
     if not os.path.exists(config_path):
         logger.error(f"Config file not found: {config_path}")
         sys.exit(1)
-    
+
     try:
         with open(config_path, 'r') as f:
             if config_path.endswith('.json'):
@@ -81,18 +81,18 @@ def get_interactive_auth() -> Dict[str, str]:
     print("\n" + "=" * 60)
     print("Grafana Authentication")
     print("=" * 60)
-    
+
     # Get Grafana URL
     url = input("\nGrafana URL [http://localhost:3000]: ").strip()
     if not url:
         url = 'http://localhost:3000'
-    
+
     # Ask for auth method
     print("\nAuthentication method:")
     print("1. API Key (recommended for production)")
     print("2. Username/Password")
     choice = input("Choose [1]: ").strip()
-    
+
     if choice == '2':
         # Username/Password auth
         user = input("Username [admin]: ").strip()
@@ -105,7 +105,8 @@ def get_interactive_auth() -> Dict[str, str]:
             'url': url,
             'user': user,
             'password': password,
-            'api_key': ''
+            'api_key': '',
+            'prometheus_url': ''
         }
     else:
         # API Key auth
@@ -114,13 +115,14 @@ def get_interactive_auth() -> Dict[str, str]:
             'url': url,
             'user': '',
             'password': '',
-            'api_key': api_key
+            'api_key': api_key,
+            'prometheus_url': ''
         }
 
 
 def load_configuration(config_file: Optional[str] = None) -> Dict[str, str]:
     """Load configuration from file, environment variables, or interactive prompt"""
-    
+
     # Priority 1: Config file
     if config_file:
         logger.info(f"Loading configuration from file: {config_file}")
@@ -129,24 +131,27 @@ def load_configuration(config_file: Optional[str] = None) -> Dict[str, str]:
             'url': config.get('grafana_url', config.get('GRAFANA_URL', 'http://localhost:3000')),
             'user': config.get('grafana_user', config.get('GRAFANA_USER', 'admin')),
             'password': config.get('grafana_password', config.get('GRAFANA_PASSWORD', 'admin')),
-            'api_key': config.get('grafana_api_key', config.get('GRAFANA_API_KEY', ''))
+            'api_key': config.get('grafana_api_key', config.get('GRAFANA_API_KEY', '')),
+            'prometheus_url': config.get('prometheus_url', config.get('PROMETHEUS_URL', ''))
         }
-    
+
     # Priority 2: Environment variables
     env_url = os.getenv('GRAFANA_URL')
     env_user = os.getenv('GRAFANA_USER')
     env_password = os.getenv('GRAFANA_PASSWORD')
     env_api_key = os.getenv('GRAFANA_API_KEY')
-    
-    if env_url or env_user or env_password or env_api_key:
+    env_prometheus_url = os.getenv('PROMETHEUS_URL')
+
+    if env_url or env_user or env_password or env_api_key or env_prometheus_url:
         logger.info("Using configuration from environment variables")
         return {
             'url': env_url or 'http://localhost:3000',
             'user': env_user or 'admin',
             'password': env_password or 'admin',
-            'api_key': env_api_key or ''
+            'api_key': env_api_key or '',
+            'prometheus_url': env_prometheus_url or ''
         }
-    
+
     # Priority 3: Interactive prompt
     logger.info("No configuration provided. Starting interactive mode...")
     return get_interactive_auth()
@@ -476,14 +481,14 @@ def create_tracing_dashboard() -> Dict:
         uid="l2-distributed-tracing",
         tags=["l2-proxy", "tracing", "jaeger"]
     )
-    
+
     panels = dashboard["dashboard"]["panels"]
     y = 0
-    
+
     # Row 1: Tracing Overview
     panels.append(create_row_panel("Обзор трассировки", 1, y))
     y += 1
-    
+
     # Panel 2: Spans Sent vs Failed
     panels.append(create_timeseries_panel(
         title="Спанов отправлено vs ошибок",
@@ -502,7 +507,7 @@ def create_tracing_dashboard() -> Dict:
             {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"}
         ]
     ))
-    
+
     # Panel 3: Tracing Queue Size
     panels.append(create_timeseries_panel(
         title="Размер очереди трассировки",
@@ -522,7 +527,7 @@ def create_tracing_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Panel 4: Spans Failed Rate
     panels.append(create_timeseries_panel(
         title="Скорость ошибок спанов",
@@ -541,7 +546,7 @@ def create_tracing_dashboard() -> Dict:
             {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 5: Last Send Duration
     panels.append(create_timeseries_panel(
         title="Длительность последней отправки",
@@ -553,11 +558,11 @@ def create_tracing_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 2: Tracing Latency
     panels.append(create_row_panel("Задержки трассировки", 10, y))
     y += 1
-    
+
     # Panel 11: Span Send Latency
     panels.append(create_timeseries_panel(
         title="Задержка отправки спанов",
@@ -570,7 +575,7 @@ def create_tracing_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.99, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p99", "refId": "C"}
         ]
     ))
-    
+
     # Panel 12: Queue Time
     panels.append(create_timeseries_panel(
         title="Время спана в очереди",
@@ -584,7 +589,7 @@ def create_tracing_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     return dashboard
 
 def create_sentry_dashboard() -> Dict:
@@ -764,7 +769,7 @@ def create_timeseries_panel(
     custom: Optional[Dict] = None
 ) -> Dict:
     """Create a time series panel"""
-    
+
     if thresholds is None:
         thresholds = {
             "mode": "absolute",
@@ -772,7 +777,7 @@ def create_timeseries_panel(
                 {"color": "green", "value": None}
             ]
         }
-    
+
     field_defaults = {
         "color": {"mode": "palette-classic"},
         "mappings": [],
@@ -781,7 +786,7 @@ def create_timeseries_panel(
     }
     if custom is not None:
         field_defaults["custom"] = custom
-    
+
     return {
         "id": id,
         "type": "timeseries",
@@ -1374,7 +1379,7 @@ def get_existing_dashboard_metrics(dashboard: Dict) -> List[str]:
 def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, y: int) -> Optional[Dict]:
     """Create a time series panel for a newly discovered metric"""
     category = categorize_metric(metric_name)
-    
+
     # Determine unit based on metric name
     unit = "short"
     if 'bytes' in metric_name:
@@ -1383,10 +1388,10 @@ def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, 
         unit = "s"
     elif '_total' in metric_name or 'rate' in metric_name:
         unit = "reqps"
-    
+
     # Create legend format
     legend_format = metric_name.replace('l2_proxy_', '').replace('l2_worker_', '').replace('l2_tracing_', '')
-    
+
     # Check if it's a histogram metric
     if '_bucket{' in metric_name or 'histogram_quantile' in metric_name:
         # Create percentile panels
@@ -1401,11 +1406,11 @@ def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, 
             expr = f"rate({metric_name}{{vm=~\"${{vm:regex}}\"}}[1m])"
         else:
             expr = f"{metric_name}{{vm=~\"${{vm:regex}}\"}}"
-        
+
         targets = [
             {"expr": expr, "legendFormat": legend_format, "refId": "A"}
         ]
-    
+
     return create_timeseries_panel(
         title=metric_name.replace('_', ' ').title(),
         id=panel_id,
@@ -1419,90 +1424,90 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
     """Correct an existing dashboard by comparing with generated version with detailed diagnostics"""
     try:
         import re
-        
+
         # Get existing dashboard
         existing = api.get_dashboard(dashboard_uid)
         if not existing:
             logger.info(f"Dashboard {dashboard_uid} does not exist, will create new")
             return api.save_dashboard(dashboard_func())
-        
+
         # Get new dashboard definition
         new_dashboard = dashboard_func()
-        
+
         existing_panels = existing.get('dashboard', {}).get('panels', [])
         new_panels = new_dashboard.get('dashboard', {}).get('panels', [])
-        
+
         # Extract metrics from both versions
         existing_metrics = set(get_existing_dashboard_metrics(existing))
         new_metrics = set(get_existing_dashboard_metrics(new_dashboard))
-        
+
         # Calculate differences
         added_metrics = new_metrics - existing_metrics
         removed_metrics = existing_metrics - new_metrics
         common_metrics = existing_metrics & new_metrics
-        
+
         # Count panels by type
         existing_rows = sum(1 for p in existing_panels if p.get('type') == 'row')
         new_rows = sum(1 for p in new_panels if p.get('type') == 'row')
         existing_visual_panels = len(existing_panels) - existing_rows
         new_visual_panels = len(new_panels) - new_rows
-        
+
         # Print detailed diagnostics
         print(f"\n{'='*60}")
         print(f"Dashboard: {new_dashboard['dashboard']['title']}")
         print(f"UID: {dashboard_uid}")
         print(f"{'='*60}")
-        
+
         # Panel changes
         if len(existing_panels) != len(new_panels):
             print(f"\n📊 Panel Changes:")
             print(f"   Total panels: {len(existing_panels)} -> {len(new_panels)} ({len(new_panels) - len(existing_panels):+d})")
             print(f"   Row panels: {existing_rows} -> {new_rows}")
             print(f"   Visualization panels: {existing_visual_panels} -> {new_visual_panels}")
-            
+
             # Find added/removed panels by title
             existing_titles = set(p.get('title', '') for p in existing_panels if p.get('type') != 'row')
             new_titles = set(p.get('title', '') for p in new_panels if p.get('type') != 'row')
             added_panels = new_titles - existing_titles
             removed_panels = existing_titles - new_titles
-            
+
             if added_panels:
                 print(f"\n   ✨ Added panels:")
                 for title in sorted(added_panels):
                     print(f"      + {title}")
-            
+
             if removed_panels:
                 print(f"\n   🗑️  Removed panels:")
                 for title in sorted(removed_panels):
                     print(f"      - {title}")
-        
+
         # Metric changes
         if added_metrics or removed_metrics:
             print(f"\n📈 Metric Changes:")
-            
+
             if added_metrics:
                 print(f"\n   ✨ New metrics ({len(added_metrics)}):")
                 for metric in sorted(added_metrics):
                     category = categorize_metric(metric)
                     print(f"      + {metric} ({category})")
-            
+
             if removed_metrics:
                 print(f"\n   🗑️  Removed metrics ({len(removed_metrics)}):")
                 for metric in sorted(removed_metrics):
                     print(f"      - {metric}")
-            
+
             if common_metrics:
                 print(f"\n   ⚡ Unchanged metrics: {len(common_metrics)}")
         else:
             print(f"\n✅ Dashboard is up to date")
             print(f"   Panels: {len(new_panels)} ({new_rows} rows + {new_visual_panels} visualizations)")
             print(f"   Metrics: {len(new_metrics)} total")
-        
+
         print(f"{'='*60}\n")
-        
+
         # Determine if update is needed
         needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics)
-        
+
         if needs_update:
             if api.save_dashboard(new_dashboard):
                 print(f"✅ Dashboard updated successfully")
@@ -1512,7 +1517,7 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
                 return False
         else:
             return True
-            
+
     except Exception as e:
         logger.error(f"Failed to correct dashboard {dashboard_uid}: {e}")
         return False
@@ -1521,15 +1526,15 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
 def discover_and_create_dashboards(api: GrafanaAPI, prometheus_api: PrometheusAPI) -> List[str]:
     """Discover new metrics and create dashboards for them if needed"""
     created_dashboards = []
-    
+
     # Get all metrics from Prometheus
     all_metrics = prometheus_api.get_all_metrics()
     if not all_metrics:
         logger.warning("No metrics found in Prometheus")
         return created_dashboards
-    
+
     logger.info(f"Found {len(all_metrics)} L2 metrics in Prometheus")
-    
+
     # Group metrics by category
     metrics_by_category = {}
     for metric in all_metrics:
@@ -1537,7 +1542,7 @@ def discover_and_create_dashboards(api: GrafanaAPI, prometheus_api: PrometheusAP
         if category not in metrics_by_category:
             metrics_by_category[category] = []
         metrics_by_category[category].append(metric)
-    
+
     # Check for new categories that don't have dashboards yet
     existing_dashboards = []  # We'll get this from Grafana
     try:
@@ -1546,17 +1551,17 @@ def discover_and_create_dashboards(api: GrafanaAPI, prometheus_api: PrometheusAP
         existing_dashboards = [d['uid'] for d in response.json()]
     except Exception as e:
         logger.error(f"Failed to get existing dashboards: {e}")
-    
+
     # Known dashboard UIDs
     known_uids = {
         'l2-distributed-tracing'
     }
-    
+
     # Check for new metric categories
     for category, metrics in metrics_by_category.items():
         # This is a simplified check - in reality you'd want more sophisticated logic
         pass
-    
+
     return created_dashboards
 
 
@@ -1571,10 +1576,10 @@ def create_proxy_dashboard() -> Dict:
         uid="l2-proxy",
         tags=["l2-proxy", "nats", "rate-limiting", "http-pool"]
     )
-    
+
     panels = dashboard["dashboard"]["panels"]
     y = 0
-    
+
     # Row 0: Hot clients & per-client distribution (X-DataHub-Client-Id) — на
     # самом верху, чтобы хот-клиенты были видны без прокрутки.
     panels.append(create_row_panel("Хот-клиенты (X-DataHub-Client-Id)", 5, y))
@@ -1719,7 +1724,7 @@ def create_proxy_dashboard() -> Dict:
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1
-    
+
     # Panel 2: Client Requests
     panels.append(create_timeseries_panel(
         title="Запросы клиентов",
@@ -1730,7 +1735,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 3: Client Request Errors
     panels.append(create_timeseries_panel(
         title="Ошибки запросов клиентов",
@@ -1749,7 +1754,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 4: Duplicate Requests
     panels.append(create_timeseries_panel(
         title="Дублирующиеся запросы",
@@ -1762,11 +1767,11 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 2: Bytes
     panels.append(create_row_panel("Байты", 10, y))
     y += 1
-    
+
     # Panel 11: Bytes Received
     panels.append(create_timeseries_panel(
         title="Получено байт",
@@ -1777,7 +1782,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_proxy_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 12: Bytes Sent
     panels.append(create_timeseries_panel(
         title="Отправлено байт",
@@ -1789,11 +1794,11 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 3: Latency & Sizes
     panels.append(create_row_panel("Задержки и размеры", 20, y))
     y += 1
-    
+
     # Panel 21: Request Duration
     panels.append(create_timeseries_panel(
         title="Длительность запроса",
@@ -1806,7 +1811,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
         ]
     ))
-    
+
     # Panel 22: Request Size
     panels.append(create_timeseries_panel(
         title="Размер запроса",
@@ -1819,7 +1824,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
         ]
     ))
-    
+
     # Panel 23: Response Size
     panels.append(create_timeseries_panel(
         title="Размер ответа",
@@ -1833,11 +1838,11 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 5: NATS
     panels.append(create_row_panel("NATS", 40, y))
     y += 1
-    
+
     # Panel 41: NATS Requests
     panels.append(create_timeseries_panel(
         title="NATS запросы",
@@ -1848,7 +1853,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_proxy_nats_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 42: NATS Errors
     panels.append(create_timeseries_panel(
         title="NATS ошибки",
@@ -1867,7 +1872,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_proxy_nats_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 43: NATS Connection Events
     panels.append(create_timeseries_panel(
         title="NATS события подключения",
@@ -1880,7 +1885,7 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Panel 44: NATS Request Duration
     panels.append(create_timeseries_panel(
         title="NATS длительность запроса",
@@ -1894,11 +1899,11 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 6: Connection Pool
     panels.append(create_row_panel("Пул соединений", 50, y))
     y += 1
-    
+
     # Panel 51: Pool Active/Available
     panels.append(create_timeseries_panel(
         title="Пул активных/доступных",
@@ -1910,7 +1915,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "l2_http_pool_available_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Доступные", "refId": "B"}
         ]
     ))
-    
+
     # Panel 52: Pool Acquisitions/Releases
     panels.append(create_timeseries_panel(
         title="Пул получения/возврата",
@@ -1922,7 +1927,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_http_pool_client_releases_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Возвраты/с", "refId": "B"}
         ]
     ))
-    
+
     # Panel 53: Pool Stale Evictions
     panels.append(create_timeseries_panel(
         title="Вытеснение устаревших из пула",
@@ -1934,11 +1939,11 @@ def create_proxy_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 7: Rate Limiting
     panels.append(create_row_panel("Ограничение частоты", 60, y))
     y += 1
-    
+
     # Panel 61: Global Rate Limiter Tokens
     panels.append(create_timeseries_panel(
         title="Токены глобального лимитера",
@@ -1949,7 +1954,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "l2_rate_limiter_tokens{vm=~\"${vm:regex}\"}", "legendFormat": "Токены", "refId": "A"}
         ]
     ))
-    
+
     # Panel 62: Global Rejected
     panels.append(create_timeseries_panel(
         title="Отклонено глобальным",
@@ -1968,7 +1973,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 63: Per-IP Rejected
     panels.append(create_timeseries_panel(
         title="Отклонено per-IP",
@@ -1987,7 +1992,7 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "rate(l2_per_ip_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 64: Per-IP Tracked IPs
     panels.append(create_timeseries_panel(
         title="Per-IP отслеживаемые IP",
@@ -2203,14 +2208,14 @@ def create_worker_dashboard() -> Dict:
         uid="l2-worker",
         tags=["l2-proxy", "worker", "circuit-breaker"]
     )
-    
+
     panels = dashboard["dashboard"]["panels"]
     y = 0
-    
+
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1
-    
+
     # Panel 2: Requests Processed
     panels.append(create_timeseries_panel(
         title="Обработано запросов",
@@ -2221,7 +2226,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_requests_processed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 3: L2 Calls
     panels.append(create_timeseries_panel(
         title="L2 вызовы",
@@ -2232,7 +2237,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_l2_calls_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Вызовы/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 4: L2 Errors
     panels.append(create_timeseries_panel(
         title="L2 ошибки",
@@ -2252,11 +2257,11 @@ def create_worker_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 2: Bytes
     panels.append(create_row_panel("Байты", 10, y))
     y += 1
-    
+
     # Panel 11: Bytes Received
     panels.append(create_timeseries_panel(
         title="Получено байт",
@@ -2267,7 +2272,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 12: Bytes Sent
     panels.append(create_timeseries_panel(
         title="Отправлено байт",
@@ -2279,11 +2284,11 @@ def create_worker_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 3: Latency
     panels.append(create_row_panel("Задержки", 20, y))
     y += 1
-    
+
     # Panel 21: Request Duration
     panels.append(create_timeseries_panel(
         title="Длительность запроса",
@@ -2296,7 +2301,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.99, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
         ]
     ))
-    
+
     # Panel 22: L2 Call Duration
     panels.append(create_timeseries_panel(
         title="L2 длительность вызова",
@@ -2310,11 +2315,11 @@ def create_worker_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 4: Response Size
     panels.append(create_row_panel("Размер ответа", 30, y))
     y += 1
-    
+
     # Panel 31: L2 Response Size
     panels.append(create_timeseries_panel(
         title="L2 размер ответа",
@@ -2328,11 +2333,11 @@ def create_worker_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 5: Errors & Resilience
     panels.append(create_row_panel("Ошибки и надёжность", 40, y))
     y += 1
-    
+
     # Panel 41: Processing JSON Errors
     panels.append(create_timeseries_panel(
         title="Ошибки обработки JSON",
@@ -2351,7 +2356,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_processing_json_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки JSON/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 42: Processing Validation Errors
     panels.append(create_timeseries_panel(
         title="Ошибки валидации",
@@ -2370,7 +2375,7 @@ def create_worker_dashboard() -> Dict:
             {"expr": "rate(l2_worker_processing_validation_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки валидации/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 43: Circuit Breaker State
     panels.append(create_timeseries_panel(
         title="Состояние Circuit Breaker",
@@ -2390,11 +2395,11 @@ def create_worker_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 6: Deduplication
     panels.append(create_row_panel("Дедупликация", 50, y))
     y += 1
-    
+
     # Panel 44: Duplicate Requests Served from Cache
     panels.append(create_timeseries_panel(
         title="Дубликаты (из кэша)",
@@ -2595,14 +2600,14 @@ def create_server_dashboard() -> Dict:
         uid="l2-server",
         tags=["l2-proxy", "server", "http"]
     )
-    
+
     panels = dashboard["dashboard"]["panels"]
     y = 0
-    
+
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1
-    
+
     # Panel 2: Requests
     panels.append(create_timeseries_panel(
         title="Запросы",
@@ -2613,7 +2618,7 @@ def create_server_dashboard() -> Dict:
             {"expr": "rate(l2_server_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 3: Request Errors
     panels.append(create_timeseries_panel(
         title="Ошибки запросов",
@@ -2633,11 +2638,11 @@ def create_server_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 2: Bytes
     panels.append(create_row_panel("Байты", 10, y))
     y += 1
-    
+
     # Panel 11: Bytes Received
     panels.append(create_timeseries_panel(
         title="Получено байт",
@@ -2648,7 +2653,7 @@ def create_server_dashboard() -> Dict:
             {"expr": "rate(l2_server_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
         ]
     ))
-    
+
     # Panel 12: Bytes Sent
     panels.append(create_timeseries_panel(
         title="Отправлено байт",
@@ -2660,11 +2665,11 @@ def create_server_dashboard() -> Dict:
         ]
     ))
     y += 8
-    
+
     # Row 3: Latency
     panels.append(create_row_panel("Задержки", 20, y))
     y += 1
-    
+
     # Panel 21: Request Duration
     panels.append(create_timeseries_panel(
         title="Длительность запроса",
@@ -2808,6 +2813,7 @@ Examples:
     )
     parser.add_argument('--config', type=str, help='Path to JSON/YAML config file with Grafana settings')
     parser.add_argument('--prometheus-url', type=str, help='Prometheus URL for metric discovery (default: http://localhost:9090)')
+    parser.add_argument('--datasource-url', type=str, help='URL, по которому Grafana ходит за метриками (default: http://victoria-metrics:8428)')
     parser.add_argument('--discover-metrics', action='store_true', help='Enable metric discovery from Prometheus to create/update dashboards')
     parser.add_argument('--correct-dashboards', action='store_true', help='Correct existing dashboards if they differ from generated versions')
     parser.add_argument('--dry-run', action='store_true', help='Не писать в Grafana, только показать diff/валидацию')
@@ -2815,7 +2821,7 @@ Examples:
     parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs app_context.cpp + валидация id/vm/y, exit 1 при ошибках')
     parser.add_argument('--grafana-timeout', type=float, default=10.0, help='HTTP timeout к Grafana/Prometheus в секундах (default: 10)')
     parser.add_argument('--grafana-retries', type=int, default=3, help='Ретраи к Grafana при сбое (default: 3)')
-    
+
     args = parser.parse_args()
 
     logger.info("=" * 60)
@@ -2924,10 +2930,12 @@ Examples:
 
     # Datasource (VictoriaMetrics) provisioning через API — заменяет
     # grafana/provisioning/datasources. Дашборды ссылаются на UID 'prometheus'.
-    api.create_datasource()
+    # Приоритет URL: --datasource-url (CLI) > конфиг-файл > константа по умолчанию.
+    api.create_datasource(args.datasource_url or config.get('prometheus_url') or PROMETHEUS_URL)
 
     if args.discover_metrics:
-        prometheus_url = args.prometheus_url or 'http://localhost:9090'
+        prometheus_url = (args.prometheus_url or config.get('prometheus_url')
+                          or 'http://localhost:9090')
         prometheus_api = PrometheusAPI(prometheus_url, timeout=args.grafana_timeout)
         if prometheus_api.test_connection():
             logger.info("Starting metric discovery...")

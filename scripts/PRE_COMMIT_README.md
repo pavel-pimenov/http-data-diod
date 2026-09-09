@@ -6,12 +6,18 @@ This pre-commit hook automatically runs health checks and message consistency te
 
 ## Installation
 
-The hook is automatically installed when you clone the repository. To manually install:
+Git does **not** copy hooks from `scripts/` on clone, so the hook must be
+installed once per clone:
 
 ```bash
-# Make sure scripts are executable
-chmod +x scripts/pre-commit.sh
-chmod +x .git/hooks/pre-commit
+./scripts/install-git-hooks.sh
+```
+
+This creates `.git/hooks/pre-commit` as a thin wrapper over
+`scripts/pre-commit.sh`. Remove it with:
+
+```bash
+./scripts/install-git-hooks.sh --uninstall
 ```
 
 ## Usage
@@ -65,10 +71,14 @@ git safe-commit "your commit message"
 
 ## Skipping Tests (Not Recommended)
 
-In emergency situations, you can skip the pre-commit hook:
+In emergency situations you can skip the pre-commit hook:
 
 ```bash
+# Clarity: bypasses the script entirely, no message_counter/docker checks
 git commit --no-verify -m "emergency fix"
+
+# Draft commits during development (skips the tests, still lets git commit)
+SKIP_PRECOMMIT=1 git commit -m "WIP: work in progress"
 ```
 
 ⚠️ **Warning**: Skipping tests may result in broken code being committed!
@@ -106,11 +116,15 @@ git commit -m "your message"
 
 ### Hook Not Running
 
-Make sure the hook is executable:
+Make sure the hook is installed and executable:
 
 ```bash
+# (Re)install from the tracked scripts
+./scripts/install-git-hooks.sh
+
+# Verify permissions
 chmod +x .git/hooks/pre-commit
-chmod +x scripts/pre-commit.sh
+ls -la .git/hooks/pre-commit
 ```
 
 ## Configuration
@@ -123,7 +137,8 @@ Edit `scripts/pre-commit.sh` to customize:
 
 ## Files
 
-- `scripts/pre-commit.sh` - Main pre-commit script
-- `.git/hooks/pre-commit` - Git hook that calls the script
+- `scripts/pre-commit.sh` - Main pre-commit script (tests, optional commit)
+- `scripts/install-git-hooks.sh` - Installer for `.git/hooks/pre-commit`
+- `.git/hooks/pre-commit` - Git hook that calls the script (created by installer)
 - `health-check.sh` - Health check utility (called by pre-commit)
 - `message_counter.py` - Message consistency test (called by pre-commit)

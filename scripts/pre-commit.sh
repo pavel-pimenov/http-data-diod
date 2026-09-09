@@ -109,6 +109,17 @@ main() {
     echo "=========================================="
     echo ""
 
+    # SKIP_PRECOMMIT=1 — черновой коммит без тестов (см. AGENTS.md)
+    if [ "${SKIP_PRECOMMIT:-0}" = "1" ]; then
+        log_warn "SKIP_PRECOMMIT=1 — pre-commit тесты пропущены"
+        if [ -n "$commit_message" ]; then
+            git add -A
+            git commit -m "$commit_message"
+            return $?
+        fi
+        return 0
+    fi
+
     # Check if we have changes to commit
     if [ -z "$(git status --porcelain)" ]; then
         log_warn "No changes to commit"

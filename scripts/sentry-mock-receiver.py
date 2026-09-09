@@ -19,7 +19,6 @@ Exit codes (wait mode):
 import argparse
 import json
 import os
-import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread, Timer
 
