@@ -249,22 +249,26 @@ void AppContext::init_worker_metrics() {
            m_worker_registry, "l2_worker_queue_size",
            "Current worker thread-pool queue depth"),
        MetricsManager::create_gauge(
-           m_worker_registry, "l2_worker_nats_connected",
-           "NATS connection state (1 = connected, 0 = disconnected)"),
-       MetricsManager::create_gauge(
-           m_worker_registry, "l2_worker_health_ready",
-           "Readiness state (1 = ready, 0 = not ready) mirrored from "
-           "/health/ready"),
-       MetricsManager::create_counter(
-           m_worker_registry, "l2_worker_sentry_events_sent_total",
-           "Sentry events successfully delivered"),
-       MetricsManager::create_counter(
-           m_worker_registry, "l2_worker_sentry_events_failed_total",
-           "Sentry events that failed to deliver or were dropped while the "
-           "queue was full"),
-       MetricsManager::create_gauge(m_worker_registry,
-                                    "l2_worker_sentry_queue_size",
-                                    "Sentry events pending in the async queue")});
+            m_worker_registry, "l2_worker_nats_connected",
+            "NATS connection state (1 = connected, 0 = disconnected)"),
+        MetricsManager::create_gauge(
+            m_worker_registry, "l2_worker_health_ready",
+            "Readiness state (1 = ready, 0 = not ready) mirrored from "
+            "/health/ready"),
+        MetricsManager::create_counter(
+            m_worker_registry, "l2_worker_sentry_events_sent_total",
+            "Sentry events successfully delivered"),
+        MetricsManager::create_counter(
+            m_worker_registry, "l2_worker_sentry_events_failed_total",
+            "Sentry events that failed to deliver or were dropped while the "
+            "queue was full"),
+        MetricsManager::create_gauge(m_worker_registry,
+                                     "l2_worker_sentry_queue_size",
+                                     "Sentry events pending in the async queue"),
+        MetricsManager::create_gauge(
+            m_worker_registry, "l2_worker_graceful_shutdown_seconds",
+            "Last graceful-shutdown drain duration in seconds (time from "
+            "SIGTERM to full shutdown, 0 while running)")});
 }
 
 void AppContext::init_server_metrics() {

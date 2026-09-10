@@ -339,11 +339,22 @@ void L2Worker::run() {
 
   Logger::info("Shutting down gracefully...");
 
+  // Graceful-shutdown gauge: drain duration from the shutdown flag (signal)
+  // to the moment all in-flight tasks have completed. 0 while running.
+  const auto drain_start = std::chrono::steady_clock::now();
+
   // Thread pool destructor drains all in-flight tasks before joining
   Logger::info("Waiting for in-flight requests to complete...");
   if (m_thread_pool) {
     m_thread_pool.reset();
   }
+
+  const auto drain_seconds = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - drain_start);
+  m_ctx.m_worker.m_metrics->m_graceful_shutdown_seconds.Set(
+      drain_seconds.count());
+  Logger::info("Graceful shutdown completed in {:.2f}s",
+               drain_seconds.count());
 }
 
 void L2Worker::update_queue_size_metric() {

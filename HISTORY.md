@@ -1,3 +1,83 @@
+# feat(worker): метрика l2_worker_graceful_shutdown_seconds
+
+## Date: 2026-09-10
+
+### Что сделано
+- `app_context.hpp`: в `WorkerMetrics` добавлена gauge
+  `m_graceful_shutdown_seconds`.
+- `app_context.cpp`: регистрация `l2_worker_graceful_shutdown_seconds`
+  («Last graceful-shutdown drain duration in seconds, 0 while running») в
+  worker-реестре.
+- `l2_worker.cpp` `L2Worker::run()`: замеряется длительность graceful shutdown
+  — от момента выхода из `run_with_nats()` (сигнал уже установлен) до полного
+  завершения drain пула потоков; значение пишется в метрику и логируется
+  (`Graceful shutdown completed in {:.2f}s`).
+- `scripts/metrics-golden-check.py`: `l2_worker_graceful_shutdown_seconds`
+  добавлена в `CATALOG` (регистрируется при старте — presence-проверка зелёная).
+- `README.md`: метрика добавлена в «полный каталог» worker-метрик.
+
+### Проверка
+- Сборка в контейнерах `./rebuild-and-run.sh`, юнит-тесты.
+- На живом стеке:
+  `docker compose stop l2-worker` → в логах
+  `Graceful shutdown completed in {:.2f}s`; `curl :19091/metrics` до остановки
+  показывает `l2_worker_graceful_shutdown_seconds 0`.
+- `python3 scripts/metrics-golden-check.py` — OK (семейство присутствует).
+
+# feat(tools): ENABLE_SENTRY_MOCK — опциональный dev-стек с mock-приёмником Sentry
+
+## Date: 2026-09-10
+
+### Что сделано
+- `rebuild-and-run.sh`: новый опциональный флаг окружения `ENABLE_SENTRY_MOCK`
+  (default `false`). При `=true`:
+  - добавляет `--profile sentry-mock` к `docker compose build`/`up`;
+  - если `SENTRY_DSN` не задан, выставляет
+    `SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1` — mock поднимается вместе
+    со стеком, все envelope-события сервисов пишутся в `docker logs sentry-mock`.
+  - Поведение по умолчанию (без флага) не меняется — prod-стеки не запускают mock.
+- `docker-compose.yml`: комментарий сервиса `sentry-mock` обновлён (упоминание
+  `ENABLE_SENTRY_MOCK=true`).
+- `README.md`: раздел «Мock-приёмник как профиль compose» дополнен вариантом
+  `ENABLE_SENTRY_MOCK=true ./rebuild-and-run.sh`.
+- `TODO.md`: пункт «Self-hosted Sentry» актуализирован (mock уже подключается
+  флагом; удалена задача автозапуска в dev-стек по умолчанию).
+
+### Проверка
+- `bash -n rebuild-and-run.sh` — OK.
+- `docker compose config --quiet` — OK.
+- Полная проверка — `ENABLE_SENTRY_MOCK=true ./rebuild-and-run.sh` (mock в
+  `docker compose ps`, `docker logs sentry-mock` показывает события при
+  ошибках), затем `python3 scripts/sentry-e2e-test.py`.
+
+# test(e2e): fault_tolerance — chaos-сценарии (concurrent restart, multi-restart, graceful drain)
+
+## Date: 2026-09-10
+
+### Что сделано
+- `fault_tolerance_test.py`: добавлены 3 новых сценария (всего стало 8):
+  - `concurrent` — **одновременный** рестарт `l2-worker` + `l2-proxy` под
+    непрерывной нагрузкой (subprocess.Popen параллельно): воркер и прокси
+    перезапускаются одновременно, проверяется отсутствие зависаний, наличие
+    200 после recovery и целостность сообщений.
+  - `multi-restart` — серия из 3 быстрых рестартов `l2-worker` (stop → 1s →
+    start): стек восстанавливается после каждого рестарта, `message_counter.py`
+    проходит.
+  - `drain` — graceful drain: непрерывная нагрузка + `docker compose stop`
+    (`SIGTERM` → worker входит в drain-окно `stop_grace_period: 40s`); in-flight
+    запросы обязаны завершиться (200/conn_error) без клиентских зависаний; после
+    `compose start` воркер возвращается в ready.
+- `--skip` расширен: `concurrent`, `multi-restart`, `drain`.
+- `README.md`: таблица сценариев fault-tolerance дополнена тремя новыми.
+- `TODO.md`: актуализирован (статус 13e, 418 test cases / 2 213 assertions,
+  новые пункты по chaos/sentry/drain/coverage-vetve).
+
+### Проверка
+- `python3 -m py_compile fault_tolerance_test.py` — OK.
+- `python3 scripts/lint-python.py fault_tolerance_test.py` — 0 issues.
+- Сценарии требуют живого стека: `./rebuild-and-run.sh` + полный прогон
+  `python3 fault_tolerance_test.py` (8 сценариев).
+
 # fix(tools): golden-check — поллинг наличия каталога (устранение гонки с vmagent) + синхронный traffic-гейт
 
 ## Date: 2026-09-10

@@ -44,6 +44,14 @@ export VM_NAME="${VM_NAME:-$(hostname)}"
 
 ENABLE_ASAN=false
 COMPOSE_ARGS=()
+# Opt-in dev Sentry ingest: when enabled, start the sentry-mock receiver
+# profile and point the services' SENTRY_DSN at it
+# (http://sentry-e2e@sentry-mock:9001/1). Default off — production stacks
+# set their own SENTRY_DSN and do not run the mock.
+export ENABLE_SENTRY_MOCK="${ENABLE_SENTRY_MOCK:-false}"
+if [ "$ENABLE_SENTRY_MOCK" = "true" ]; then
+    export SENTRY_DSN="${SENTRY_DSN:-http://sentry-e2e@sentry-mock:9001/1}"
+fi
 
 for arg in "$@"; do
     case "$arg" in
@@ -154,6 +162,10 @@ echo "  Docker Buildx: $(docker buildx version 2>/dev/null | head -1 || echo 'no
 echo ""
 
 BUILD_STEP_START=$(date +%s)
+
+if [ "$ENABLE_SENTRY_MOCK" = "true" ]; then
+    COMPOSE_ARGS+=("--profile" "sentry-mock")
+fi
 
 if ! docker compose build --progress=plain ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}; then
     # Remove failed containers, keep cached layers

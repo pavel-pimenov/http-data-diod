@@ -106,6 +106,9 @@ struct WorkerMetrics {
   prometheus::Counter &m_sentry_events_sent;
   prometheus::Counter &m_sentry_events_failed;
   prometheus::Gauge &m_sentry_queue_size;
+  // Last graceful-shutdown drain duration in seconds (time from SIGTERM to
+  // full shutdown, 0 while running). Для prod-мониторинга деплоев.
+  prometheus::Gauge &m_graceful_shutdown_seconds;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

@@ -265,8 +265,10 @@ services:
 
   # Mock Sentry ingest endpoint for E2E/integration testing of the Sentry client
   # (sentry_client.cpp). Reuses scripts/sentry-mock-receiver.py as a standalone
-  # container. Started only on demand:
+  # container. Started on demand:
   #   docker compose --profile sentry-mock up -d
+  # or automatically by rebuild-and-run.sh when ENABLE_SENTRY_MOCK=true
+  # (it also sets SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1).
   # Point the stack at it with SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1
   # (inside the compose network the services resolve the "sentry-mock" name).
   sentry-mock:

@@ -280,8 +280,12 @@ python3 rate_limit_test.py --expect-zero
 | `server` | Остановка `l2-server` | Запросы через proxy падают **быстро** с 5xx (не виснут), после старта `l2-server` возвращаются к 200 |
 | `worker` | Остановка `l2-worker` | In-flight запросы завершаются с 5xx в пределах таймаута (прокси не зависает), после рестарта воркера `message_counter.py` проходит |
 | `dedup` | Остановка `nats-server` во время in-flight нагрузки (payload ~900KB) | Ответы in-flight запросов теряются; после восстановления прокси **перепосылает** их (`l2_proxy_duplicate_requests_total` растёт), воркер отвечает из кэша дедупликации (`l2_worker_duplicate_requests_total` растёт) без повторных вызовов L2 |
+| `proxy` | Рестарт `l2-proxy` под нагрузкой | In-flight запросы завершаются 5xx или обрывом соединения (никогда не виснут), после восстановления прокси отвечает 200; целостность сообщений не нарушена |
+| `concurrent` | Одновременный рестарт `l2-worker` + `l2-proxy` под нагрузкой | Rolling restart двух ключевых сервисов: нет зависаний, после восстановления есть 200, `message_counter.py` проходит |
+| `multi-restart` | Серия из 3 быстрых рестартов `l2-worker` | Стек восстанавливается после каждого рестарта, `message_counter.py` проходит |
+| `drain` | `docker compose stop` (`SIGTERM`) под нагрузкой | Graceful drain: in-flight запросы завершаются в пределах `stop_grace_period` (нет клиентских зависаний), после старта воркер снова ready |
 
-Пропуск сценария: `python3 fault_tolerance_test.py --skip nats --skip server --skip dedup`.
+Пропуск сценария: `python3 fault_tolerance_test.py --skip nats --skip server --skip dedup --skip drain`.
 
 ### Проверка «золотого набора» метрик
 
@@ -385,6 +389,17 @@ docker compose up -d --no-deps sentry-mock                      # или тол�
 # Направить реальный трафик стека на mock:
 SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1 docker compose up -d --force-recreate
 ```
+
+Либо автоматически при сборке dev-стека:
+
+```bash
+ENABLE_SENTRY_MOCK=true ./rebuild-and-run.sh
+```
+
+`rebuild-and-run.sh` при `ENABLE_SENTRY_MOCK=true` добавляет `--profile
+sentry-mock` к `docker compose build/up` и (если `SENTRY_DSN` не задан) выставляет
+`SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1` — mock поднимается вместе со
+стеком, и все envelope-события сервисов видны в `docker logs sentry-mock`.
 
 Контейнер запускает `scripts/sentry-mock-receiver.py` и пишет принятые envelope-события
 в stdout (`docker logs sentry-mock`). Имя сервиса `sentry-mock` разрешается внутри сети
@@ -490,6 +505,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_sentry_events_sent_total` | counter | — | Sentry-события успешно доставлены |
 | `l2_worker_sentry_events_failed_total` | counter | — | Sentry-события не доставлены или сброшены при заполненной очереди |
 | `l2_worker_sentry_queue_size` | gauge | — | Sentry-события в асинхронной очереди |
+| `l2_worker_graceful_shutdown_seconds` | gauge | — | Длительность drain при graceful shutdown (от SIGTERM до выхода), `0` в работе |
 
 ### l2-server
 

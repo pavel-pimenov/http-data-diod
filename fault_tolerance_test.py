@@ -24,6 +24,18 @@ Scenarios:
                               requests finish with 5xx or a dropped connection
                               (never a hang), the proxy becomes ready again and
                               message consistency is intact after recovery.
+   6. concurrent restart    - l2-worker and l2-proxy are restarted
+                              simultaneously under load; verifies no hang,
+                              at least some 200s after recovery, and message
+                              consistency.
+   7. worker multi-restart  - l2-worker is restarted 3 times in rapid
+                              succession; verifies the stack recovers and
+                              message_counter.py passes.
+   8. graceful drain        - sends in-flight requests, then issues
+                              `docker compose stop` (which sends SIGTERM);
+                              verifies no client-side hangs (requests finish
+                              within the stop_grace_period window) and the
+                              stack recovers cleanly.
 
 Every scenario restores the services it stopped, even on failure, so the
 stack is left healthy at the end.
@@ -591,12 +603,160 @@ async def test_proxy_restart() -> bool:
     return ok
 
 
+async def test_concurrent_restart() -> bool:
+    print(f"\n{Colors.GREEN}{'=' * 60}\n[6/8] Concurrent worker + proxy restart\n"
+          f"{'=' * 60}{Colors.NC}")
+    ok = True
+    load_task: Optional[asyncio.Task] = None
+    statuses: List[dict] = []
+    try:
+        print("[6a] Starting continuous load, then restarting worker + proxy...")
+        connector = aiohttp.TCPConnector(limit=16, ssl=not SSL_VERIFY)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            load_task = asyncio.create_task(
+                run_duration_load(session, duration_s=12, concurrency=8,
+                                  body="concurrent-restart-test"))
+
+            await asyncio.sleep(1.5)
+
+            print("[6b] docker compose restart l2-worker + l2-proxy...")
+            r1 = subprocess.Popen(
+                ["docker", "compose", "restart", "l2-worker"])
+            r2 = subprocess.Popen(
+                ["docker", "compose", "restart", "l2-proxy"])
+            r1.wait(timeout=60)
+            r2.wait(timeout=60)
+
+            print("[6c] Waiting for recovery...")
+            ok = await wait_until(PROXY_READY_URL, 200, RECOVERY_TIMEOUT,
+                                  "proxy /health/ready") and ok
+            ok = await wait_until(WORKER_READY_URL, 200, RECOVERY_TIMEOUT,
+                                  "worker /health/ready") and ok
+
+            try:
+                statuses = await asyncio.wait_for(load_task, timeout=60)
+            except Exception as e:
+                logger.error("Load generation failed: %s", e)
+                ok = False
+
+        ok200 = sum(1 for s in statuses if s["status"] == 200)
+        hung = sum(1 for s in statuses if s["error"] == "timeout"
+                   and s["elapsed"] >= CLIENT_TIMEOUT - 1)
+        conn_errors = sum(1 for s in statuses if s["error"] == "conn_error")
+        print(f"  load results: 200={ok200}, connection errors={conn_errors}, "
+              f"hung={hung}, total={len(statuses)}")
+        if ok200 == 0:
+            print(f"{Colors.RED}  FAIL: no request returned 200 after "
+                  f"recovery{Colors.NC}")
+            ok = False
+        if hung > 0:
+            print(f"{Colors.RED}  FAIL: {hung} requests genuinely hung until "
+                  f"client timeout{Colors.NC}")
+            ok = False
+    except Exception as e:
+        logger.error("Concurrent restart scenario raised: %s", e)
+        ok = False
+    finally:
+        await ensure_services_up(["l2-worker", "l2-proxy"])
+
+    if ok:
+        print("[6d] Verifying message consistency...")
+        ok = run_message_counter()
+    return ok
+
+
+async def test_worker_multi_restart() -> bool:
+    print(f"\n{Colors.GREEN}{'=' * 60}\n[7/8] Worker rapid restart ×3\n"
+          f"{'=' * 60}{Colors.NC}")
+    ok = True
+    try:
+        for i in range(1, 4):
+            print(f"[7{i}] Restarting l2-worker ({i}/3)...")
+            compose_stop("l2-worker")
+            await asyncio.sleep(1)
+            compose_start("l2-worker")
+
+        print("[7b] Waiting for worker recovery...")
+        ok = await wait_until(WORKER_READY_URL, 200, RECOVERY_TIMEOUT,
+                              "worker /health/ready") and ok
+        ok = await wait_until(PROXY_READY_URL, 200, RECOVERY_TIMEOUT,
+                              "proxy /health/ready") and ok
+    except Exception as e:
+        logger.error("Worker multi-restart scenario raised: %s", e)
+        ok = False
+    finally:
+        await ensure_services_up(["l2-worker"])
+
+    if ok:
+        print("[7c] Verifying message consistency after multi-restart...")
+        ok = run_message_counter()
+    return ok
+
+
+async def test_graceful_drain() -> bool:
+    print(f"\n{Colors.GREEN}{'=' * 60}\n[8/8] Graceful drain under load\n"
+          f"{'=' * 60}{Colors.NC}")
+    ok = True
+    load_task: Optional[asyncio.Task] = None
+    statuses: List[dict] = []
+    try:
+        print("[8a] Sending continuous load, then docker compose stop "
+              "l2-worker (SIGTERM → drain)...")
+        connector = aiohttp.TCPConnector(limit=16, ssl=not SSL_VERIFY)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            load_task = asyncio.create_task(
+                run_duration_load(session, duration_s=8, concurrency=8,
+                                  body="graceful-drain-test"))
+
+            await asyncio.sleep(1.5)
+
+            print("[8b] docker compose stop l2-worker...")
+            compose_stop("l2-worker")
+
+            try:
+                statuses = await asyncio.wait_for(load_task, timeout=60)
+            except Exception as e:
+                logger.error("Load generation failed: %s", e)
+                ok = False
+
+        ok200 = sum(1 for s in statuses if s["status"] == 200)
+        hung = sum(1 for s in statuses if s["error"] == "timeout"
+                   and s["elapsed"] >= CLIENT_TIMEOUT - 1)
+        conn_errors = sum(1 for s in statuses if s["error"] == "conn_error")
+        print(f"  load results: 200={ok200}, connection errors={conn_errors}, "
+              f"hung={hung}, total={len(statuses)}")
+        if hung > 0:
+            print(f"{Colors.RED}  FAIL: {hung} requests hung until client "
+                  f"timeout during graceful drain{Colors.NC}")
+            ok = False
+        if ok200 == 0 and conn_errors == 0:
+            print(f"{Colors.RED}  FAIL: expected some 200s or connection "
+                  f"errors during drain, got neither{Colors.NC}")
+            ok = False
+
+        print("[8c] Starting l2-worker and waiting for recovery...")
+        compose_start("l2-worker")
+        ok = await wait_until(WORKER_READY_URL, 200, RECOVERY_TIMEOUT,
+                              "worker /health/ready") and ok
+    except Exception as e:
+        logger.error("Graceful drain scenario raised: %s", e)
+        ok = False
+    finally:
+        await ensure_services_up(["l2-worker"])
+
+    if ok:
+        print("[8d] Verifying message consistency after drain...")
+        ok = run_message_counter()
+    return ok
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Fault tolerance integration tests for the HTTP-data-diod "
                     "stack")
     parser.add_argument("--skip", action="append", default=[],
-                        choices=["nats", "server", "worker", "dedup", "proxy"],
+                        choices=["nats", "server", "worker", "dedup", "proxy",
+                                 "concurrent", "multi-restart", "drain"],
                         help="Skip a scenario (may be repeated)")
     return parser.parse_args()
 
@@ -613,6 +773,9 @@ async def main() -> int:
         ("worker", test_worker_kill),
         ("dedup", test_nats_dedup_resend),
         ("proxy", test_proxy_restart),
+        ("concurrent", test_concurrent_restart),
+        ("multi-restart", test_worker_multi_restart),
+        ("drain", test_graceful_drain),
     ]
 
     for name, coro in scenarios:
