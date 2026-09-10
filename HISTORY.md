@@ -1,3 +1,40 @@
+# fix(sentry): authenticate via X-Sentry-Auth for glitchtip >= 6
+
+## Date: 2026-09-10
+
+### Проблема
+События Sentry не доставлялись в glitchtip v6 по двум причинам:
+1. glitchtip ≥ 6 (Rust-envelope parser) берёт DSN-ключ из `X-Sentry-Auth` /
+   `Authorization: Bearer` / query-параметра `sentry_key`, а не из
+   userinfo-части URL. Клиент `sentry_client.cpp` слал POST без заголовков
+   (`httplib::Headers{}`) → `403 Forbidden / Invalid DSN`.
+2. Даже с корректным заголовком Rust-парсер envelope отвергал legacy
+   auth-строку внутри тела envelope (header → auth → item → payload): события
+   получали `200 OK`, но не сохранялись в БД glitchtip.
+
+### Что сделано
+- `SentryClient::send_envelope` теперь добавляет заголовок
+  `X-Sentry-Auth: Sentry sentry_version=7, sentry_key=<public_key>` (со
+  slash-secret из DSN при наличии). Заголовок — стандарт Sentry, сохраняет
+  совместимость и с классическими Sentry/glitchtip < 6.
+- `build_envelope` больше не вставляет legacy auth-строку (`sent_key`) в тело
+  envelope: glitchtip ≥ 6 парсит только header → item → payload, auth идёт
+  через HTTP-заголовок. Классические Sentry-серверы тоже принимают такой
+  формат (auth-строка в envelope была legacy).
+- Подтверждено на реальном glitchtip: POST envelope без auth-строки с
+  заголовком возвращает 200 и событие появляется в `issues_issue`.
+
+### Тесты
+- `message_counter.py` pass (сборка без регрессии).
+- Юнит-тесты `test_sentry_client.cpp` обновлены: формат envelope из 3 строк
+  (header → item → payload), проверка заголовка `X-Sentry-Auth`
+  (sentry_key=PUBLIC) в тесте real-HTTP-доставки.
+- E2E: `scripts/sentry-e2e-test.py` с mock-приёмником не зависит от
+  compose-профиля.
+- Реальный E2E на glitchtip: worker с DSN отправляет события →
+  `l2_worker_sentry_events_sent_total` растёт, события появляются в БД
+  glitchtip (`issue_events_issue`).
+
 # feat(observability): glitchtip as self-hosted Sentry-compatible server
 
 ## Date: 2026-09-10

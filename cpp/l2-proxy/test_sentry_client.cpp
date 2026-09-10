@@ -223,17 +223,14 @@ TEST_CASE("Sentry envelope: header, auth and item structure",
   const auto envelope =
       sentry::build_envelope(event, dsn, "l2-worker", "", "");
   const auto lines = split_lines(envelope);
-  REQUIRE(lines.size() >= 4);
+  REQUIRE(lines.size() >= 3);
 
   const auto header = nlohmann::json::parse(lines[0]);
-  const auto auth = nlohmann::json::parse(lines[1]);
-  const auto item = nlohmann::json::parse(lines[2]);
-  const auto payload = nlohmann::json::parse(lines[3]);
+  const auto item = nlohmann::json::parse(lines[1]);
+  const auto payload = nlohmann::json::parse(lines[2]);
 
   REQUIRE(header["event_id"].get<std::string>().size() == 32);
   REQUIRE(header["sdk"]["name"] == "http-data-diod");
-  REQUIRE(auth["sent_key"] == "PUBLIC:SECRET");
-  REQUIRE(auth["sent_version"] == "7");
   REQUIRE(item["type"] == "event");
   REQUIRE(payload["event_id"] == header["event_id"]);
   REQUIRE(payload["message"] == "boom");
@@ -382,8 +379,13 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
           "[sentry-client]") {
   httplib::Server server;
   std::string received;
+  std::string received_auth_header;
   server.Post(".*", [&](const httplib::Request &req, httplib::Response &res) {
     received = req.body;
+    auto auth = req.headers.find("X-Sentry-Auth");
+    if (auth != req.headers.end()) {
+      received_auth_header = auth->second;
+    }
     res.status = 200;
   });
   const int port = server.bind_to_any_port("127.0.0.1");
@@ -401,8 +403,10 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
 
   REQUIRE(m.m_sent_counter.Value() == 1.0);
   REQUIRE(m.m_failed_counter.Value() == 0.0);
-  REQUIRE(received.find("sent_version") != std::string::npos);
+  REQUIRE(received.find("sdk") != std::string::npos);
   REQUIRE(received.find("via real http") != std::string::npos);
+  REQUIRE(received_auth_header.find("sentry_key=PUBLIC") !=
+          std::string::npos);
 
   server.stop();
   server_thread.join();

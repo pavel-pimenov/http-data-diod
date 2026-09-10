@@ -205,15 +205,12 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
       {"sent_at", TimeUtils::format_rfc3339()},
       {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
 
-  std::string sent_key = dsn.m_public_key;
-  if (!dsn.m_secret_key.empty()) {
-    sent_key += ":" + dsn.m_secret_key;
-  }
-  const nlohmann::json auth = {
-      {"sent_key", sent_key}, {"sent_version", "7"}};
+  // Modern Sentry-compatible servers (glitchtip >= 6) authenticate via the
+  // X-Sentry-Auth HTTP header (added in send_envelope) and their Rust
+  // envelope parser rejects the legacy in-body auth line, so it is omitted.
   const nlohmann::json item_header = {{"type", "event"}};
 
-  return header.dump() + "\n" + auth.dump() + "\n" + item_header.dump() + "\n" +
+  return header.dump() + "\n" + item_header.dump() + "\n" +
          event_json.dump();
 }
 
@@ -348,6 +345,16 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   const std::string path =
       m_dsn_data->m_path_prefix + "/api/" + m_dsn_data->m_project_id +
       "/envelope/";
+  // Modern Sentry-compatible servers (glitchtip >= 6) authenticate the DSN
+  // via the X-Sentry-Auth header, not the URL userinfo part. The public key
+  // is required; the legacy secret key goes after the slash if present.
+  std::string sentry_key = m_dsn_data->m_public_key;
+  if (!m_dsn_data->m_secret_key.empty()) {
+    sentry_key += "/" + m_dsn_data->m_secret_key;
+  }
+  httplib::Headers headers{
+      {"X-Sentry-Auth",
+       "Sentry sentry_version=7, sentry_key=" + sentry_key}};
   const int timeout_seconds = m_timeout_ms / 1000;
 
   httplib::Result res;
@@ -356,14 +363,14 @@ bool SentryClient::send_envelope(const std::string &envelope) {
     client.set_connection_timeout(5, 0);
     client.set_read_timeout(timeout_seconds, 0);
     client.set_write_timeout(timeout_seconds, 0);
-    res = client.Post(path, httplib::Headers{}, envelope,
+    res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   } else {
     httplib::Client client(m_dsn_data->m_host, m_dsn_data->m_port);
     client.set_connection_timeout(5, 0);
     client.set_read_timeout(timeout_seconds, 0);
     client.set_write_timeout(timeout_seconds, 0);
-    res = client.Post(path, httplib::Headers{}, envelope,
+    res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   }
   return res && res->status >= 200 && res->status < 300;
