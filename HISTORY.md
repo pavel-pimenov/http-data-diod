@@ -1,3 +1,35 @@
+# feat(chaos,sentry): reply-loss scenario + sentry-mock helper script
+
+## Date: 2026-09-10
+
+### Что сделано
+
+#### Chaos: reply-loss сценарий (fault_tolerance_test.py)
+- Новый сценарий `[9/9] reply-loss`: воркер получает запросы и начинает
+  обработку, затем `docker compose stop l2-worker` — ответы теряются.
+- Прокси poll-повторяет запросы, счётчик `l2_proxy_duplicate_requests_total`
+  растёт, прокси возвращает 504 к дедлайну poll (REQUEST_TIMEOUT=30s, не
+  зависает; CLIENT_TIMEOUT=50s > REQUEST_TIMEOUT).
+- Восстановление: worker стартует, `message_counter.py` проходит.
+- Отличие от `worker kill` (сценарий 3): там запросы шлются ПОСЛЕ остановки
+  (быстрый 5xx "No responders"), здесь — ДО остановки (poll retry → 504 на
+  дедлайне, dedup-счётчик растёт).
+- Обновлён `--skip`: добавлен ключ `reply-loss`.
+
+#### Sentry: scripts/run-sentry-mock-stack.sh
+- Скрипт-хелпер для быстрого включения sentry-mock без полной пересборки.
+- `./scripts/run-sentry-mock-stack.sh` — поднимает `sentry-mock` профиль,
+  пересоздаёт `l2-proxy` + `l2-worker` с `SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1`.
+- `./scripts/run-sentry-mock-stack.sh --stop` — убирает mock, восстанавливает
+  `SENTRY_DSN=''`.
+- Ожидает readiness локально (`curl localhost:8888/health/ready`) до возврата.
+
+#### README
+- Таблица fault-tolerance: добавлена строка `reply-loss`.
+- Раздел Sentry: документация по `run-sentry-mock-stack.sh`.
+
+---
+
 # feat(worker): метрика l2_worker_graceful_shutdown_seconds
 
 ## Date: 2026-09-10

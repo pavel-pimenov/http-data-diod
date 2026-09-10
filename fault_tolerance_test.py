@@ -32,10 +32,16 @@ Scenarios:
                               succession; verifies the stack recovers and
                               message_counter.py passes.
    8. graceful drain        - sends in-flight requests, then issues
-                              `docker compose stop` (which sends SIGTERM);
-                              verifies no client-side hangs (requests finish
-                              within the stop_grace_period window) and the
-                              stack recovers cleanly.
+                               `docker compose stop` (which sends SIGTERM);
+                               verifies no client-side hangs (requests finish
+                               within the stop_grace_period window) and the
+                               stack recovers cleanly.
+   9. reply lost mid-flight - requests are delivered to the worker, then
+                               the worker is killed before it can reply;
+                               the proxy poll loop retries (dedup counter
+                               grows) and returns 504 at the poll deadline
+                               (never hangs). After recovery the stack is
+                               fully healthy.
 
 Every scenario restores the services it stopped, even on failure, so the
 stack is left healthy at the end.
@@ -750,13 +756,78 @@ async def test_graceful_drain() -> bool:
     return ok
 
 
+async def test_reply_loss() -> bool:
+    print(f"\n{Colors.GREEN}{'=' * 60}\n[9/9] Reply lost mid-flight: "
+          f"worker killed while processing\n{'=' * 60}{Colors.NC}")
+    ok = True
+    load_task: Optional[asyncio.Task] = None
+    statuses: List[dict] = []
+    try:
+        print("[9a] Starting continuous load with large body "
+              "(worker will receive and begin processing)...")
+        dedup_before = fetch_metric("l2_proxy_duplicate_requests_total",
+                                    PROXY_METRICS_URL)
+        connector = aiohttp.TCPConnector(limit=16, ssl=not SSL_VERIFY)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            load_task = asyncio.create_task(
+                run_duration_load(session, duration_s=12, concurrency=8,
+                                  body="reply-loss-" + "z" * 50000))
+            await asyncio.sleep(2.0)  # let requests reach the worker
+
+            print("[9b] Killing l2-worker mid-flight (replies lost)...")
+            compose_stop("l2-worker")
+            try:
+                statuses = await asyncio.wait_for(load_task, timeout=90)
+            except Exception as e:
+                logger.error("Load generation failed: %s", e)
+                ok = False
+
+        ok200 = sum(1 for s in statuses if s["status"] == 200)
+        hung = sum(1 for s in statuses if s["error"] == "timeout"
+                   and s["elapsed"] >= CLIENT_TIMEOUT - 1)
+        conn_errors = sum(1 for s in statuses if s["error"] == "conn_error")
+        print(f"  load results: 200={ok200}, connection errors={conn_errors}, "
+              f"hung={hung}, total={len(statuses)}")
+        if hung > 0:
+            print(f"{Colors.RED}  FAIL: {hung} requests hung until client "
+                  f"timeout (proxy poll deadline exceeded){Colors.NC}")
+            ok = False
+
+        print("  Waiting for in-flight re-sends to settle...")
+        dedup_after = await wait_metric_stable(
+            "l2_proxy_duplicate_requests_total", PROXY_METRICS_URL,
+            dedup_before)
+        dedup_delta = dedup_after - dedup_before
+        print(f"  dedup re-sends delta={dedup_delta}")
+        if dedup_delta <= 0:
+            print(f"{Colors.RED}  FAIL: proxy did not re-send after losing "
+                  f"replies (dedup counter unchanged){Colors.NC}")
+            ok = False
+
+        print("[9c] Starting l2-worker and waiting for recovery...")
+        compose_start("l2-worker")
+        ok = await wait_until(WORKER_READY_URL, 200, RECOVERY_TIMEOUT,
+                              "worker /health/ready") and ok
+    except Exception as e:
+        logger.error("Reply loss scenario raised: %s", e)
+        ok = False
+    finally:
+        await ensure_services_up(["l2-worker"])
+
+    if ok:
+        print("[9d] Verifying message consistency after reply loss recovery...")
+        ok = run_message_counter()
+    return ok
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Fault tolerance integration tests for the HTTP-data-diod "
                     "stack")
     parser.add_argument("--skip", action="append", default=[],
                         choices=["nats", "server", "worker", "dedup", "proxy",
-                                 "concurrent", "multi-restart", "drain"],
+                                 "concurrent", "multi-restart", "drain",
+                                 "reply-loss"],
                         help="Skip a scenario (may be repeated)")
     return parser.parse_args()
 
@@ -776,6 +847,7 @@ async def main() -> int:
         ("concurrent", test_concurrent_restart),
         ("multi-restart", test_worker_multi_restart),
         ("drain", test_graceful_drain),
+        ("reply-loss", test_reply_loss),
     ]
 
     for name, coro in scenarios:
