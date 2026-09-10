@@ -136,6 +136,12 @@ TRAFFIC_QUERIES = [
 TRAFFIC_WINDOW = "5m"
 
 TRAFFIC_TIMEOUT_S = 120
+
+CATALOGUE_POLL_S = 2
+# New families appear only after the first scrape that follows the action that
+# created them (e.g. smoke test): a single label-values snapshot taken right
+# after message_counter can race the next vmagent scrape and report them missing.
+CATALOGUE_TIMEOUT_S = 60
 TRAFFIC_POLL_INTERVAL_S = 2
 
 
@@ -184,6 +190,26 @@ def check_traffic(vm_url: str) -> list:
         time.sleep(TRAFFIC_POLL_INTERVAL_S)
 
 
+def poll_catalogue_families(vm_url: str, required: list) -> list:
+    # Poll until every required family is present (or the deadline expires) so a
+    # family whose first scrape lands a moment after the check starts is not a
+    # silent failure.
+    deadline = time.monotonic() + CATALOGUE_TIMEOUT_S
+    while True:
+        names = label_values(vm_url)
+        missing = [f for f in required if not family_present(names, f)]
+        if not missing:
+            return [], names
+        if time.monotonic() >= deadline:
+            known = label_values(vm_url)
+            return [
+                (f"{f}: not present (families known to VM: "
+                 f"{f in known})")
+                for f in missing
+            ], names
+        time.sleep(CATALOGUE_POLL_S)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8428"),
@@ -196,15 +222,14 @@ def main() -> int:
 
     failures = []
     try:
-        names = label_values(args.url)
+        required = CATALOG + (CONDITIONAL if args.all else [])
+        missing, names = poll_catalogue_families(args.url, required)
     except Exception as exc:
         print(f"ERROR: cannot query VictoriaMetrics {args.url}: {exc}")
         return 1
 
-    required = CATALOG + (CONDITIONAL if args.all else [])
-    missing = [f for f in required if not family_present(names, f)]
     if missing:
-        failures.append(f"missing families: {', '.join(sorted(missing))}")
+        failures.append(f"missing families: {', '.join(missing)}")
 
     if args.traffic:
         failures.extend(check_traffic(args.url))
