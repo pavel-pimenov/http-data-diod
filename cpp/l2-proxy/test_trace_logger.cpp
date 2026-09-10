@@ -451,6 +451,234 @@ TEST_CASE("TraceLogger: make_span_and_traceparent uses the tracer",
   REQUIRE(tp.find(span_id) != std::string::npos);
 }
 
+TEST_CASE("TraceLogger: validate_traceparent short-circuit variants",
+          "[tracing]") {
+  // Version prefix "00-": hit second and third operands of the || chain
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "0x-0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00x0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+  // Separator at position 52 (after span_id), not only position 35
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdefx01"));
+  REQUIRE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+}
+
+TEST_CASE("TracingHelpers: get_traceparent_header present and absent",
+          "[tracing]") {
+  httplib::Headers with;
+  with.emplace("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
+  REQUIRE(get_traceparent_header(with) ==
+          "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
+  httplib::Headers without;
+  REQUIRE(get_traceparent_header(without).empty());
+}
+
+TEST_CASE("TracingHelpers: begin_request_trace with real headers", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  httplib::Headers with;
+  with.emplace("traceparent",
+               "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01");
+  std::string inlet;
+  const TraceContext ctx =
+      begin_request_trace(tracer, with, "req-begin", "GET /api", 1000, inlet);
+  REQUIRE(ctx.m_trace_id == "cccccccccccccccccccccccccccccccc");
+  REQUIRE(ctx.m_parent_id == "dddddddddddddddd");
+  REQUIRE(inlet.size() == 16);
+  REQUIRE(inlet != ctx.m_traceparent_header);
+
+  std::string inlet2;
+  const TraceContext gen =
+      begin_request_trace(tracer, {}, "req-begin2", "POST /nats", 2000, inlet2);
+  REQUIRE(gen.m_trace_id.size() == 32);
+  REQUIRE(inlet2.size() == 16);
+}
+
+TEST_CASE("TracingHelpers: extract_and_validate raw variants", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  const TraceContext parsed = TraceContextHelper::extract_and_validate(
+      {{"traceparent",
+        "00-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ffffffffffffffff-01"}},
+      tracer, "ctx-a");
+  REQUIRE(parsed.m_trace_id == "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+  REQUIRE(parsed.m_parent_id == "ffffffffffffffff");
+
+  const TraceContext generated =
+      TraceContextHelper::extract_and_validate({}, tracer, "ctx-b");
+  REQUIRE(generated.m_trace_id.size() == 32);
+  REQUIRE(generated.m_traceparent_header.size() == 55);
+}
+
+TEST_CASE("TracingHelpers: JaegerSpanLogger real-tracer spam variants",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_parent_id = "abcdef0123456789";
+  ctx.m_traceparent_header =
+      "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
+
+  JaegerSpanLogger::log_l2_call(tracer, "GET", "http://l2:8088/x", 200, 1000,
+                                2000, ctx, "worker", "aaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb", "req-l2");
+  JaegerSpanLogger::log_l2_call(tracer, "GET", "http://l2:8088/x", 200, 1000,
+                                2000, ctx, "worker", "aaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb", "req-l2",
+                                nlohmann::json{{"db", "pg"}});
+  JaegerSpanLogger::log_worker_processing(tracer, "POST", "/api/p", 200, 1000,
+                                          2000, ctx, "worker",
+                                          "cccccccccccccccc",
+                                          "req-wp");
+  JaegerSpanLogger::log_proxy_response(tracer, "GET", "/api/r", 200, 1000,
+                                       2000, ctx, "proxy", "req-pr");
+  REQUIRE(JaegerSpanLogger::generate_span_id(tracer).size() == 16);
+  REQUIRE(JaegerSpanLogger::generate_span_id(nullptr).empty());
+}
+
+TEST_CASE("TracingHelpers: JaegerSpanLogger null tracer short-circuits",
+          "[tracing]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  JaegerSpanLogger::log_l2_call(nullptr, "GET", "http://l2/x", 200, 1, 2, ctx,
+                                "worker", "aaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb");
+  JaegerSpanLogger::log_worker_processing(nullptr, "POST", "/p", 200, 1, 2, ctx,
+                                          "worker", "cccccccccccccccc",
+                                          "req-wp-null");
+  JaegerSpanLogger::log_proxy_response(nullptr, "GET", "/r", 200, 1, 2, ctx,
+                                       "proxy", "req-pr-null");
+  JaegerSpanLogger::log_nats_span(nullptr, "PUB", 200, "req", "t", "s", "p", 1);
+}
+
+TEST_CASE("TracingHelpers: log_nats_span attaches success flag", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  JaegerSpanLogger::log_nats_span(env.m_logger.get(), "PUBLISH", 200, "req-n",
+                                  "0123456789abcdef0123456789abcdef",
+                                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", 1000);
+  JaegerSpanLogger::log_nats_span(env.m_logger.get(), "REQUEST", 500, "req-n2",
+                                  "0123456789abcdef0123456789abcdef",
+                                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", 2000,
+                                  nlohmann::json{{"backend", "db"}});
+  REQUIRE(env.m_logger->should_sample(true));
+}
+
+TEST_CASE("TracingHelpers: log_backend_error detail branch", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_parent_id = "abcdef0123456789";
+
+  BackendErrorSpanLogger::log_backend_error(tracer, "POST", "/api/x", 502, 1000,
+                                            ctx, "proxy", "req-be",
+                                            "worker_dead", "connection refused");
+  BackendErrorSpanLogger::log_backend_error(tracer, "POST", "/api/x", 502, 1000,
+                                            ctx, "proxy", "req-be2",
+                                            "worker_dead", "");
+  BackendErrorSpanLogger::log_backend_error(nullptr, "POST", "/api/x", 502, 1000,
+                                            ctx, "proxy", "req-be3",
+                                            "worker_dead", "");
+  REQUIRE(env.m_logger->should_sample(true));
+}
+
+TEST_CASE("TracingHelpers: log_rate_limit_rejection limit branches",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+
+  RateLimitSpanLogger::log_rate_limit_rejection(
+      tracer, "too_many", "10.0.0.9",
+      "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01", "100",
+      "50");
+  RateLimitSpanLogger::log_rate_limit_rejection(tracer, "too_many", "10.0.0.9",
+                                                "", "", "");
+  RateLimitSpanLogger::log_rate_limit_rejection(
+      nullptr, "too_many", "10.0.0.9", "unused", "100", "50");
+  REQUIRE(env.m_logger->should_sample(true));
+}
+
+TEST_CASE("TracingHelpers: make_span_and_traceparent hint and sampled",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_traceparent_header =
+      "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
+
+  const auto [hint_span, hint_tp] =
+      make_span_and_traceparent(tracer, ctx, "deadbeefdeadbeef", false);
+  REQUIRE(hint_span == "deadbeefdeadbeef");
+  REQUIRE(hint_tp.ends_with("-00"));
+
+  const auto gen = make_span_and_traceparent(tracer, ctx);
+  REQUIRE(gen.first.size() == 16);
+
+  const auto [no_tracer, no_tp] = make_span_and_traceparent(nullptr, ctx);
+  REQUIRE(no_tracer.empty());
+  REQUIRE(no_tp == ctx.m_traceparent_header);
+}
+
+TEST_CASE("TracingHelpers: add_proxy_trace_fields populates request",
+          "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+  TraceContext ctx;
+  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+
+  nlohmann::json req = nlohmann::json::object();
+  add_proxy_trace_fields(req, tracer, ctx, "1111111111111111",
+                         "2222222222222222", true);
+  REQUIRE(req[NatsContract::kProxyTraceId] ==
+          "0123456789abcdef0123456789abcdef");
+  REQUIRE(req[NatsContract::kProxySpanId] == "2222222222222222");
+  REQUIRE(req[NatsContract::kProxyInletSpanId] == "1111111111111111");
+  REQUIRE(req[NatsContract::kProxyTraceparent]
+              .get<std::string>()
+              .starts_with("00-0123456789abcdef0123456789abcdef-"));
+
+  nlohmann::json empty = nlohmann::json::object();
+  add_proxy_trace_fields(empty, nullptr, ctx, "1111111111111111",
+                         "2222222222222222");
+  REQUIRE(empty.empty());
+}
+
+TEST_CASE("TracingHelpers: set_traceparent_response_header branch",
+          "[tracing]") {
+  httplib::Response res;
+  TraceContext ctx;
+  ctx.m_traceparent_header =
+      "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
+  set_traceparent_response_header(res, ctx);
+  REQUIRE(res.get_header_value("traceparent") ==
+          "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01");
+
+  httplib::Response res_empty;
+  TraceContext ctx_empty;
+  set_traceparent_response_header(res_empty, ctx_empty);
+  REQUIRE(res_empty.get_header_value("traceparent").empty());
+}
+
+TEST_CASE("TracingHelpers: log_worker_span guards trace_id", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  auto *tracer = env.m_logger.get();
+  log_worker_span(tracer, "POST", "/api/x", 200, 1000, 2000, "worker", "req-ws",
+                  "0123456789abcdef0123456789abcdef", "aaaaaaaaaaaaaaaa",
+                  "bbbbbbbbbbbbbbbb");
+  log_worker_span(tracer, "POST", "/api/x", 200, 1000, 2000, "worker",
+                  "req-ws2", "", "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+  log_worker_span(nullptr, "POST", "/api/x", 200, 1000, 2000, "worker",
+                  "req-ws3", "0123456789abcdef0123456789abcdef",
+                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+  REQUIRE(env.m_logger->should_sample(true));
+}
+
 TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
           "[tracing]") {
   TraceLoggerEnv env("http://127.0.0.1:1/api/traces");

@@ -2,12 +2,12 @@
 
 ## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **418 + 99 = 517 test cases**,
-**2 469 assertions** (1662 + 807). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **431 + 99 = 530 test cases**,
+**2 503 assertions** (1696 + 807). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 97.7%** (8709/8915), гейт 90% — пройден
+- **Lines: 97.7%** (8884/9090), гейт 90% — пройден
 - **Functions: 95.4%** (1157/1213)
-- **Branches: 41.5%** (17566/42355) — слабое место
+- **Branches: 41.5%** (17956/43285) — слабое место
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
@@ -22,6 +22,15 @@ routing + 12 кейсов валидации config.cpp. Вывод: кажда�
 config.cpp: ветви валидации почти насыщены (общий `if (cond)` в
 `ConfigChecker::check` — точка слияния), остальное — env-var ветки
 `get_env_*` (override/invalid/default).
+Раунд tracing: 13 кейсов в test_trace_logger.cpp — validate_traceparent
+short-circuit (L68/L72 ☑), get_traceparent_header, begin_request_trace,
+extract_and_validate, JaegerSpanLogger::log_l2_call/worker/proxy + null-трейсер,
+log_nats_span, log_backend_error (detail-ветка ☑), rate_limit_rejection
+(limit/remaining ☑), make_span_and_traceparent (hint/sampled/no-tracer),
+add_proxy_trace_fields, set_traceparent_response_header, log_worker_span.
+trace_logger.cpp 61.1%→61.5% (254→256/416), tracing_helpers.hpp 55.0%→55.6%
+(155→158/284). Остаток — cross-TU-merge артефакты (test_proxy_core не
+вызывает helper'ы) и sender_loop/retry/сетевые ветки.
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -35,7 +44,7 @@ drain, reply-loss).
 - `logger.hpp` — init-time ветки `LOG_LEVEL=CRITICAL/OFF` (env-dependent, требуют
   отдельного процесса с setenv перед init; std::call_once блокирует повторный вход)
 - `sentry_client.cpp` — 51.2% ветвей (317 uncovered, network-heavy)
-- `trace_logger.cpp`/`tracing_helpers.hpp` — 61.1%/55.0% (162+127 uncovered,
+- `trace_logger.cpp`/`tracing_helpers.hpp` — 61.5%/55.6% (160+126 uncovered,
   in-process, достижимы без внешних сервисов)
 - `stats_page.hpp` — 59.6% (151 uncovered, в осн. html-render артефакты)
 - `string_utils.hpp` — gcov-артефакт: закрывающая `}` inline-функции в

@@ -1,3 +1,38 @@
+# test(coverage): tracing round — traceparent short-circuits + tracing_helpers
+
+## Date: 2026-09-10
+
+### Что сделано
+- 13 кейсов в test_trace_logger.cpp (`[tracing]`):
+  - validate_traceparent short-circuit variants покрывающие 2-й/3-й операнды
+    `||`-цепочки (префикс `0x-`/`00x`, сепаратор после span_id L52) — L68/L72 ☑
+  - get_traceparent_header present/absent, begin_request_trace с реальным
+    tracer (валидный + генерируемый контекст)
+  - TraceContextHelper::extract_and_validate (сырая + пустая)
+  - JaegerSpanLogger::log_l2_call/log_worker_processing/log_proxy_response/
+    generate_span_id с реальным и null-трейсером
+  - log_nats_span (success flag), log_backend_error (detail-ветка),
+    RateLimitSpanLogger::log_rate_limit_rejection (limit/remaining ☑)
+  - make_span_and_traceparent (hint/sampled/no-tracer), add_proxy_trace_fields
+    (population + null), set_traceparent_response_header, log_worker_span
+- Только тесты; production-код не менялся.
+
+### Выводы
+- Достижимые ветви закрыты; остаток в tracing_helpers.hpp — cross-TU merge
+  артефакты (test_proxy_core включает header, но не вызывает helper'ы,
+  gcovr агрегирует копии inline-функций по всем TU).
+- trace_logger.cpp: sender_loop/send_batch/send_span retry-сетевые ветки
+  частично закрыты мок-сервером; pool-exhaustion (`!client`) не тестируется.
+
+### Результат
+- trace_logger.cpp: 61.1%→61.5% (254→256/416); tracing_helpers.hpp:
+  55.0%→55.6% (155→158/284).
+- Test cases 517→530; assertions 2469→2503. Lines 97.7% (8884/9090),
+  Branches 41.5% (17956/43285).
+- `./rebuild-and-run.sh` + `message_counter.py --iterations 1 --concurrent 1` ✅
+
+---
+
 # test(coverage): branch-раунд — Utils/Gateway/config validation
 
 ## Date: 2026-09-10
