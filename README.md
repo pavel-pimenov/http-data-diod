@@ -294,10 +294,14 @@ python3 rate_limit_test.py --expect-zero
 - `--traffic` — после `python3 message_counter.py --iterations 1 --concurrent 1`
   требует ненулевые счётчики happy-path за последние 5 минут
   (`l2_proxy_client_requests_total`, `l2_worker_requests_processed_total`,
-  `l2_server_requests_total`, `l2_tracing_spans_sent_total` и др.).
-- `--all` — дополнительно проверяет лениво эмитируемые семейства
-  (`l2_proxy_per_client_id_duplicate_*`, появляются только после
-  дубликатного трафика с заголовком `X-DataHub-Client-Id`).
+  `l2_server_requests_total`, `l2_proxy_responses_total` и др. — только
+  синхронные счётчики запросного пути; асинхронные флушеры вроде
+  `l2_tracing_spans_sent_total` в строгий гейт не входят, их присутствие
+  проверяется presence-частью).
+- `--all` — дополнительно проверяет лениво эмитируемые семейства:
+  `l2_proxy_per_client_id_duplicate_*` (появляются после дубликатного
+  трафика с заголовком `X-DataHub-Client-Id`) и `l2_proxy_per_ip_*`
+  (регистрируются только при `ENABLE_PER_IP_RATE_LIMITING=true`).
 
 Вызов с `--traffic` включён в CI после smoke-теста; presence-проверка без
 флагов выполняется в конце `./rebuild-and-run.sh`.
