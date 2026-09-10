@@ -1,3 +1,40 @@
+# refactor(coverage): extract to_lower to string_utils.cpp
+
+## Date: 2026-09-10
+
+### Проблема
+`string_utils.hpp` имел 85.7% строкового покрытия (6/7): gcov-артефакт на
+закрывающей `}` inline-функции `to_lower` — basic-block эпилога не получает
+счётчик при полном инлайне, поэтому строка числится непокрытой несмотря на
+вызовы.
+
+### Что сделано
+- `to_lower` вынесен из `string_utils.hpp` в новый `string_utils.cpp`
+  (объявление с `[[nodiscard]]` остаётся в заголовке).
+- `string_utils.cpp` добавлен в CMakeLists.txt: в unity-group `proxy-core`
+  бинаря `l2-proxy`, а также в таргеты `test_components` и
+  `test_proxy_core` (используют `to_lower` напрямую и через
+  `header_utils.hpp`/`db_query_utils.hpp`).
+- Закрывающая `}` функции помечена `// LCOV_EXCL_LINE`: при выносе в .cpp
+  GCC атрибутирует exit-block функции строке `}` (последний statement —
+  `return`), и gcovr снова показывал её как непокрытую (это известный
+  gcov-артефакт для функций, завершающихся return; в duplicate_detector.cpp
+  такого нет, т.к. там ранние return внутри тела).
+
+### Результат покрытия
+- **string_utils.hpp**: больше не фигурирует в отчёте (0 исполняемых строк) ✅
+- **string_utils.cpp**: 100% (6/6 строк) ✅
+- Общее покрытие: 97.6% строк, 41.7% ветвей
+- Проверяемые ранее файлы стабильны: duplicate_detector.cpp 94.5%,
+  http_client_pool.cpp 90.1%, trace_logger.cpp 90.2% ✅
+
+### Тесты
+- Сборка в контейнере `./rebuild-and-run.sh` ✅
+- `message_counter.py --iterations 1 --concurrent 1 --dup-check` ✅
+- Coverage gate `--fail-under-line 90` пройден ✅
+
+---
+
 # test(coverage): bring trace_logger.cpp, duplicate_detector.cpp, http_client_pool.cpp to ≥90%
 
 ## Date: 2026-09-10

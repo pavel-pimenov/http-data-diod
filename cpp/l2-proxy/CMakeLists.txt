@@ -288,6 +288,7 @@ add_executable(l2-proxy
  app_context.cpp
  common_utils.cpp
  config.cpp
+ string_utils.cpp
  request_handler.cpp
  request_id_generator.cpp
  trace_context_extractor.cpp
@@ -336,7 +337,8 @@ target_compile_definitions(l2-proxy PRIVATE
 set_target_properties(l2-proxy PROPERTIES UNITY_BUILD_MODE GROUP)
 
 set_source_files_properties(
-    app_context.cpp common_utils.cpp config.cpp request_handler.cpp
+    app_context.cpp common_utils.cpp config.cpp string_utils.cpp
+    request_handler.cpp
     request_id_generator.cpp trace_context_extractor.cpp
     request_data_preparer.cpp response_builder.cpp server_handler.cpp
     duplicate_detector.cpp
@@ -447,6 +449,7 @@ if(BUILD_TESTS)
         test_sentry_client.cpp
         test_trace_logger.cpp
         config.cpp
+        string_utils.cpp
         duplicate_detector.cpp
         circuit_breaker.cpp
         common_utils.cpp
@@ -507,6 +510,7 @@ if(BUILD_TESTS)
     add_executable(test_proxy_core
         test_proxy_core.cpp
         config.cpp
+        string_utils.cpp
     )
     target_include_directories(test_proxy_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

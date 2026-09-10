@@ -1,18 +1,19 @@
 # TODO / Продолжение работы
 
-## Текущий статус (16 — файлы <90% строкового покрытия)
+## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
 Raунды покрытия юнит-тестами: **393 + 74 = 467 test cases**,
 **2 362 assertions** (1625 + 743). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 97.4%** (8245/8465), гейт 90% — пройден
-- **Functions: 95.0%** (1095/1153)
-- **Branches: 41.8%** (16299/39038) — слабое место
+- **Lines: 97.6%** (8393/8599), гейт 90% — пройден
+- **Functions: 95.2%** (1107/1163)
+- **Branches: 41.7%** (16695/40003) — слабое место
 
 Последний раунд: доведение файлов ниже 90% строкового покрытия
 до ≥90%. `duplicate_detector.cpp` (89.8%→94.5%),
 `http_client_pool.cpp` (88.4%→90.1%), `trace_logger.cpp` (88.7%→90.2%).
-`string_utils.hpp` (85.7%) — gcov-артефакт, не устраним тестами.
+`string_utils.hpp` — gcov-артефакт устранён выносом `to_lower` в
+`string_utils.cpp` (100% строк; header больше не в отчёте).
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -25,8 +26,9 @@ drain, reply-loss).
 Открытые ветки (строковое покрытие уже высокое, осталось ветвей):
 - `logger.hpp` — init-time ветки `LOG_LEVEL=CRITICAL/OFF` (env-dependent, требуют
   отдельного процесса с setenv перед init; std::call_once блокирует повторный вход)
-- `string_utils.hpp` (85.7%) — gcov-артефакт: закрывающая `}` inline-функции в
-  header-е (1 строка из 7), не устраним тестами; потребуется вынос в .cpp
+- `string_utils.hpp` — gcov-артефакт: закрывающая `}` inline-функции в
+  header-е (1 строка из 7), не устраним тестами; **РЕШЕНО** выносом в
+  `string_utils.cpp` (100% строк, header без исполняемых строк)
 - **Branches 41.8%** в целом — крупный задел (gcovr `--branch` метрика), но
   ветви в header-heavy шаблонном коде требуют точечных тест-кейсов
 
