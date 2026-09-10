@@ -381,37 +381,40 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 > счётчики доставки Sentry не экспонируются — это общий паттерн для
 > кросс-сервисных метрик наблюдаемости, не специфика Sentry.
 
-Mock-приёмник также доступен как профиль docker-compose для постоянной
-(не E2E-разовой) интеграции стека с Sentry-каналом:
+Self-hosted Sentry-совместимый сервер также доступен как профиль docker-compose
+для постоянной (не E2E-разовой) интеграции стека с реальным Sentry-каналом:
 
 ```bash
-docker compose --profile sentry-mock up -d                      # поднять mock на :9001
-docker compose up -d --no-deps sentry-mock                      # или только mock-контейнер
-# Направить реальный трафик стека на mock:
-SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1 docker compose up -d --force-recreate
+docker compose --profile glitchtip up -d                  # поднять glitchtip на :8000
 ```
 
 Либо автоматически при сборке dev-стека:
 
 ```bash
-ENABLE_SENTRY_MOCK=true ./rebuild-and-run.sh
+ENABLE_GLITCHTIP=true ./rebuild-and-run.sh
 ```
 
-`rebuild-and-run.sh` при `ENABLE_SENTRY_MOCK=true` добавляет `--profile
-sentry-mock` к `docker compose build/up` и (если `SENTRY_DSN` не задан) выставляет
-`SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1` — mock поднимается вместе со
-стеком, и все envelope-события сервисов видны в `docker logs sentry-mock`.
-
-Для быстрого включения Sentry-mock **без полной пересборки** (уже запущенный стек):
+Регистрация первого пользователя, создание организации и проекта — в UI
+`http://localhost:8000`. DSN проекта имеет вид
+`http://<public-key>@glitchtip:8000/<project-id>` (hostname `glitchtip`
+разрешается внутри compose-сети). Направить реальный трафик стека на glitchtip:
 
 ```bash
-./scripts/run-sentry-mock-stack.sh        # включить mock + пересоздать proxy/worker
-./scripts/run-sentry-mock-stack.sh --stop  # выключить mock + восстановить SENTRY_DSN=''
+SENTRY_DSN="http://<public-key>@glitchtip:8000/<project-id>" \
+    docker compose up -d --force-recreate l2-server l2-proxy l2-worker
 ```
 
-Контейнер запускает `scripts/sentry-mock-receiver.py` и пишет принятые envelope-события
-в stdout (`docker logs sentry-mock`). Имя сервиса `sentry-mock` разрешается внутри сети
-compose, поэтому из l2-proxy/l2-worker/l2-server DSN использует это hostname.
+Для быстрого включения glitchtip **без полной пересборки** (уже запущенный стек):
+
+```bash
+SENTRY_DSN="http://<public-key>@glitchtip:8000/<project-id>" \
+    ./scripts/run-glitchtip-stack.sh        # включить glitchtip + пересоздать сервисы
+./scripts/run-glitchtip-stack.sh --stop      # выключить glitchtip + восстановить SENTRY_DSN=''
+```
+
+`glitchtip` использует выделенный Postgres (`glitchtip-db`, образ уже есть в
+стеке), основной `postgres` сервис остаётся нетронутым. Файлы конфигурации —
+`docker-compose.yml` (профиль `glitchtip`), переменные `GLITCHTIP_*`.
 
 Проверка реальной доставки — E2E-скрипты (запускаются вручную):
 `python3 scripts/sentry-e2e-test.py` поднимает локальный mock-приёмник

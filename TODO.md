@@ -57,10 +57,12 @@ drain, reply-loss).
 ### 4. Self-hosted Sentry — ГОТОВО
 
 Реализовано:
-- `sentry-mock` сервис в `docker-compose.yml` (профиль `sentry-mock`)
-- `scripts/sentry-mock-receiver.py` (HTTP-сервер, парсит envelope)
-- `scripts/run-sentry-mock-stack.sh` (start/stop helper)
-- `rebuild-and-run.sh` с `ENABLE_SENTRY_MOCK=true`
+- `glitchtip` сервис в `docker-compose.yml` (профиль `glitchtip`) + выделенный
+  `glitchtip-db` (Postgres); образ `glitchtip/glitchtip:6`
+- E2E-проверка доставки: `scripts/sentry-e2e-test.py` +
+  `scripts/sentry-mock-receiver.py` (локальный mock-приёмник на хосте)
+- `scripts/run-glitchtip-stack.sh` (start/stop helper)
+- `rebuild-and-run.sh` с `ENABLE_GLITCHTIP=true`
 - Grafana-панель `l2-sentry-delivery` (uid) в `generate-grafana-dashboards.py`
 
 ### 5. Видимость кросс-сервисных метрик (архитектурное)
@@ -73,4 +75,4 @@ drain, reply-loss).
 
 NATS-ветка отключена — все изменения и тесты针对 NATS-режима.
 Oracle-профиль запускается по demand: `docker compose --profile oracle up -d`.
-Sentry-mock запускается по demand: `docker compose --profile sentry-mock up -d`.
+Sentry (glitchtip) запускается по demand: `docker compose --profile glitchtip up -d`.

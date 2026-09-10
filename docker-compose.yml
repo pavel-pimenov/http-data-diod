@@ -263,28 +263,73 @@ services:
       retries: 10
       start_period: 90s
 
-  # Mock Sentry ingest endpoint for E2E/integration testing of the Sentry client
-  # (sentry_client.cpp). Reuses scripts/sentry-mock-receiver.py as a standalone
-  # container. Started on demand:
-  #   docker compose --profile sentry-mock up -d
-  # or automatically by rebuild-and-run.sh when ENABLE_SENTRY_MOCK=true
-  # (it also sets SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1).
-  # Point the stack at it with SENTRY_DSN=http://sentry-e2e@sentry-mock:9001/1
-  # (inside the compose network the services resolve the "sentry-mock" name).
-  sentry-mock:
-    container_name: sentry-mock
-    image: python:3.12-alpine
+  # Self-hosted Sentry-compatible error tracking (glitchtip). Started on demand:
+  #   docker compose --profile glitchtip up -d
+  # or automatically by rebuild-and-run.sh when ENABLE_GLITCHTIP=true.
+  # Register the first user in the UI (http://localhost:8000), create an
+  # organization + project, then point the stack at the project DSN with
+  #   SENTRY_DSN=http://<public-key>@glitchtip:8000/<project-id>
+  # glitchtip-db is a dedicated PostgreSQL (image already present locally);
+  # the main postgres service stays untouched (DB gateway).
+  glitchtip-db:
+    container_name: glitchtip-db
+    image: postgres:17-alpine
     restart: unless-stopped
     profiles:
-      - sentry-mock
-    working_dir: /app
+      - glitchtip
+    mem_limit: ${GLITCHTIP_DB_MEM_LIMIT:-256m}
+    environment:
+      - POSTGRES_USER=${GLITCHTIP_DB_USER:-glitchtip}
+      - POSTGRES_PASSWORD=${GLITCHTIP_DB_PASSWORD:-glitchtip_password}
+      - POSTGRES_DB=${GLITCHTIP_DB_NAME:-glitchtip}
     volumes:
-      - ./scripts/sentry-mock-receiver.py:/app/sentry-mock-receiver.py:ro
-    command: ["python3", "sentry-mock-receiver.py", "--port", "9001"]
-    ports:
-      - "9001:9001"
+      - glitchtip-db-data:/var/lib/postgresql/data
     networks:
       - l2_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${GLITCHTIP_DB_USER:-glitchtip} -d ${GLITCHTIP_DB_NAME:-glitchtip}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  glitchtip:
+    container_name: glitchtip
+    image: glitchtip/glitchtip:6
+    restart: unless-stopped
+    profiles:
+      - glitchtip
+    mem_limit: ${GLITCHTIP_MEM_LIMIT:-1g}
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgres://${GLITCHTIP_DB_USER:-glitchtip}:${GLITCHTIP_DB_PASSWORD:-glitchtip_password}@glitchtip-db:5432/${GLITCHTIP_DB_NAME:-glitchtip}
+      - SECRET_KEY=${GLITCHTIP_SECRET_KEY:-change_me_to_something_random}
+      - EMAIL_URL=consolemail://
+      - GLITCHTIP_DOMAIN=http://localhost:8000
+      - SERVER_ROLE=all_in_one
+      # Disable Valkey (use Postgres for task queue/cache/session) to save RAM
+      - VALKEY_URL=
+      - ENABLE_USER_REGISTRATION=true
+      - ENABLE_ORGANIZATION_CREATION=true
+      - ENABLE_ADMIN=false
+      - GLITCHTIP_ENABLE_UPTIME=false
+      - GLITCHTIP_ENABLE_LOGS=false
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
+    volumes:
+      - glitchtip-uploads:/code/uploads
+    depends_on:
+      glitchtip-db:
+        condition: service_healthy
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   # PostgreSQL 16 for the HTTP DB gateway (l2-worker connects via libpq).
   # init scripts run on the first boot via /docker-entrypoint-initdb.d.
@@ -683,4 +728,8 @@ volumes:
   oracle-data:
     driver: local
   postgres-data:
+    driver: local
+  glitchtip-db-data:
+    driver: local
+  glitchtip-uploads:
     driver: local

@@ -1,3 +1,31 @@
+# feat(observability): glitchtip as self-hosted Sentry-compatible server
+
+## Date: 2026-09-10
+
+### Что сделано
+- Docker-образ `gvenzl/oracle-xe` при каждой сборке тянется только в build-кэш
+  (Oracle profile запускается по demand) — образ не занимает место постоянно.
+- Освобождено место на диске (100% → 78%): удалены неиспользуемые образы
+  `http-data-diod:coverage`, `:lint`, `:builder` (пересоздаются скриптами),
+  неиспользуемый `grafana/grafana:latest`; почищен build cache и dangling volumes.
+- Мock `sentry-mock` (python-приёмник) заменён на настоящий self-hosted
+  Sentry-совместимый сервер **glitchtip** (`glitchtip/glitchtip:6`) в
+  `docker-compose.yml` (профиль `glitchtip`) + выделенный Postgres `glitchtip-db`
+  (образ postgres уже есть в стеке):
+  - порт `8000:8000`, `SERVER_ROLE=all_in_one`, Valkey отключён
+    (`VALKEY_URL=` — task queue/cache на Postgres, экономия RAM);
+  - переменные `GLITCHTIP_*` (мемлимиты, секрет, учётки postgres);
+  - `rebuild-and-run.sh`: `ENABLE_SENTRY_MOCK` → `ENABLE_GLITCHTIP`;
+  - `scripts/run-sentry-mock-stack.sh` → `scripts/run-glitchtip-stack.sh`
+    (start/stop профиля, DSN задаётся явно — у glitchtip нет фикс-цветного DSN,
+    проект создаётся в UI `http://localhost:8000`).
+- Валидность `docker compose config` подтверждена.
+
+### Тесты
+- Compose-конфиг валиден (`docker compose config --quiet`).
+- E2E потока Sentry (`sentry-e2e-test.py` + mock-приёмник на хосте) не зависит
+  от compose-профиля и сохранён как есть.
+
 # test(coverage): non-null JaegerLogger path coverage for tracing_helpers
 
 ## Date: 2026-09-10
