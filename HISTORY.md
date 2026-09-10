@@ -1,3 +1,44 @@
+# test(coverage): non-null JaegerLogger path coverage for tracing_helpers
+
+## Date: 2026-09-10
+
+### Что сделано
+- Добавлены юнит-тесты в `test_coverage_ext.cpp` для покрытия non-null tracer ветвей в
+  `tracing_helpers.hpp` и связанных модулях:
+  - **JaegerTracerFixture**: общий фикстур с реальным JaegerLogger (prometheus
+    Registry/Gauge/Counter/Histogram), используемый во всех non-null тестах.
+  - **resolve_trace_id** с реальным трейсером: генерация нового trace_id (пустой ctx),
+    возврат существующего trace_id (непустой ctx).
+  - **log_incoming_span** с реальным трейсером: с существующим trace_id, с пустым trace_id.
+  - **make_span_and_traceparent** с реальным трейсером: непустой trace_id, пустой
+    trace_id, пустой hint.
+  - **add_proxy_trace_fields** с реальным трейсером: заполнение JSON, разрешение
+    trace_id из пустого ctx.
+  - **JaegerSpanLogger**: `log_l2_call`, `log_worker_processing`,
+    `log_proxy_response`, `log_nats_span`, `generate_span_id` с реальным трейсером.
+  - **BackendErrorSpanLogger::log_backend_error** с реальным трейсером: пустой и
+    непустой detail.
+  - **RateLimitSpanLogger::log_rate_limit_rejection** с реальным трейсером: пустые и
+    непустые limit/remaining.
+  - **log_worker_span** с реальным трейсером: непустой и пустой trace_id.
+  - **TraceContextHelper::extract_from_raw** с реальным трейсером: непустой и
+    пустой traceparent.
+  - **TraceContextHelper::extract_and_validate** с реальным трейсером: валидный
+    traceparent.
+  - **begin_request_trace** с реальным трейсером: с и без traceparent.
+
+### Исправление тестов
+- Тесты `TraceContextHelper` скорректированы: `handle_trace_context` генерирует новый
+  span_id через `tracer->generate_span_id()` и сохраняет родительский span_id в
+  `m_parent_id`, а не в `m_span_id`. Пустой traceparent с реальным трейсером
+  порождает новый trace_id + span_id (а не пустые).
+
+### Статистика
+- 383 test cases, 1568 assertions — all passed
+- message_counter.py: PASS (POST + GET + duplicate-check)
+
+---
+
 # test(coverage): branch coverage for tracing_helpers, db_query_executor_base, logger, rate_limiter_per_ip
 
 ## Date: 2026-09-10

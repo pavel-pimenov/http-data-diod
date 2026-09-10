@@ -24,8 +24,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "httplib/httplib.h"
+#include "prometheus/counter.h"
 #include "prometheus/family.h"
 #include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include "prometheus/registry.h"
 #include "prometheus/summary.h"
 #include <chrono>
 #include <memory>
@@ -1084,4 +1087,332 @@ TEST_CASE("PerIPRateLimiter: get_per_ip_stats emits counters for each entry",
   const auto stats = limiter.get_per_ip_stats();
   REQUIRE(stats.size() == 1);
   REQUIRE(stats[0].second.m_requests == 2);
+}
+
+// ============================================================================
+// tracing_helpers.hpp — non-null JaegerLogger paths
+// ============================================================================
+
+namespace {
+
+struct JaegerTracerFixture {
+  std::shared_ptr<prometheus::Registry> m_registry;
+  prometheus::Counter &m_spans_sent;
+  prometheus::Counter &m_spans_failed;
+  prometheus::Gauge &m_queue_size;
+  prometheus::Gauge &m_last_send_duration;
+  prometheus::Histogram &m_send_latency;
+  prometheus::Histogram &m_queue_time;
+  std::unique_ptr<JaegerLogger> m_tracer;
+
+  JaegerTracerFixture()
+      : m_registry(std::make_shared<prometheus::Registry>()),
+        m_spans_sent(prometheus::BuildCounter()
+                         .Name("test_j_spans_sent")
+                         .Help("sent")
+                         .Register(*m_registry)
+                         .Add({})),
+        m_spans_failed(prometheus::BuildCounter()
+                           .Name("test_j_spans_failed")
+                           .Help("failed")
+                           .Register(*m_registry)
+                           .Add({})),
+        m_queue_size(prometheus::BuildGauge()
+                         .Name("test_j_queue_size")
+                         .Help("queue")
+                         .Register(*m_registry)
+                         .Add({})),
+        m_last_send_duration(prometheus::BuildGauge()
+                                 .Name("test_j_last_send_duration")
+                                 .Help("dur")
+                                 .Register(*m_registry)
+                                 .Add({})),
+        m_send_latency(prometheus::BuildHistogram()
+                           .Name("test_j_send_latency")
+                           .Help("lat")
+                           .Register(*m_registry)
+                           .Add({},
+                                std::vector<double>{0.001, 0.01, 0.1, 1.0})),
+        m_queue_time(prometheus::BuildHistogram()
+                         .Name("test_j_queue_time")
+                         .Help("qt")
+                         .Register(*m_registry)
+                         .Add({},
+                              std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
+    m_tracer = std::make_unique<JaegerLogger>(
+        "http://localhost:19999", m_spans_sent, m_spans_failed, m_queue_size,
+        m_last_send_duration, m_send_latency, m_queue_time,
+        /*batch_size=*/2, /*flush_interval_ms=*/100, /*sample_rate=*/1.0);
+  }
+};
+
+} // namespace
+
+TEST_CASE("Tracing helpers: resolve_trace_id generates when empty with real "
+          "tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext empty;
+  empty.m_trace_id = "";
+  const auto tid = resolve_trace_id(fix.m_tracer.get(), empty);
+  REQUIRE_FALSE(tid.empty());
+  REQUIRE(tid.size() == 32);
+}
+
+TEST_CASE("Tracing helpers: resolve_trace_id returns existing when non-empty",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "known-trace-id";
+  REQUIRE(resolve_trace_id(fix.m_tracer.get(), ctx) == "known-trace-id");
+}
+
+TEST_CASE("Tracing helpers: log_incoming_span returns non-empty span_id with "
+          "real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "";
+  ctx.m_parent_id = "parent-abc";
+  const auto span_id =
+      log_incoming_span(fix.m_tracer.get(), "/v1/sql/oracle/query",
+                        TimeUtils::epoch_us(), "req-123", ctx);
+  REQUIRE_FALSE(span_id.empty());
+  REQUIRE(span_id.size() == 16);
+}
+
+TEST_CASE("Tracing helpers: log_incoming_span with pre-existing trace_id",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  ctx.m_parent_id = "";
+  const auto span_id =
+      log_incoming_span(fix.m_tracer.get(), "/api/x", 1'000'000, "req-456", ctx);
+  REQUIRE_FALSE(span_id.empty());
+}
+
+TEST_CASE("Tracing helpers: make_span_and_traceparent generates traceparent "
+          "with real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "1234567890abcdef1234567890abcdef";
+  ctx.m_traceparent_header = "";
+  const auto [span_id, tp] =
+      make_span_and_traceparent(fix.m_tracer.get(), ctx, "custom-span");
+  REQUIRE(span_id == "custom-span");
+  REQUIRE_FALSE(tp.empty());
+  REQUIRE(tp.substr(0, 3) == "00-");
+  REQUIRE(tp.find("1234567890abcdef1234567890abcdef") != std::string::npos);
+  REQUIRE(tp.find("custom-span") != std::string::npos);
+}
+
+TEST_CASE("Tracing helpers: make_span_and_traceparent generates span_id when "
+          "hint is empty",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const auto [span_id, tp] =
+      make_span_and_traceparent(fix.m_tracer.get(), ctx);
+  REQUIRE_FALSE(span_id.empty());
+  REQUIRE(span_id.size() == 16);
+  REQUIRE_FALSE(tp.empty());
+}
+
+TEST_CASE("Tracing helpers: make_span_and_traceparent returns header when "
+          "trace_id is empty",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "";
+  ctx.m_traceparent_header = "00-aabb-ccdd-01";
+  const auto [span_id, tp] =
+      make_span_and_traceparent(fix.m_tracer.get(), ctx);
+  REQUIRE(tp == "00-aabb-ccdd-01");
+}
+
+TEST_CASE("Tracing helpers: add_proxy_trace_fields fills JSON with real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  json request_data = nlohmann::json::object();
+  TraceContext ctx;
+  ctx.m_trace_id = "11111111111111111111111111111111";
+  add_proxy_trace_fields(request_data, fix.m_tracer.get(), ctx, "inlet-span-1",
+                         "proxy-span-1");
+  REQUIRE(request_data.contains(NatsContract::kProxyTraceId));
+  REQUIRE(request_data.contains(NatsContract::kProxySpanId));
+  REQUIRE(request_data.contains(NatsContract::kProxyInletSpanId));
+  REQUIRE(request_data.contains(NatsContract::kProxyTraceparent));
+  REQUIRE(request_data[NatsContract::kProxyTraceId] ==
+          "11111111111111111111111111111111");
+  REQUIRE(request_data[NatsContract::kProxySpanId] == "proxy-span-1");
+  REQUIRE(request_data[NatsContract::kProxyInletSpanId] == "inlet-span-1");
+  const std::string tp =
+      request_data[NatsContract::kProxyTraceparent].get<std::string>();
+  REQUIRE(tp.substr(0, 3) == "00-");
+  REQUIRE(tp.find("11111111111111111111111111111111") != std::string::npos);
+  REQUIRE(tp.find("proxy-span-1") != std::string::npos);
+}
+
+TEST_CASE("Tracing helpers: add_proxy_trace_fields resolves trace_id from "
+          "empty ctx",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  json request_data = nlohmann::json::object();
+  TraceContext ctx;
+  ctx.m_trace_id = "";
+  add_proxy_trace_fields(request_data, fix.m_tracer.get(), ctx, "", "span-2");
+  const std::string resolved_tid =
+      request_data[NatsContract::kProxyTraceId].get<std::string>();
+  REQUIRE_FALSE(resolved_tid.empty());
+  REQUIRE(resolved_tid.size() == 32);
+}
+
+TEST_CASE("Tracing helpers: JaegerSpanLogger non-null tracer paths",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "22222222222222222222222222222222";
+  ctx.m_span_id = "2222222222222222";
+  ctx.m_parent_id = "3333333333333333";
+
+  const auto now = TimeUtils::epoch_us();
+  JaegerSpanLogger::log_l2_call(fix.m_tracer.get(), "POST", "/v1/sql/oracle/query",
+                                200, now, now + 5000, ctx, "proxy", "sp-l2",
+                                "par-l2", "req-l2");
+  JaegerSpanLogger::log_worker_processing(fix.m_tracer.get(), "POST",
+                                         "/v1/sql/oracle/query", 200, now,
+                                         now + 3000, ctx, "worker", "sp-wrk",
+                                         "req-wrk");
+  JaegerSpanLogger::log_proxy_response(fix.m_tracer.get(), "POST",
+                                       "/v1/sql/oracle/query", 200, now,
+                                       now + 4000, ctx, "proxy", "req-pr");
+  JaegerSpanLogger::log_nats_span(fix.m_tracer.get(), "poll", 200, "req-nat",
+                                  "22222222222222222222222222222222",
+                                  "span-nat", "parent-nat", now);
+  const auto span_id = JaegerSpanLogger::generate_span_id(fix.m_tracer.get());
+  REQUIRE_FALSE(span_id.empty());
+  REQUIRE(span_id.size() == 16);
+}
+
+TEST_CASE("Tracing helpers: BackendErrorSpanLogger non-null tracer with "
+          "empty and non-empty detail",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  TraceContext ctx;
+  ctx.m_trace_id = "44444444444444444444444444444444";
+  ctx.m_span_id = "4444444444444444";
+  ctx.m_parent_id = "5555555555555555";
+  const auto now = TimeUtils::epoch_us();
+
+  BackendErrorSpanLogger::log_backend_error(fix.m_tracer.get(), "POST",
+                                           "/v1/sql/oracle/query", 500, now,
+                                           ctx, "proxy", "req-err",
+                                           "backend_error", "");
+  BackendErrorSpanLogger::log_backend_error(fix.m_tracer.get(), "POST",
+                                           "/v1/sql/oracle/query", 502, now,
+                                           ctx, "proxy", "req-err2",
+                                           "timeout", "worker did not respond");
+}
+
+TEST_CASE("Tracing helpers: RateLimitSpanLogger non-null tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+
+  RateLimitSpanLogger::log_rate_limit_rejection(fix.m_tracer.get(),
+                                                "too many requests",
+                                                "10.0.0.1", "", "10", "0");
+  RateLimitSpanLogger::log_rate_limit_rejection(
+      fix.m_tracer.get(), "burst", "10.0.0.2",
+      "00-66666666666666666666666666666666-aaaa-01", "100", "50");
+}
+
+TEST_CASE("Tracing helpers: log_worker_span with real tracer and non-empty "
+          "trace_id",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  const auto now = TimeUtils::epoch_us();
+  REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200,
+                                  now, now + 1000, "worker", "req-ws",
+                                  "77777777777777777777777777777777",
+                                  "span-ws", "parent-ws"));
+}
+
+TEST_CASE("Tracing helpers: log_worker_span no-ops with empty trace_id even "
+          "with real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200,
+                                  1, 2, "worker", "req-ws2", "", "", ""));
+}
+
+TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
+          "non-empty traceparent and real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  const TraceContext ctx = TraceContextHelper::extract_from_raw(
+      "00-88888888888888888888888888888888-aaaaaaaaaaaaaaaa-01",
+      fix.m_tracer.get(), "test-ctx");
+  REQUIRE(ctx.m_trace_id == "88888888888888888888888888888888");
+  REQUIRE(ctx.m_parent_id == "aaaaaaaaaaaaaaaa");
+  REQUIRE_FALSE(ctx.m_span_id.empty());
+  REQUIRE(ctx.m_sampled);
+}
+
+TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
+          "empty traceparent and real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  const TraceContext ctx =
+      TraceContextHelper::extract_from_raw("", fix.m_tracer.get(), "test-empty");
+  REQUIRE_FALSE(ctx.m_trace_id.empty());
+  REQUIRE_FALSE(ctx.m_span_id.empty());
+  REQUIRE(ctx.m_parent_id.empty());
+}
+
+TEST_CASE("Tracing helpers: TraceContextHelper extract_and_validate with "
+          "headers",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  httplib::Headers hdrs;
+  hdrs.emplace("traceparent",
+               "00-99999999999999999999999999999999-bbbbbbbbbbbbbbbb-01");
+  const TraceContext ctx =
+      TraceContextHelper::extract_and_validate(hdrs, fix.m_tracer.get(),
+                                              "test-validate");
+  REQUIRE(ctx.m_trace_id == "99999999999999999999999999999999");
+  REQUIRE(ctx.m_parent_id == "bbbbbbbbbbbbbbbb");
+  REQUIRE_FALSE(ctx.m_span_id.empty());
+}
+
+TEST_CASE("Tracing helpers: begin_request_trace with real tracer",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  httplib::Headers hdrs;
+  hdrs.emplace("traceparent",
+               "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cccccccccccccccc-01");
+  std::string inlet_span_id;
+  const TraceContext ctx = begin_request_trace(fix.m_tracer.get(), hdrs,
+                                              "req-brt", "/v1/sql/oracle/query",
+                                              TimeUtils::epoch_us(),
+                                              inlet_span_id);
+  REQUIRE(ctx.m_trace_id == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  REQUIRE_FALSE(inlet_span_id.empty());
+  REQUIRE(inlet_span_id.size() == 16);
+}
+
+TEST_CASE("Tracing helpers: begin_request_trace generates trace_id when "
+          "no traceparent",
+          "[tracing-helpers][non-null]") {
+  JaegerTracerFixture fix;
+  httplib::Headers hdrs;
+  std::string inlet_span_id;
+  const TraceContext ctx = begin_request_trace(fix.m_tracer.get(), hdrs,
+                                              "req-brt2", "/ping",
+                                              TimeUtils::epoch_us(),
+                                              inlet_span_id);
+  REQUIRE(ctx.m_trace_id.size() == 32);
+  REQUIRE_FALSE(inlet_span_id.empty());
 }
