@@ -7,6 +7,9 @@
 #include "common_utils.hpp"
 #include "crash_handler.hpp"
 #include "db_query_executor.hpp"
+#include "db_query_executor_base.hpp"
+#include "json_utils.hpp"
+#include "rate_limiter_per_ip.hpp"
 #include "exceptions.hpp"
 #include "metrics_manager.hpp"
 #include "pool_executor.hpp"
@@ -871,4 +874,214 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category tolerates "
   ProcessingErrorMetrics metrics;
   REQUIRE_NOTHROW(
       handle_processing_error_with_category("invalid json: boom", metrics));
+}
+
+// ============================================================================
+// tracing_helpers.hpp — null-tracer guard branches
+// ============================================================================
+
+TEST_CASE("Tracing helpers: JaegerSpanLogger methods no-op with null tracer",
+          "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "abc";
+  ctx.m_parent_id = "def";
+  ctx.m_span_id = "ghi";
+  REQUIRE_NOTHROW(JaegerSpanLogger::log_l2_call(
+      nullptr, "POST", "/query", 200, 1, 2, ctx, "proxy", "s1", "p1", "req-1",
+      nlohmann::json::object()));
+  REQUIRE_NOTHROW(JaegerSpanLogger::log_worker_processing(
+      nullptr, "POST", "/query", 200, 1, 2, ctx, "worker", "s1", "req-1"));
+  REQUIRE_NOTHROW(JaegerSpanLogger::log_proxy_response(
+      nullptr, "POST", "/query", 200, 1, 2, ctx, "proxy", "req-1"));
+  REQUIRE(JaegerSpanLogger::generate_span_id(nullptr) == "");
+  REQUIRE_NOTHROW(JaegerSpanLogger::log_nats_span(
+      nullptr, "poll", 200, "req-1", "trace-1", "span-1", "parent-1", 1000));
+}
+
+TEST_CASE("Tracing helpers: BackendErrorSpanLogger no-op with null tracer "
+          "(empty and non-empty detail)",
+          "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "t";
+  ctx.m_span_id = "s";
+  REQUIRE_NOTHROW(BackendErrorSpanLogger::log_backend_error(
+      nullptr, "POST", "/query", 500, 1'000, ctx, "proxy", "req-1",
+      "backend_error", ""));
+  REQUIRE_NOTHROW(BackendErrorSpanLogger::log_backend_error(
+      nullptr, "POST", "/query", 500, 1'000, ctx, "proxy", "req-1",
+      "backend_error", "db down"));
+}
+
+TEST_CASE("Tracing helpers: RateLimitSpanLogger no-op with null tracer "
+          "(empty and non-empty limit/remaining)",
+          "[tracing-helpers]") {
+  REQUIRE_NOTHROW(RateLimitSpanLogger::log_rate_limit_rejection(
+      nullptr, "too many", "1.2.3.4", "", "", ""));
+  REQUIRE_NOTHROW(RateLimitSpanLogger::log_rate_limit_rejection(
+      nullptr, "too many", "1.2.3.4", "00-aa-bb-01", "10", "0"));
+}
+
+TEST_CASE("Tracing helpers: log_incoming_span returns empty with null tracer",
+          "[tracing-helpers]") {
+  TraceContext ctx;
+  ctx.m_trace_id = "trace-1";
+  ctx.m_parent_id = "parent-1";
+  REQUIRE(log_incoming_span(nullptr, "/query", 1'000, "req-1", ctx) == "");
+}
+
+TEST_CASE("Tracing helpers: add_proxy_trace_fields is a no-op with null tracer",
+          "[tracing-helpers]") {
+  json request_data = nlohmann::json::object();
+  TraceContext ctx;
+  ctx.m_trace_id = "trace-1";
+  request_data[NatsContract::kProxyTraceId] = "";
+  add_proxy_trace_fields(request_data, nullptr, ctx, "", "span-1");
+  REQUIRE(request_data[NatsContract::kProxyTraceId] == "");
+}
+
+TEST_CASE("Tracing helpers: log_worker_span no-ops on null tracer or empty "
+          "trace_id", "[tracing-helpers]") {
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
+                                  "req-1", "", "span-1", "parent-1"));
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
+                                  "req-1", "trace-1", "span-1", "parent-1"));
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
+                                  "req-1", "", "", ""));
+}
+
+TEST_CASE("Tracing helpers: resolve_trace_id generates when trace id empty and "
+          "tracer null returns empty", "[tracing-helpers]") {
+  TraceContext empty;
+  empty.m_trace_id = "";
+  empty.m_span_id = "";
+  empty.m_parent_id = "";
+  REQUIRE(resolve_trace_id(nullptr, empty) == "");
+}
+
+// ============================================================================
+// db_query_executor_base.cpp — set_db_pool_gauges
+// ============================================================================
+
+namespace {
+
+class BasePoolExecMock final : public DbExecutorBase {
+public:
+  explicit BasePoolExecMock(DbConfig db) : DbExecutorBase(std::move(db)) {}
+  bool init() override { return true; }
+  bool is_ready() const override { return DbExecutorBase::is_ready(); }
+  json execute_query(const std::string &, const json &, int, int,
+                     int &) override {
+    return json::object();
+  }
+  bool ping(int) override { return true; }
+  void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pm) override {
+    DbExecutorBase::set_pool_metrics(pm);
+  }
+
+protected:
+  // Satisfy the pure-virtual contract; the pool is external to the base class.
+  void refresh_pool_gauges() override {}
+};
+
+} // namespace
+
+TEST_CASE("DbExecutorBase: default getters read DbConfig",
+          "[db-executor-base]") {
+  DbConfig cfg;
+  cfg.m_name = "oracle";
+  cfg.m_query_timeout_ms = 3000;
+  cfg.m_max_rows = 500;
+  BasePoolExecMock exec(cfg);
+  REQUIRE(exec.default_timeout_ms() == 3000);
+  REQUIRE(exec.default_max_rows() == 500);
+  REQUIRE(exec.db_name() == "oracle");
+}
+
+TEST_CASE("DbExecutorBase: set_db_pool_gauges is a no-op before metrics set",
+          "[db-executor-base]") {
+  DbConfig cfg;
+  cfg.m_name = "oracle";
+  cfg.m_query_timeout_ms = 1000;
+  cfg.m_max_rows = 100;
+  BasePoolExecMock exec(cfg);
+  REQUIRE_NOTHROW(exec.set_db_pool_gauges(2.0, 3.0));
+}
+
+TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active gauges",
+          "[db-executor-base]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = prometheus::BuildGauge()
+                     .Name("db_pool")
+                     .Help("db pool state")
+                     .Register(*registry);
+  DbConfig cfg;
+  cfg.m_name = "pg";
+  cfg.m_query_timeout_ms = 1000;
+  cfg.m_max_rows = 100;
+  BasePoolExecMock exec(cfg);
+  exec.set_pool_metrics(&family);
+  exec.set_db_pool_gauges(5.0, 2.0);
+  const auto collected = family.Collect();
+  REQUIRE(collected.front().metric.size() == 2);
+  double idle = -1.0, active = -1.0;
+  for (const auto &m : collected.front().metric) {
+    for (const auto &label : m.label) {
+      if (label.name == "state" && label.value == "idle") {
+        idle = m.gauge.value;
+      }
+      if (label.name == "state" && label.value == "active") {
+        active = m.gauge.value;
+      }
+    }
+  }
+  REQUIRE(idle == 5.0);
+  REQUIRE(active == 2.0);
+}
+
+// ============================================================================
+// logger.hpp — set_level_from_string additional branches
+// ============================================================================
+
+TEST_CASE("Logger: set_level_from_string covers lowercase and alias variants",
+          "[logger]") {
+  Logger::set_level_from_string("warn");
+  REQUIRE(Logger::get_level() == Logger::WARN);
+  Logger::set_level_from_string("WARNING");
+  REQUIRE(Logger::get_level() == Logger::WARN);
+  Logger::set_level_from_string("info");
+  REQUIRE(Logger::get_level() == Logger::INFO);
+  Logger::set_level_from_string("debug");
+  REQUIRE(Logger::get_level() == Logger::DEBUG);
+  Logger::set_level_from_string("error");
+  REQUIRE(Logger::get_level() == Logger::ERROR);
+  Logger::set_level_from_string("UNKNOWN");
+  REQUIRE(Logger::get_level() == Logger::INFO);
+  Logger::set_level(Logger::DEBUG);
+}
+
+// ============================================================================
+// rate_limiter_per_ip.hpp — get_per_ip_stats kMaxExpose cap
+// ============================================================================
+
+TEST_CASE("PerIPRateLimiter: get_per_ip_stats covers >1000 IPs capped at 1000",
+          "[rate-limiter-per-ip-ext]") {
+  PerIPRateLimiter limiter(10, 5, 5000, 3600);
+  for (int i = 0; i < 1500; ++i) {
+    const std::string ip = "10.0.0." + std::to_string(i % 250) + "." +
+                           std::to_string(i);
+    limiter.acquire(ip);
+  }
+  const auto stats = limiter.get_per_ip_stats();
+  REQUIRE(stats.size() == 1000);
+  REQUIRE(stats.size() >= 1000);
+}
+
+TEST_CASE("PerIPRateLimiter: get_per_ip_stats emits counters for each entry",
+          "[rate-limiter-per-ip-ext]") {
+  PerIPRateLimiter limiter(10, 5, 5000, 3600);
+  limiter.acquire("10.0.0.1");
+  limiter.acquire("10.0.0.1");
+  const auto stats = limiter.get_per_ip_stats();
+  REQUIRE(stats.size() == 1);
+  REQUIRE(stats[0].second.m_requests == 2);
 }

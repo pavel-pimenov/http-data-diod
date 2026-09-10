@@ -1,3 +1,32 @@
+# test(coverage): branch coverage for tracing_helpers, db_query_executor_base, logger, rate_limiter_per_ip
+
+## Date: 2026-09-10
+
+### Что сделано
+- Добавлены юнит-тесты в `test_coverage_ext.cpp` для закрытия пробелов покрытия ветвей
+  в четырёх модулях:
+  - **tracing_helpers.hpp**: null-tracer guard ветки для `JaegerSpanLogger::log_l2_call`,
+    `log_worker_processing`, `log_proxy_response`, `generate_span_id`, `log_nats_span`,
+    `BackendErrorSpanLogger::log_backend_error` (с пустым и непустым detail),
+    `RateLimitSpanLogger::log_rate_limit_rejection` (с пустыми и непустыми limit/remaining),
+    `log_incoming_span`, `add_proxy_trace_fields`, `log_worker_span` (null tracer + empty
+    trace_id), `resolve_trace_id` (empty ctx + null tracer).
+  - **db_query_executor_base.cpp**: `set_db_pool_gauges` null guard (before `set_pool_metrics`)
+    и normal path с прометеус Family<Gauge> — проверяется публикация idle/active gauge.
+    Тестовый подкласс `BasePoolExecMock` с виртуальным `refresh_pool_gauges()`.
+  - **logger.hpp**: `set_level_from_string` с lowercase вариантами (`"warn"`, `"info"`,
+    `"debug"`, `"error"`), alias `"WARNING"`, и неизвестным уровнем `"UNKNOWN"` (default INFO).
+  - **rate_limiter_per_ip.hpp**: `get_per_ip_stats` с >1500 IPs — проверяется cap в `kMaxExpose=1000`,
+    а также проверка счётчиков `IPStats::m_requests` для конкретного IP.
+
+### Результат
+- Сборка в контейнерах прошла успешно.
+- `message_counter.py --iterations 1 --concurrent 1 --dup-check` — все проверки пройдены.
+- Общее количество: 1522 assertions в 364 test cases (tests_components),
+  743 assertions в 74 test cases (tests_proxy_core).
+
+---
+
 # feat(chaos,sentry): reply-loss scenario + sentry-mock helper script
 
 ## Date: 2026-09-10
