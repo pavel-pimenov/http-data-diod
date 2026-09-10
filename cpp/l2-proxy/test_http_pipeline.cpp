@@ -407,3 +407,18 @@ TEST_CASE("HttpClientPool: release of null pointer is a no-op",
   REQUIRE(pool.total_clients() == 0);
   REQUIRE(pool.active_clients() == 0);
 }
+
+TEST_CASE("HttpClientPool: pool full on release destroys connection",
+          "[http-client-pool]") {
+  HttpClientPool pool(1, 1, 1);
+
+  auto c1 = pool.acquire_connection();
+  REQUIRE(pool.total_clients() == 1);
+  auto c4 = std::make_unique<HttpClient>(1, true, false, false, "");
+  pool.release_connection(std::move(c1));
+  REQUIRE(pool.total_clients() == 1);
+  REQUIRE(pool.available_count() == 1);
+  pool.release_connection(std::move(c4));
+  REQUIRE(pool.total_clients() == 0);
+  REQUIRE(pool.available_count() == 1);
+}

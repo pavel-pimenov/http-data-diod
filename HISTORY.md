@@ -1,3 +1,56 @@
+# test(coverage): bring trace_logger.cpp, duplicate_detector.cpp, http_client_pool.cpp to ≥90%
+
+## Date: 2026-09-10
+
+### Проблема
+Четыре файла проекта имели строковое покрытие ниже 90%:
+- `string_utils.hpp` (85.7%)
+- `http_client_pool.cpp` (88.4%)
+- `trace_logger.cpp` (88.7%)
+- `duplicate_detector.cpp` (89.8%)
+
+### Что сделано
+
+**http_client_pool.cpp** (88.4% → 90.1%):
+- Тест `HttpClientPool: pool full on release destroys connection`: пул из 1 соединения,
+  acquisition + release при переполнении → `total_clients()` декрементируется.
+
+**duplicate_detector.cpp** (89.8% → 94.5%):
+- `DuplicateDetector: per_client_ttl_ms=0 disables client TTL eviction`
+- `DuplicateDetector: report truncates to m_top_n`
+- `DuplicateDetector: report includes all required JSON fields`
+- `DuplicateDetector: evict_lowest_count tie-break uses first_seen_ms`
+- `DuplicateDetector: body stored on second delivery if first was too large`
+
+**trace_logger.cpp** (88.7% → 90.2%):
+- Расширен тест `validate_traceparent rejects malformed headers`: 12
+  проверочных строк длиной 55 символов покрывают все ветви
+  `validate_traceparent` — L73 (невалидный разделитель), L82 (не-hex
+  trace_id), L85 (не-hex span_id), L88 (не-hex flags), L92/L94
+  (flags ≠ 00/01). Ранее существовавшая строка с `Z` была 54 символов
+  и не достигала проверки разделителя.
+
+**Baggage** (trace_logger.hpp):
+- `Baggage: url_encode and url_decode round-trip`
+- `Baggage: to_header and from_header round-trip`
+- `Baggage: from_header handles empty and whitespace`
+- `Baggage: from_header with url-encoded values`
+
+### Результат
+- **duplicate_detector.cpp**: 94.5% ✅
+- **http_client_pool.cpp**: 90.1% ✅
+- **trace_logger.cpp**: 90.2% ✅
+- **string_utils.hpp**: 85.7% — gcov-artefact (закрывающая `}` inline-функции
+  в header-файле; basic-block эпилога не получает счётчик при полном
+  инлайне; устранение возможно только выносом в .cpp)
+
+### Тесты
+- Все 467 test cases + 2 362 assertions пройдены (393+74 cases, 1625+743 assertions)
+- `message_counter.py --iterations 1 --concurrent 1 --dup-check` ✅
+- Coverage gate `--fail-under-line 90` пройден (общее покрытие 97.4%)
+
+---
+
 # fix(sentry): authenticate via X-Sentry-Auth for glitchtip >= 6
 
 ## Date: 2026-09-10

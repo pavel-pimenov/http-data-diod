@@ -5,6 +5,7 @@
 // external Jaeger service is required.
 
 #include "common_utils.hpp"
+#include "duplicate_detector.hpp"
 #include "httplib/httplib.h"
 #include "nlohmann/json.hpp"
 #include "trace_logger.hpp"
@@ -181,16 +182,47 @@ TEST_CASE("TraceLogger: generate_traceparent round-trips validation",
 
 TEST_CASE("TraceLogger: validate_traceparent rejects malformed headers",
           "[tracing]") {
+  // Wrong size
   REQUIRE_FALSE(JaegerLogger::validate_traceparent(""));
   REQUIRE_FALSE(JaegerLogger::validate_traceparent("00-aa"));
+
+  // Wrong version prefix
   REQUIRE_FALSE(JaegerLogger::validate_traceparent(
-      "01-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"));
+      "01-0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+
+  // Wrong separator at trace_id/span_id boundary
   REQUIRE_FALSE(JaegerLogger::validate_traceparent(
-      "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaZbbbbbbbbbbbbbbb-01"));
+      "00-0123456789abcdef0123456789abcdefx0123456789abcdef-01"));
+
+  // Non-hex in trace_id (position 3)
   REQUIRE_FALSE(JaegerLogger::validate_traceparent(
-      "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-02"));
+      "00-g123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+
+  // Non-hex in trace_id (position 34)
   REQUIRE_FALSE(JaegerLogger::validate_traceparent(
-      "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-11"));
+      "00-0123456789abcdef0123456789abcdeG-0123456789abcdef-01"));
+
+  // Non-hex in span_id (position 36)
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-g123456789abcdef-01"));
+
+  // Non-hex in span_id (position 51)
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdeG-01"));
+
+  // Non-hex in flags (position 54)
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-0g"));
+
+  // Non-hex in flags (position 53)
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-g1"));
+
+  // Flags not 00/01
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-02"));
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-11"));
 }
 
 TEST_CASE("TraceLogger: extract_trace_info parses and validates", "[tracing]") {
@@ -439,4 +471,147 @@ TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
   REQUIRE(parsed.m_trace_id == "0123456789abcdef0123456789abcdef");
   REQUIRE(parsed.m_parent_id == "abcdef0123456789");
   REQUIRE(parsed.m_span_id.size() == 16);
+}
+
+TEST_CASE("Baggage: url_encode and url_decode round-trip", "[baggage]") {
+  REQUIRE(Baggage::url_encode("hello") == "hello");
+  REQUIRE(Baggage::url_encode("hello world") == "hello%20world");
+  REQUIRE(Baggage::url_encode("a+b") == "a%2Bb");
+  REQUIRE(Baggage::url_encode("%") == "%25");
+  REQUIRE(Baggage::url_encode("") == "");
+  REQUIRE(Baggage::url_encode("abc123-_.~") == "abc123-_.~");
+
+  REQUIRE(Baggage::url_decode("hello") == "hello");
+  REQUIRE(Baggage::url_decode("hello%20world") == "hello world");
+  REQUIRE(Baggage::url_decode("a%2Bb") == "a+b");
+  REQUIRE(Baggage::url_decode("%25") == "%");
+  REQUIRE(Baggage::url_decode("") == "");
+  REQUIRE(Baggage::url_decode("abc") == "abc");
+
+  REQUIRE(Baggage::url_decode("x%0Gy") == "x%0Gy");
+  REQUIRE(Baggage::url_decode("x%2") == "x%2");
+}
+
+TEST_CASE("Baggage: to_header and from_header round-trip", "[baggage]") {
+  Baggage b;
+  b.set("key1", "value1");
+  b.set("key2", "value2");
+  const std::string header = b.to_header();
+  REQUIRE_FALSE(header.empty());
+
+  const Baggage parsed = Baggage::from_header(header);
+  REQUIRE(parsed.size() == 2);
+  REQUIRE(parsed.get("key1") == "value1");
+  REQUIRE(parsed.get("key2") == "value2");
+}
+
+TEST_CASE("Baggage: from_header handles empty and whitespace", "[baggage]") {
+  const Baggage empty = Baggage::from_header("");
+  REQUIRE(empty.size() == 0);
+
+  const Baggage whitespace = Baggage::from_header("  key = value  ");
+  REQUIRE(whitespace.size() == 1);
+  REQUIRE(whitespace.get("key") == "value");
+}
+
+TEST_CASE("Baggage: from_header with url-encoded values", "[baggage]") {
+  const Baggage decoded = Baggage::from_header("k=hello%20world");
+  REQUIRE(decoded.size() == 1);
+  REQUIRE(decoded.get("k") == "hello world");
+}
+
+TEST_CASE("DuplicateDetector: per_client_ttl_ms=0 disables client TTL eviction",
+          "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_ttl_ms = 0;
+  DuplicateDetector detector(options);
+
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  REQUIRE(detector.per_client_count_size() == 1);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+  REQUIRE(detector.per_client_count_size() == 2);
+}
+
+TEST_CASE("DuplicateDetector: report truncates to m_top_n", "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_top_n = 2;
+  DuplicateDetector detector(options);
+
+  for (int i = 0; i < 5; ++i) {
+    const std::string hash = "hash-" + std::to_string(i);
+    const std::string body = R"({"v":)" + std::to_string(i) + "}";
+    detector.record("client-a", "10.0.0.1", hash, body);
+    detector.record("client-a", "10.0.0.1", hash, body);
+  }
+
+  const auto report = detector.report();
+  REQUIRE(report["top"].size() == 2);
+  REQUIRE(report["duplicate_bodies"] == 5);
+}
+
+TEST_CASE("DuplicateDetector: report includes all required JSON fields",
+          "[duplicate-detector]") {
+  DuplicateDetector detector(DuplicateDetector::Options{});
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+  detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+
+  const auto report = detector.report();
+  REQUIRE(report.contains("enabled"));
+  REQUIRE(report.contains("duplicate_bodies"));
+  REQUIRE(report.contains("duplicate_occurrences"));
+  REQUIRE(report.contains("by_type"));
+  REQUIRE(report.contains("top"));
+  REQUIRE(report["enabled"] == true);
+  REQUIRE(report["duplicate_bodies"] == 1);
+  REQUIRE(report["duplicate_occurrences"] == 1);
+  REQUIRE(report["by_type"]["same_client"] == 1);
+  REQUIRE(report["by_type"]["cross_client"] == 0);
+
+  const auto &item = report["top"][0];
+  REQUIRE(item.contains("count"));
+  REQUIRE(item.contains("type"));
+  REQUIRE(item.contains("clients"));
+  REQUIRE(item.contains("first_seen_ms"));
+  REQUIRE(item.contains("last_seen_ms"));
+  REQUIRE(item.contains("body"));
+  REQUIRE(item["count"] == 2);
+  REQUIRE(item["type"] == "same_client");
+}
+
+TEST_CASE("DuplicateDetector: evict_lowest_count tie-break uses first_seen_ms",
+          "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_max_entries = 2;
+  DuplicateDetector detector(options);
+
+  detector.record("client-a", "10.0.0.1", "hash-1", "body-1");
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  detector.record("client-a", "10.0.0.1", "hash-2", "body-2");
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  detector.record("client-a", "10.0.0.1", "hash-1", "body-1");
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  detector.record("client-a", "10.0.0.1", "hash-3", "body-3");
+
+  const auto report = detector.report();
+  REQUIRE(report["duplicate_bodies"] >= 1);
+}
+
+TEST_CASE("DuplicateDetector: body stored on second delivery if first was too "
+          "large", "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_max_body_bytes = 10;
+  DuplicateDetector detector(options);
+
+  const std::string long_body(20, 'x');
+  detector.record("client-a", "10.0.0.1", "hash-1", long_body);
+  const std::string short_body = "ok";
+  detector.record("client-a", "10.0.0.1", "hash-1", short_body);
+
+  const auto report = detector.report();
+  REQUIRE(report["top"][0]["body"] == "ok");
 }

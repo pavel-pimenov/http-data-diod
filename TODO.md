@@ -1,20 +1,18 @@
 # TODO / Продолжение работы
 
-## Текущий статус (15 — non-null JaegerLogger покрытие, замер покрытия)
+## Текущий статус (16 — файлы <90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **383 + 74 = 457 test cases**,
-**2 311 assertions** (1568 + 743). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **393 + 74 = 467 test cases**,
+**2 362 assertions** (1625 + 743). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
 - **Lines: 97.4%** (8245/8465), гейт 90% — пройден
 - **Functions: 95.0%** (1095/1153)
 - **Branches: 41.8%** (16299/39038) — слабое место
 
-Последний раунд: non-null JaegerLogger ветки в `tracing_helpers.hpp`
-(теперь **99.2%**, 123/124 строк), `apply_traceparent`,
-`begin_request_trace`, `make_span_and_traceparent`, `resolve_trace_id`
-с реальным трейсером. Файлы <90% по строкам: `string_utils.hpp` (85.7%),
-`http_client_pool.cpp` (88.4%), `trace_logger.cpp` (88.7%),
-`duplicate_detector.cpp` (89.8%).
+Последний раунд: доведение файлов ниже 90% строкового покрытия
+до ≥90%. `duplicate_detector.cpp` (89.8%→94.5%),
+`http_client_pool.cpp` (88.4%→90.1%), `trace_logger.cpp` (88.7%→90.2%).
+`string_utils.hpp` (85.7%) — gcov-артефакт, не устраним тестами.
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -27,8 +25,8 @@ drain, reply-loss).
 Открытые ветки (строковое покрытие уже высокое, осталось ветвей):
 - `logger.hpp` — init-time ветки `LOG_LEVEL=CRITICAL/OFF` (env-dependent, требуют
   отдельного процесса с setenv перед init; std::call_once блокирует повторный вход)
-- `string_utils.hpp` (85.7%), `http_client_pool.cpp` (88.4%),
-  `trace_logger.cpp` (88.7%), `duplicate_detector.cpp` (89.8%) — <90% по строкам
+- `string_utils.hpp` (85.7%) — gcov-артефакт: закрывающая `}` inline-функции в
+  header-е (1 строка из 7), не устраним тестами; потребуется вынос в .cpp
 - **Branches 41.8%** в целом — крупный задел (gcovr `--branch` метрика), но
   ветви в header-heavy шаблонном коде требуют точечных тест-кейсов
 
