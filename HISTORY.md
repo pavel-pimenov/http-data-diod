@@ -1,3 +1,38 @@
+# test(coverage): branch-раунд — Utils/Gateway/config validation
+
+## Date: 2026-09-10
+
+### Что сделано
+- Раунд ветвей: parse_url (7 кейсов, все ветви), format_http_error
+  (timeout/connection/bind/other), JsonUtils (safe_get_*/try_parse/
+  get_response_body/build_nats_response_envelope fallback-ветви),
+  HeaderUtils (is_binary_content_type audio/video, filter_headers_from_json,
+  get_header_value/find_header_optional fallback, redact_header_value,
+  shorten_user_agent), DB gateway routing (classify_method 404/405,
+  normalize_path_rest, parse_path, is_read_only_sql, strip_sql_comments,
+  parse_request params), Gateway row-collector limit, error categorizer,
+  URL normalize_path, Sparkline rate mode.
+- Добавлены 12 кейсов валидации config.cpp (`[config]`): ports/timeouts fail,
+  empty L2 URLs, NATS subject/TLS pairing, TLS CA required, db query limits,
+  worker malformed DB entries, oracle/postgres missing fields, proxy skips
+  per-DB fields, rate limiting/dedup/duplicate/tracing bounds reject.
+
+### Выводы по branch-метрике
+- `ConfigChecker::check()` — общая точка ветвления: fail-тесты дают
+  исполнения, но не новые ветви (config.cpp: 616→619, всего +3).
+- Остаток в config.cpp — env-var ветки `get_env_*` (override/invalid/default).
+- Каждый тест добавляет 30-80 непокрываемых ветвей макросов Catch2
+  (REQUIRE fail-ветвь); тест-файлы = 35290 из 42355 общего числа ветвей,
+  поэтому общий % почти недвижим.
+- Честная цель: production-only 56.7% (3852/6791).
+
+### Результат
+- Test cases: 467 → 517; assertions: 2362 → 2469.
+- Lines 97.7% (8709/8915), Functions 95.4%, Branches 41.5% (17566/42355).
+- `./rebuild-and-run.sh` + `message_counter.py --iterations 1 --concurrent 1` ✅
+
+---
+
 # refactor(coverage): extract to_lower to string_utils.cpp
 
 ## Date: 2026-09-10

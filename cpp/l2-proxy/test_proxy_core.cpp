@@ -141,11 +141,11 @@ TEST_CASE("Gateway errors: unavailable and sql_error set the http status",
   REQUIRE(status == 503);
   REQUIRE(unavailable[DbResponseContract::kError][DbResponseContract::kCode] ==
           "DB_UNAVAILABLE");
-  REQUIRE(std::string(
-              unavailable[DbResponseContract::kError]
-                         [DbResponseContract::kMessage]
-                             .get_ref<const std::string &>())
-              .find("conn refused") != std::string::npos);
+  REQUIRE(
+      std::string(
+          unavailable[DbResponseContract::kError][DbResponseContract::kMessage]
+              .get_ref<const std::string &>())
+          .find("conn refused") != std::string::npos);
 
   status = 0;
   const json sql_error = make_db_sql_error(status, "ORA-00942: no such table");
@@ -170,12 +170,12 @@ TEST_CASE("Gateway requests: build_db_query_request carries db and sql",
 
 TEST_CASE("Gateway requests: optional fields are forwarded",
           "[db-gateway-request]") {
-  const json req = build_db_query_request(
-      "query", "r", "oracle",
-      json{{"sql", "SELECT * FROM t WHERE id = :id"},
-           {DbQueryContract::kParams, json{{"id", 1}}},
-           {DbQueryContract::kTimeoutMs, 9000},
-           {DbQueryContract::kMaxRows, 25}});
+  const json req =
+      build_db_query_request("query", "r", "oracle",
+                             json{{"sql", "SELECT * FROM t WHERE id = :id"},
+                                  {DbQueryContract::kParams, json{{"id", 1}}},
+                                  {DbQueryContract::kTimeoutMs, 9000},
+                                  {DbQueryContract::kMaxRows, 25}});
   REQUIRE(req[DbQueryContract::kParams]["id"] == 1);
   REQUIRE(req[DbQueryContract::kTimeoutMs] == 9000);
   REQUIRE(req[DbQueryContract::kMaxRows] == 25);
@@ -212,8 +212,7 @@ TEST_CASE("Gateway read-only check: strip_sql_comments edges",
   REQUIRE(strip_sql_comments("") == "");
   // A quote does not disable comment stripping (documented limitation: the
   // reader is naive, string literals are not parsed).
-  REQUIRE(strip_sql_comments("SELECT '--x' FROM t") ==
-          "SELECT '");
+  REQUIRE(strip_sql_comments("SELECT '--x' FROM t") == "SELECT '");
   // The first keyword is still SELECT, so the read-only check stays correct
   // even though the trailing part of the string literal was eaten.
   REQUIRE(is_read_only_sql("SELECT '--x' FROM t") == true);
@@ -235,53 +234,53 @@ TEST_CASE("Gateway request validation: parses a valid query",
 
 TEST_CASE("Gateway request validation: empty/mutating sql fails",
           "[db-gateway-validate]") {
-  const auto no_sql =
-      parse_db_query_request(json{{DbQueryContract::kType, "query"},
-                                  {DbQueryContract::kDb, "oracle"}});
+  const auto no_sql = parse_db_query_request(json{
+      {DbQueryContract::kType, "query"}, {DbQueryContract::kDb, "oracle"}});
   REQUIRE_FALSE(no_sql.has_value());
 
-  const auto mutation = parse_db_query_request(
-      json{{DbQueryContract::kType, "query"},
-           {DbQueryContract::kDb, "oracle"},
-           {DbQueryContract::kSql, "DROP TABLE t"}});
+  const auto mutation =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "DROP TABLE t"}});
   REQUIRE_FALSE(mutation.has_value());
 }
 
 TEST_CASE("Gateway request validation: rejects non-object params",
           "[db-gateway-validate]") {
-  const auto bad = parse_db_query_request(
-      json{{DbQueryContract::kType, "query"},
-           {DbQueryContract::kDb, "oracle"},
-           {DbQueryContract::kSql, "SELECT 1"},
-           {DbQueryContract::kParams, json::array()}});
+  const auto bad =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kParams, json::array()}});
   REQUIRE_FALSE(bad.has_value());
 }
 
 TEST_CASE("Gateway request validation: clamps timeout and max_rows",
           "[db-gateway-validate]") {
-  const auto ok = parse_db_query_request(
-      json{{DbQueryContract::kType, "query"},
-           {DbQueryContract::kDb, "oracle"},
-           {DbQueryContract::kSql, "SELECT 1"},
-           {DbQueryContract::kTimeoutMs, 7000},
-           {DbQueryContract::kMaxRows, 100}});
+  const auto ok =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kTimeoutMs, 7000},
+                                  {DbQueryContract::kMaxRows, 100}});
   REQUIRE(ok.has_value());
   REQUIRE(ok->m_timeout_ms == 7000);
   REQUIRE(ok->m_max_rows == 100);
 
-  const auto bad_timeout = parse_db_query_request(
-      json{{DbQueryContract::kType, "query"},
-           {DbQueryContract::kDb, "oracle"},
-           {DbQueryContract::kSql, "SELECT 1"},
-           {DbQueryContract::kTimeoutMs, 0}});
+  const auto bad_timeout =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kTimeoutMs, 0}});
   REQUIRE_FALSE(bad_timeout.has_value());
 }
 
 TEST_CASE("Gateway responses: query and ping bodies", "[db-gateway-response]") {
-  const json cols = make_db_columns_json({{"ID", "NUMBER"}, {"MESSAGE", "VARCHAR2"}});
+  const json cols =
+      make_db_columns_json({{"ID", "NUMBER"}, {"MESSAGE", "VARCHAR2"}});
   const json rows = json::array({{1, "hello"}});
-  const json query_resp = make_db_query_response("oracle", cols, rows, 1,
-                                                 false, 12);
+  const json query_resp =
+      make_db_query_response("oracle", cols, rows, 1, false, 12);
   REQUIRE(query_resp[DbResponseContract::kStatus] == "ok");
   REQUIRE(query_resp[DbResponseContract::kDb] == "oracle");
   REQUIRE(query_resp[DbResponseContract::kRowCount] == 1);
@@ -308,7 +307,8 @@ TEST_CASE("Gateway envelope: wraps status and body", "[db-gateway-envelope]") {
   REQUIRE(envelope[DbQueryContract::kBody] == body);
 }
 
-TEST_CASE("Gateway row collector: enforces the row limit", "[db-gateway-rows]") {
+TEST_CASE("Gateway row collector: enforces the row limit",
+          "[db-gateway-rows]") {
   DbRowCollector collector(2);
   REQUIRE(collector.try_add(json::array({1})));
   REQUIRE(collector.try_add(json::array({2})));
@@ -327,12 +327,10 @@ TEST_CASE("Gateway list: builds one entry per configured database",
   const std::vector<DummyDb> dbs = {{"oracle", "oracle"}, {"pg", "postgres"}};
   const json list = db_gateway_routing::databases_list_json(dbs);
   REQUIRE(list.size() == 2);
-  REQUIRE(list[0] == json{{"name", "oracle"},
-                          {"driver", "oracle"},
-                          {"enabled", true}});
-  REQUIRE(list[1] == json{{"name", "pg"},
-                          {"driver", "postgres"},
-                          {"enabled", true}});
+  REQUIRE(list[0] ==
+          json{{"name", "oracle"}, {"driver", "oracle"}, {"enabled", true}});
+  REQUIRE(list[1] ==
+          json{{"name", "pg"}, {"driver", "postgres"}, {"enabled", true}});
 }
 
 TEST_CASE("Gateway list: empty config produces an empty array",
@@ -395,7 +393,6 @@ TEST_CASE("Request data: X-Real-IP wins over cf-connecting-ip",
   REQUIRE(extract_client_ip(req) == "1.2.3.4");
 }
 
-
 TEST_CASE("Request data: query string is taken after the ?", "[request-data]") {
   httplib::Request req;
   req.target = "/v1/sql/oracle/query?a=1&b=2";
@@ -441,8 +438,9 @@ TEST_CASE("Header utils: skip and redact", "[header-utils]") {
   REQUIRE(HeaderUtils::to_lower("X-Custom") == "x-custom");
 }
 
-TEST_CASE("Header utils: filter_headers skips default headers case-insensitively",
-          "[header-utils]") {
+TEST_CASE(
+    "Header utils: filter_headers skips default headers case-insensitively",
+    "[header-utils]") {
   httplib::Headers source = {
       {"Host", "example.com"},
       {"Content-Length", "42"},
@@ -517,7 +515,8 @@ TEST_CASE("Header utils: headers_to_json preserves all pairs",
   REQUIRE(out["B"] == "2");
 }
 
-TEST_CASE("Header utils: should_skip_header with custom set", "[header-utils]") {
+TEST_CASE("Header utils: should_skip_header with custom set",
+          "[header-utils]") {
   header_utils::HeaderSet skip = {"x-custom"};
   REQUIRE(HeaderUtils::should_skip_header("X-Custom", skip));
   REQUIRE(HeaderUtils::should_skip_header("x-custom", skip));
@@ -537,8 +536,7 @@ TEST_CASE("Random utils: between stays within the inclusive range",
 TEST_CASE("Schema validator: required fields, methods, paths, sizes",
           "[schema-validator]") {
   std::string error;
-  RequestValidator validator =
-      create_standard_request_validator();
+  RequestValidator validator = create_standard_request_validator();
   json ok = {{"method", "POST"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
   REQUIRE(validator.validate(ok, error));
   REQUIRE_NOTHROW(validator.validate_or_throw(ok));
@@ -549,13 +547,15 @@ TEST_CASE("Schema validator: required fields, methods, paths, sizes",
   REQUIRE_THROWS_AS(validator.validate_or_throw(missing),
                     std::invalid_argument);
 
-  json bad_method = {{"method", "DELETE"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
+  json bad_method = {
+      {"method", "DELETE"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
   REQUIRE_FALSE(validator.validate(bad_method, error));
   REQUIRE(error.find("Method not allowed") != std::string::npos);
 
   RequestValidator path_validator = create_standard_request_validator();
   path_validator.add_allowed_path("/v1");
-  json bad_path = {{"method", "POST"}, {"path", "/other"}, {"request_id", "r1"}};
+  json bad_path = {
+      {"method", "POST"}, {"path", "/other"}, {"request_id", "r1"}};
   REQUIRE_FALSE(path_validator.validate(bad_path, error));
   REQUIRE(error.find("Path not allowed") != std::string::npos);
 
@@ -565,13 +565,11 @@ TEST_CASE("Schema validator: required fields, methods, paths, sizes",
   REQUIRE_FALSE(validator.validate(too_long_path, error));
   REQUIRE(error.find("Path too long") != std::string::npos);
 
-  json too_big_body = {{"method", "POST"},
-                       {"path", "/v1/sql"},
-                       {"request_id", "r1"},
-                       {"body", std::string(
-                                    static_cast<std::size_t>(11) * 1024 *
-                                    1024,
-                                    'a')}};
+  json too_big_body = {
+      {"method", "POST"},
+      {"path", "/v1/sql"},
+      {"request_id", "r1"},
+      {"body", std::string(static_cast<std::size_t>(11) * 1024 * 1024, 'a')}};
   REQUIRE_FALSE(validator.validate(too_big_body, error));
   REQUIRE(error.find("Body too large") != std::string::npos);
 
@@ -585,16 +583,13 @@ TEST_CASE("Schema validator: required fields, methods, paths, sizes",
 TEST_CASE("Schema validator: response status and body rules",
           "[schema-validator]") {
   std::string error;
-  ResponseValidator validator =
-      create_standard_response_validator();
+  ResponseValidator validator = create_standard_response_validator();
   validator.add_allowed_status_code(200);
 
-  json ok = {{"status_code", 200},
-             {"body", {{"response", "payload"}}}};
+  json ok = {{"status_code", 200}, {"body", {{"response", "payload"}}}};
   REQUIRE(validator.validate(ok, error));
 
-  json bad_status = {{"status_code", 500},
-                     {"body", {{"response", "payload"}}}};
+  json bad_status = {{"status_code", 500}, {"body", {{"response", "payload"}}}};
   REQUIRE_FALSE(validator.validate(bad_status, error));
   REQUIRE(error.find("Status code not allowed") != std::string::npos);
 
@@ -602,11 +597,11 @@ TEST_CASE("Schema validator: response status and body rules",
   REQUIRE_FALSE(validator.validate(missing_body, error));
   REQUIRE(error.find("body required but missing") != std::string::npos);
 
-  json too_big = {{"status_code", 200},
-                  {"body", {{"response",
-                              std::string(
-                                  static_cast<std::size_t>(51) * 1024 * 1024,
-                                  'b')}}}};
+  json too_big = {
+      {"status_code", 200},
+      {"body",
+       {{"response",
+         std::string(static_cast<std::size_t>(51) * 1024 * 1024, 'b')}}}};
   REQUIRE_FALSE(validator.validate(too_big, error));
   REQUIRE(error.find("body too large") != std::string::npos);
 }
@@ -728,11 +723,11 @@ TEST_CASE("Dynamic labeled family: provider drops vanished labels",
 
 // Keep the import list explicit: no `using namespace` (google-build).
 using error_categorizer::categorize_http_error;
-using error_categorizer::HttpErrorType;
 using error_categorizer::categorize_l2_error;
+using error_categorizer::categorize_processing_error;
+using error_categorizer::HttpErrorType;
 using error_categorizer::l2_error_type_to_string;
 using error_categorizer::L2ErrorType;
-using error_categorizer::categorize_processing_error;
 using error_categorizer::processing_error_type_to_string;
 using error_categorizer::ProcessingErrorType;
 
@@ -853,12 +848,13 @@ TEST_CASE("Error categorizer: to_string maps every enum value",
 
   REQUIRE(processing_error_type_to_string(
               ProcessingErrorType::JSON_PARSE_ERROR) == "JSON_PARSE_ERROR");
-  REQUIRE(processing_error_type_to_string(ProcessingErrorType::VALIDATION_ERROR) ==
-          "VALIDATION_ERROR");
   REQUIRE(processing_error_type_to_string(
-              ProcessingErrorType::DECOMPRESSION_ERROR) == "DECOMPRESSION_ERROR");
-  REQUIRE(processing_error_type_to_string(ProcessingErrorType::ENCODING_ERROR) ==
-          "ENCODING_ERROR");
+              ProcessingErrorType::VALIDATION_ERROR) == "VALIDATION_ERROR");
+  REQUIRE(processing_error_type_to_string(
+              ProcessingErrorType::DECOMPRESSION_ERROR) ==
+          "DECOMPRESSION_ERROR");
+  REQUIRE(processing_error_type_to_string(
+              ProcessingErrorType::ENCODING_ERROR) == "ENCODING_ERROR");
   REQUIRE(processing_error_type_to_string(ProcessingErrorType::TIMEOUT_ERROR) ==
           "TIMEOUT_ERROR");
   REQUIRE(processing_error_type_to_string(
@@ -867,7 +863,8 @@ TEST_CASE("Error categorizer: to_string maps every enum value",
           "OTHER_ERROR");
 }
 
-TEST_CASE("Error categorizer: first matching rule wins", "[error-categorizer]") {
+TEST_CASE("Error categorizer: first matching rule wins",
+          "[error-categorizer]") {
   // "connection" (CONNECTION) precedes "timeout" (TIMEOUT) in the http table.
   REQUIRE(categorize_http_error("connection timed out") ==
           HttpErrorType::CONNECTION_ERROR);
@@ -880,8 +877,7 @@ TEST_CASE("Error categorizer: first matching rule wins", "[error-categorizer]") 
 // URL utils (url_utils.hpp)
 // ============================================================================
 
-TEST_CASE("URL utils: normalize_path fills a leading slash",
-          "[url-utils]") {
+TEST_CASE("URL utils: normalize_path fills a leading slash", "[url-utils]") {
   REQUIRE(normalize_path("/api") == "/api");
   REQUIRE(normalize_path("api") == "/api");
   REQUIRE(normalize_path("") == "/");
@@ -909,8 +905,8 @@ TEST_CASE("URL utils: extract_proxy_ip uses local addr", "[url-utils]") {
 
 TEST_CASE("Stats label formatter: empty and populated", "[stats-labels]") {
   REQUIRE(mh_format_labels({}) == "");
-  const std::vector<prometheus::ClientMetric::Label> labels = {
-      {"job", "x"}, {"db", "main"}};
+  const std::vector<prometheus::ClientMetric::Label> labels = {{"job", "x"},
+                                                               {"db", "main"}};
   REQUIRE(mh_format_labels(labels) == "{job=x, db=main}");
 }
 
@@ -933,15 +929,15 @@ TEST_CASE("Sparkline SVG: insufficient samples returns empty", "[stats-svg]") {
   REQUIRE(build_sparkline_svg({}, false, 30) == "");
   REQUIRE(build_sparkline_svg({{base, 1.0}}, false, 30) == "");
   // Old points outside the window are filtered out before the size check.
-  REQUIRE(build_sparkline_svg({{base - 3600, 1.0}, {base, 2.0}}, false,
-                              30) == "");
+  REQUIRE(build_sparkline_svg({{base - 3600, 1.0}, {base, 2.0}}, false, 30) ==
+          "");
 }
 
-TEST_CASE("Sparkline SVG: rate mode computes per-second deltas", "[stats-svg]") {
+TEST_CASE("Sparkline SVG: rate mode computes per-second deltas",
+          "[stats-svg]") {
   const std::time_t base = 1'000'000'000;
-  const std::string svg =
-      build_sparkline_svg({{base, 0.0}, {base + 2, 100.0}, {base + 4, 0.0}},
-                          true, 30);
+  const std::string svg = build_sparkline_svg(
+      {{base, 0.0}, {base + 2, 100.0}, {base + 4, 0.0}}, true, 30);
   REQUIRE(svg.find("<svg class=\"spark\"") == 0);
   REQUIRE(svg.find("<polyline") != std::string::npos);
   // rate: (100-0)/2=50 and (0-100)/2=-50 clamped to 0; y from 1 (max) to 25.
@@ -950,20 +946,19 @@ TEST_CASE("Sparkline SVG: rate mode computes per-second deltas", "[stats-svg]") 
 
 TEST_CASE("Sparkline SVG: gauge mode plots raw values", "[stats-svg]") {
   const std::time_t base = 1'000'000'000;
-  const std::string flat =
-      build_sparkline_svg({{base, 5.0}, {base + 1, 5.0}, {base + 2, 5.0}},
-                          false, 30);
+  const std::string flat = build_sparkline_svg(
+      {{base, 5.0}, {base + 1, 5.0}, {base + 2, 5.0}}, false, 30);
   // Flat line: zero range collapses to a straight horizontal line at y=25.
   REQUIRE(flat.find("0,25 94,25 188,25") != std::string::npos);
-  const std::string ramp =
-      build_sparkline_svg({{base, 0.0}, {base + 1, 0.0}, {base + 2, 48.0}},
-                          false, 30);
+  const std::string ramp = build_sparkline_svg(
+      {{base, 0.0}, {base + 1, 0.0}, {base + 2, 48.0}}, false, 30);
   // min=0 max=48 range=48; x=0/94/188, y: 25, 25, 26-(48/48*24)-1=1.
   REQUIRE(ramp.find("0,25 94,25 188,1") != std::string::npos);
 }
 
 TEST_CASE("Stats HTML: escape_html escapes markup", "[stats-page]") {
-  REQUIRE(escape_html("<a href=\"x\">&") == "&lt;a href=&quot;x&quot;&gt;&amp;");
+  REQUIRE(escape_html("<a href=\"x\">&") ==
+          "&lt;a href=&quot;x&quot;&gt;&amp;");
   REQUIRE(escape_html("plain") == "plain");
 }
 
@@ -990,4 +985,243 @@ TEST_CASE("MetricsHistory: ring buffer records a counter family",
   REQUIRE(series[0].m_labels == "{app=test}");
   REQUIRE_FALSE(series[0].m_points.empty());
   REQUIRE(series[0].m_points.back().second == 3.5);
+}
+
+// ============================================================================
+// Branch coverage: json_utils.hpp — fallback paths
+// ============================================================================
+
+TEST_CASE("JsonUtils: safe_get_string returns fallback on missing key",
+          "[json-utils][branch-cover]") {
+  const json j{{"a", 42}};
+  REQUIRE(JsonUtils::safe_get_string(j, "missing") == "");
+  REQUIRE(JsonUtils::safe_get_string(j, "missing", "def") == "def");
+}
+
+TEST_CASE("JsonUtils: safe_get_string returns fallback on wrong type",
+          "[json-utils][branch-cover]") {
+  const json j{{"a", 42}, {"b", true}, {"c", nullptr}};
+  REQUIRE(JsonUtils::safe_get_string(j, "a") == "");
+  REQUIRE(JsonUtils::safe_get_string(j, "b") == "");
+  REQUIRE(JsonUtils::safe_get_string(j, "c") == "");
+}
+
+TEST_CASE("JsonUtils: safe_get_int returns default on missing/wrong type",
+          "[json-utils][branch-cover]") {
+  const json j{{"s", "hello"}, {"n", 7}};
+  REQUIRE(JsonUtils::safe_get_int(j, "missing", -5) == -5);
+  REQUIRE(JsonUtils::safe_get_int(j, "s", -5) == -5);
+  REQUIRE(JsonUtils::safe_get_int(j, "n") == 7);
+}
+
+TEST_CASE("JsonUtils: safe_get_bool returns default on missing/wrong type",
+          "[json-utils][branch-cover]") {
+  const json j{{"n", 1}, {"b", true}};
+  REQUIRE(JsonUtils::safe_get_bool(j, "missing", false) == false);
+  REQUIRE(JsonUtils::safe_get_bool(j, "n") == false);
+  REQUIRE(JsonUtils::safe_get_bool(j, "b") == true);
+}
+
+TEST_CASE("JsonUtils: try_parse returns unexpected on malformed JSON",
+          "[json-utils][branch-cover]") {
+  auto ok = JsonUtils::try_parse(R"({"a":1})");
+  REQUIRE(ok.has_value());
+  auto bad = JsonUtils::try_parse("{not json}");
+  REQUIRE_FALSE(bad.has_value());
+}
+
+TEST_CASE("JsonUtils: get_response_body fallback on empty/missing body",
+          "[json-utils][branch-cover]") {
+  json empty;
+  const auto &body = get_response_body(empty);
+  REQUIRE(body.is_object());
+  REQUIRE(body.empty());
+  json bad{{"body", "not-object"}};
+  const auto &body2 = get_response_body(bad);
+  REQUIRE(body2.is_object());
+}
+
+TEST_CASE("JsonUtils: get_body_response_ref fallback on missing key",
+          "[json-utils][branch-cover]") {
+  json j;
+  REQUIRE(get_body_response_ref(j).empty());
+  json j2{{"body", json::object()}};
+  REQUIRE(get_body_response_ref(j2).empty());
+}
+
+TEST_CASE("JsonUtils: build_nats_response_envelope with empty headers",
+          "[json-utils][branch-cover]") {
+  const json env = build_nats_response_envelope(
+      200, "req-1", "ok", 12345, false, "text/plain", json::object(), "");
+  REQUIRE(env[NatsResponseContract::kStatus] == 200);
+  REQUIRE_FALSE(env.contains(NatsResponseContract::kHeaders));
+  REQUIRE_FALSE(env.contains(NatsResponseContract::kBodyTraceparent));
+  // Populate headers and traceparent in a second call.
+  json hdrs{{"X-Custom", "val"}};
+  const json env2 = build_nats_response_envelope(
+      200, "req-2", "ok", 12345, false, "text/plain", hdrs, "00-abc");
+  REQUIRE(env2.contains(NatsResponseContract::kHeaders));
+  REQUIRE(env2[NatsResponseContract::kBody].contains(
+      NatsResponseContract::kBodyTraceparent));
+}
+
+// ============================================================================
+// Branch coverage: header_utils.hpp — skipped/edge-case paths
+// ============================================================================
+
+TEST_CASE("HeaderUtils: is_binary_content_type covers audio/video",
+          "[header-utils][branch-cover]") {
+  REQUIRE_FALSE(HeaderUtils::is_binary_content_type("text/html"));
+  REQUIRE_FALSE(HeaderUtils::is_binary_content_type("application/json"));
+  REQUIRE(HeaderUtils::is_binary_content_type("audio/mpeg"));
+  REQUIRE(HeaderUtils::is_binary_content_type("video/mp4"));
+  REQUIRE(HeaderUtils::is_binary_content_type("image/png"));
+  REQUIRE(HeaderUtils::is_binary_content_type("application/octet-stream"));
+}
+
+TEST_CASE("HeaderUtils: filter_headers_from_json on non-object input",
+          "[header-utils][branch-cover]") {
+  httplib::Headers out;
+  HeaderUtils::filter_headers_from_json(json::array(), out);
+  REQUIRE(out.empty());
+  HeaderUtils::filter_headers_from_json(json("str"), out);
+  REQUIRE(out.empty());
+}
+
+TEST_CASE("HeaderUtils: get_header_value fallback on missing/empty",
+          "[header-utils][branch-cover]") {
+  httplib::Headers h;
+  h.emplace("x-ok", "val");
+  REQUIRE(get_header_value(h, "x-ok", "d") == "val");
+  REQUIRE(get_header_value(h, "x-missing", "d") == "d");
+  h.emplace("x-empty", "");
+  REQUIRE(get_header_value(h, "x-empty", "d") == "d");
+}
+
+TEST_CASE("HeaderUtils: find_header_optional returns nullopt on missing",
+          "[header-utils][branch-cover]") {
+  httplib::Headers h;
+  h.emplace("a", "1");
+  REQUIRE(find_header_optional(h, "a").has_value());
+  REQUIRE_FALSE(find_header_optional(h, "b").has_value());
+}
+
+TEST_CASE("HeaderUtils: redact_header_value marks sensitive headers",
+          "[header-utils][branch-cover]") {
+  REQUIRE(HeaderUtils::redact_header_value("Authorization", "Bearer tok") ==
+          "***");
+  REQUIRE(HeaderUtils::redact_header_value("x-amz-security-token", "abc") ==
+          "***");
+  REQUIRE(HeaderUtils::redact_header_value("x-custom", "val") == "val");
+}
+
+TEST_CASE("HeaderUtils: shorten_user_agent with non-browser UA",
+          "[header-utils][branch-cover]") {
+  const std::string long_ua(200, 'A');
+  const auto shortened = shorten_user_agent(long_ua);
+  REQUIRE_FALSE(shortened.empty());
+  REQUIRE(shortened.size() <= 80);
+  REQUIRE(shortened != long_ua);
+}
+
+// ============================================================================
+// Branch coverage: db_gateway_routing.hpp — edge-case paths
+// ============================================================================
+
+TEST_CASE("DB gateway routing: classify_method 404 on unknown action",
+          "[db-routing][branch-cover]") {
+  auto d = db_gateway_routing::classify_method("insert", "POST");
+  REQUIRE(d.m_is_error);
+  REQUIRE(d.m_status == 404);
+}
+
+TEST_CASE("DB gateway routing: classify_method 405 for ping+POST",
+          "[db-routing][branch-cover]") {
+  auto d = db_gateway_routing::classify_method("ping", "POST");
+  REQUIRE(d.m_is_error);
+  REQUIRE(d.m_status == 405);
+}
+
+TEST_CASE("DB gateway routing: classify_method ok for query+POST",
+          "[db-routing][branch-cover]") {
+  auto d = db_gateway_routing::classify_method("query", "POST");
+  REQUIRE_FALSE(d.m_is_error);
+}
+
+TEST_CASE("DB gateway routing: normalize_path_rest strips all slashes",
+          "[db-routing][branch-cover]") {
+  REQUIRE(db_gateway_routing::normalize_path_rest("///") == "");
+  REQUIRE(db_gateway_routing::normalize_path_rest("oracle/") == "oracle");
+  REQUIRE(db_gateway_routing::normalize_path_rest("/oracle") == "oracle");
+}
+
+TEST_CASE("DB gateway routing: parse_path list detection on empty",
+          "[db-routing][branch-cover]") {
+  auto parsed = db_gateway_routing::parse_path("oracle/query");
+  REQUIRE(parsed.m_valid);
+  REQUIRE_FALSE(parsed.m_is_list);
+  auto parsed2 = db_gateway_routing::parse_path("");
+  REQUIRE(parsed2.m_valid);
+  REQUIRE(parsed2.m_is_list);
+}
+
+// ============================================================================
+// Branch coverage: db_query_utils.hpp — additional paths
+// ============================================================================
+
+TEST_CASE("Gateway: is_read_only_sql with only parentheses",
+          "[db-query-utils][branch-cover]") {
+  REQUIRE_FALSE(is_read_only_sql("()"));
+  REQUIRE_FALSE(is_read_only_sql("(())"));
+  REQUIRE_FALSE(is_read_only_sql("  "));
+}
+
+TEST_CASE("Gateway: strip_sql_comments single trailing dash/slash",
+          "[db-query-utils][branch-cover]") {
+  REQUIRE(strip_sql_comments("SELECT 1 -") == "SELECT 1 -");
+  REQUIRE(strip_sql_comments("SELECT 1 /") == "SELECT 1 /");
+}
+
+TEST_CASE("Gateway: parse_request params as array rejected",
+          "[db-query-utils][branch-cover]") {
+  json req{{"type", "query"},
+           {"request_id", "r"},
+           {"db", "d"},
+           {"sql", "SELECT 1"},
+           {"params", json::array()}};
+  REQUIRE_FALSE(parse_db_query_request(req).has_value());
+}
+
+TEST_CASE("Gateway: parse_request params with nested object rejected",
+          "[db-query-utils][branch-cover]") {
+  json req{{"type", "query"},
+           {"request_id", "r"},
+           {"db", "d"},
+           {"sql", "SELECT 1"},
+           {"params", json{{"k", json::object()}}}};
+  REQUIRE_FALSE(parse_db_query_request(req).has_value());
+}
+
+TEST_CASE("Gateway: parse_request params with array value rejected",
+          "[db-query-utils][branch-cover]") {
+  json req{{"type", "query"},
+           {"request_id", "r"},
+           {"db", "d"},
+           {"sql", "SELECT 1"},
+           {"params", json{{"k", json::array()}}}};
+  REQUIRE_FALSE(parse_db_query_request(req).has_value());
+}
+
+TEST_CASE("Gateway: parse_request accepts all scalar param types",
+          "[db-query-utils][branch-cover]") {
+  json params{
+      {"n", nullptr}, {"b", true}, {"i", 42}, {"d", 3.14}, {"s", "str"}};
+  json req{{"type", "query"},
+           {"request_id", "r"},
+           {"db", "d"},
+           {"sql", "SELECT 1"},
+           {"params", params}};
+  auto result = parse_db_query_request(req);
+  REQUIRE(result.has_value());
+  REQUIRE(result->m_params.size() == 5);
 }

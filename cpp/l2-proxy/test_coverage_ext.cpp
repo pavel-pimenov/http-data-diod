@@ -8,11 +8,18 @@
 #include "crash_handler.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_base.hpp"
-#include "json_utils.hpp"
-#include "rate_limiter_per_ip.hpp"
 #include "exceptions.hpp"
+#include "httplib/httplib.h"
+#include "json_utils.hpp"
 #include "metrics_manager.hpp"
 #include "pool_executor.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/family.h"
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include "prometheus/registry.h"
+#include "prometheus/summary.h"
+#include "rate_limiter_per_ip.hpp"
 #include "scoped_metrics.hpp"
 #include "scoped_profiler.hpp"
 #include "stats_page.hpp"
@@ -23,13 +30,6 @@
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "httplib/httplib.h"
-#include "prometheus/counter.h"
-#include "prometheus/family.h"
-#include "prometheus/gauge.h"
-#include "prometheus/histogram.h"
-#include "prometheus/registry.h"
-#include "prometheus/summary.h"
 #include <chrono>
 #include <memory>
 #include <string>
@@ -85,8 +85,7 @@ TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
   REQUIRE(std::string(ex.what()) == "boom");
 }
 
-TEST_CASE("Exceptions: TimeoutException prefixes the message",
-          "[exceptions]") {
+TEST_CASE("Exceptions: TimeoutException prefixes the message", "[exceptions]") {
   TimeoutException ex("read failed");
   REQUIRE_THROWS_AS(throw ex, L2ProxyException);
   REQUIRE_THROWS_AS(throw ex, std::runtime_error);
@@ -225,21 +224,22 @@ TEST_CASE("Pool executor: invalid client is released and throws",
   };
   InvalidPool pool;
   REQUIRE_THROWS_AS(
-      execute_http_command_with_status(&pool, [](MockHttpClient *) {
-        return std::string("never reached");
-      }),
+      execute_http_command_with_status(
+          &pool, [](MockHttpClient *) { return std::string("never reached"); }),
       std::runtime_error);
   REQUIRE(pool.m_releases == 1);
 }
 
 TEST_CASE("Pool executor: exception in func invalidates and releases then "
-          "rethrows", "[pool-executor]") {
+          "rethrows",
+          "[pool-executor]") {
   MockPool pool;
-  REQUIRE_THROWS_AS(
-      execute_http_command_with_status(&pool, [](MockHttpClient *) -> int {
-        throw std::runtime_error("func failed");
-      }),
-      std::runtime_error);
+  REQUIRE_THROWS_AS(execute_http_command_with_status(
+                        &pool,
+                        [](MockHttpClient *) -> int {
+                          throw std::runtime_error("func failed");
+                        }),
+                    std::runtime_error);
   REQUIRE(pool.m_acquires == 1);
   REQUIRE(pool.m_releases == 1);
 }
@@ -267,8 +267,8 @@ TEST_CASE("MetricsManager: creates a gauge and sets a value",
 TEST_CASE("MetricsManager: creates a histogram and observes a value",
           "[metrics-manager]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &hist = MetricsManager::create_histogram(
-      registry, "mm_hist", "mm", std::vector<double>{0.5, 1.0});
+  auto &hist = MetricsManager::create_histogram(registry, "mm_hist", "mm",
+                                                std::vector<double>{0.5, 1.0});
   hist.Observe(0.75);
   const auto collected = hist.Collect();
   REQUIRE(collected.histogram.sample_count == 1);
@@ -308,7 +308,8 @@ TEST_CASE("MetricsManager: array-arg creators forward bucket bounds",
 }
 
 TEST_CASE("MetricsManager: record_db_request_metrics increments labelled "
-          "series", "[metrics-manager]") {
+          "series",
+          "[metrics-manager]") {
   auto registry = std::make_shared<prometheus::Registry>();
   auto &fam = MetricsManager::create_counter_family(registry, "db_total", "");
   record_db_request_metrics(fam, "oracle", "query", 200);
@@ -399,8 +400,9 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent with null tracer",
   REQUIRE(tp2 == "00-abc-def-01");
 }
 
-TEST_CASE("Tracing helpers: set_traceparent_response_header sets when non-empty",
-          "[tracing-helpers]") {
+TEST_CASE(
+    "Tracing helpers: set_traceparent_response_header sets when non-empty",
+    "[tracing-helpers]") {
   httplib::Response res;
   TraceContext empty;
   set_traceparent_response_header(res, empty);
@@ -423,15 +425,17 @@ TEST_CASE("Tracing helpers: begin_request_trace with null tracer",
   REQUIRE(inlet == "");
 }
 
-TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with null tracer",
-          "[tracing-helpers]") {
+TEST_CASE(
+    "Tracing helpers: TraceContextHelper extract_from_raw with null tracer",
+    "[tracing-helpers]") {
   const TraceContext ctx =
       TraceContextHelper::extract_from_raw("", nullptr, "test");
   REQUIRE(ctx.m_trace_id == "");
 }
 
 TEST_CASE("Tracing helpers: make_span_and_traceparent with traced context and "
-          "hint", "[tracing-helpers]") {
+          "hint",
+          "[tracing-helpers]") {
   TraceContext ctx;
   ctx.m_trace_id = "abc123";
   ctx.m_traceparent_header = "00-abc123-def-01";
@@ -461,22 +465,24 @@ TEST_CASE("Stats page: format_metric_value per type", "[stats-page-ext]") {
   prometheus::ClientMetric hist;
   hist.histogram.sample_count = 5;
   hist.histogram.sample_sum = 2.5;
-  const std::string h = format_metric_value(hist, prometheus::MetricType::Histogram);
+  const std::string h =
+      format_metric_value(hist, prometheus::MetricType::Histogram);
   REQUIRE(h.find("count=5") != std::string::npos);
   REQUIRE(h.find("sum=2.5") != std::string::npos);
 
   prometheus::ClientMetric summary;
   summary.summary.sample_count = 7;
   summary.summary.sample_sum = 1.0;
-  const std::string s = format_metric_value(summary, prometheus::MetricType::Summary);
+  const std::string s =
+      format_metric_value(summary, prometheus::MetricType::Summary);
   REQUIRE(s.find("count=7") != std::string::npos);
   REQUIRE(s.find("sum=1") != std::string::npos);
 }
 
 TEST_CASE("Stats page: format_labels renders braces", "[stats-page-ext]") {
   REQUIRE(format_labels({}) == "");
-  const std::vector<prometheus::ClientMetric::Label> labels = {
-      {"job", "proxy"}, {"state", "ok"}};
+  const std::vector<prometheus::ClientMetric::Label> labels = {{"job", "proxy"},
+                                                               {"state", "ok"}};
   REQUIRE(format_labels(labels) == "{job=proxy, state=ok}");
 }
 
@@ -492,7 +498,8 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
                       .Add({});
   counter.Increment();
 
-  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
   REQUIRE(html.find("OPERATIONAL") != std::string::npos);
   REQUIRE(html.find("proxy-test") != std::string::npos);
   REQUIRE(html.find("health_ready") != std::string::npos);
@@ -504,7 +511,8 @@ TEST_CASE("Stats page: build_stats_html flags degraded when health not ready",
   auto registry = std::make_shared<prometheus::Registry>();
   auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
   gauge.Set(0.0);
-  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
   REQUIRE(html.find("DEGRADED") != std::string::npos);
 }
 
@@ -516,8 +524,9 @@ TEST_CASE("Stats page: escape_html escapes special characters",
   REQUIRE(escape_html("plain") == "plain");
 }
 
-TEST_CASE("Stats page: parse_stats_window handles absent/invalid/clamped values",
-          "[stats-page-ext]") {
+TEST_CASE(
+    "Stats page: parse_stats_window handles absent/invalid/clamped values",
+    "[stats-page-ext]") {
   std::map<std::string, std::string> no_window;
   REQUIRE(parse_stats_window(no_window) == 30);
   REQUIRE(parse_stats_window(no_window, 60) == 60);
@@ -556,8 +565,9 @@ TEST_CASE("Stats page: build_sparkline_svg renders rate and clamps counter "
   REQUIRE(svg.find("0,") != std::string::npos);
 }
 
-TEST_CASE("Stats page: build_sparkline_svg renders raw gauge and applies window",
-          "[stats-page-ext]") {
+TEST_CASE(
+    "Stats page: build_sparkline_svg renders raw gauge and applies window",
+    "[stats-page-ext]") {
   const std::time_t now = std::time(nullptr);
   const std::vector<std::pair<std::time_t, double>> pts = {
       {now - 3600, 1.0}, {now - 90, 2.0}, {now - 60, 3.0}};
@@ -570,7 +580,8 @@ TEST_CASE("Stats page: build_stats_html flags degraded when nats disconnected",
   auto registry = std::make_shared<prometheus::Registry>();
   auto &nats = MetricsManager::create_gauge(registry, "nats_connected", "nats");
   nats.Set(0.0);
-  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
   REQUIRE(html.find("DEGRADED") != std::string::npos);
 }
 
@@ -585,7 +596,8 @@ TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
     family.Add({{"ip", "10.0.0." + std::to_string(i)}})
         .Set(static_cast<double>(i));
   }
-  const std::string html = build_stats_html("proxy-test", registry, nullptr, 30);
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
   REQUIRE(html.find("+2 more") != std::string::npos);
 }
 
@@ -602,7 +614,8 @@ TEST_CASE("Stats page: build_stats_html renders sparklines from history",
   history.start();
   std::this_thread::sleep_for(std::chrono::milliseconds(2300));
   history.stop();
-  const std::string html = build_stats_html("proxy-test", registry, &history, 5);
+  const std::string html =
+      build_stats_html("proxy-test", registry, &history, 5);
   REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
 }
 
@@ -615,10 +628,8 @@ TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
                   .Register(*registry)
                   .Add({});
   cnt.Increment();
-  auto &gauge = prometheus::BuildGauge()
-                    .Name("mh_gau")
-                    .Help("h")
-                    .Register(*registry);
+  auto &gauge =
+      prometheus::BuildGauge().Name("mh_gau").Help("h").Register(*registry);
   gauge.Add({{"ip", "1"}}).Set(2.0);
   gauge.Add({{"ip", "2"}}).Set(3.0);
   auto &sum = prometheus::BuildSummary()
@@ -745,8 +756,7 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM executes on the pool and reuses it",
   REQUIRE(fut.get() != std::this_thread::get_id());
   std::vector<std::future<int>> results;
   for (size_t i = 0; i < tasks; ++i) {
-    results.push_back(
-        pool.enqueue([i]() { return static_cast<int>(i * i); }));
+    results.push_back(pool.enqueue([i]() { return static_cast<int>(i * i); }));
   }
   for (size_t i = 0; i < tasks; ++i) {
     REQUIRE(results[i].get() == static_cast<int>(i * i));
@@ -756,7 +766,8 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM executes on the pool and reuses it",
 TEST_CASE("ThreadPoolWrapper: CUSTOM queue_size reflects pending work",
           "[thread-pool-wrapper]") {
   ThreadPoolWrapper pool(ThreadPoolWrapper::Type::CUSTOM, 1, 2);
-  pool.enqueue([]() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); });
+  pool.enqueue(
+      []() { std::this_thread::sleep_for(std::chrono::milliseconds(50)); });
   REQUIRE(pool.queue_size() <= 2);
   pool.enqueue([]() {});
   pool.enqueue([]() {});
@@ -854,8 +865,7 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
   REQUIRE(decomp_err.Value() == 0.0);
   REQUIRE(other_err.Value() == 0.0);
 
-  handle_processing_error_with_category("bzip2 decompression failed",
-                                        metrics);
+  handle_processing_error_with_category("bzip2 decompression failed", metrics);
   REQUIRE(inv.Value() == 2.0);
   REQUIRE(decomp_err.Value() == 1.0);
   REQUIRE(other_err.Value() == 0.0);
@@ -943,17 +953,20 @@ TEST_CASE("Tracing helpers: add_proxy_trace_fields is a no-op with null tracer",
 }
 
 TEST_CASE("Tracing helpers: log_worker_span no-ops on null tracer or empty "
-          "trace_id", "[tracing-helpers]") {
-  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
-                                  "req-1", "", "span-1", "parent-1"));
-  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
-                                  "req-1", "trace-1", "span-1", "parent-1"));
-  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2, "worker",
-                                  "req-1", "", "", ""));
+          "trace_id",
+          "[tracing-helpers]") {
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2,
+                                  "worker", "req-1", "", "span-1", "parent-1"));
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2,
+                                  "worker", "req-1", "trace-1", "span-1",
+                                  "parent-1"));
+  REQUIRE_NOTHROW(log_worker_span(nullptr, "POST", "/query", 200, 1, 2,
+                                  "worker", "req-1", "", "", ""));
 }
 
 TEST_CASE("Tracing helpers: resolve_trace_id generates when trace id empty and "
-          "tracer null returns empty", "[tracing-helpers]") {
+          "tracer null returns empty",
+          "[tracing-helpers]") {
   TraceContext empty;
   empty.m_trace_id = "";
   empty.m_span_id = "";
@@ -1070,8 +1083,8 @@ TEST_CASE("PerIPRateLimiter: get_per_ip_stats covers >1000 IPs capped at 1000",
           "[rate-limiter-per-ip-ext]") {
   PerIPRateLimiter limiter(10, 5, 5000, 3600);
   for (int i = 0; i < 1500; ++i) {
-    const std::string ip = "10.0.0." + std::to_string(i % 250) + "." +
-                           std::to_string(i);
+    const std::string ip =
+        "10.0.0." + std::to_string(i % 250) + "." + std::to_string(i);
     limiter.acquire(ip);
   }
   const auto stats = limiter.get_per_ip_stats();
@@ -1127,18 +1140,17 @@ struct JaegerTracerFixture {
                                  .Help("dur")
                                  .Register(*m_registry)
                                  .Add({})),
-        m_send_latency(prometheus::BuildHistogram()
-                           .Name("test_j_send_latency")
-                           .Help("lat")
-                           .Register(*m_registry)
-                           .Add({},
-                                std::vector<double>{0.001, 0.01, 0.1, 1.0})),
+        m_send_latency(
+            prometheus::BuildHistogram()
+                .Name("test_j_send_latency")
+                .Help("lat")
+                .Register(*m_registry)
+                .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})),
         m_queue_time(prometheus::BuildHistogram()
                          .Name("test_j_queue_time")
                          .Help("qt")
                          .Register(*m_registry)
-                         .Add({},
-                              std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
+                         .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
     m_tracer = std::make_unique<JaegerLogger>(
         "http://localhost:19999", m_spans_sent, m_spans_failed, m_queue_size,
         m_last_send_duration, m_send_latency, m_queue_time,
@@ -1187,8 +1199,8 @@ TEST_CASE("Tracing helpers: log_incoming_span with pre-existing trace_id",
   TraceContext ctx;
   ctx.m_trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   ctx.m_parent_id = "";
-  const auto span_id =
-      log_incoming_span(fix.m_tracer.get(), "/api/x", 1'000'000, "req-456", ctx);
+  const auto span_id = log_incoming_span(fix.m_tracer.get(), "/api/x",
+                                         1'000'000, "req-456", ctx);
   REQUIRE_FALSE(span_id.empty());
 }
 
@@ -1214,8 +1226,7 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent generates span_id when "
   JaegerTracerFixture fix;
   TraceContext ctx;
   ctx.m_trace_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  const auto [span_id, tp] =
-      make_span_and_traceparent(fix.m_tracer.get(), ctx);
+  const auto [span_id, tp] = make_span_and_traceparent(fix.m_tracer.get(), ctx);
   REQUIRE_FALSE(span_id.empty());
   REQUIRE(span_id.size() == 16);
   REQUIRE_FALSE(tp.empty());
@@ -1228,8 +1239,7 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent returns header when "
   TraceContext ctx;
   ctx.m_trace_id = "";
   ctx.m_traceparent_header = "00-aabb-ccdd-01";
-  const auto [span_id, tp] =
-      make_span_and_traceparent(fix.m_tracer.get(), ctx);
+  const auto [span_id, tp] = make_span_and_traceparent(fix.m_tracer.get(), ctx);
   REQUIRE(tp == "00-aabb-ccdd-01");
 }
 
@@ -1279,13 +1289,12 @@ TEST_CASE("Tracing helpers: JaegerSpanLogger non-null tracer paths",
   ctx.m_parent_id = "3333333333333333";
 
   const auto now = TimeUtils::epoch_us();
-  JaegerSpanLogger::log_l2_call(fix.m_tracer.get(), "POST", "/v1/sql/oracle/query",
-                                200, now, now + 5000, ctx, "proxy", "sp-l2",
-                                "par-l2", "req-l2");
-  JaegerSpanLogger::log_worker_processing(fix.m_tracer.get(), "POST",
-                                         "/v1/sql/oracle/query", 200, now,
-                                         now + 3000, ctx, "worker", "sp-wrk",
-                                         "req-wrk");
+  JaegerSpanLogger::log_l2_call(fix.m_tracer.get(), "POST",
+                                "/v1/sql/oracle/query", 200, now, now + 5000,
+                                ctx, "proxy", "sp-l2", "par-l2", "req-l2");
+  JaegerSpanLogger::log_worker_processing(
+      fix.m_tracer.get(), "POST", "/v1/sql/oracle/query", 200, now, now + 3000,
+      ctx, "worker", "sp-wrk", "req-wrk");
   JaegerSpanLogger::log_proxy_response(fix.m_tracer.get(), "POST",
                                        "/v1/sql/oracle/query", 200, now,
                                        now + 4000, ctx, "proxy", "req-pr");
@@ -1307,23 +1316,20 @@ TEST_CASE("Tracing helpers: BackendErrorSpanLogger non-null tracer with "
   ctx.m_parent_id = "5555555555555555";
   const auto now = TimeUtils::epoch_us();
 
-  BackendErrorSpanLogger::log_backend_error(fix.m_tracer.get(), "POST",
-                                           "/v1/sql/oracle/query", 500, now,
-                                           ctx, "proxy", "req-err",
-                                           "backend_error", "");
-  BackendErrorSpanLogger::log_backend_error(fix.m_tracer.get(), "POST",
-                                           "/v1/sql/oracle/query", 502, now,
-                                           ctx, "proxy", "req-err2",
-                                           "timeout", "worker did not respond");
+  BackendErrorSpanLogger::log_backend_error(
+      fix.m_tracer.get(), "POST", "/v1/sql/oracle/query", 500, now, ctx,
+      "proxy", "req-err", "backend_error", "");
+  BackendErrorSpanLogger::log_backend_error(
+      fix.m_tracer.get(), "POST", "/v1/sql/oracle/query", 502, now, ctx,
+      "proxy", "req-err2", "timeout", "worker did not respond");
 }
 
 TEST_CASE("Tracing helpers: RateLimitSpanLogger non-null tracer",
           "[tracing-helpers][non-null]") {
   JaegerTracerFixture fix;
 
-  RateLimitSpanLogger::log_rate_limit_rejection(fix.m_tracer.get(),
-                                                "too many requests",
-                                                "10.0.0.1", "", "10", "0");
+  RateLimitSpanLogger::log_rate_limit_rejection(
+      fix.m_tracer.get(), "too many requests", "10.0.0.1", "", "10", "0");
   RateLimitSpanLogger::log_rate_limit_rejection(
       fix.m_tracer.get(), "burst", "10.0.0.2",
       "00-66666666666666666666666666666666-aaaa-01", "100", "50");
@@ -1334,18 +1340,17 @@ TEST_CASE("Tracing helpers: log_worker_span with real tracer and non-empty "
           "[tracing-helpers][non-null]") {
   JaegerTracerFixture fix;
   const auto now = TimeUtils::epoch_us();
-  REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200,
-                                  now, now + 1000, "worker", "req-ws",
-                                  "77777777777777777777777777777777",
-                                  "span-ws", "parent-ws"));
+  REQUIRE_NOTHROW(log_worker_span(
+      fix.m_tracer.get(), "POST", "/query", 200, now, now + 1000, "worker",
+      "req-ws", "77777777777777777777777777777777", "span-ws", "parent-ws"));
 }
 
 TEST_CASE("Tracing helpers: log_worker_span no-ops with empty trace_id even "
           "with real tracer",
           "[tracing-helpers][non-null]") {
   JaegerTracerFixture fix;
-  REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200,
-                                  1, 2, "worker", "req-ws2", "", "", ""));
+  REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200, 1,
+                                  2, "worker", "req-ws2", "", "", ""));
 }
 
 TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
@@ -1365,8 +1370,8 @@ TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
           "empty traceparent and real tracer",
           "[tracing-helpers][non-null]") {
   JaegerTracerFixture fix;
-  const TraceContext ctx =
-      TraceContextHelper::extract_from_raw("", fix.m_tracer.get(), "test-empty");
+  const TraceContext ctx = TraceContextHelper::extract_from_raw(
+      "", fix.m_tracer.get(), "test-empty");
   REQUIRE_FALSE(ctx.m_trace_id.empty());
   REQUIRE_FALSE(ctx.m_span_id.empty());
   REQUIRE(ctx.m_parent_id.empty());
@@ -1379,9 +1384,8 @@ TEST_CASE("Tracing helpers: TraceContextHelper extract_and_validate with "
   httplib::Headers hdrs;
   hdrs.emplace("traceparent",
                "00-99999999999999999999999999999999-bbbbbbbbbbbbbbbb-01");
-  const TraceContext ctx =
-      TraceContextHelper::extract_and_validate(hdrs, fix.m_tracer.get(),
-                                              "test-validate");
+  const TraceContext ctx = TraceContextHelper::extract_and_validate(
+      hdrs, fix.m_tracer.get(), "test-validate");
   REQUIRE(ctx.m_trace_id == "99999999999999999999999999999999");
   REQUIRE(ctx.m_parent_id == "bbbbbbbbbbbbbbbb");
   REQUIRE_FALSE(ctx.m_span_id.empty());
@@ -1394,10 +1398,9 @@ TEST_CASE("Tracing helpers: begin_request_trace with real tracer",
   hdrs.emplace("traceparent",
                "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cccccccccccccccc-01");
   std::string inlet_span_id;
-  const TraceContext ctx = begin_request_trace(fix.m_tracer.get(), hdrs,
-                                              "req-brt", "/v1/sql/oracle/query",
-                                              TimeUtils::epoch_us(),
-                                              inlet_span_id);
+  const TraceContext ctx = begin_request_trace(
+      fix.m_tracer.get(), hdrs, "req-brt", "/v1/sql/oracle/query",
+      TimeUtils::epoch_us(), inlet_span_id);
   REQUIRE(ctx.m_trace_id == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   REQUIRE_FALSE(inlet_span_id.empty());
   REQUIRE(inlet_span_id.size() == 16);
@@ -1409,10 +1412,101 @@ TEST_CASE("Tracing helpers: begin_request_trace generates trace_id when "
   JaegerTracerFixture fix;
   httplib::Headers hdrs;
   std::string inlet_span_id;
-  const TraceContext ctx = begin_request_trace(fix.m_tracer.get(), hdrs,
-                                              "req-brt2", "/ping",
-                                              TimeUtils::epoch_us(),
-                                              inlet_span_id);
+  const TraceContext ctx =
+      begin_request_trace(fix.m_tracer.get(), hdrs, "req-brt2", "/ping",
+                          TimeUtils::epoch_us(), inlet_span_id);
   REQUIRE(ctx.m_trace_id.size() == 32);
   REQUIRE_FALSE(inlet_span_id.empty());
+}
+
+// ============================================================================
+// Branch coverage: common_utils.cpp — parse_url
+// ============================================================================
+
+TEST_CASE("parse_url: throws on empty string", "[parse-url][branch-cover]") {
+  REQUIRE_THROWS_AS(parse_url(""), std::runtime_error);
+}
+
+TEST_CASE("parse_url: http URL with port and path",
+          "[parse-url][branch-cover]") {
+  auto p = parse_url("http://example.com:8080/api/v1");
+  REQUIRE(p.m_host == "example.com");
+  REQUIRE(p.m_port == 8080);
+  REQUIRE(p.m_path == "/api/v1");
+  REQUIRE_FALSE(p.m_is_https);
+}
+
+TEST_CASE("parse_url: https URL without port", "[parse-url][branch-cover]") {
+  auto p = parse_url("https://example.com/data");
+  REQUIRE(p.m_host == "example.com");
+  REQUIRE(p.m_port == 443);
+  REQUIRE(p.m_path == "/data");
+  REQUIRE(p.m_is_https);
+}
+
+TEST_CASE("parse_url: URL with host only (no path after host)",
+          "[parse-url][branch-cover]") {
+  auto p = parse_url("http://example.com");
+  REQUIRE(p.m_host == "example.com");
+  REQUIRE(p.m_path == "/");
+}
+
+TEST_CASE("parse_url: URL with port but no path", "[parse-url][branch-cover]") {
+  auto p = parse_url("https://example.com:9443");
+  REQUIRE(p.m_host == "example.com");
+  REQUIRE(p.m_port == 9443);
+  REQUIRE(p.m_path == "/");
+}
+
+TEST_CASE("parse_url: no-protocol URL throws (empty host)",
+          "[parse-url][branch-cover]") {
+  REQUIRE_THROWS_AS(parse_url("/v1/sql/oracle"), std::runtime_error);
+}
+
+TEST_CASE("parse_url: throws on protocol-only URL",
+          "[parse-url][branch-cover]") {
+  REQUIRE_THROWS_AS(parse_url("https://"), std::runtime_error);
+}
+
+TEST_CASE("parse_url: throws on unparseable port",
+          "[parse-url][branch-cover]") {
+  auto p = parse_url("http://host:notaport/path");
+  REQUIRE(p.m_host == "host");
+  REQUIRE(p.m_port == 80);
+}
+
+// ============================================================================
+// Branch coverage: common_utils.cpp — format_http_error
+// ============================================================================
+
+TEST_CASE("format_http_error: Read error includes timeout",
+          "[format-http-error][branch-cover]") {
+  auto msg = format_http_error(httplib::Error::Read, 30, "GET /api");
+  REQUIRE(msg.find("timeout after 30") != std::string::npos);
+}
+
+TEST_CASE("format_http_error: Write error includes timeout",
+          "[format-http-error][branch-cover]") {
+  auto msg = format_http_error(httplib::Error::Write, 15, "POST /api");
+  REQUIRE(msg.find("timeout after 15") != std::string::npos);
+}
+
+TEST_CASE("format_http_error: Connection error",
+          "[format-http-error][branch-cover]") {
+  auto msg = format_http_error(httplib::Error::Connection, 10, "GET /api");
+  REQUIRE(msg.find("connection failed") != std::string::npos);
+}
+
+TEST_CASE("format_http_error: BindIPAddress error",
+          "[format-http-error][branch-cover]") {
+  auto msg = format_http_error(httplib::Error::BindIPAddress, 5, "GET /api");
+  REQUIRE(msg.find("failed to bind IP") != std::string::npos);
+}
+TEST_CASE("format_http_error: other error (no suffix)",
+          "[format-http-error][branch-cover]") {
+  auto msg =
+      format_http_error(httplib::Error::Unknown, 10, "GET /api");
+  REQUIRE(msg.find("failed:") != std::string::npos);
+  REQUIRE(msg.find("timeout") == std::string::npos);
+  REQUIRE(msg.find("connection failed") == std::string::npos);
 }

@@ -2,18 +2,26 @@
 
 ## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **393 + 74 = 467 test cases**,
-**2 362 assertions** (1625 + 743). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **418 + 99 = 517 test cases**,
+**2 469 assertions** (1662 + 807). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 97.6%** (8393/8599), гейт 90% — пройден
-- **Functions: 95.2%** (1107/1163)
-- **Branches: 41.7%** (16695/40003) — слабое место
+- **Lines: 97.7%** (8709/8915), гейт 90% — пройден
+- **Functions: 95.4%** (1157/1213)
+- **Branches: 41.5%** (17566/42355) — слабое место
 
-Последний раунд: доведение файлов ниже 90% строкового покрытия
-до ≥90%. `duplicate_detector.cpp` (89.8%→94.5%),
-`http_client_pool.cpp` (88.4%→90.1%), `trace_logger.cpp` (88.7%→90.2%).
+Последние раунды: доведение файлов ниже 90% строкового покрытия
+до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
+`http_client_pool.cpp` 88.4%→90.1%, `trace_logger.cpp` 88.7%→90.2%);
 `string_utils.hpp` — gcov-артефакт устранён выносом `to_lower` в
 `string_utils.cpp` (100% строк; header больше не в отчёте).
+Раунд ветвей: parse_url/format_http_error/JsonUtils/HeaderUtils/Gateway
+routing + 12 кейсов валидации config.cpp. Вывод: каждая покрытая ветвь
+в production добавляет 30-80 непокрываемых тест-ветвей макросов Catch2
+(тест-файлы = 35290 из 42355 общего числа), поэтому общий % почти
+недвижим; честная цель — production-only ветви 56.7% (3852/6791).
+config.cpp: ветви валидации почти насыщены (общий `if (cond)` в
+`ConfigChecker::check` — точка слияния), остальное — env-var ветки
+`get_env_*` (override/invalid/default).
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -26,10 +34,14 @@ drain, reply-loss).
 Открытые ветки (строковое покрытие уже высокое, осталось ветвей):
 - `logger.hpp` — init-time ветки `LOG_LEVEL=CRITICAL/OFF` (env-dependent, требуют
   отдельного процесса с setenv перед init; std::call_once блокирует повторный вход)
+- `sentry_client.cpp` — 51.2% ветвей (317 uncovered, network-heavy)
+- `trace_logger.cpp`/`tracing_helpers.hpp` — 61.1%/55.0% (162+127 uncovered,
+  in-process, достижимы без внешних сервисов)
+- `stats_page.hpp` — 59.6% (151 uncovered, в осн. html-render артефакты)
 - `string_utils.hpp` — gcov-артефакт: закрывающая `}` inline-функции в
   header-е (1 строка из 7), не устраним тестами; **РЕШЕНО** выносом в
   `string_utils.cpp` (100% строк, header без исполняемых строк)
-- **Branches 41.8%** в целом — крупный задел (gcovr `--branch` метрика), но
+- **Branches 41.5%** в целом — крупный задел (gcovr `--branch` метрика), но
   ветви в header-heavy шаблонном коде требуют точечных тест-кейсов
 
 ### 2. Chaos-тестирование (fault_tolerance_test.py) — ГОТОВО

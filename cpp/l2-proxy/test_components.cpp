@@ -844,6 +844,138 @@ TEST_CASE("Config: validate with logging enabled reports issues", "[config]") {
   REQUIRE(config.validate(true) == false);
 }
 
+TEST_CASE("Config: ports and timeouts fail together", "[config]") {
+  Config config;
+  config.m_proxy_port = 0;
+  config.m_l2_server_port = 70000;
+  config.m_request_timeout_seconds = -5;
+  config.m_http_timeout_seconds = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: empty L2 URL set and empty single URL fail", "[config]") {
+  Config config;
+  config.m_l2_server_url = "";
+  config.m_l2_server_urls = {};
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: invalid NATS subject and TLS pairing fail", "[config]") {
+  Config config;
+  config.m_nats_subject = "";
+  config.m_nats_enable_tls = true;
+  config.m_nats_tls_ca_cert_file = "/ca.pem";
+  config.m_nats_tls_cert_file = "/cert.pem";
+  config.m_nats_tls_key_file = "";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: NATS TLS requires CA cert", "[config]") {
+  Config config;
+  config.m_nats_enable_tls = true;
+  config.m_nats_tls_cert_file = "/cert.pem";
+  config.m_nats_tls_key_file = "/key.pem";
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: db query with bad subject and limits fails", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  config.m_db_query_nats_subject = "";
+  config.m_db_query_nats_timeout_ms = 0;
+  config.m_db_query_default_timeout_ms = -1;
+  config.m_db_query_default_max_rows = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: worker with malformed database entries fails", "[config]") {
+  Config config;
+  config.m_mode = "worker";
+  config.m_db_query_enabled = true;
+  DbConfig bad_driver;
+  bad_driver.m_name = "mongo";
+  bad_driver.m_driver = "mongodb";
+  config.m_databases.push_back(bad_driver);
+  DbConfig empty_host;
+  empty_host.m_name = "oracle2";
+  empty_host.m_driver = "oracle";
+  config.m_databases.push_back(empty_host);
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: oracle/postgres rows missing required fields", "[config]") {
+  Config config;
+  config.m_mode = "worker";
+  config.m_db_query_enabled = true;
+  DbConfig oracle;
+  oracle.m_name = "ora";
+  oracle.m_driver = "oracle";
+  oracle.m_host = "ora-host";
+  oracle.m_port = 70000;
+  config.m_databases.push_back(oracle);
+  DbConfig pg;
+  pg.m_name = "pg";
+  pg.m_driver = "postgres";
+  pg.m_host = "pg-host";
+  pg.m_port = 5432;
+  pg.m_user = "alice";
+  pg.m_pool_min = 0;
+  config.m_databases.push_back(pg);
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: proxy skips per-database connection fields", "[config]") {
+  Config config;
+  config.m_db_query_enabled = true;
+  DbConfig oracle;
+  oracle.m_name = "ora";
+  oracle.m_driver = "oracle";
+  config.m_databases.push_back(oracle);
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: rate limiting values must be positive", "[config]") {
+  Config config;
+  config.m_enable_per_ip_rate_limiting = true;
+  config.m_per_ip_max_tokens = 0;
+  config.m_per_ip_refill_rate = -1;
+  config.m_per_ip_max_ips = 0;
+  config.m_per_ip_cleanup_ttl_seconds = -1;
+  config.m_enable_global_rate_limiting = true;
+  config.m_global_max_tokens = 0;
+  config.m_global_refill_rate = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: dedup cache values must be positive", "[config]") {
+  Config config;
+  config.m_dedup_enabled = true;
+  config.m_dedup_max_entries = 0;
+  config.m_dedup_ttl_ms = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: duplicate detection values must be positive", "[config]") {
+  Config config;
+  config.m_duplicate_detection_enabled = true;
+  config.m_duplicate_detection_top_n = 0;
+  config.m_duplicate_detection_max_entries = -1;
+  config.m_duplicate_detection_ttl_ms = 0;
+  config.m_duplicate_detection_max_clients = -1;
+  config.m_duplicate_detection_client_ttl_ms = -1;
+  config.m_duplicate_detection_max_body_bytes = -1;
+  config.m_duplicate_log_threshold = -1;
+  REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: tracing batch/flush/sample bounds reject", "[config]") {
+  Config config;
+  config.m_tracing_batch_size = 0;
+  config.m_tracing_flush_interval_ms = -1;
+  config.m_tracing_sample_rate = 1.5;
+  REQUIRE(config.validate(false) == false);
+}
+
 // ============================================================================
 // Base64 tests
 // ============================================================================
