@@ -125,7 +125,7 @@ TEST_CASE("Gateway method: error messages carry action and verb",
 }
 
 TEST_CASE("Gateway errors: error body shape", "[db-gateway-body]") {
-  const json body = make_db_error_body(404, "NOT_FOUND", "no such db");
+  const json body = make_db_error_body("NOT_FOUND", "no such db");
   REQUIRE(body[DbResponseContract::kStatus] ==
           DbResponseContract::kStatusError);
   REQUIRE(body[DbResponseContract::kError][DbResponseContract::kCode] ==

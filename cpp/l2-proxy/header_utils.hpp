@@ -152,7 +152,9 @@ public:
         skip_headers, log_context,
         [&headers_json](auto &&emit) {
           for (const auto &header : headers_json.items()) {
-            emit(header.key(), header.value().get<std::string>());
+            if (header.value().is_string()) {
+              emit(header.key(), header.value().get_ref<const std::string &>());
+            }
           }
         },
         [&dest_headers](const std::string &name, const std::string &value) {

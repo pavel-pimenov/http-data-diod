@@ -74,7 +74,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   auto parsed = parse_db_query_request(request);
   if (!parsed) {
     status_code = 400;
-    body = make_db_error_body(status_code, "BAD_REQUEST", parsed.error());
+    body = make_db_error_body("BAD_REQUEST", parsed.error());
     return;
   }
   const DbQueryRequest &req = *parsed;
@@ -91,7 +91,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   }
   if (!executor) {
     status_code = 404;
-    body = make_db_error_body(status_code, "UNKNOWN_DATABASE",
+    body = make_db_error_body("UNKNOWN_DATABASE",
                               std::format("Unknown database '{}'", req.m_db));
     return;
   }
@@ -102,7 +102,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
     const uint64_t latency_ms = TimeUtils::steady_ms() - start_ms;
     status_code = ok ? 200 : 503;
     body = ok ? make_db_ping_response(executor->db_name(), latency_ms)
-              : make_db_error_body(status_code, "DB_UNAVAILABLE",
+              : make_db_error_body("DB_UNAVAILABLE",
                                    "Database ping failed");
     return;
   }

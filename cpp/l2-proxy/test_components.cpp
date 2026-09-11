@@ -3120,7 +3120,7 @@ TEST_CASE("[db-query-utils] error bodies carry code/message and set status",
           "bad column");
 
   const json body =
-      make_db_error_body(404, "UNKNOWN_DATABASE", "no such db");
+      make_db_error_body("UNKNOWN_DATABASE", "no such db");
   REQUIRE(body[DbResponseContract::kStatus] ==
           DbResponseContract::kStatusError);
   REQUIRE(body[DbResponseContract::kError][DbResponseContract::kMessage] ==
@@ -3173,8 +3173,7 @@ TEST_CASE("[db-query-utils] build_db_query_request forwards the wire fields",
   REQUIRE_FALSE(p.contains(DbQueryContract::kSql));
   REQUIRE_FALSE(p.contains(DbQueryContract::kParams));
 
-  const json env = make_db_response_envelope(503, make_db_error_body(
-                                                      503, "X", "m"));
+  const json env = make_db_response_envelope(503, make_db_error_body("X", "m"));
   REQUIRE(env[DbQueryContract::kStatus] == 503);
   REQUIRE(env[DbQueryContract::kBody][DbResponseContract::kError]
              [DbResponseContract::kCode] == "X");

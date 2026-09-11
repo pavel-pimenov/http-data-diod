@@ -1,3 +1,38 @@
+# refactor: dead-code cleanup, const-correctness, signature cleanup, minor dedup
+
+## Date: 2026-09-11
+
+### Что сделано
+- Удалена мёртвая константа `g_default_request_timeout_seconds = 15` из
+  RequestHandler (hpp:23). Константа не использовалась — ctor инициализировал
+  `m_request_timeout_seconds` из неё, но тут же перезаписывал из Config.
+  Упрощён ctor: инициализация напрямую из `ctx.m_config`.
+- Синхронизирован дефолт `m_http_timeout_seconds` в config.hpp: 10→30,
+  чтобы совпадать с env-дефолтом `HTTP_TIMEOUT_SECONDS` (30) в config.cpp.
+- Удалён неиспользуемый параметр `http_status` из `make_db_error_body`
+  (db_query_utils.hpp). Обновлены все 12 call-sites: request_handler.cpp,
+  db_query_handler.cpp, l2_worker_nats.cpp, тесты.
+- `header_utils.hpp`: добавлена проверка `is_string()` перед
+  `get_ref<const std::string &>()` в `filter_headers_from_json` —
+  защита от crash при нестроковом значении JSON-заголовка.
+- `json_utils.hpp`: `safe_get_int` — `is_number()` заменён на
+  `is_number_integer()` для корректной обработки float-значений.
+- `json_utils.hpp`: `get_body_response_ref` — устранён повторный вызов
+  `get_response_body(j)` (два `find` → один).
+- `in_flight_tracker.hpp`: шаблон `shard_sum(M member)` вместо двух
+  идентичных циклов `in_flight_sum()` / `total_requests_sum()`.
+- `nats_poll_service.cpp`: устранён повторный вызов `TimeUtils::epoch_us()`
+  в `poll_response` (duration_us + Observe вычисляли время дважды);
+  добавлен `std::move(reply.m_data)` при возврате.
+- `trace_logger.hpp/cpp`: `get_baggage` / `get_all_baggage` отмечены `const`
+  (мутации thread-local не затрагивают члены класса).
+
+### Результат
+- 10 файлов изменены; поведение не меняется (behavior-preserving).
+- `./rebuild-and-run.sh` + `message_counter.py` ✅
+
+---
+
 # test(coverage): tracing round — traceparent short-circuits + tracing_helpers
 
 ## Date: 2026-09-10

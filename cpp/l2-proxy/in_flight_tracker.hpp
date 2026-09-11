@@ -43,20 +43,21 @@ private:
     return g_shard;
   }
 
-  uint64_t in_flight_sum() const {
+  template <typename M>
+  uint64_t shard_sum(M member) const {
     uint64_t total = 0;
     for (const Shard &shard : m_shards) {
-      total += shard.m_in_flight.load(std::memory_order_acquire);
+      total += (shard.*member).load(std::memory_order_acquire);
     }
     return total;
   }
 
+  uint64_t in_flight_sum() const {
+    return shard_sum(&Shard::m_in_flight);
+  }
+
   uint64_t total_requests_sum() const {
-    uint64_t total = 0;
-    for (const Shard &shard : m_shards) {
-      total += shard.m_total.load(std::memory_order_relaxed);
-    }
-    return total;
+    return shard_sum(&Shard::m_total);
   }
 
 public:

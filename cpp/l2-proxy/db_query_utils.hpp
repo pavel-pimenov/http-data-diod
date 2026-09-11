@@ -157,9 +157,8 @@ inline std::string nonempty_or(std::string_view value,
 }
 
 // Builds the DbResponseContract error body shared by the proxy and the worker.
-inline json make_db_error_body(int http_status, const std::string &code,
+inline json make_db_error_body(const std::string &code,
                                const std::string &message) {
-  (void)http_status;
   return json{
       {DbResponseContract::kStatus, DbResponseContract::kStatusError},
       {DbResponseContract::kError,
@@ -173,7 +172,7 @@ inline json make_db_unavailable(int &status_code,
                                 const std::string &detail = "") {
   status_code = 503;
   return make_db_error_body(
-      status_code, "DB_UNAVAILABLE",
+      "DB_UNAVAILABLE",
       detail.empty() ? "Failed to acquire a database connection"
                      : "Failed to acquire a database connection: " + detail);
 }
@@ -183,7 +182,7 @@ inline json make_db_unavailable(int &status_code,
 // status+code+body triple.
 inline json make_db_sql_error(int &status_code, const std::string &message) {
   status_code = 422;
-  return make_db_error_body(status_code, "SQL_ERROR", message);
+  return make_db_error_body("SQL_ERROR", message);
 }
 
 // Builds the DbResponseContract success body of a query execution.

@@ -20,7 +20,6 @@ using json = nlohmann::json;
 
 class RequestHandler {
 private:
-  static constexpr int g_default_request_timeout_seconds = 15;
   static constexpr int g_default_retry_delay_ms = 100;
   static constexpr int g_max_retry_delay_ms = 2000;
 

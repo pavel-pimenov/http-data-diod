@@ -83,7 +83,7 @@ public:
   // Group 5: int fields (4 bytes each) — sorted by logical group
   // ========================================================================
   int m_request_timeout_seconds{30};
-  int m_http_timeout_seconds{10};
+  int m_http_timeout_seconds{30};
   int m_l2_worker_threads{128};
   int m_l2_worker_queue_size{0};
   int m_proxy_port{8888};

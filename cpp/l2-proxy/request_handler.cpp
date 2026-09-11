@@ -50,16 +50,14 @@ inline constexpr const char *kDbGatewayPath = "/v1/sql";
 void send_db_error(httplib::Response &res, int status, const std::string &code,
                    const std::string &message) {
   res.status = status;
-  res.set_content(make_db_error_body(status, code, message).dump(),
+  res.set_content(make_db_error_body(code, message).dump(),
                   "application/json");
 }
 
 RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
-      m_request_timeout_seconds(g_default_request_timeout_seconds),
-      m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {
-  m_request_timeout_seconds = m_ctx.m_config.m_request_timeout_seconds;
-}
+      m_request_timeout_seconds(ctx.m_config.m_request_timeout_seconds),
+      m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
 
 RequestHandler::~RequestHandler() {}
 

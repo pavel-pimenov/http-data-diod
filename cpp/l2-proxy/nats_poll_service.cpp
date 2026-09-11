@@ -121,11 +121,11 @@ std::string NatsPollService::poll_response(const std::string &request_id,
           parent_id);
     }
 
-    const int64_t duration_us = TimeUtils::epoch_us() - nats_poll_start;
+    const uint64_t end_us = TimeUtils::epoch_us();
+    const int64_t duration_us = end_us - nats_poll_start;
     m_ctx.m_proxy.m_metrics->m_nats_request_duration_seconds.Observe(
         TimeUtils::duration_seconds(
-            static_cast<uint64_t>(nats_poll_start),
-            static_cast<uint64_t>(TimeUtils::epoch_us())));
+            static_cast<uint64_t>(nats_poll_start), end_us));
 
     JaegerSpanLogger::log_nats_span(
         m_ctx.m_tracer.get(), "NATS_poll", 200, request_id,
@@ -133,7 +133,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
         {{"nats.response_size", reply.m_data.size()},
          {"nats.duration_us", duration_us}});
 
-    return reply.m_data;
+    return std::move(reply.m_data);
 
   } catch (const std::exception &e) {
     Logger::error("NATS poll exception: {}", e.what());

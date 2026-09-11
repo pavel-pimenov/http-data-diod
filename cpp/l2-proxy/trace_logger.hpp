@@ -287,8 +287,8 @@ public:
   // Baggage propagation
   void set_baggage(const std::string &trace_id, const std::string &key,
                    const std::string &value);
-  std::string get_baggage(const std::string &trace_id, const std::string &key);
-  Baggage get_all_baggage(const std::string &trace_id);
+  std::string get_baggage(const std::string &trace_id, const std::string &key) const;
+  Baggage get_all_baggage(const std::string &trace_id) const;
 };
 
 #endif // TRACE_LOGGER_HPP

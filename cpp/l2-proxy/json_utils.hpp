@@ -108,7 +108,7 @@ public:
   static int safe_get_int(const json &j, const std::string &key,
                           int fallback = 0) {
     const auto it = j.find(key);
-    if (it != j.end() && it->is_number()) {
+    if (it != j.end() && it->is_number_integer()) {
       return it->get<int>();
     }
     return fallback;
@@ -175,8 +175,9 @@ inline const json &get_response_body(const json &j) {
 // that are stored verbatim (not base64).
 inline const std::string &get_body_response_ref(const json &j) {
   static const std::string g_empty;
-  const auto it = get_response_body(j).find(NatsResponseContract::kBodyResponse);
-  if (it != get_response_body(j).end() && it->is_string()) {
+  const auto &body = get_response_body(j);
+  const auto it = body.find(NatsResponseContract::kBodyResponse);
+  if (it != body.end() && it->is_string()) {
     return it->get_ref<const std::string &>();
   }
   return g_empty;

@@ -519,7 +519,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     const auto parsed = JsonUtils::try_parse(request_json);
     if (!parsed) {
       status = 400;
-      body = make_db_error_body(status, "BAD_REQUEST", "Invalid JSON body");
+      body = make_db_error_body("BAD_REQUEST", "Invalid JSON body");
     } else {
       request_data = *parsed;
       const std::string request_id =
@@ -544,7 +544,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
 
       if (!m_db_query_handler) {
         status = 503;
-        body = make_db_error_body(status, "DB_UNAVAILABLE",
+        body = make_db_error_body("DB_UNAVAILABLE",
                                   "DB gateway is not initialized");
       } else {
         const uint64_t db_start_us = get_current_timestamp_us();
@@ -607,7 +607,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
                   e.what());
     status = 500;
     task.m_activity.m_status = 500;
-    body = make_db_error_body(status, "INTERNAL_ERROR", e.what());
+    body = make_db_error_body("INTERNAL_ERROR", e.what());
     if (m_ctx.m_sentry) {
       m_ctx.m_sentry->capture_message(
           std::format("DB query internal error: {}", e.what()),

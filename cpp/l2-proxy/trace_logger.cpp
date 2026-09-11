@@ -450,7 +450,7 @@ void JaegerLogger::set_baggage(const std::string &trace_id,
 }
 
 std::string JaegerLogger::get_baggage(const std::string &trace_id,
-                                      const std::string &key) {
+                                       const std::string &key) const {
   cleanup_expired_baggage();
   const auto it = g_trace_baggage.find(trace_id);
   if (it != g_trace_baggage.end()) {
@@ -459,7 +459,7 @@ std::string JaegerLogger::get_baggage(const std::string &trace_id,
   return "";
 }
 
-Baggage JaegerLogger::get_all_baggage(const std::string &trace_id) {
+Baggage JaegerLogger::get_all_baggage(const std::string &trace_id) const {
   cleanup_expired_baggage();
   const auto it = g_trace_baggage.find(trace_id);
   if (it != g_trace_baggage.end()) {
