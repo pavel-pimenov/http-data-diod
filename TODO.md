@@ -2,8 +2,8 @@
 
 ## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **540 test cases**,
-**2 524 assertions**. Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **542 test cases**,
+**2 532 assertions**. Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
 - **Lines: 97.9%** (9032/9224), гейт 90% — пройден
 - **Functions: 95.2%** (1188/1248)
@@ -50,8 +50,9 @@ drain, reply-loss).
   http/https send_envelope failure-ветки, остаётся pool/процессные)
 - `trace_logger.cpp`/`tracing_helpers.hpp` — 61.5%/55.6% (160+126 uncovered,
   in-process, достижимы без внешних сервисов)
-- `stats_page.hpp` — 62.6% (140 uncovered, в осн. html-render артефакты:
-  `s.m_points.empty()`, `family.metric.empty()` — не достижимы тестами)
+- `stats_page.hpp` — 59.5% (378 ветвей, в осн. html-render артефакты:
+  `s.m_points.empty()`, `family.metric.empty()`, extra-registry уже закрыт в
+  раунде l2_common)
 - `string_utils.hpp` — gcov-артефакт: закрывающая `}` inline-функции в
   header-е (1 строка из 7), не устраним тестами; **РЕШЕНО** выносом в
   `string_utils.cpp` (100% строк, header без исполняемых строк)

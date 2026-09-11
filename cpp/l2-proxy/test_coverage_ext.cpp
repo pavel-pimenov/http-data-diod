@@ -673,6 +673,69 @@ TEST_CASE(
   REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
 }
 
+TEST_CASE("Stats page: build_stats_html renders extra registry tiles",
+          "[stats-page-ext]") {
+  auto primary = std::make_shared<prometheus::Registry>();
+  auto &p_gauge = MetricsManager::create_gauge(primary, "health_ready", "ready");
+  p_gauge.Set(1.0);
+  auto &p_cnt = prometheus::BuildCounter()
+                    .Name("proxy_requests_total")
+                    .Help("proxy requests")
+                    .Register(*primary)
+                    .Add({});
+  p_cnt.Increment();
+
+  auto extra = std::make_shared<prometheus::Registry>();
+  auto &t_cnt = prometheus::BuildCounter()
+                    .Name("l2_tracing_spans_sent_total")
+                    .Help("spans sent")
+                    .Register(*extra)
+                    .Add({});
+  t_cnt.Increment();
+  auto &s_gauge = MetricsManager::create_gauge(
+      extra, "l2_worker_sentry_queue_size", "sentry queue");
+  s_gauge.Set(0.0);
+
+  MetricsHistory extra_history(extra, std::chrono::seconds(1), 8, 240);
+  extra_history.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(2300));
+  extra_history.stop();
+
+  const std::string html =
+      build_stats_html("l2-worker", primary, nullptr, 30, extra,
+                       &extra_history);
+  // Primary registry tiles still rendered alongside the extra ones.
+  REQUIRE(html.find("proxy_requests_total") != std::string::npos);
+  REQUIRE(html.find("health_ready") != std::string::npos);
+  // Extra-registry families render their own tiles and sparklines from the
+  // extra history (the primary history does not know these families).
+  REQUIRE(html.find("l2_tracing_spans_sent_total") != std::string::npos);
+  REQUIRE(html.find("l2_worker_sentry_queue_size") != std::string::npos);
+  REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html extra registry skips empty families",
+          "[stats-page-ext]") {
+  auto primary = std::make_shared<prometheus::Registry>();
+  auto &p_gauge = MetricsManager::create_gauge(primary, "health_ready", "ready");
+  p_gauge.Set(1.0);
+  auto extra = std::make_shared<prometheus::Registry>();
+  // Family registered but never observed: render_tile must bail out early.
+  prometheus::BuildGauge().Name("l2_tracing_queue_size").Help("queue").Register(
+      *extra);
+  auto &live = MetricsManager::create_gauge(extra, "l2_tracing_queue_size_live",
+                                            "queue live");
+  live.Set(2.0);
+
+  const std::string html =
+      build_stats_html("l2-worker", primary, nullptr, 30, extra, nullptr);
+  REQUIRE(html.find("l2_tracing_queue_size_live") != std::string::npos);
+  // No tile for the metric-less family.
+  REQUIRE(html.find(">l2_tracing_queue_size<") == std::string::npos);
+  // Rendered without extra history -> no sparkline from the extra registry.
+  REQUIRE(html.find("<div class=\"sparkwrap\"") == std::string::npos);
+}
+
 TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();

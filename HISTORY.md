@@ -1,3 +1,36 @@
+# test(coverage): branch round — stats_page extra-registry (l2_common) rendering
+
+## Date: 2026-09-11
+
+### Что сделано
+- `test_coverage_ext.cpp`: 2 новых кейса закрывают ветви нового кода
+  `build_stats_html` (добавлен в раунде `l2_common`):
+  - `build_stats_html renders extra registry tiles` — primary-реестр +
+    extra-реестр (`l2_tracing_spans_sent_total`, `l2_worker_sentry_queue_size`)
+    с `extra_history` (MetricsHistory на l2-common): плитки обоих реестров +
+    sparkline из extra-истории (ветки `extra_registry`, `hist && has_family`,
+    repr-выбор);
+  - `build_stats_html extra registry skips empty families` — family без
+    серий (ветка `family.metric.empty()` в extra-пути) + рендер без
+    `extra_history` (нет sparklines).
+- Итог: stats_page.hpp lines 95.9% (187/195), branches 59.5% (225/378),
+  functions 100% (6/6). Замечание: знаменатель ветвей вырос из-за рефактора
+  рендера в лямбду `render_tile` + новый extra-путь (раунд `3b966b8`).
+
+### Замечание (flaky)
+- В coverage-прогоне один раз упал существующий асинхронный тест
+  `test_sentry_client.cpp:511` (`delivered.size()==1` — гонка: при медленном
+  сендере слот освобождается до 2-го capture, доставляется 2). При
+  повторном прогоне green — флаки-тайминг, к этому раунду отношения нет.
+
+### Результат
+- Test cases 540→542 (test_components 441→443 + test_proxy_core 99);
+  assertions 2524→2532 (1717→1725 + 807).
+- `./rebuild-and-run.sh` ✅, `message_counter.py --iterations 1
+  --concurrent 1` ✅, coverage-гейт `--fail-under-line 90` ✅.
+
+---
+
 # feat(metrics): единый реестр l2_common — видимость l2_tracing_*/l2_worker_sentry_* на всех портах
 
 ## Date: 2026-09-11
