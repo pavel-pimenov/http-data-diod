@@ -2,12 +2,12 @@
 
 ## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **431 + 99 = 530 test cases**,
-**2 503 assertions** (1696 + 807). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **540 test cases**,
+**2 524 assertions**. Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 97.7%** (8884/9090), гейт 90% — пройден
-- **Functions: 95.4%** (1157/1213)
-- **Branches: 41.5%** (17956/43285) — слабое место
+- **Lines: 97.9%** (9032/9224), гейт 90% — пройден
+- **Functions: 95.2%** (1188/1248)
+- **Branches: 41.6%** (18237/43889) — слабое место
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
@@ -31,6 +31,9 @@ add_proxy_trace_fields, set_traceparent_response_header, log_worker_span.
 trace_logger.cpp 61.1%→61.5% (254→256/416), tracing_helpers.hpp 55.0%→55.6%
 (155→158/284). Остаток — cross-TU-merge артефакты (test_proxy_core не
 вызывает helper'ы) и sender_loop/retry/сетевые ветки.
+Раунд send_envelope/stats_page: sentry_client.cpp 51.2%→53.2% (+13 ветвей),
+stats_page.hpp 59.6%→62.6% (+11 ветвей), shutdown-flush в sender_loop (+2).
+PROD branches 56.8%→57.2% (3893/6811).
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -43,10 +46,12 @@ drain, reply-loss).
 Открытые ветки (строковое покрытие уже высокое, осталось ветвей):
 - `logger.hpp` — init-time ветки `LOG_LEVEL=CRITICAL/OFF` (env-dependent, требуют
   отдельного процесса с setenv перед init; std::call_once блокирует повторный вход)
-- `sentry_client.cpp` — 51.2% ветвей (317 uncovered, network-heavy)
+- `sentry_client.cpp` — 53.2% ветвей (304 uncovered, network-heavy; закрыты
+  http/https send_envelope failure-ветки, остаётся pool/процессные)
 - `trace_logger.cpp`/`tracing_helpers.hpp` — 61.5%/55.6% (160+126 uncovered,
   in-process, достижимы без внешних сервисов)
-- `stats_page.hpp` — 59.6% (151 uncovered, в осн. html-render артефакты)
+- `stats_page.hpp` — 62.6% (140 uncovered, в осн. html-render артефакты:
+  `s.m_points.empty()`, `family.metric.empty()` — не достижимы тестами)
 - `string_utils.hpp` — gcov-артефакт: закрывающая `}` inline-функции в
   header-е (1 строка из 7), не устраним тестами; **РЕШЕНО** выносом в
   `string_utils.cpp` (100% строк, header без исполняемых строк)

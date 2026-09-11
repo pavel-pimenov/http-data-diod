@@ -411,3 +411,104 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
   server.stop();
   server_thread.join();
 }
+
+TEST_CASE("SentryClient: send_envelope counts a non-2xx response as failure",
+          "[sentry-client]") {
+  httplib::Server server;
+  server.Post(".*", [](const httplib::Request &, httplib::Response &res) {
+    res.status = 500;
+  });
+  const int port = server.bind_to_any_port("127.0.0.1");
+  std::thread server_thread([&] { server.listen_after_bind(); });
+
+  SentryTestMetrics m;
+  SentryClient client(
+      "http://PUBLIC@127.0.0.1:" + std::to_string(port) + "/42",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      3000, 8);
+  client.capture_message("server error");
+  client.flush();
+
+  REQUIRE(m.m_sent_counter.Value() == 0.0);
+  REQUIRE(m.m_failed_counter.Value() == 1.0);
+
+  server.stop();
+  server_thread.join();
+}
+
+TEST_CASE("SentryClient: send_envelope counts a connection failure",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  SentryClient client("http://PUBLIC@127.0.0.1:1/42", m.m_sent_counter,
+                      m.m_failed_counter, m.m_queue_gauge, "srv", "", "", 1000,
+                      8);
+  client.capture_message("dead endpoint");
+  client.flush();
+
+  REQUIRE(m.m_sent_counter.Value() == 0.0);
+  REQUIRE(m.m_failed_counter.Value() == 1.0);
+}
+
+TEST_CASE("SentryClient: send_envelope https scheme fails without a TLS server",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  SentryClient client("https://PUBLIC@127.0.0.1:1/42", m.m_sent_counter,
+                      m.m_failed_counter, m.m_queue_gauge, "srv", "", "", 1000,
+                      8);
+  client.capture_message("no tls here");
+  client.flush();
+
+  REQUIRE(m.m_sent_counter.Value() == 0.0);
+  REQUIRE(m.m_failed_counter.Value() == 1.0);
+}
+
+TEST_CASE("SentryClient: secret key is sent in the X-Sentry-Auth header",
+          "[sentry-client]") {
+  httplib::Server server;
+  std::string received_auth_header;
+  server.Post(".*", [&](const httplib::Request &req, httplib::Response &res) {
+    auto auth = req.headers.find("X-Sentry-Auth");
+    if (auth != req.headers.end()) {
+      received_auth_header = auth->second;
+    }
+    res.status = 200;
+  });
+  const int port = server.bind_to_any_port("127.0.0.1");
+  std::thread server_thread([&] { server.listen_after_bind(); });
+
+  SentryTestMetrics m;
+  SentryClient client(
+      "http://PUBLIC:SECRET@127.0.0.1:" + std::to_string(port) + "/42",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      3000, 8);
+  client.capture_message("with secret");
+  client.flush();
+
+  REQUIRE(m.m_sent_counter.Value() == 1.0);
+  REQUIRE(m.m_failed_counter.Value() == 0.0);
+  REQUIRE(received_auth_header.find("sentry_key=PUBLIC/SECRET") !=
+          std::string::npos);
+
+  server.stop();
+  server_thread.join();
+}
+
+TEST_CASE("SentryClient: zero max_queue_size is clamped to one",
+          "[sentry-client]") {
+  SentryTestMetrics m;
+  std::vector<std::string> delivered;
+  SentryClient client(
+      "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
+      m.m_queue_gauge, "srv", "", "", 1000, 0,
+      [&](const std::string &envelope) {
+        delivered.push_back(envelope);
+        return true;
+      });
+  client.capture_message("single slot");
+  client.capture_message("second dropped");
+  client.flush();
+
+  REQUIRE(delivered.size() == 1);
+  REQUIRE(m.m_failed_counter.Value() == 1.0);
+  REQUIRE(m.m_sent_counter.Value() == 1.0);
+}

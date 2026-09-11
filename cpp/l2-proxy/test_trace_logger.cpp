@@ -701,6 +701,33 @@ TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
   REQUIRE(parsed.m_span_id.size() == 16);
 }
 
+TEST_CASE("TraceLogger: remaining spans are flushed on shutdown",
+          "[tracing]") {
+  TraceMockServer server(500000); // slow POST keeps the sender occupied
+  int bodies_before = 0;
+  {
+    TraceLoggerEnv env(server.endpoint(), 8, 60000, 1.0);
+    for (int i = 0; i < 8; ++i) {
+      env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                 "bbbbbbbbbbbbbbbb", "", "HTTP GET /flush1",
+                                 1000, 2000, "test-service");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    for (int i = 0; i < 8; ++i) {
+      env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                 "cccccccccccccccc", "", "HTTP GET /flush2",
+                                 1000, 2000, "test-service");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    bodies_before = server.body_count();
+  }
+
+  // The destructor flushes the second queued batch (one body per 8 spans).
+  REQUIRE(wait_for_condition(
+      [&] { return server.body_count() > bodies_before; }, 5000));
+  REQUIRE(server.body_count() >= 2);
+}
+
 TEST_CASE("Baggage: url_encode and url_decode round-trip", "[baggage]") {
   REQUIRE(Baggage::url_encode("hello") == "hello");
   REQUIRE(Baggage::url_encode("hello world") == "hello%20world");

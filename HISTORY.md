@@ -1,3 +1,39 @@
+# test(coverage): branch round — sentry_client send_envelope + stats_page + shutdown-flush
+
+## Date: 2026-09-11
+
+### Что сделано
+- `test_sentry_client.cpp`: 5 новых кейсов закрывают ветви `send_envelope`
+  (sentry_client.cpp 51.2%→53.2%, +13 ветвей):
+  - non-2xx HTTP-ответ (500) — ветки `res && status>=200 && status<300`
+    (ложь по диапазону status)
+  - мёртвый http-порт — ветка `res` (falsy) + failure-подсчёт
+  - https-схема — ветка построения `SSLClient` (без TLS-сервера → graceful fail)
+  - секретный ключ — `X-Sentry-Auth: sentry_key=PUBLIC/SECRET` (ветка
+    append `"/"+secret`)
+  - `max_queue_size == 0 ? 1 : ...` — clamp в ctor
+- `test_sentry_client.cpp`: +6 ветвей в sentry_client.hpp (внешние границы
+  связанных с ctor)
+- `test_coverage_ext.cpp`: 4 кейса по stats_page.hpp (59.6%→62.6%, +11 ветвей):
+  - `build_sparkline_svg` as_rate с 2 точками — ветка `vals.size()==1` (x=0)
+    и `dt > 0.0` (ложь при одинаковых timestamp)
+  - flat-range: ветка `(max-min) > 1e-12` (ложь → единичный range)
+  - `build_stats_html` без help у family — ветка `!family.help.empty()` (ложь)
+  - labeled-gauge история: ветки выбора repr-серии (`s.m_labels.empty()`,
+    `last > best` обе стороны), as_rate=false (raw gauge sparkline)
+- `test_trace_logger.cpp`: shutdown-flush путь `sender_loop` — финальный
+  batch на деструкторе (ветки `!final_batch.empty()` / `send_batch` success,
+  +2 ветви в trace_logger.cpp)
+
+### Результат
+- PROD branches 56.8%→57.2% (3860/6799→3893/6811); Lines 97.7%→97.9%
+  (8884/9090→9032/9224).
+- Test cases 530→540; assertions 2503→2524.
+- `./rebuild-and-run.sh` ✅ (unit tests: 441 + 99 cases pass), `message_counter.py
+  --iterations 1 --concurrent 1` ✅, golden-metrics check 66/66 ✅.
+
+---
+
 # refactor: dead-code cleanup, const-correctness, signature cleanup, minor dedup
 
 ## Date: 2026-09-11

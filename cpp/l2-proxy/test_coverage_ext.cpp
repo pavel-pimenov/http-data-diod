@@ -619,6 +619,60 @@ TEST_CASE("Stats page: build_stats_html renders sparklines from history",
   REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
 }
 
+TEST_CASE(
+    "Stats page: build_sparkline_svg single sample rate and zero delta",
+    "[stats-page-ext]") {
+  // Two points as_rate produce exactly one rate sample (vals.size()==1 -> x=0)
+  // and the dt<=0 guard is exercised with identical timestamps.
+  const std::time_t now = std::time(nullptr);
+  const std::vector<std::pair<std::time_t, double>> same_ts = {{now, 5.0},
+                                                               {now, 7.0}};
+  const std::string svg = build_sparkline_svg(same_ts, true, 30);
+  REQUIRE(svg.find("<svg class=\"spark\"") != std::string::npos);
+  REQUIRE(svg.find("0,25") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_sparkline_svg flat range uses unit range",
+          "[stats-page-ext]") {
+  const std::time_t now = std::time(nullptr);
+  const std::vector<std::pair<std::time_t, double>> flat = {
+      {now - 2, 4.0}, {now - 1, 4.0}, {now, 4.0}};
+  const std::string svg = build_sparkline_svg(flat, false, 30);
+  REQUIRE(svg.find("<svg class=\"spark\"") != std::string::npos);
+  REQUIRE(svg.find("94,25") != std::string::npos);
+}
+
+TEST_CASE("Stats page: build_stats_html omits tile help when empty",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &plain =
+      prometheus::BuildGauge().Name("plain_gauge").Register(*registry);
+  plain.Add({}).Set(1.0);
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("plain_gauge") != std::string::npos);
+  REQUIRE(html.find("class=\"thelp\"") == std::string::npos);
+}
+
+TEST_CASE(
+    "Stats page: build_stats_html renders labeled gauge sparklines raw",
+    "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = prometheus::BuildGauge()
+                     .Name("spark_per_ip")
+                     .Help("per ip gauge")
+                     .Register(*registry);
+  family.Add({{"ip", "0.0.0.1"}}).Set(100.0);
+  family.Add({{"ip", "9.9.9.9"}}).Set(1.0);
+  MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
+  history.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(2300));
+  history.stop();
+  const std::string html =
+      build_stats_html("proxy-test", registry, &history, 5);
+  REQUIRE(html.find("<div class=\"sparkwrap\"") != std::string::npos);
+}
+
 TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();
