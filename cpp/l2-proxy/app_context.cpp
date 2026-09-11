@@ -1,9 +1,7 @@
 #include "app_context.hpp"
 #include "duplicate_detector.hpp"
-#include "dynamic_labeled_family.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
-#include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "sentry_client.hpp"
@@ -21,10 +19,6 @@ AppContext::AppContext() {
       m_sentry_metrics->m_events_failed, m_sentry_metrics->m_queue_size,
       m_config.m_mode, m_config.m_sentry_environment, m_config.m_sentry_release,
       m_config.m_sentry_timeout_ms, m_config.m_sentry_max_queue_size);
-
-  if (m_config.m_mode == "proxy") {
-    init_proxy_components();
-  }
 }
 
 AppContext::~AppContext() {
@@ -303,141 +297,4 @@ void AppContext::init_server_metrics() {
           m_server_registry, "l2_server_health_ready",
           "Readiness state (1 = ready, 0 = not ready) mirrored from "
           "/health/ready")});
-}
-
-void AppContext::init_proxy_components() {
-  Logger::info("Using NATS for messaging (host={}:{}, subject={})",
-               m_config.m_nats_host, m_config.m_nats_port,
-               m_config.m_nats_subject);
-
-  m_nats_client = std::make_shared<NatsClient>(m_config.create_nats_config());
-
-  if (!m_nats_client->connect()) {
-    Logger::error("Failed to connect to NATS server");
-  } else {
-    Logger::info("NATS client connected successfully");
-  }
-
-  m_proxy.m_internal_memory_metrics = std::make_unique<InternalMemoryMetrics>(
-      InternalMemoryMetrics{MetricsManager::create_gauge(
-          m_proxy_registry, "l2_proxy_per_ip_rate_limiter_ips_tracked",
-          "Current number of unique IPs tracked by per-IP rate limiter")});
-
-  m_proxy.m_rate_limiter_metrics =
-      std::make_unique<RateLimiterMetrics>(RateLimiterMetrics{
-          MetricsManager::create_gauge(m_proxy_registry,
-                                       "l2_rate_limiter_tokens",
-                                       "Available rate limiter tokens"),
-          MetricsManager::create_counter(
-              m_proxy_registry, "l2_rate_limiter_rejected_total",
-              "Total requests rejected by global rate limiter")});
-
-  m_proxy.m_per_ip_rate_limiter_metrics =
-      std::make_unique<PerIPRateLimiterMetrics>(
-          PerIPRateLimiterMetrics{MetricsManager::create_counter(
-              m_proxy_registry, "l2_per_ip_rate_limiter_rejected_total",
-              "Total requests rejected by per-IP rate limiter")});
-
-  if (m_config.m_enable_global_rate_limiting) {
-    m_proxy.m_rate_limiter = std::make_unique<RateLimiter>(
-        static_cast<uint64_t>(m_config.m_global_max_tokens),
-        static_cast<uint64_t>(m_config.m_global_refill_rate));
-    Logger::info("Global rate limiter initialized: max={} tokens, "
-                 "refill={}/sec",
-                 m_config.m_global_max_tokens, m_config.m_global_refill_rate);
-  } else {
-    Logger::info(
-        "Global rate limiter disabled (ENABLE_GLOBAL_RATE_LIMITING=false)");
-  }
-
-  if (m_config.m_enable_per_ip_rate_limiting) {
-    m_proxy.m_per_ip_rate_limiter = std::make_unique<PerIPRateLimiter>(
-        m_config.m_per_ip_max_tokens, m_config.m_per_ip_refill_rate,
-        m_config.m_per_ip_max_ips, m_config.m_per_ip_cleanup_ttl_seconds);
-    m_proxy.m_per_ip_metrics_collector = std::make_shared<
-        DynamicLabeledFamily<prometheus::Gauge>>(
-        "ip",
-        std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
-            {"l2_proxy_per_ip_requests_total",
-             "Total number of requests received per client IP"},
-            {"l2_proxy_per_ip_rejected_total",
-             "Total number of requests rejected by the per-IP rate limiter "
-             "per client IP"}},
-        [limiter = m_proxy.m_per_ip_rate_limiter.get()]() {
-          std::vector<std::pair<std::string, std::vector<double>>> entries;
-          if (limiter != nullptr) {
-            for (const auto &[ip, stats] : limiter->get_per_ip_stats()) {
-              entries.emplace_back(ip, std::vector<double>{
-                                           static_cast<double>(
-                                               stats.m_requests),
-                                           static_cast<double>(
-                                               stats.m_rejected)});
-            }
-          }
-          return entries;
-        });
-    Logger::info("Per-IP rate limiter initialized: max_tokens={} "
-                 "refill_rate={} max_ips={} cleanup_ttl={}s",
-                 m_config.m_per_ip_max_tokens, m_config.m_per_ip_refill_rate,
-                 m_config.m_per_ip_max_ips,
-                 m_config.m_per_ip_cleanup_ttl_seconds);
-  } else {
-    Logger::info("Per-IP rate limiting disabled");
-  }
-
-  m_proxy.m_per_client_id_metrics_collector = std::make_shared<
-      DynamicLabeledFamily<prometheus::Counter>>(
-      "client_id",
-      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
-          {"l2_proxy_per_client_id_requests_total",
-           "Total number of requests received per X-DataHub-Client-Id "
-           "header"},
-          {"l2_proxy_per_client_id_rejected_total",
-           "Total number of requests rejected by rate limiters per "
-           "X-DataHub-Client-Id header"}});
-
-  m_proxy.m_per_client_id_latency_collector = std::make_shared<
-      DynamicLabeledFamily<prometheus::Histogram>>(
-      "client_id",
-      std::vector<DynamicLabeledFamily<prometheus::Histogram>::Series>{
-          {"l2_proxy_per_client_id_latency_seconds",
-           "Request processing latency per X-DataHub-Client-Id header"}},
-      DynamicLabeledFamily<prometheus::Histogram>::Provider{}, 300, 10000,
-      std::vector<double>(
-          histogram_buckets::g_k_latency_5ms_to_10s.begin(),
-          histogram_buckets::g_k_latency_5ms_to_10s.end()));
-
-  m_proxy.m_per_client_id_duplicate_collector = std::make_shared<
-      DynamicLabeledFamily<prometheus::Counter>>(
-      "client_id",
-      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
-          {"l2_proxy_per_client_id_duplicate_requests_total",
-           "Total number of duplicate POST bodies (same body hash seen "
-           "again) detected per X-DataHub-Client-Id header"},
-          {"l2_proxy_per_client_id_duplicate_rejected_total",
-           "Reserved: rejected duplicate POSTs per X-DataHub-Client-Id "
-           "header"}});
-
-  DuplicateDetector::Options dup_options;
-  dup_options.m_enabled = m_config.m_duplicate_detection_enabled;
-  dup_options.m_top_n = m_config.m_duplicate_detection_top_n;
-  dup_options.m_max_entries = m_config.m_duplicate_detection_max_entries;
-  dup_options.m_max_body_bytes =
-      m_config.m_duplicate_detection_max_body_bytes;
-  dup_options.m_ttl_ms = m_config.m_duplicate_detection_ttl_ms;
-  dup_options.m_duplicate_log_threshold = m_config.m_duplicate_log_threshold;
-  dup_options.m_per_client_max_entries =
-      m_config.m_duplicate_detection_max_clients;
-  dup_options.m_per_client_ttl_ms =
-      m_config.m_duplicate_detection_client_ttl_ms;
-  m_proxy.m_duplicate_detector =
-      std::make_unique<DuplicateDetector>(dup_options);
-  Logger::info("Duplicate POST detector initialized: enabled={} top_n={} "
-               "max_entries={} max_body_bytes={} ttl_ms={} log_threshold={} "
-               "max_clients={} client_ttl_ms={}",
-               dup_options.m_enabled, dup_options.m_top_n,
-               dup_options.m_max_entries, dup_options.m_max_body_bytes,
-               dup_options.m_ttl_ms, dup_options.m_duplicate_log_threshold,
-               dup_options.m_per_client_max_entries,
-               dup_options.m_per_client_ttl_ms);
 }

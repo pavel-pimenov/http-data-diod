@@ -24,6 +24,7 @@
 
 #include "app_context.hpp"
 #include "l2_worker.hpp"
+#include "proxy_init.hpp"
 #include "request_handler.hpp"
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
@@ -185,6 +186,11 @@ create_metrics_exposer(int port,
 }
 
 void run_proxy(AppContext &app_ctx) {
+  // NATS client, rate limiters and duplicate detector were created inside the
+  // AppContext ctor before; they now live in init_proxy_components() so
+  // AppContext stays constructible in unit tests without the NATS library.
+  init_proxy_components(app_ctx);
+
   StatsLogger stats_logger(app_ctx, g_shutdown_flag);
   stats_logger
       .start_periodic_logging(); // Start periodic logging in proxy mode too

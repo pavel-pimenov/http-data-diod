@@ -286,6 +286,7 @@ add_executable(l2-proxy
  main.cpp
  version.cpp
  app_context.cpp
+ proxy_init.cpp
  common_utils.cpp
  config.cpp
  string_utils.cpp
@@ -338,6 +339,7 @@ set_target_properties(l2-proxy PROPERTIES UNITY_BUILD_MODE GROUP)
 
 set_source_files_properties(
     app_context.cpp common_utils.cpp config.cpp string_utils.cpp
+    proxy_init.cpp
     request_handler.cpp
     request_id_generator.cpp trace_context_extractor.cpp
     request_data_preparer.cpp response_builder.cpp server_handler.cpp
@@ -448,6 +450,8 @@ if(BUILD_TESTS)
         test_db_executor_base.cpp
         test_sentry_client.cpp
         test_trace_logger.cpp
+        test_app_context.cpp
+        app_context.cpp
         config.cpp
         string_utils.cpp
         duplicate_detector.cpp
