@@ -163,7 +163,9 @@ inline int parse_stats_window(const ParamsT &params, int default_min = 30) {
 inline std::string build_stats_html(
     const std::string &service_name,
     const std::shared_ptr<prometheus::Registry> &registry,
-    const MetricsHistory *history = nullptr, int window_minutes = 30) {
+    const MetricsHistory *history = nullptr, int window_minutes = 30,
+    const std::shared_ptr<prometheus::Registry> &extra_registry = nullptr,
+    const MetricsHistory *extra_history = nullptr) {
   const auto families = registry->Collect();
   std::span<const prometheus::MetricFamily> fam_view(families);
 
@@ -243,63 +245,80 @@ inline std::string build_stats_html(
   // blow up the card height and break the no-scroll layout.
   constexpr std::size_t kMaxSeriesPerTile = 6;
 
+  const auto render_tile =
+      [&](const prometheus::MetricFamily &family, const MetricsHistory *hist) {
+        if (family.metric.empty()) {
+          return;
+        }
+        html << "<div class=\"tile\">\n";
+        html << "<div class=\"tname\">" << escape_html(family.name)
+             << "</div>\n";
+        if (!family.help.empty()) {
+          html << "<div class=\"thelp\">" << escape_html(family.help)
+               << "</div>\n";
+        }
+        html << "<div class=\"vals\">\n";
+        std::span<const prometheus::ClientMetric> mview(family.metric);
+        const std::size_t shown =
+            std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
+        // ranges::views::take — C++23 сахар вместо ручного min+for
+        for (const auto &metric : mview | std::views::take(shown)) {
+          const std::string labels = format_labels(metric.label);
+          html << "<div class=\"vrow\"><span class=\"labels\">"
+               << escape_html(labels) << "</span> <span class=\"val\">"
+               << escape_html(format_metric_value(metric, family.type))
+               << "</span></div>\n";
+        }
+        if (mview.size() > shown) {
+          html << "<div class=\"vrow more\">+" << (mview.size() - shown)
+               << " more</div>\n";
+        }
+        html << "</div>\n";
+
+        // One compact sparkline per tile: the family's representative series
+        // (unlabeled/total if present, else the most active labeled series).
+        if (hist && hist->has_family(family.name)) {
+          const bool as_rate =
+              (family.type == prometheus::MetricType::Counter ||
+               family.type == prometheus::MetricType::Histogram ||
+               family.type == prometheus::MetricType::Summary);
+          const auto series = hist->get_series(family.name, 16);
+          const MetricsHistory::Series *repr = nullptr;
+          double best = -1.0;
+          for (const auto &s : series) {
+            if (s.m_labels.empty()) {
+              repr = &s;
+              break;
+            }
+            const double last =
+                s.m_points.empty() ? 0.0 : s.m_points.back().second;
+            if (last > best) {
+              best = last;
+              repr = &s;
+            }
+          }
+          if (repr) {
+            const std::string svg =
+                build_sparkline_svg(repr->m_points, as_rate, window_minutes);
+            if (!svg.empty()) {
+              html << "<div class=\"sparkwrap\"><div class=\"cap\">last "
+                   << window_minutes << "m</div>" << svg << "</div>\n";
+            }
+          }
+        }
+
+        html << "</div>\n";
+      };
+
   for (const auto &family : fam_view) {
-    if (family.metric.empty()) {
-      continue;
-    }
-    html << "<div class=\"tile\">\n";
-    html << "<div class=\"tname\">" << escape_html(family.name) << "</div>\n";
-    if (!family.help.empty()) {
-      html << "<div class=\"thelp\">" << escape_html(family.help) << "</div>\n";
-    }
-    html << "<div class=\"vals\">\n";
-    std::span<const prometheus::ClientMetric> mview(family.metric);
-    const std::size_t shown = std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
-    // ranges::views::take — C++23 сахар вместо ручного min+for
-    for (const auto &metric : mview | std::views::take(shown)) {
-      const std::string labels = format_labels(metric.label);
-      html << "<div class=\"vrow\"><span class=\"labels\">" << escape_html(labels)
-           << "</span> <span class=\"val\">"
-           << escape_html(format_metric_value(metric, family.type))
-           << "</span></div>\n";
-    }
-    if (mview.size() > shown) {
-      html << "<div class=\"vrow more\">+" << (mview.size() - shown) << " more</div>\n";
-    }
-    html << "</div>\n";
+    render_tile(family, history);
+  }
 
-    // One compact sparkline per tile: the family's representative series
-    // (unlabeled/total if present, else the most active labeled series).
-    if (history && history->has_family(family.name)) {
-      const bool as_rate =
-          (family.type == prometheus::MetricType::Counter ||
-           family.type == prometheus::MetricType::Histogram ||
-           family.type == prometheus::MetricType::Summary);
-      const auto series = history->get_series(family.name, 16);
-      const MetricsHistory::Series *repr = nullptr;
-      double best = -1.0;
-      for (const auto &s : series) {
-        if (s.m_labels.empty()) {
-          repr = &s;
-          break;
-        }
-        const double last = s.m_points.empty() ? 0.0 : s.m_points.back().second;
-        if (last > best) {
-          best = last;
-          repr = &s;
-        }
-      }
-      if (repr) {
-        const std::string svg =
-            build_sparkline_svg(repr->m_points, as_rate, window_minutes);
-        if (!svg.empty()) {
-          html << "<div class=\"sparkwrap\"><div class=\"cap\">last "
-               << window_minutes << "m</div>" << svg << "</div>\n";
-        }
-      }
+  if (extra_registry) {
+    const auto extra_families = extra_registry->Collect();
+    for (const auto &family : extra_families) {
+      render_tile(family, extra_history);
     }
-
-    html << "</div>\n";
   }
 
   html << "</div>\n</body>\n</html>\n";

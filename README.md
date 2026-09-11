@@ -332,7 +332,12 @@ python3 rate_limit_test.py --expect-zero
 `scripts/generate-grafana-dashboards.py`). Типы: `counter` (нарастающий итог),
 `gauge` (мгновенное значение), `histogram` (с _bucket/_sum/_count).
 
-### Распределённая трассировка (воркер, реестр `l2_worker`)
+### Распределённая трассировка (общий реестр `l2_common`)
+
+Метрики трассировки регистрируются в общем (observability) реестре
+`l2_common` и экспонируются на всех трёх портах метрик — l2-proxy (`19090`),
+l2-worker (`19091`) и l2-server (`19092`). В каждом режиме реестр `l2_common`
+подмешивается к собственному реестру режима.
 
 | Метрика | Тип | Описание |
 |---|---|---|
@@ -376,10 +381,10 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 `l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size`
 
 > Видимость метрик: `l2_worker_sentry_*` (как и `l2_tracing_*`)
-> регистрируются в общем (worker) реестре и экспонируются только на порту
-> l2-worker (`19091/metrics`). В режимах l2-proxy (19090) и l2-server (19092)
-> счётчики доставки Sentry не экспонируются — это общий паттерн для
-> кросс-сервисных метрик наблюдаемости, не специфика Sentry.
+> регистрируются в общем реестре `l2_common`, экспонируемом на всех портах
+> метрик — l2-proxy (`19090`), l2-worker (`19091`) и l2-server (`19092`).
+> Клиент Sentry создаётся во всех режимах, поэтому в каждом процессе счётчики
+> доставки отражают активность именно этого процесса (tag `service` = режим).
 
 Self-hosted Sentry-совместимый сервер также доступен как профиль docker-compose
 для постоянной (не E2E-разовой) интеграции стека с реальным Sentry-каналом:
@@ -517,6 +522,10 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_sentry_events_failed_total` | counter | — | Sentry-события не доставлены или сброшены при заполненной очереди |
 | `l2_worker_sentry_queue_size` | gauge | — | Sentry-события в асинхронной очереди |
 | `l2_worker_graceful_shutdown_seconds` | gauge | — | Длительность drain при graceful shutdown (от SIGTERM до выхода), `0` в работе |
+
+> Строки `l2_worker_sentry_*` в этой таблице и блок `l2_tracing_*` выше
+> регистрируются не в реестре воркера, а в общем реестре `l2_common` и
+> экспонируются на всех трёх портах метрик (19090/19091/19092).
 
 ### l2-server
 

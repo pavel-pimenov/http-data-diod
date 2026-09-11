@@ -1,3 +1,38 @@
+# feat(metrics): единый реестр l2_common — видимость l2_tracing_*/l2_worker_sentry_* на всех портах
+
+## Date: 2026-09-11
+
+### Что сделано
+- Введён общий (observability) реестр `AppContext::m_common_registry` +
+  `m_common_stats_history` (`init_common`, stop в деструкторе).
+- Метрики распределённой трассировки (`l2_tracing_*`) перенесены из
+  `m_worker_registry` в `m_common_registry`.
+- Метрики доставки Sentry (`l2_worker_sentry_*`) вынесены из `WorkerMetrics`
+  в новый `SentryMetrics` (`m_sentry_metrics`), регистрируются в
+  `m_common_registry`; `SentryClient` читает их оттуда.
+- Реестр `l2_common` подмешивается (`Exposer::RegisterCollectable`) ко всем
+  трём экспозерам: 19090 (proxy), 19091 (worker), 19092 (l2-server). Теперь
+  в каждом процессе счётчики наблюдаемости отражают активность именно этого
+  процесса (dummy-реестры не экспонируются — только общие метрики).
+- `build_stats_html` расширен параметрами `extra_registry`/`extra_history`:
+  `/stats` воркера (19093) и прокси рендерят плитки `l2_common` дополнительно
+  к своему реестру (sparkline-история общая для common-метрик).
+- README: раздел трассировки переведён на реестр `l2_common`, обновлена
+  заметка о видимости Sentry-метрик и каталог.
+- TODO.md: пункт 5 отмечен реализованным.
+
+### Верификация
+- `./rebuild-and-run.sh` ✅ (unit tests: 441 + 99 cases pass; health-check all ✅;
+  golden-metrics check ✅)
+- На портах 19090/19091/19092 присутствуют `l2_tracing_*` и
+  `l2_worker_sentry_*` с реальными значениями каждого процесса
+  (например, `l2_tracing_spans_sent_total`: proxy=8, worker=6, server=1).
+- `/stats` воркера (19093) и прокси (8888) рендерят плитки `l2_common`.
+- `message_counter.py --iterations 1 --concurrent 1` ✅ (POST/GET, 0 потерь).
+- `scripts/run-coverage.sh` ✅ (гейт `--fail-under-line 90`), clang-tidy ✅.
+
+---
+
 # test(coverage): branch round — sentry_client send_envelope + stats_page + shutdown-flush
 
 ## Date: 2026-09-11

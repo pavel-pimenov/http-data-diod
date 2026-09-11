@@ -68,6 +68,15 @@ struct TracingMetrics {
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
+struct SentryMetrics {
+  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
+  // Intentional design for Prometheus metrics
+  prometheus::Counter &m_events_sent;
+  prometheus::Counter &m_events_failed;
+  prometheus::Gauge &m_queue_size;
+  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+};
+
 struct WorkerMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
   // Intentional design for Prometheus metrics
@@ -102,10 +111,6 @@ struct WorkerMetrics {
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
   prometheus::Gauge &m_health_ready;
-  // Sentry event delivery: sent/failed counters and the queued-pending gauge.
-  prometheus::Counter &m_sentry_events_sent;
-  prometheus::Counter &m_sentry_events_failed;
-  prometheus::Gauge &m_sentry_queue_size;
   // Last graceful-shutdown drain duration in seconds (time from SIGTERM to
   // full shutdown, 0 while running). Для prod-мониторинга деплоев.
   prometheus::Gauge &m_graceful_shutdown_seconds;
@@ -214,7 +219,13 @@ public:
   std::shared_ptr<prometheus::Registry> m_proxy_registry;
   std::shared_ptr<prometheus::Registry> m_worker_registry;
   std::shared_ptr<prometheus::Registry> m_server_registry;
+  // Cross-cutting observability metrics (distributed tracing + Sentry
+  // delivery). Registered once here and exposed alongside each mode's own
+  // registry on every metrics port (19090/19091/19092) so the counters stay
+  // visible in proxy and l2-server processes too.
+  std::shared_ptr<prometheus::Registry> m_common_registry;
   std::unique_ptr<TracingMetrics> m_tracing_metrics;
+  std::unique_ptr<SentryMetrics> m_sentry_metrics;
   std::shared_ptr<NatsClient> m_nats_client;
   InFlightTracker m_in_flight_tracker;
 
@@ -229,6 +240,7 @@ public:
   std::unique_ptr<MetricsHistory> m_proxy_stats_history;
   std::unique_ptr<MetricsHistory> m_worker_stats_history;
   std::unique_ptr<MetricsHistory> m_server_stats_history;
+  std::unique_ptr<MetricsHistory> m_common_stats_history;
 
   AppContext();
   ~AppContext();

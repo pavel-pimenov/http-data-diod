@@ -17,10 +17,9 @@ AppContext::AppContext() {
   init_server_metrics();
 
   m_sentry = std::make_unique<SentryClient>(
-      m_config.m_sentry_dsn, m_worker.m_metrics->m_sentry_events_sent,
-      m_worker.m_metrics->m_sentry_events_failed,
-      m_worker.m_metrics->m_sentry_queue_size, m_config.m_mode,
-      m_config.m_sentry_environment, m_config.m_sentry_release,
+      m_config.m_sentry_dsn, m_sentry_metrics->m_events_sent,
+      m_sentry_metrics->m_events_failed, m_sentry_metrics->m_queue_size,
+      m_config.m_mode, m_config.m_sentry_environment, m_config.m_sentry_release,
       m_config.m_sentry_timeout_ms, m_config.m_sentry_max_queue_size);
 
   if (m_config.m_mode == "proxy") {
@@ -38,6 +37,9 @@ AppContext::~AppContext() {
   if (m_server_stats_history) {
     m_server_stats_history->stop();
   }
+  if (m_common_stats_history) {
+    m_common_stats_history->stop();
+  }
   m_tracer.reset();
 }
 
@@ -51,34 +53,49 @@ void AppContext::init_common() {
   m_proxy_registry = std::make_shared<prometheus::Registry>();
   m_worker_registry = std::make_shared<prometheus::Registry>();
   m_server_registry = std::make_shared<prometheus::Registry>();
+  m_common_registry = std::make_shared<prometheus::Registry>();
 
   m_proxy_stats_history = std::make_unique<MetricsHistory>(m_proxy_registry);
   m_worker_stats_history = std::make_unique<MetricsHistory>(m_worker_registry);
   m_server_stats_history = std::make_unique<MetricsHistory>(m_server_registry);
+  m_common_stats_history = std::make_unique<MetricsHistory>(m_common_registry);
   m_proxy_stats_history->start();
   m_worker_stats_history->start();
   m_server_stats_history->start();
+  m_common_stats_history->start();
 
   m_tracing_metrics = std::make_unique<TracingMetrics>(TracingMetrics{
-      MetricsManager::create_counter(m_worker_registry,
-                                     "l2_tracing_spans_sent_total",
-                                     "Total number of spans sent to Jaeger"),
       MetricsManager::create_counter(
-          m_worker_registry, "l2_tracing_spans_failed_total",
+          m_common_registry, "l2_tracing_spans_sent_total",
+          "Total number of spans sent to Jaeger"),
+      MetricsManager::create_counter(
+          m_common_registry, "l2_tracing_spans_failed_total",
           "Total number of spans failed to send to Jaeger"),
-      MetricsManager::create_gauge(m_worker_registry, "l2_tracing_queue_size",
+      MetricsManager::create_gauge(m_common_registry, "l2_tracing_queue_size",
                                    "Current size of the tracing span queue"),
-      MetricsManager::create_gauge(m_worker_registry,
-                                   "l2_tracing_last_send_duration_seconds",
-                                   "Duration of the last span send to Jaeger"),
+      MetricsManager::create_gauge(
+          m_common_registry, "l2_tracing_last_send_duration_seconds",
+          "Duration of the last span send to Jaeger"),
       MetricsManager::create_histogram(
-          m_worker_registry, "l2_tracing_send_latency_seconds",
+          m_common_registry, "l2_tracing_send_latency_seconds",
           "Histogram of span batch send latency in seconds",
           histogram_buckets::g_k_latency_ms_to_5s),
       MetricsManager::create_histogram(
-          m_worker_registry, "l2_tracing_queue_time_seconds",
+          m_common_registry, "l2_tracing_queue_time_seconds",
           "Histogram of time spans spend in queue before sending in seconds",
           histogram_buckets::g_k_latency_ms_to_5s)});
+
+  m_sentry_metrics = std::make_unique<SentryMetrics>(SentryMetrics{
+      MetricsManager::create_counter(
+          m_common_registry, "l2_worker_sentry_events_sent_total",
+          "Sentry events successfully delivered"),
+      MetricsManager::create_counter(
+          m_common_registry, "l2_worker_sentry_events_failed_total",
+          "Sentry events that failed to deliver or were dropped while the "
+          "queue was full"),
+      MetricsManager::create_gauge(m_common_registry,
+                                   "l2_worker_sentry_queue_size",
+                                   "Sentry events pending in the async queue")});
 }
 
 void AppContext::init_proxy_metrics() {
@@ -255,16 +272,6 @@ void AppContext::init_worker_metrics() {
             m_worker_registry, "l2_worker_health_ready",
             "Readiness state (1 = ready, 0 = not ready) mirrored from "
             "/health/ready"),
-        MetricsManager::create_counter(
-            m_worker_registry, "l2_worker_sentry_events_sent_total",
-            "Sentry events successfully delivered"),
-        MetricsManager::create_counter(
-            m_worker_registry, "l2_worker_sentry_events_failed_total",
-            "Sentry events that failed to deliver or were dropped while the "
-            "queue was full"),
-        MetricsManager::create_gauge(m_worker_registry,
-                                     "l2_worker_sentry_queue_size",
-                                     "Sentry events pending in the async queue"),
         MetricsManager::create_gauge(
             m_worker_registry, "l2_worker_graceful_shutdown_seconds",
             "Last graceful-shutdown drain duration in seconds (time from "

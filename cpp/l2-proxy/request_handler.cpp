@@ -75,7 +75,9 @@ void RequestHandler::handle_get(const httplib::Request &req,
   if (req.path == "/stats") {
     res.set_content(build_stats_html("l2-proxy", m_ctx.m_proxy_registry,
                                      m_ctx.m_proxy_stats_history.get(),
-                                     parse_stats_window(req.params)),
+                                     parse_stats_window(req.params),
+                                     m_ctx.m_common_registry,
+                                     m_ctx.m_common_stats_history.get()),
                     "text/html; charset=utf-8");
     return;
   }

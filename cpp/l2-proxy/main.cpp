@@ -191,6 +191,9 @@ void run_proxy(AppContext &app_ctx) {
   RequestHandler request_handler(app_ctx, stats_logger);
 
   auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry);
+  // Cross-cutting observability metrics (l2_tracing_*, l2_worker_sentry_*)
+  // are served on every mode's metrics port via the shared common registry.
+  exposer->RegisterCollectable(app_ctx.m_common_registry);
 
   if (app_ctx.m_proxy.m_per_ip_metrics_collector) {
     exposer->RegisterCollectable(app_ctx.m_proxy.m_per_ip_metrics_collector);
@@ -243,6 +246,7 @@ void run_worker(AppContext &app_ctx) {
   stats_logger.start_periodic_logging();
 
   auto exposer = create_metrics_exposer(19091, app_ctx.m_worker_registry);
+  exposer->RegisterCollectable(app_ctx.m_common_registry);
 
   L2Worker worker(app_ctx);
 
@@ -278,7 +282,9 @@ void run_worker(AppContext &app_ctx) {
     res.set_content(
         build_stats_html("l2-worker", app_ctx.m_worker_registry,
                          app_ctx.m_worker_stats_history.get(),
-                         parse_stats_window(req.params)),
+                         parse_stats_window(req.params),
+                         app_ctx.m_common_registry,
+                         app_ctx.m_common_stats_history.get()),
         "text/html; charset=utf-8");
   });
 
@@ -306,6 +312,7 @@ void run_l2_server(AppContext &app_ctx) {
   ServerHandler server_handler(app_ctx);
 
   auto exposer = create_metrics_exposer(19092, app_ctx.m_server_registry);
+  exposer->RegisterCollectable(app_ctx.m_common_registry);
 
   Logger::info("C++ L2 Server listening on {}://0.0.0.0:{}",
                app_ctx.m_config.m_l2_server_protocol,
