@@ -1,3 +1,23 @@
+# refactor(exposer): общий реестр как параметр create_metrics_exposer
+
+## Date: 2026-09-11
+
+### Что сделано
+- `main.cpp`: `create_metrics_exposer(port, registry, common = nullptr)`
+  регистрирует оба реестра; три call-site (`run_proxy`/`run_worker`/
+  `run_l2_server`) упрощены, дубли `RegisterCollectable(m_common_registry)`
+  убраны. Поясняющий комментарий переехал внутрь фабрики (интерфейс
+  изменился — правка комментария допустима).
+- `TODO.md`: убран китайский артефакт `针对` в «Замечании по окружению».
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). `l2_common` на всех трёх портах: 19090=8, 19091=6, 19092=1 —
+  как до рефактора (behavior-preserving). Golden-check: только известный
+  `l2_worker_db_pool_connections` (нет СУБД).
+
+---
+
 # test(unity): ODR-аудит тестовых TU + guard-комментарий в CMakeLists
 
 ## Date: 2026-09-11

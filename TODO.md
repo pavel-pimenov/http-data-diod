@@ -117,6 +117,6 @@ drain, reply-loss).
 
 ## Замечание по окружению
 
-NATS-ветка отключена — все изменения и тесты针对 NATS-режима.
+NATS-ветка отключена — все изменения и тесты только для NATS-режима.
 Oracle-профиль запускается по demand: `docker compose --profile oracle up -d`.
 Sentry (glitchtip) запускается по demand: `docker compose --profile glitchtip up -d`.
