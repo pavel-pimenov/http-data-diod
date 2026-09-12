@@ -1,3 +1,23 @@
+# fix(compose): postgres pin 16-alpine под существующий volume
+
+## Date: 2026-09-12
+
+### Что сделано
+- `docker-compose.yml`: образ `postgres` `17-alpine` → `16-alpine`.
+  Volume `postgres-data` инициализирован PG16, 17-й на нём падает
+  (`FATAL: database files are incompatible`, restart-loop). Пин без потери
+  данных (в отличие от wipe); апгрейд мажора только через `pg_upgrade`.
+  `glitchtip-db` (отдельный volume, профиль по demand) не тронут.
+
+### Результат
+- `postgres` healthy (`pg_isready` OK). Ретрай воркера сам поднял пул
+  (`pool ready 1..5 sessions`) — ничего перезапускать не пришлось.
+- Golden-check: **66/66 complete** (закрыт `l2_worker_db_pool_connections`).
+- `scripts/db-gateway-e2e-test.py --base-url http://localhost:8888`:
+  **7/7 passed** (read-only gate, ping, oracle-404).
+
+---
+
 # chore(tidy): full sweep — 0 замечаний в проектном коде
 
 ## Date: 2026-09-12
