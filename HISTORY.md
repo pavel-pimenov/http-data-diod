@@ -1,3 +1,27 @@
+# test(oracle): E2E gateway доказан, стенд возвращён к дефолтам
+
+## Date: 2026-09-12
+
+### Что сделано
+- Поднят `oracle` (`--profile oracle up`, ~4.5 мин до READY; память хоста
+  3G→1G — впритык, но стабильно, без OOM).
+- Временно `DB_ORACLE_ENABLED=true` (worker+proxy через env override):
+  worker `pool ready (0..5, oracle:1521/XEPDB1)`; `GET
+  /v1/sql/oracle/ping` → ok (424ms cold); `POST .../query
+  {"sql":"select 1 as value from dual"}` → 200, `row_count=1`, `VALUE=1`.
+- Возврат: override снят (plain `up -d`, worker снова `false`), `oracle`
+  остановлен (исходное состояние до сессии — demand-профиль; держать его
+  ради 2G RAM нет смысла). Повтор: `docker compose --profile oracle up -d
+  oracle` + `DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy`.
+- Попутно: код 137 у oracle — это SIGKILL при `stop` (медленный SIGTERM),
+  а не обязательно OOM, как казалось раньше.
+
+### Результат
+- `message_counter.py` ✅ после возврата. Коммитится только эта запись
+  (compose-дефолты не менялись).
+
+---
+
 # fix(compose): postgres pin 16-alpine под существующий volume
 
 ## Date: 2026-09-12
