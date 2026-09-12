@@ -2,8 +2,8 @@
 
 ## Текущий статус (17 — все файлы ≥90% строкового покрытия)
 
-Raунды покрытия юнит-тестами: **542 test cases**,
-**2 532 assertions**. Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **544 test cases**,
+**2 619 assertions** (test_components 445/1812 + test_proxy_core 99/807). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
 - **Lines: 97.9%** (9032/9224), гейт 90% — пройден
 - **Functions: 95.2%** (1188/1248)
@@ -101,6 +101,19 @@ drain, reply-loss).
 `l2_common` (новый `AppContext::m_common_registry`), который подмешивается
 к собственному реестру режима на каждом экспозере. `/stats` воркера и
 прокси рендерят плитки `l2_common` дополнительно к своему реестру.
+
+## Заморожено (не делать, решение 2026-09-11)
+
+- l2-server — не прод (тестовый стаб для worker): метрики/stats/дашборды/алерты
+  не развивать, отдельный `/stats` и per-mode панели не делать (см. AGENTS.md).
+- Branch-хвосты `sentry_client` (~53%), `trace_logger`/`tracing_helpers`
+  (~55–61%), `stats_page` (~59%) дальше не гнать: общий % топчется из-за
+  ветвей макросов Catch2 в тест-файлах. Держать гейт lines ≥90%.
+- Переименование `l2_worker_sentry_*` → `l2_sentry_*` не делать (ломает
+  дашборды; имя зафиксировано как legacy в общем реестре `l2_common`).
+- Отложено до востребования: lazy-start 4× `MetricsHistory`, unit-тест
+  `init_proxy_components()` с линковкой NATS, мелочи `test_app_context.cpp`
+  (`AppCtxEnvGuard` restore старого значения MODE).
 
 ## Замечание по окружению
 

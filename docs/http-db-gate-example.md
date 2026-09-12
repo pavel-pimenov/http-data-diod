@@ -7,7 +7,7 @@
 Схема запроса `POST /v1/sql/oracle/query`:
 
 ```
-client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
+client ──POST /v1/sql/oracle/query──▶ l2-proxy (host 8890 → 8888)
                                           │  валидация, маршрутизация
                                           ▼
                                      NATS  service.db.query
@@ -93,7 +93,7 @@ L2_WORKER_DOCKER_TARGET=runtime-db DB_ORACLE_ENABLED=true docker compose up -d -
 ```
 docker compose logs l2-worker | grep -i "DB executor 'oracle'"   # ждать "pool ready"
 docker compose up -d --profile oracle                            # если oracle ещё не поднят
-curl http://localhost:8888/v1/sql/oracle/ping                    # {"status":"ok",...}
+curl http://localhost:8890/v1/sql/oracle/ping                    # {"status":"ok",...}
 ```
 
 ## ld.so регистрация подробно (что делает runtime-db)
@@ -202,7 +202,7 @@ environment:
 ### 1. Список баз данных
 
 ```bash
-curl http://localhost:8888/v1/sql
+curl http://localhost:8890/v1/sql
 ```
 
 ```json
@@ -216,7 +216,7 @@ curl http://localhost:8888/v1/sql
 ### 2. Ping базы
 
 ```bash
-curl http://localhost:8888/v1/sql/oracle/ping
+curl http://localhost:8890/v1/sql/oracle/ping
 ```
 
 ```json
@@ -226,7 +226,7 @@ curl http://localhost:8888/v1/sql/oracle/ping
 ### 3. Простой SELECT
 
 ```bash
-curl -X POST http://localhost:8888/v1/sql/oracle/query \
+curl -X POST http://localhost:8890/v1/sql/oracle/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT id, message, created_at FROM app_user.demo_messages ORDER BY id"}'
 ```
@@ -253,7 +253,7 @@ curl -X POST http://localhost:8888/v1/sql/oracle/query \
 ### 4. Запрос с bind-переменной
 
 ```bash
-curl -X POST http://localhost:8888/v1/sql/oracle/query \
+curl -X POST http://localhost:8890/v1/sql/oracle/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT message FROM app_user.demo_messages WHERE id = :id", "params": {"id": 2}}'
 ```
@@ -273,7 +273,7 @@ curl -X POST http://localhost:8888/v1/sql/oracle/query \
 ### 4b. То же самое для PostgreSQL (включён по умолчанию)
 
 ```bash
-curl -X POST http://localhost:8888/v1/sql/postgres/query \
+curl -X POST http://localhost:8890/v1/sql/postgres/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT id, message FROM demo_messages ORDER BY id"}'
 ```

@@ -1,3 +1,99 @@
+# chore(ports): host-порт l2-proxy 8888 → 8890 (конфликт с ptokax-hub)
+
+## Date: 2026-09-11
+
+### Что сделано
+- Хост-привязка `l2-proxy` в `docker-compose.yml`: `"8888:8888"` →
+  `"8890:8888"`. Контейнерный порт остаётся `8888` (`PROXY_PORT`,
+  `config.hpp/cpp` дефолты, `nginx.conf` upstream `l2-proxy:8888`,
+  `Dockerfile`/`compose` healthcheck `localhost:8888` — всё это
+  внутриконтейнерное и не менялось).
+- Хост-скрипты переведены на `8890`: `health-check.sh` (`PROXY_PORT`
+  default), `message_counter.py` (fallback), `rate_limit_test.py`,
+  `fault_tolerance_test.py`, `scripts/sentry-e2e-test.py`,
+  `run-glitchtip-stack.sh`, `e2e-graceful-shutdown-test.py`,
+  `db-gateway-e2e-test.py`, пример в `load_test.py`.
+- Доки: `README.md` (таблица `/stats`), `docs/openapi/http-db-gate.yaml`,
+  `docs/http-db-gate-example.md`.
+- Временный `/tmp/l2proxy-ports.yml` больше не нужен, удалён.
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests 445/1812 + 99/807 passed),
+  `message_counter.py --iterations 1 --concurrent 1` ✅ (0 потерь, через
+  nginx `:7777` по дефолту).
+- Golden-check: после трафика остался 1 missing —
+  `l2_worker_db_pool_connections` (нет ни одного DB pool: `postgres`
+  сломан на хосте, oracle не поднят). Предсуществующее окружение, к порту
+  отношения не имеет; лечится поднятием СУБД, а не кодом.
+
+---
+
+# fix(tests): UB в test_app_context::has_family + сборка и прогон стенда
+
+## Date: 2026-09-11
+
+### Что сделано
+- `test_app_context.cpp`: исправлено UB в `has_family()` — итераторы
+  `begin()`/`end()` брались от двух разных временных векторов
+  (`family_names(registry)` дважды), из-за чего в изолированном прогоне
+  `has_family(m_proxy_registry, "l2_tracing_*")` ложно возвращал `true`,
+  а в полном прогоне падал SIGSEGV (`test_app_context.cpp:71`) с обрывом
+  прогона. Теперь вектор кэшируется в локальной переменной.
+- `test_app_context.cpp`: `EnvVarGuard` → `AppCtxEnvGuard` — одноимённый
+  класс в `test_components.cpp` конфликтовал при unity-сборке
+  (`redefinition`, `Unity/unity_0_cxx.cxx`).
+- Проверка по AGENTS.md: `./rebuild-and-run.sh` ✅ — unit tests
+  `test_components` 445 cases / 1812 assertions + `test_proxy_core`
+  99 / 807, всё passed; `message_counter.py --iterations 1 --concurrent 1`
+  ✅ (0 потерь; прогон через `--url http://127.0.0.1:8899`, см. ниже).
+- Подтверждено в проде: `run_proxy → init_proxy_components()` (новый free
+  function) — `Connected to NATS`, `listening on 8888`, `/health/ready 200`,
+  `/stats 200`, `l2_common` виден на 19090 (proxy, spans=8) и 19091
+  (worker, spans=6).
+
+### Замечания по окружению (не код, фиксирую как есть)
+- Хост-порт `8888` занят чужим контейнером `ptokax-hub` (не из этого
+  compose-проекта) — штатный `up` не может поднять `l2-proxy`. Проверка
+  выполнена через временный override `/tmp/l2proxy-ports.yml`
+  (`8899:8888`, `19095:19090`, с `!override`) + `rm/recreate l2-proxy`;
+  в репозиторий ничего не добавлялось. Перед следующим штатным прогоном
+  либо остановить `ptokax-hub`, либо переиспользовать override.
+- Первый старт `l2-proxy` получил битый `resolv.conf` без `127.0.0.11`
+  (транзиентный глитч embedded-DNS после частичного `up`); чистый recreate
+  вылечил, `getent hosts nats-server` OK.
+- `postgres` в restart-loop: volume с данными PG16 против образа PG17
+  (`database files are incompatible`). Предсуществует, к изменениям
+  отношения не имеет (`DB_POSTGRES_ENABLED=false`); volume не трогал.
+
+---
+
+# chore(policy,contract): l2-server не прод + контракт proxy-init + заморозка долгов
+
+## Date: 2026-09-11
+
+### Что сделано
+- `AGENTS.md`: зафиксировано — l2-server не продакшен-режим (тестовый стаб
+  для worker); метрики/stats/дашборды/алерты для него не развивать, новых
+  per-mode панелей и отдельного `/stats` не делать; общий реестр `l2_common`
+  туда только подмешивается как есть.
+- Контрактная дыра ctor закрыта: `AppContext` больше не инициализирует
+  proxy-компоненты неявно — `ProxyContext` документирован как null до
+  `init_proxy_components()`; добавлен
+  `AppContext::is_proxy_components_initialized()` (маркеры — NATS-клиент +
+  duplicate-detector); `init_proxy_components()` идемпотентна (повторный
+  вызов — warn + skip). `RequestHandler`/`StatsLogger` null-tolerant,
+  поведение не меняется.
+- `TODO.md`: раздел «Заморожено» — l2-server, branch-хвосты
+  (sentry/tracing/stats_page, держать гейт lines ≥90%), переименование
+  `l2_worker_sentry_*`, lazy `MetricsHistory`, unit-тест proxy_init с NATS,
+  мелочи `test_app_context.cpp`.
+
+### Результат
+- Требуется `./rebuild-and-run.sh` + `message_counter.py --iterations 1
+  --concurrent 1` перед коммитом (по AGENTS.md).
+
+---
+
 # test(coverage): branch round — stats_page extra-registry (l2_common) rendering
 
 ## Date: 2026-09-11

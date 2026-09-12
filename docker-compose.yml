@@ -398,7 +398,9 @@ services:
     stop_grace_period: 40s
     mem_limit: ${L2_PROXY_MEM_LIMIT:-1g}
     ports:
-      - "8888:8888"
+      # Host 8890: 8888 is squatted by an unrelated host service (ptokax-hub).
+      # Container port stays 8888 (PROXY_PORT, nginx upstream, healthchecks).
+      - "8890:8888"
       - "19090:19090"
     extra_hosts:
       - "host.docker.internal:host-gateway"

@@ -15,7 +15,7 @@ info:
   contact:
     name: http-data-diod
 servers:
-  - url: http://localhost:8888
+  - url: http://localhost:8890
     description: l2-proxy (локальный dev)
 tags:
   - name: SQL Gateway

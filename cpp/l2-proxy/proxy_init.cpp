@@ -9,6 +9,10 @@
 #include "rate_limiter_per_ip.hpp"
 
 void init_proxy_components(AppContext &app_ctx) {
+  if (app_ctx.is_proxy_components_initialized()) {
+    Logger::warn("Proxy components already initialized, skipping re-init");
+    return;
+  }
   Logger::info("Using NATS for messaging (host={}:{}, subject={})",
                app_ctx.m_config.m_nats_host, app_ctx.m_config.m_nats_port,
                app_ctx.m_config.m_nats_subject);

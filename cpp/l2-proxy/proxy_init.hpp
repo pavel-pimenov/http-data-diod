@@ -8,6 +8,8 @@ class AppContext;
 // Lives in its own TU so AppContext stays constructible in unit tests
 // without linking the NATS client library (tests run in worker/l2-server
 // modes, where the proxy components are never created).
+// Contract: run_proxy() calls it once before RequestHandler/StatsLogger;
+// AppContext::is_proxy_components_initialized() reports whether it ran.
 void init_proxy_components(AppContext &app_ctx);
 
 #endif // PROXY_INIT_HPP

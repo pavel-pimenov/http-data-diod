@@ -173,6 +173,8 @@ class DuplicateDetector;
 class SentryClient;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+// Proxy-режим требует init_proxy_components() после ctor (см. proxy_init.hpp):
+// до её вызова указатели ниже null, RequestHandler/StatsLogger это допускают.
 struct ProxyContext {
   std::unique_ptr<ProxyMetrics> m_metrics;
   std::unique_ptr<HttpPoolMetrics> m_http_pool_metrics;
@@ -244,6 +246,8 @@ public:
 
   AppContext();
   ~AppContext();
+
+  [[nodiscard]] bool is_proxy_components_initialized() const;
 
 private:
   void init_common();

@@ -4,7 +4,7 @@
 # Usage: ./health-check.sh [service] [max_retries] [interval]
 #
 # Services:
-#   proxy  - L2 Service Proxy (port 8888)
+#   proxy  - L2 Service Proxy (host port 8890 -> container 8888)
 #   worker - L2 Service Worker (health 19093, metrics 19091)
 #   server - L2 Server (port 8088 or 3333)
 #   all    - Check all services (default)
@@ -27,7 +27,7 @@ MAX_RETRIES="${2:-2}"
 RETRY_DELAY=5
 
 # Service ports
-PROXY_PORT="${PROXY_PORT:-8888}"
+PROXY_PORT="${PROXY_PORT:-8890}"
 WORKER_METRICS_PORT="${WORKER_METRICS_PORT:-19091}"
 WORKER_HEALTH_PORT="${WORKER_HEALTH_PORT:-19093}"
 SERVER_PORT="${SERVER_PORT:-8088}"

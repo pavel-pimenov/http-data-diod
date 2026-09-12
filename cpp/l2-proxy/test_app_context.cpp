@@ -7,16 +7,16 @@
 
 namespace {
 
-class EnvVarGuard {
+class AppCtxEnvGuard {
 public:
-  EnvVarGuard(const char *name, const char *value) : m_name(name) {
+  AppCtxEnvGuard(const char *name, const char *value) : m_name(name) {
     if (value == nullptr) {
       unsetenv(m_name.c_str());
     } else {
       setenv(m_name.c_str(), value, 1);
     }
   }
-  ~EnvVarGuard() { unsetenv(m_name.c_str()); }
+  ~AppCtxEnvGuard() { unsetenv(m_name.c_str()); }
 
 private:
   std::string m_name;
@@ -33,9 +33,8 @@ std::vector<std::string> family_names(
 
 bool has_family(const std::shared_ptr<prometheus::Registry> &registry,
                 const std::string &name) {
-  return std::find(family_names(registry).begin(),
-                   family_names(registry).end(),
-                   name) != family_names(registry).end();
+  const auto names = family_names(registry);
+  return std::find(names.begin(), names.end(), name) != names.end();
 }
 
 const std::vector<std::string> &common_l2_families() {
@@ -70,7 +69,7 @@ void require_common_registry_only_on_common(AppContext &ctx) {
 
 TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
           "[app_context]") {
-  EnvVarGuard mode("MODE", "worker");
+  AppCtxEnvGuard mode("MODE", "worker");
 
   AppContext ctx;
 
@@ -96,7 +95,7 @@ TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
 
 TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
           "[app_context]") {
-  EnvVarGuard mode("MODE", "l2-server");
+  AppCtxEnvGuard mode("MODE", "l2-server");
 
   AppContext ctx;
 

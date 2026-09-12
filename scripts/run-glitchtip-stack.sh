@@ -79,7 +79,7 @@ fi
 log_info "Waiting for l2-server + l2-proxy + l2-worker to come back up (max 60 s)..."
 HEALTHY=0
 for i in $(seq 1 60); do
-    if curl -sf http://localhost:8888/health/ready >/dev/null 2>&1 \
+    if curl -sf http://localhost:8890/health/ready >/dev/null 2>&1 \
        && curl -sf http://localhost:19093/health/ready >/dev/null 2>&1; then
         HEALTHY=1
         break

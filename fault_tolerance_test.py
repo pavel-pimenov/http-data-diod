@@ -71,8 +71,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-PROXY_URL = 'http://localhost:8888'
-PROXY_READY_URL = 'http://localhost:8888/health/ready'
+PROXY_URL = 'http://localhost:8890'
+PROXY_READY_URL = 'http://localhost:8890/health/ready'
 WORKER_READY_URL = 'http://localhost:19093/health/ready'
 PROXY_METRICS_URL = 'http://localhost:19090/metrics'
 WORKER_METRICS_URL = 'http://localhost:19091/metrics'

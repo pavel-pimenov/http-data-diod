@@ -37,6 +37,11 @@ AppContext::~AppContext() {
   m_tracer.reset();
 }
 
+bool AppContext::is_proxy_components_initialized() const {
+  return m_nats_client != nullptr &&
+         m_proxy.m_duplicate_detector != nullptr;
+}
+
 void AppContext::init_common() {
   m_config.load_from_env();
   if (!m_config.validate()) {

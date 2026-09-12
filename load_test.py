@@ -7,7 +7,7 @@ and measures latency, throughput, and error rates.
 
 Usage:
   python3 load_test.py --requests 1000 --concurrent 100
-  python3 load_test.py --requests 5000 --concurrent 200 --url http://localhost:8888
+  python3 load_test.py --requests 5000 --concurrent 200 --url http://localhost:8890
 """
 
 import asyncio
