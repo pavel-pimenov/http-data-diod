@@ -1,3 +1,22 @@
+# chore(hygiene): удалён пустой ca-bundle.crt + свежий комментарий в run_proxy
+
+## Date: 2026-09-11
+
+### Что сделано
+- Удалён `ca-bundle.crt` (0 байт, нигде не referenced) — случайно уехал
+  в коммит волны портов через `git add -A`.
+- `main.cpp::run_proxy`: исторический комментарий («were created inside the
+  ctor before») заменён актуальным контрактным («initialized here, not in
+  the ctor»); контракт также зафиксирован в `proxy_init.hpp` и
+  `AppContext::is_proxy_components_initialized()`.
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). Golden-check: только известный `l2_worker_db_pool_connections`
+  (нет СУБД в окружении).
+
+---
+
 # test(ports): валидация порта 8890 — rate_limit + dedup
 
 ## Date: 2026-09-11

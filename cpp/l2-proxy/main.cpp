@@ -191,8 +191,7 @@ std::unique_ptr<prometheus::Exposer> create_metrics_exposer(
 }
 
 void run_proxy(AppContext &app_ctx) {
-  // NATS client, rate limiters and duplicate detector were created inside the
-  // AppContext ctor before; they now live in init_proxy_components() so
+  // Proxy runtime components are initialized here (not in the ctor) so
   // AppContext stays constructible in unit tests without the NATS library.
   init_proxy_components(app_ctx);
 
