@@ -314,6 +314,9 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
 bool RequestHandler::record_and_maybe_reject_duplicate(
     const std::string &client_id, const std::string &client_ip,
     const std::string &body, httplib::Response &res) {
+  if (!m_ctx.m_proxy.m_duplicate_detector) {
+    return false;
+  }
   const auto body_hash = compute_sha256_hex(body);
   if (!m_ctx.m_proxy.m_duplicate_detector
            ->record(client_id, client_ip, body_hash, body)

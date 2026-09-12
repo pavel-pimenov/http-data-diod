@@ -42,6 +42,26 @@
 
 ---
 
+# fix(proxy): null-guard в record_and_maybe_reject_duplicate
+
+## Date: 2026-09-12
+
+### Что сделано
+- Аудит `request_handler.cpp` на незащищённые разыменования опциональных
+  proxy-компонент (актуально после выноса инициализации из ctor):
+  `m_metrics` — всегда из ctor, safe; пары limiter/metrics и collector-ветки
+  везде под guard; `handle_duplicates` под guard.
+- Единственная дыра: `record_and_maybe_reject_duplicate` разыменовывал
+  `m_duplicate_detector` без проверки (полагался на guard в call-site).
+  Добавлен early-return `false` в стиле файла.
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). Golden-check: **complete без оговорок** (postgres-пул жив
+  после волны 16).
+
+---
+
 # test(perf): полный load 5000/200 + rate expect-zero
 
 ## Date: 2026-09-12
