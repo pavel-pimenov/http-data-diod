@@ -38,7 +38,7 @@ bool has_family(const std::shared_ptr<prometheus::Registry> &registry,
 }
 
 const std::vector<std::string> &common_l2_families() {
-  static const std::vector<std::string> kFamilies{
+  static const std::vector<std::string> g_k_families{
       "l2_tracing_spans_sent_total",
       "l2_tracing_spans_failed_total",
       "l2_tracing_queue_size",
@@ -49,7 +49,7 @@ const std::vector<std::string> &common_l2_families() {
       "l2_worker_sentry_events_failed_total",
       "l2_worker_sentry_queue_size",
   };
-  return kFamilies;
+  return g_k_families;
 }
 
 void require_common_registry_only_on_common(AppContext &ctx) {

@@ -1,3 +1,24 @@
+# chore(tidy): clang-tidy точечно + g_-конвенция в test_app_context
+
+## Date: 2026-09-11
+
+### Что сделано
+- Прогнан clang-tidy (builder-образ, compile_commands без unity) по
+  `main.cpp`, `app_context.cpp`, `proxy_init.cpp`, `test_app_context.cpp`:
+  прод-файлы чисты, один варнинг —
+  `readability-identifier-naming` на `static const kFamilies` в тесте.
+- `test_app_context.cpp`: `kFamilies` → `g_k_families` (конвенция проекта:
+  статика с `g_`, как `histogram_buckets::g_k_*`).
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). Recheck tidy по `test_app_context.cpp`: 0 варнингов
+  в проектных файлах (остальное — системные/сторонние заголовки, как
+  фильтрует `run-clang-tidy.sh`). Golden-check: только известный
+  `l2_worker_db_pool_connections` (нет СУБД).
+
+---
+
 # chore(hygiene): удалён пустой ca-bundle.crt + свежий комментарий в run_proxy
 
 ## Date: 2026-09-11
