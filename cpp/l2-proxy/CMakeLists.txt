@@ -443,6 +443,8 @@ if(BUILD_TESTS)
     message(STATUS "Building unit tests with Catch2 and CLI11")
     
     # Component tests
+    # Unity-build constraint: anonymous-namespace names must be unique across
+    # all TUs below (batches merge into one TU; dupes fail with redefinition).
     add_executable(test_components
         test_components.cpp
         test_http_pipeline.cpp

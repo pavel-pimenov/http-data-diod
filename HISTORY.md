@@ -1,3 +1,22 @@
+# test(unity): ODR-аудит тестовых TU + guard-комментарий в CMakeLists
+
+## Date: 2026-09-11
+
+### Что сделано
+- Проверены anonymous-namespace сущности всех TU `test_components`
+  (7 тестовых + прод-источники) и `test_proxy_core` на коллизии имён
+  после инцидента `EnvVarGuard`/`AppCtxEnvGuard`: дубликатов нет.
+- `CMakeLists.txt`: добавлен guard-комментарий про unity-ограничение
+  (уникальность anonymous-имен между TU) — правило неочевидное, уже раз
+  ломало сборку.
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). Golden-check: только известный `l2_worker_db_pool_connections`
+  (нет СУБД в окружении).
+
+---
+
 # refactor(includes): чистка app_context.cpp после выноса proxy_init
 
 ## Date: 2026-09-11
