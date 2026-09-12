@@ -121,6 +121,21 @@
 
 ---
 
+# chore(gate): финальный полный прогон точного HEAD
+
+## Date: 2026-09-12
+
+### Что сделано
+- `./rebuild-and-run.sh` на точном HEAD ✅ (unit tests 445/1812 + 99/807),
+  `message_counter.py` ✅ (0 потерь), `./health-check.sh all` 6/6 OK,
+  golden-check **complete без оговорок** (66/66).
+- `l2-proxy-version.h` перегенерирован под HEAD (`0c6d55f`).
+
+### Результат
+- Стек оставлен здоровым, дерево чисто, всё запушено. Сессия завершена.
+
+---
+
 # test(perf): regression-gate на дефолтной нагрузке — PASS
 
 ## Date: 2026-09-12
