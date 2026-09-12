@@ -56,6 +56,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -74,6 +75,7 @@ logger = logging.getLogger(__name__)
 PROXY_URL = 'http://localhost:8888'
 PROXY_READY_URL = 'http://localhost:8888/health/ready'
 WORKER_READY_URL = 'http://localhost:19093/health/ready'
+SERVER_METRICS_URL = 'http://localhost:19092/metrics'
 PROXY_METRICS_URL = 'http://localhost:19090/metrics'
 WORKER_METRICS_URL = 'http://localhost:19091/metrics'
 SSL_VERIFY = False
@@ -112,6 +114,17 @@ def compose_start(service: str) -> None:
     if r.returncode != 0:
         raise RuntimeError(
             f"docker compose start {service} failed: {r.stderr.strip()}")
+
+
+def compose_up(service: str, extra_env: Optional[dict] = None) -> None:
+    env = dict(os.environ)
+    if extra_env:
+        env.update(extra_env)
+    r = subprocess.run(["docker", "compose", "up", "-d", service],
+                       capture_output=True, text=True, timeout=180, env=env)
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"docker compose up -d {service} failed: {r.stderr.strip()}")
 
 
 async def http_get_status(url: str, timeout: float = 5.0) -> Optional[int]:
@@ -441,7 +454,18 @@ async def test_nats_dedup_resend() -> bool:
     ok = True
     load_task: Optional[asyncio.Task] = None
     statuses: List[dict] = []
+    slowed = False
     try:
+        print("[4a0] Slowing l2-server (L2_TEST_RESPONSE_DELAY_MS=3000) so "
+              "in-flight requests are still being processed — with replies "
+              "not yet sent — when NATS dies; the proxy's re-sends then hit "
+              "the worker dedup cache deterministically.")
+        compose_up("l2-server", {"L2_TEST_RESPONSE_DELAY_MS": "3000"})
+        slowed = True
+        if not await wait_until(SERVER_METRICS_URL, 200, RECOVERY_TIMEOUT,
+                                "l2-server /metrics (slow)"):
+            raise RuntimeError("l2-server did not recover after slowdown")
+
         proxy_dup_before = fetch_metric("l2_proxy_duplicate_requests_total",
                                         PROXY_METRICS_URL)
         worker_dup_before = fetch_metric("l2_worker_duplicate_requests_total",
@@ -480,6 +504,16 @@ async def test_nats_dedup_resend() -> bool:
         ok = False
     finally:
         await ensure_services_up(["nats-server"])
+        if slowed:
+            try:
+                print("[4x] Restoring l2-server "
+                      "(L2_TEST_RESPONSE_DELAY_MS back to default)...")
+                compose_up("l2-server")
+                await wait_until(SERVER_METRICS_URL, 200, RECOVERY_TIMEOUT,
+                                 "l2-server /metrics (restore)")
+            except Exception as e:
+                logger.error("Failed to restore l2-server delay: %s", e)
+                ok = False
 
     if load_task is not None:
         try:
