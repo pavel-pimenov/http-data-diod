@@ -193,15 +193,17 @@ std::unique_ptr<prometheus::Exposer> create_metrics_exposer(
 void run_proxy(AppContext &app_ctx) {
   // Proxy runtime components are initialized here (not in the ctor) so
   // AppContext stays constructible in unit tests without the NATS library.
+  // Exposer first: :19090/metrics stays up while init_proxy_components blocks
+  // on NATS connect; per-IP/client collectors register below once created.
+  auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry,
+                                          app_ctx.m_common_registry);
+
   init_proxy_components(app_ctx);
 
   StatsLogger stats_logger(app_ctx, g_shutdown_flag);
   stats_logger
       .start_periodic_logging(); // Start periodic logging in proxy mode too
   RequestHandler request_handler(app_ctx, stats_logger);
-
-  auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry,
-                                          app_ctx.m_common_registry);
 
   if (app_ctx.m_proxy.m_per_ip_metrics_collector) {
     exposer->RegisterCollectable(app_ctx.m_proxy.m_per_ip_metrics_collector);

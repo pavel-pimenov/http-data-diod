@@ -1,3 +1,30 @@
+# refactor(proxy): exposer до NATS-connect — метрики доступны в outage
+
+## Date: 2026-09-12
+
+### Что сделано
+- `main.cpp::run_proxy`: создание exposer (`:19090` + `l2_common`) перенесено
+  ДО `init_proxy_components()`. Раньше блокирующий NATS-connect
+  (`RetryOnFailedConnect` бесконечный) стоял первым — в outage не было ни
+  `/metrics`, ни видимости `l2_proxy_nats_connected=0` (только scrape-failure).
+  Per-IP/client коллекторы регистрируются позже по готовности, как раньше
+  (динамический `RegisterCollectable` это допускает). При здоровом NATS
+  поведение не меняется. `run_worker`/`run_l2_server` уже были в правильном
+  порядке — не тронуты.
+
+### Результат
+- Доказано на стенде (`--no-deps`, чтобы `depends_on` не воскрешал NATS):
+  холодный старт proxy при мёртвом NATS — `:19090/metrics` отвечает с
+  корректным `l2_proxy_nats_connected 0` (до фикса — connection refused).
+  После `start nats-server` — connect, `listening on :8888`,
+  `message_counter.py` ✅ (0 потерь).
+- По ходу: два первых замера были невалидны (graceful-stop NATS успел
+  ответить; `depends_on` воскрешал NATS при recreate) — зафиксировано как
+  методология для будущих outage-тестов.
+- `./rebuild-and-run.sh` ✅ (unit tests passed).
+
+---
+
 # test(chaos): полный suite после фиксов — 8/9 PASS
 
 ## Date: 2026-09-11
