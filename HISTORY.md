@@ -42,6 +42,26 @@
 
 ---
 
+# test(perf): полный load 5000/200 + rate expect-zero
+
+## Date: 2026-09-12
+
+### Что сделано
+- `load_test.py --requests 5000 --concurrent 200`: 5000/5000, 0 failed.
+  Латентности: mean 388ms, p50 346ms, p95 622ms, p99 1023ms, p999 9.7s
+  (флаги скрипта). Ошибок нет (`client_request_errors=0`,
+  `nats_errors=0`), message_counter после нагрузки ✅.
+- `rate_limit_test.py --expect-zero` (100/2000): 3000 accepted, 0×429 ✅.
+- Вывод: hot path моими диффами не тронут (request_handler/NATS/worker
+  идентичны базе) — хвост p99/p999 относится к burst-queueing
+  (200 concurrent при пуле воркера), не к регрессии. Зафиксировано как
+  baseline; оптимизация latency — отдельная задача, не этот заход.
+
+### Результат
+- Код не менялся (только эта запись).
+
+---
+
 # fix(sentry-mock): парсинг нового envelope без legacy auth-строки
 
 ## Date: 2026-09-12
