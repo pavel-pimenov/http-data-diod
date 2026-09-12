@@ -554,7 +554,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 | Сервис | URL | Порт |
 |---|---|---|
-| `l2-proxy` | `http://localhost:8890/stats` (или через nginx `:7777/stats`) | 8890 → 8888 |
+| `l2-proxy` | `http://localhost:8888/stats` (или через nginx `:7777/stats`) | 8888 |
 | `l2-worker` | `http://localhost:19093/stats` | 19093 |
 
 Особенности:

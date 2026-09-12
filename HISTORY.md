@@ -1,3 +1,20 @@
+# chore(ports): возврат host-порта 8888 (ptokax-hub остановлен)
+
+## Date: 2026-09-12
+
+### Что сделано
+- Откат волны `cdc720b`: хост-привязка снова `"8888:8888"`, все
+  хост-скрипты/docs/README возвращены на `8888` (зеркальный дифф).
+  `ptokax-hub` остановлен вручную — порт свободен (проверено `ss`).
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `l2-proxy` healthy на
+  штатном `0.0.0.0:8888->8888`, `message_counter.py` ✅ (0 потерь, дефолт
+  через nginx), `./health-check.sh all` — 6/6 OK. Golden-check: только
+  известный `l2_worker_db_pool_connections` (нет СУБД).
+
+---
+
 # refactor(proxy): exposer до NATS-connect — метрики доступны в outage
 
 ## Date: 2026-09-12

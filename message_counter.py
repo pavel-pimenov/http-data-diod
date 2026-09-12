@@ -136,7 +136,7 @@ async def resolve_runtime_url(url: str) -> str:
     if os.path.exists('/.dockerenv'):
         fallback_url = 'http://nginx'
     else:
-        fallback_url = 'http://127.0.0.1:8890'
+        fallback_url = 'http://127.0.0.1:8888'
     logger.warning(
         "localhost:7777 is not responding over HTTP; using l2-proxy fallback %s",
         fallback_url)

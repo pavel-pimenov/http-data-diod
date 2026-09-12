@@ -38,7 +38,7 @@ from threading import Thread
 DOCKER_NETWORK = "http-data-diod_l2_network"
 RECEIVER_PORT = 9001
 COMPOSE_SVC = ["l2-server", "l2-proxy", "l2-worker"]
-PROXY_PORT = 8890
+PROXY_PORT = 8888
 # Client-side timeout must exceed the proxy's REQUEST_TIMEOUT_SECONDS (30s)
 # so we observe the actual HTTP 504 when the worker is stopped.
 REQUEST_TIMEOUT = 40

@@ -14,7 +14,7 @@ Runs the read-only SQL gateway checks against a running compose stack:
 
 Usage:
   scripts/db-gateway-e2e-test.py
-  scripts/db-gateway-e2e-test.py --base-url http://localhost:8890
+  scripts/db-gateway-e2e-test.py --base-url http://localhost:8888
   scripts/db-gateway-e2e-test.py --parallel 25
   scripts/db-gateway-e2e-test.py --nats-restart   # recovery scenario
 
@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 REQUEST_TIMEOUT_SECONDS = 10
-PROXY_BASE_URL = "http://localhost:8890"
+PROXY_BASE_URL = "http://localhost:8888"
 
 # Positive checks return True on success; negative checks expect the given
 # HTTP status and error code (or one of the accepted alternatives).

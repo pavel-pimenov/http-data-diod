@@ -40,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DEFAULT_URL = 'http://localhost:8890'
+DEFAULT_URL = 'http://localhost:8888'
 REQUEST_TIMEOUT = 10
 SSL_VERIFY = False
 
