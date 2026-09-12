@@ -1,3 +1,21 @@
+# chore(tidy): full sweep — 0 замечаний в проектном коде
+
+## Date: 2026-09-12
+
+### Что сделано
+- Полный clang-tidy sweep по всем 39 TU (`--header-filter`, unity OFF,
+  тот же compile_commands-подход что в `run-clang-tidy.sh`): 32 TU
+  полностью чисты, в 7 — только сторонние шумы (httplib/json/prometheus/
+  odpi/spdlog-fmt-consteval — всё в игнор-листе скрипта). В проектных
+  `.cpp/.hpp` — 0 errors, 0 warnings. Кодовых правок не потребовалось.
+- Прибраны артефакты sweep: `build-lint/` (root-owned, удалён через
+  builder-контейнер), `/tmp/tidy-*.log`.
+
+### Результат
+- Код не менялся (только эта запись); гейт — из предыдущих волн.
+
+---
+
 # test(e2e): graceful-shutdown + load smoke на 8888
 
 ## Date: 2026-09-12
