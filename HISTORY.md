@@ -1,3 +1,18 @@
+# test(ports): валидация возврата на 8888 — dup-check + dedup
+
+## Date: 2026-09-12
+
+### Что сделано
+- `message_counter.py --iterations 1 --concurrent 1 --dup-check` ✅
+  (0 потерь + frequent-duplicate WARN для per-client коллекторов —
+  задевает код exposer из волны 3).
+- `dedup_test.py` ✅ (cache hit, deltas 1.0/1.0).
+
+### Результат
+- Код не менялся (только эта запись); сборка — из волны возврата.
+
+---
+
 # chore(ports): возврат host-порта 8888 (ptokax-hub остановлен)
 
 ## Date: 2026-09-12
