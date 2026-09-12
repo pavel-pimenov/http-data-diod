@@ -173,6 +173,31 @@
 
 ---
 
+# test(glitchtip): интероп с реальным сервером доказан
+
+## Date: 2026-09-12
+
+### Что сделано
+- Поднят `glitchtip`+`glitchtip-db` (по пути: снесены stale-контейнеры
+  прошлой эры с битой ссылкой на сеть). UI готов за ~60с.
+- Авто-онбординг без браузера: `createsuperuser --noinput` + создание
+  org/team/project/key через `manage.py shell` (DSN
+  `http://<key>@glitchtip:8000/1`). На будущее: login API требует
+  CSRF-сессию, токенных endpoints нет — shell-путь самый прямой.
+- Триггер (как в sentry-e2e): стоп worker → POST → proxy 504 →
+  `proxy_backend_error`. Событие ПРИНЯТО настоящим Glitchtip 6
+  (`issue_events: 1`, "Backend request failed: category=empty_response") —
+  предпосылка `436430e` (auth только через X-Sentry-Auth header)
+  подтверждена против живого сервера, не только мока.
+- Возврат штатно: `run-glitchtip-stack.sh --stop` (DSN очищен,
+  health all OK), `message_counter.py` ✅.
+
+### Результат
+- C++ не менялся; сборка не требуется (только эта запись + рабочие
+  рецепты выше).
+
+---
+
 # fix(chaos): dedup-сценарий детерминирован через L2_TEST_RESPONSE_DELAY_MS
 
 ## Date: 2026-09-12
