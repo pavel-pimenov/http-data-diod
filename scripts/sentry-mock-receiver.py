@@ -33,27 +33,31 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", "replace")
         lines = raw.split("\n")
 
-        header = {}
+        def _parse(idx):
+            if idx < len(lines) and lines[idx].strip():
+                try:
+                    return json.loads(lines[idx])
+                except Exception:
+                    return {"_raw": lines[idx]}
+            return {}
+
+        # New format (glitchtip >= 6, see build_envelope()): header /
+        # item-header / payload, no legacy in-body auth line. Legacy bodies
+        # had an extra X-Sentry-Auth line at index 1 (not JSON with "type").
+        header = _parse(0)
         auth = {}
-        item_header = {}
-        payload = {}
-        if len(lines) >= 1 and lines[0].strip():
-            try:
-                header = json.loads(lines[0])
-            except Exception:
-                header = {"_raw": lines[0]}
-        if len(lines) >= 2 and lines[1].strip():
-            auth = {"_raw": lines[1]}
-        if len(lines) >= 3 and lines[2].strip():
-            try:
-                item_header = json.loads(lines[2])
-            except Exception:
-                item_header = {"_raw": lines[2]}
-        if len(lines) >= 4 and lines[3].strip():
-            try:
-                payload = json.loads(lines[3])
-            except Exception:
-                payload = {"_raw": lines[3]}
+        idx = 1
+        probe = _parse(1)
+        if isinstance(probe, dict) and probe.get("type"):
+            item_header = probe
+            idx = 2
+        else:
+            auth = {"_raw": lines[1]} if 1 < len(lines) else {}
+            item_header = _parse(2)
+            idx = 3
+        payload = _parse(idx)
+        if not isinstance(payload, dict):
+            payload = {"_raw": payload}
 
         record = {
             "event_id": header.get("event_id", ""),

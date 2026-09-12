@@ -42,6 +42,29 @@
 
 ---
 
+# fix(sentry-mock): парсинг нового envelope без legacy auth-строки
+
+## Date: 2026-09-12
+
+### Что сделано
+- Диагноз: `scripts/sentry-e2e-test.py` падал (`Event found: True`,
+  но `Fingerprint ok: False`) — коммит `436430e` убрал legacy
+  in-body auth-строку из envelope (3 строки вместо 4), а
+  `sentry-mock-receiver.py` парсил старый формат: payload брался из
+  пустой 4-й строки → все поля пустые. Поломка предсуществует, E2E давно
+  не был зелёным вопреки записям.
+- Мок переписан на индекс-указатель с автоопределением формата (строка 1
+  с `"type"` → новый формат; иначе legacy auth-строка) — обратно совместим.
+- Проверка: `sentry-e2e-test.py` ✅ PASS (fingerprint + service tag).
+- Возврат стенда: тест оставляет моковый `SENTRY_DSN` в контейнерах —
+  сделан plain recreate (`l2-proxy/l2-worker/l2-server`, DSN пуст),
+  `message_counter.py` ✅.
+
+### Результат
+- C++ не менялся; контейнерная сборка не требуется (только python-мок).
+
+---
+
 # chore(tidy): full sweep — 0 замечаний в проектном коде
 
 ## Date: 2026-09-12
