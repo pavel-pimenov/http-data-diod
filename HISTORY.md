@@ -1,3 +1,21 @@
+# test(ports): валидация порта 8890 — rate_limit + dedup
+
+## Date: 2026-09-11
+
+### Что сделано
+- `rate_limit_test.py --expect-429` на `:8890` (дефолт уже обновлён в волне
+  портов): при штатном лимитере 10000/1000 трипа нет (410 rps < refill —
+  ожидаемо); с временным `GLOBAL_RATE_LIMIT_MAX_TOKENS=60
+  REFILL_RATE=20` — 80×200 + 220×429 с `Retry-After`/`X-RateLimit-*`. После
+  проверки лимитер возвращён на дефолты (recreate без override).
+- `dedup_test.py` на новом стенде ✅ (cache hit, `l2_worker_l2_calls_total`
+  +1.0, `l2_worker_duplicate_requests_total` +1.0).
+
+### Результат
+- Код не менялся (только эта запись); сборка/прогон — из волны 3.
+
+---
+
 # refactor(exposer): общий реестр как параметр create_metrics_exposer
 
 ## Date: 2026-09-11
