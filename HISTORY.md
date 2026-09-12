@@ -1,3 +1,23 @@
+# refactor(includes): чистка app_context.cpp после выноса proxy_init
+
+## Date: 2026-09-11
+
+### Что сделано
+- `app_context.cpp`: удалены неиспользуемые инклюды `duplicate_detector.hpp`,
+  `rate_limiter.hpp`, `rate_limiter_per_ip.hpp` (остатки до выноса
+  `init_proxy_components()` в `proxy_init.cpp`; в TU не осталось ни одного
+  символа из них). Оставлены: `sentry_client.hpp` (`make_unique` в ctor),
+  `trace_logger.hpp` (`m_tracer.reset()` в dtor требует complete type),
+  `logger.hpp`, `metrics_manager.hpp`.
+- `proxy_init.cpp`: все 8 инклюдов используются — без изменений.
+
+### Результат
+- `./rebuild-and-run.sh` ✅ (unit tests passed), `message_counter.py` ✅
+  (0 потерь). Golden-check: только известный `l2_worker_db_pool_connections`
+  (нет СУБД в окружении).
+
+---
+
 # chore(ports): host-порт l2-proxy 8888 → 8890 (конфликт с ptokax-hub)
 
 ## Date: 2026-09-11
