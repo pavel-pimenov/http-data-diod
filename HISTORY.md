@@ -1,3 +1,23 @@
+# test(chaos): полный suite после фиксов — 8/9 PASS
+
+## Date: 2026-09-11
+
+### Что сделано
+- Полный `fault_tolerance_test.py` на порту 8890 + nginx с `valid=10s`:
+  nats/server/worker/proxy/concurrent/multi-restart/drain/reply-loss —
+  PASS; dedup — FAIL (известная проблема дизайна из записи выше:
+  в этом прогоне даже `proxy re-sends delta=0` — NATS рестартовал без
+  in-flight, ресендить нечего; assertion hits>0 по-прежнему
+  статистически несостоятельна при быстром L2-стабе).
+- Важно: сценарий `proxy` (restart under load) проходит через nginx без
+  ручного вмешательства — фикс resolver держит chaos.
+
+### Результат
+- `./health-check.sh all` — все 6 endpoints OK (proxy уже на `:8890`).
+  `message_counter.py` ✅ (0 потерь). Стек оставлен здоровым.
+
+---
+
 # fix(nginx): valid=10s в resolver против 502 после recreate l2-proxy
 
 ## Date: 2026-09-11
