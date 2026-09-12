@@ -1,3 +1,21 @@
+# test(e2e): graceful-shutdown + load smoke на 8888
+
+## Date: 2026-09-12
+
+### Что сделано
+- `scripts/e2e-graceful-shutdown-test.py` ✅: 5649/5649 под нагрузкой,
+  ExitCode 0 (SIGTERM обработан), `Received signal 15` + `server thread
+  joined` в логах, healthy после рестарта.
+- `load_test.py --requests 200 --concurrent 20` ✅: 200/200, issues none.
+- Саморевью диффа сессии (`2d298a6..HEAD`, 12 файлов): C++-дифф
+  минимален и behavior-preserving (exposer-параметр, порядок в run_proxy,
+  контракт proxy_init, чистка инклюдов); остальное — скрипты/порты/доки.
+
+### Результат
+- Код не менялся этой волной сверх записей (только эта запись).
+
+---
+
 # test(chaos): полный suite на 8888 после возврата — 8/9 PASS
 
 ## Date: 2026-09-12
