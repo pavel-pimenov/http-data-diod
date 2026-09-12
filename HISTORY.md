@@ -1,3 +1,18 @@
+# test(chaos): полный suite на 8888 после возврата — 8/9 PASS
+
+## Date: 2026-09-12
+
+### Что сделано
+- Полный `fault_tolerance_test.py` после возврата порта: nats/server/worker/
+  proxy/concurrent/multi-restart/drain/reply-loss — PASS; dedup — FAIL
+  (известная проблема дизайна, запись волны 7, без изменений).
+- Стек после suite здоров, `message_counter.py` ✅ (0 потерь).
+
+### Результат
+- Код не менялся (только эта запись).
+
+---
+
 # test(ports): валидация возврата на 8888 — dup-check + dedup
 
 ## Date: 2026-09-12
