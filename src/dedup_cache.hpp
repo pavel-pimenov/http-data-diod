@@ -2,7 +2,6 @@
 #define DEDUP_CACHE_HPP
 
 #include "time_utils.hpp"
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <list>

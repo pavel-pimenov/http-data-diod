@@ -12,12 +12,6 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
-#if __has_include(<latch>)
-#include <latch>
-#endif
-#if __has_include(<barrier>)
-#include <barrier>
-#endif
 #if __has_include(<stop_token>)
 #include <stop_token>
 #endif
@@ -91,10 +85,6 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
         for (const std::function<void()> &task : batch) task();
       }
     });
-#if __has_include(<barrier>) && defined(__cpp_lib_barrier)
-  // barrier demo (non-blocking): иллюстрация, не блокирует конструктор
-  // std::barrier<> barrier(threads+1); barrier.arrive_and_wait();
-#endif
 }
 
 // add new work item to the pool
@@ -139,11 +129,6 @@ inline void ThreadPool::shutdown() {
   for (auto &w : m_workers) w.request_stop();
   m_condition.notify_all();
   m_not_full.notify_all();
-#if __has_include(<latch>)
-  // latch demo: count down when each worker would exit; here we just join
-  // via jthread — latch would be used if workers signaled completion separately
-  // std::latch done(static_cast<ptrdiff_t>(m_workers.size()));
-#endif
   for (std::jthread &worker : m_workers)
     if (worker.joinable())
       worker.join();

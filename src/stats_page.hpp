@@ -1,7 +1,6 @@
 #ifndef STATS_PAGE_HPP
 #define STATS_PAGE_HPP
 
-#include <chrono>
 #include <algorithm>
 #include <ctime>
 #include <memory>

@@ -12,9 +12,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#if __has_include(<barrier>)
-#include <barrier>
-#endif
 #if __has_include(<generator>)
 #include <generator>
 #endif

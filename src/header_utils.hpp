@@ -121,7 +121,6 @@ public:
     });
   }
 
-public:
   template <typename SourceHeaders, typename DestHeaders>
   static void filter_headers(
       const SourceHeaders &source_headers, DestHeaders &dest_headers,

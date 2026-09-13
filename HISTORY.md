@@ -1,3 +1,34 @@
+# refactor(src): batch 9 — удаление мёртвых includes/demo-блоков, дублирующих public:
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/thread_pool.hpp`: удалены мёртвые `#if __has_include(<latch>)` и
+  `#if __has_include(<barrier>)` с идентичными им include-блоками (resherka 20
+  строк); удалены закомментированные демо-блоки `std::latch done(...)` и
+  `std::barrier<> barrier(...)` (commented-out code, не были в production).
+- `src/metrics_history.hpp`: удалён мёртвый `#if __has_include(<barrier>)`
+  include-блок — `<barrier>` нигде в файле не используется.
+- `src/main.cpp`: удалён неиспользуемый `#include <algorithm>` (ни один алгоритм
+  из std::accumulate/std::min/std::max/std::transform/std::sort в main.cpp не
+  используется).
+- `src/stats_page.hpp`: удалён неиспользуемый `#include <chrono>` — все типы
+  дат работают через `<ctime>` (`std::time_t`).
+- `src/dedup_cache.hpp`: удалён неиспользуемый `#include <chrono>` — даты
+  хранятся в `uint64_t ms`, подсчёт через `TimeUtils::steady_ms()`.
+- `src/logger.hpp`: удалены два неиспользуемых spdlog sink-хедера:
+  `basic_file_sink.h` (logging идёт через `rotating_file_sink`) и
+  `stdout_color_sinks.h` (logging через `stdout_sink_mt`, цвета в
+  `TextFormatter`).
+- `src/header_utils.hpp` / `src/config.hpp`: удалены дублирующие
+  `public:` (два последовательных `public:` без intervening `private:`).
+
+### Почему
+Чистка мёртвых includes снижает compile-time и убирает неиспользуемые
+шаблоны (barrier/latch) из не-инструментального кода.
+
+---
+
 # refactor(src): batch 7 — удаление мёртвого кода (validate_trace_context, client_ip) + микро-DRY (circuit_breaker, stats_logger)
 
 ## Date: 2026-09-13

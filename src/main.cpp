@@ -1,7 +1,6 @@
 #include "crash_handler.hpp"
 #include "logger.hpp"
 #include <atomic>
-#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>

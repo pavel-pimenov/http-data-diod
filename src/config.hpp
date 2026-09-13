@@ -158,7 +158,6 @@ public:
   [[nodiscard]] bool validate(bool log_issues = true) const;
   NatsConfig create_nats_config() const;
 
-public:
   // Env helpers are static and used by both Config loading and early
   // components (e.g. Logger::init reads LOG_FORMAT before Config exists).
   static int get_env_int(const std::string &env_name, int default_val);
