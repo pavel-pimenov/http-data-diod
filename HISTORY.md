@@ -1,3 +1,22 @@
+# fix(compose): postgres pin 17-alpine под существующий volume
+
+## Date: 2026-09-13
+
+### Что сделано
+- `docker-compose.yml`: образ `postgres` `16-alpine` → `17-alpine`.
+  Volume `postgres-data` был повторно инициализирован PG17 (до этого 16-alpine
+  падал с `database files are incompatible`, restart-loop, DB gateway — 504).
+  Возврат к 17-alpine восстанавливает стек без потери данных.
+- Обновлён комментарий в compose.
+
+### Результат
+- `postgres` healthy; DB gateway ready.
+- `scripts/db-gateway-e2e-test.py` — 7/7.
+- DB-панели Grafana (`l2_worker_db_*`, `l2_proxy_db_*`) populated.
+- Message counter по-прежнему ✅.
+
+---
+
 # chore(vendor): ресинк вендорных либ
 
 ## Date: 2026-09-13

@@ -335,10 +335,10 @@ services:
   # init scripts run on the first boot via /docker-entrypoint-initdb.d.
   postgres:
     container_name: postgres
-    # Pinned to 16: postgres-data volume was initialized by PG16, and 17
+    # Pinned to 17: postgres-data volume was re-initialized by PG17, and 16
     # refuses to start on it ("database files are incompatible"). Do NOT bump
     # without pg_upgrade or wiping the volume (data loss).
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     ports:
