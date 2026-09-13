@@ -3716,6 +3716,17 @@ bool is_chunked_transfer_encoding(const Headers &headers) {
   return case_ignore::equal(last_coding, "chunked");
 }
 
+bool has_conflicting_content_length(const Headers &headers) {
+  // RFC 9112 §6.3: a message carrying both Transfer-Encoding and a non-zero
+  // Content-Length is framed ambiguously. The body readers here delimit it by
+  // the transfer coding and drop Content-Length, while an intermediary may do
+  // the reverse, so the two disagree on where the body ends and a reused
+  // connection is desynchronised (request/response smuggling). Content-Length:
+  // 0 is tolerated for compatibility with existing peers.
+  return has_header(headers, "Transfer-Encoding") &&
+         get_header_value_u64(headers, "Content-Length", 0, 0) > 0;
+}
+
 template <typename T, typename U>
 bool prepare_content_receiver(T &x, int &status,
                               ContentReceiverWithProgress receiver,
@@ -4400,13 +4411,20 @@ bool parse_range_header(const std::string &s, Ranges &ranges) try {
 
       ssize_t first = -1;
       if (!lhs.empty()) {
-        ssize_t v;
-        auto res = detail::from_chars(lhs.data(), lhs.data() + lhs.size(), v);
-        if (res.ec == std::errc{}) { first = v; }
+        // Reject an overflowing first-byte-pos; treating it as absent (-1)
+        // would turn the range into a suffix range.
+        auto res =
+            detail::from_chars(lhs.data(), lhs.data() + lhs.size(), first);
+        if (res.ec != std::errc{}) {
+          all_valid_ranges = false;
+          return;
+        }
       }
 
       ssize_t last = -1;
       if (!rhs.empty()) {
+        // An overflowing last-byte-pos is past any content length, so keeping
+        // -1 ("remainder", RFC 9110 14.1.2) is correct here.
         ssize_t v;
         auto res = detail::from_chars(rhs.data(), rhs.data() + rhs.size(), v);
         if (res.ec == std::errc{}) { last = v; }
@@ -9619,8 +9637,8 @@ Server::process_request(Stream &strm, const std::string &remote_addr,
   // coding is not chunked, which leaves the body length undeterminable. The
   // latter must not fall through to the "no body" path, or the body bytes are
   // parsed as the next request on a persistent connection.
-  if (req.has_header("Transfer-Encoding") &&
-      (req.get_header_value_u64("Content-Length") > 0 ||
+  if (detail::has_conflicting_content_length(req.headers) ||
+      (req.has_header("Transfer-Encoding") &&
        !detail::is_chunked_transfer_encoding(req.headers))) {
     connection_closed = true;
     res.status = StatusCode::BadRequest_400;
@@ -10280,8 +10298,12 @@ Result ClientImpl::send_(Request &&req) {
 void ClientImpl::prepare_default_headers(Request &r, bool for_stream,
                                                 const std::string &ct) {
   (void)for_stream;
-  for (const auto &header : default_headers_) {
-    if (!r.has_header(header.first)) { r.headers.insert(header); }
+  // Default headers are meant for the origin and may carry its credentials, so
+  // keep them off the CONNECT request the proxy reads.
+  if (r.method != "CONNECT") {
+    for (const auto &header : default_headers_) {
+      if (!r.has_header(header.first)) { r.headers.insert(header); }
+    }
   }
 
   // RFC 9110 5.3 recommends sending control data such as Host first, so
@@ -10426,6 +10448,17 @@ ClientImpl::open_stream(const std::string &method, const std::string &path,
 
   if (!read_response_line(strm, req, *handle.response) ||
       !detail::read_headers(strm, handle.response->headers)) {
+    handle.error = Error::Read;
+    handle.response.reset();
+    return handle;
+  }
+
+  // Same framing check as ClientImpl::process_request(). A HEAD or bodyless
+  // (204/304) response legitimately carries framing headers with no body.
+  if (method != "HEAD" &&
+      handle.response->status != StatusCode::NoContent_204 &&
+      handle.response->status != StatusCode::NotModified_304 &&
+      detail::has_conflicting_content_length(handle.response->headers)) {
     handle.error = Error::Read;
     handle.response.reset();
     return handle;
@@ -10962,24 +10995,24 @@ bool ClientImpl::write_request(Stream &strm, Request &req,
     }
   }
 
-  if (!basic_auth_password_.empty() || !basic_auth_username_.empty()) {
-    if (!req.has_header("Authorization")) {
+  // A CONNECT request is read by the proxy; everything sent through the tunnel
+  // it opens is read by the origin. Each credential goes only to its own hop.
+  auto is_connect = req.method == "CONNECT";
+
+  if (!is_connect && !req.has_header("Authorization")) {
+    if (!basic_auth_password_.empty() || !basic_auth_username_.empty()) {
       req.headers.insert(make_basic_authentication_header(
           basic_auth_username_, basic_auth_password_, false));
-    }
-  }
-
-  if (!bearer_token_auth_token_.empty()) {
-    if (!req.has_header("Authorization")) {
+    } else if (!bearer_token_auth_token_.empty()) {
       req.headers.insert(make_bearer_token_authentication_header(
           bearer_token_auth_token_, false));
     }
   }
 
-  // Proxy-Authorization is only sent when the proxy is actually used for
-  // this target — otherwise NO_PROXY-matched requests would leak proxy
-  // credentials directly to the destination server.
-  if (is_proxy_enabled_for_host(host_)) {
+  // Proxy-Authorization is only sent when the proxy reads this message —
+  // otherwise NO_PROXY-matched requests, and requests inside a TLS tunnel,
+  // would leak proxy credentials to the destination server.
+  if (is_proxy_enabled_for_host(host_) && (!is_ssl() || is_connect)) {
     if (!proxy_basic_auth_username_.empty() &&
         !proxy_basic_auth_password_.empty() &&
         !req.has_header("Proxy-Authorization")) {
@@ -11375,6 +11408,17 @@ bool ClientImpl::process_request(Stream &strm, Request &req,
   // Body
   if ((res.status != StatusCode::NoContent_204) && req.method != "HEAD" &&
       req.method != "CONNECT") {
+    // Reject ambiguous framing (RFC 9112 §6.3). Unlike a request, a response
+    // whose final transfer coding is not chunked is not ambiguous: its body
+    // runs until the server closes the connection, so it is not rejected.
+    // HEAD/204 are excluded above and a 304 carries no body.
+    if (res.status != StatusCode::NotModified_304 &&
+        detail::has_conflicting_content_length(res.headers)) {
+      error = Error::Read;
+      output_error_log(error, &req);
+      return false;
+    }
+
     auto redirect = 300 < res.status && res.status < 400 &&
                     res.status != StatusCode::NotModified_304 &&
                     follow_location_;
@@ -17618,8 +17662,11 @@ ReadResult WebSocket::read(std::string &msg) {
         impl::read_websocket_frame(strm_, opcode, payload, fin, is_server_,
                                    CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH);
     // A timeout landed on a frame boundary: the connection is untouched and
-    // still usable, so hand control back without closing it.
-    if (r == impl::FrameRead::Timeout) { return Timeout; }
+    // still usable, so hand control back without closing it. That is only
+    // useful to a caller who asked for the timeout; the compile-time default
+    // is a backstop against a peer gone quiet, and elapsing it closes the
+    // connection so a plain `while (ws.read(msg))` loop ends.
+    if (r == impl::FrameRead::Timeout && read_timeout_set_) { return Timeout; }
     if (r != impl::FrameRead::Ok) {
       closed_ = true;
       return Fail;
@@ -17810,6 +17857,7 @@ void WebSocket::set_read_timeout(time_t sec, time_t usec) {
   // negative poll uses for an unbounded wait.
   if (sec == 0 && usec == 0) { sec = -1; }
   strm_.set_read_timeout(sec, usec);
+  read_timeout_set_ = true;
 }
 
 // WebSocketClient implementation
@@ -18034,6 +18082,9 @@ Result WebSocketClient::connect() {
   ws_ = std::unique_ptr<WebSocket>(new WebSocket(std::move(strm), req, false,
                                                  websocket_ping_interval_sec_,
                                                  websocket_max_missed_pongs_));
+  // The stream was created with the timeout already; tell the WebSocket
+  // whether it came from the caller, so read() knows to report it as Timeout.
+  ws_->read_timeout_set_ = read_timeout_set_;
   return Result{Error::Success, upgrade.status, std::move(upgrade.headers)};
 }
 
@@ -18066,6 +18117,7 @@ const std::string &WebSocketClient::subprotocol() const {
 void WebSocketClient::set_read_timeout(time_t sec, time_t usec) {
   read_timeout_sec_ = sec;
   read_timeout_usec_ = usec;
+  read_timeout_set_ = true;
   // The members above only seed the next connect(); read() consults the
   // stream, so an already-open connection has to be told directly.
   if (ws_) { ws_->set_read_timeout(sec, usec); }
