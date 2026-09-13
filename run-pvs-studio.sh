@@ -19,7 +19,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPORTS_DIR="${SCRIPT_DIR}/reports"
-BUILD_DIR="${SCRIPT_DIR}/cpp/l2-proxy/build-pvs"
+BUILD_DIR="${SCRIPT_DIR}/src/build-pvs"
 
 # Parse arguments
 CLEAN_BUILD=false
@@ -87,7 +87,7 @@ mkdir -p "${REPORTS_DIR}"
 echo ""
 echo "Converting analysis report..."
 plog-converter \
-    -r "${SCRIPT_DIR}/cpp/l2-proxy" \
+    -r "${SCRIPT_DIR}/src" \
     -t tasklist \
     -o "${REPORTS_DIR}/pvs-studio-results" \
     "${BUILD_DIR}/pvs-studio.log"

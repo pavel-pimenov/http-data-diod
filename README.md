@@ -550,7 +550,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 Для оперативной оценки состояния без Grafana у `l2-proxy` и `l2-worker`
 есть самодостаточная HTML-страница, сгенерированная прямо из Prometheus-
-реестра текущего процесса (`build_stats_html` в `cpp/l2-proxy/stats_page.hpp`):
+реестра текущего процесса (`build_stats_html` в `src/stats_page.hpp`):
 
 | Сервис | URL | Порт |
 |---|---|---|
@@ -705,7 +705,7 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 
 ## Покрытие юнит-тестов (coverage)
 
-Отчёт покрытия строится в Docker-образе (стадия `coverage` в `cpp/l2-proxy/Dockerfile`): проект компилируется с `--coverage`, прогоняются `test_components`/`test_proxy_core`, затем `gcovr` рендерит HTML-отчёт. Утилиты `gcovr`/`lcov` на хосте **не нужны**.
+Отчёт покрытия строится в Docker-образе (стадия `coverage` в `src/Dockerfile`): проект компилируется с `--coverage`, прогоняются `test_components`/`test_proxy_core`, затем `gcovr` рендерит HTML-отчёт. Утилиты `gcovr`/`lcov` на хосте **не нужны**.
 
 ```bash
 ./scripts/run-coverage.sh            # отчёт в <repo>/coverage-report/ (git-ignored)
@@ -725,7 +725,7 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
   --xml --gcov-ignore-errors=all > /tmp/cov.xml
 ```
 
-**Coverage gate:** стадия `coverage` в `cpp/l2-proxy/Dockerfile` линкует
+**Coverage gate:** стадия `coverage` в `src/Dockerfile` линкует
 `gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
 (exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
 Текущее значение: **97.4%**. Гейт по **ветвям** не ставится (см. ниже).

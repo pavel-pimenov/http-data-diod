@@ -16,7 +16,7 @@ echo -e "${BLUE}=== Comprehensive Memory Analysis for l2-proxy ===${NC}"
 
 # Check if we're in the right directory
 if [ ! -f "CMakeLists.txt" ]; then
-    echo -e "${RED}Error: CMakeLists.txt not found. Please run this script from the cpp/l2-proxy directory.${NC}"
+    echo -e "${RED}Error: CMakeLists.txt not found. Please run this script from the src directory.${NC}"
     exit 1
 fi
 

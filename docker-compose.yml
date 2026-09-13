@@ -386,7 +386,7 @@ services:
   l2-proxy:
     container_name: l2-proxy
     build:
-      context: ./cpp/l2-proxy
+      context: ./src
       dockerfile: Dockerfile
       target: ${L2_PROXY_DOCKER_TARGET:-runtime}
       args:
@@ -549,7 +549,7 @@ services:
   l2-worker:
     container_name: l2-worker
     build:
-      context: ./cpp/l2-proxy
+      context: ./src
       dockerfile: Dockerfile
       # Default build embeds the Oracle OCI client from the gvenzl/oracle-xe
       # image so the Oracle DB gateway works in the local compose stack too.

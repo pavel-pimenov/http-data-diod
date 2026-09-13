@@ -2782,8 +2782,8 @@ def _normalize_metric(name: str) -> str:
     return name
 
 def _collect_cpp_metrics() -> Set[str]:
-    """Собирает l2_* метрики из cpp/l2-proxy/app_context.cpp (источник истины)."""
-    cpp_path = pathlib.Path(__file__).parent.parent / "cpp" / "l2-proxy" / "app_context.cpp"
+    """Собирает l2_* метрики из src/app_context.cpp (источник истины)."""
+    cpp_path = pathlib.Path(__file__).parent.parent / "src" / "app_context.cpp"
     if not cpp_path.exists():
         return set()
     txt = cpp_path.read_text(encoding="utf-8", errors="ignore")

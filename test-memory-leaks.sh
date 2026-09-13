@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/cpp/l2-proxy/build"
+BUILD_DIR="${SCRIPT_DIR}/src/build"
 VALGRIND_LOG="${SCRIPT_DIR}/valgrind-output.log"
 
 echo "============================================================"
@@ -21,7 +21,7 @@ fi
 # Rebuild with debug symbols
 echo ""
 echo "[1/4] Rebuilding l2-proxy with debug symbols..."
-cd "${SCRIPT_DIR}/cpp/l2-proxy"
+cd "${SCRIPT_DIR}/src"
 
 # Create build directory if it doesn't exist
 mkdir -p build

@@ -41,7 +41,7 @@ echo ""
 
 # 1. CMake build артефакты (пересоберутся в контейнере, ccache сохранится)
 echo "--- build dirs ---"
-for d in cpp/l2-proxy/build cpp/l2-proxy/build-asan cpp/l2-proxy/build-lint cpp/l2-proxy/build-pvs cpp/l2-proxy/build-asan.log cpp/l2-proxy/build/build cpp/l2-proxy/build_test cpp/l2-proxy/build_tests; do
+for d in src/build src/build-asan src/build-lint src/build-pvs src/build-asan.log src/build/build src/build_test src/build_tests; do
   if [ -e "$d" ]; then
     du -sh "$d" 2>/dev/null | awk '{print "  "$1" "$2}'
     if [ -w "$d" ] || [ -w "$(dirname "$d")" ]; then

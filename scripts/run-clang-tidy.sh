@@ -40,7 +40,7 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 LINT_IMAGE="http-data-diod:builder"
-L2_DIR="cpp/l2-proxy"
+L2_DIR="src"
 BUILD_DIR="$L2_DIR/build-lint"
 BUILD_DIR_CONTAINER="/app/build-lint"
 

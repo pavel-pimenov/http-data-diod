@@ -10,7 +10,7 @@
 set -e
 
 CRASH_DIR="${CRASH_DIR:-crash-dumps}"
-BINARY="${L2_PROXY_BINARY:-cpp/l2-proxy/l2-proxy}"
+BINARY="${L2_PROXY_BINARY:-src/l2-proxy}"
 
 list_dumps() {
     echo "=== Crash dumps in $CRASH_DIR ==="

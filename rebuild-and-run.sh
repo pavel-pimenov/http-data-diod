@@ -101,10 +101,10 @@ ensure_free_disk_space
 #fi
 
 # Generate l2-proxy-version.h with current git SHA
-mkdir -p cpp/l2-proxy/build
-./cpp/l2-proxy/generate_version.sh > cpp/l2-proxy/build/l2-proxy-version.h
-cp -a cpp/l2-proxy/build/l2-proxy-version.h cpp/l2-proxy/l2-proxy-version.h
-rm -f cpp/l2-proxy/build/l2-proxy
+mkdir -p src/build
+./src/generate_version.sh > src/build/l2-proxy-version.h
+cp -a src/build/l2-proxy-version.h src/l2-proxy-version.h
+rm -f src/build/l2-proxy
 
 echo "Stopping existing containers..."
 docker compose down --remove-orphans 2>/dev/null || true

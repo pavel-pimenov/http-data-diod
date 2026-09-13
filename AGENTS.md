@@ -1,5 +1,5 @@
 * Все изменения добавляй в файл HISTORY.md
-* Не сканируй файл cpp/l2-proxy/httplib/httplib.cc - он сжигает токены
+* Не сканируй файл src/httplib/httplib.cc - он сжигает токены
 * Не анализируй файлы *.cpp и *.cc в каталогах httplib - это сторонние либы в них ничего менять не получится - аализируй только интерфейс к ним.
 * не предлагай переводить внешние либы и другие либы на git submodule
 * redis ветка отключена и не используется в проекте - проводи анализ только для режима рабты в NATS
@@ -9,9 +9,9 @@
 * Запускать отдельные команды сборки на локальной машине не нужно - на нем нет такого окружения.
 * Для замера покрытия юнит-тестов на хосте используй `gcovr` (HTML-отчёт) и `lcov` (объединение сырых `.gcno/.gcda` из builder-контейнера).
   Утилиты ставятся на хост (в образе builder их нет): `sudo apt install gcovr lcov`. Без них замер покрытия не собрать.
-  Нюанс: `.gcno/.gcda` собраны в build-каталоге контейнера (префикс путей `/workspace/...`), поэтому на хосте:
-  - `lcov --capture --directory <gcda_dir> --base-directory <repo_root> --substitute 's|/workspace/cpp/l2-proxy|<абс. repo>/cpp/l2-proxy|' --ignore-errors source,empty,unused,inconsistent -o cov.info`, затем `lcov --extract cov.info '<repo>/cpp/l2-proxy/*' -o proj.info` и `genhtml proj.info -o html/`.
-  - `gcovr --object-directory <gcda_dir> --root <repo>/cpp/l2-proxy --filter 'cpp/l2-proxy/.*' --html --html-details -o coverage.html --gcov-ignore-errors=all`.
+  Нюанс: `.gcno/.gcda` собраны в build-каталоге контейнера (префикс путей `/app/...`), поэтому на хосте:
+  - `lcov --capture --directory <gcda_dir> --base-directory <repo_root> --substitute 's|/app|<абс. repo>/src|' --ignore-errors source,empty,unused,inconsistent -o cov.info`, затем `lcov --extract cov.info '<repo>/src/*' -o proj.info` и `genhtml proj.info -o html/`.
+  - `gcovr --object-directory <gcda_dir> --root <repo>/src --filter 'src/.*' --html --html-details -o coverage.html --gcov-ignore-errors=all`.
 * Используй clang-tidy
 * Правила наименования C++
   - Для членов класс используй в имени префикс m_
@@ -22,7 +22,7 @@
   - Не удаляй комментарии в коде - можно только править/обновлять если меняется интерфейс или логика
   - Не пиши комментарии к функциям и методам - по имени понятно что они делают, комментарии сжигают токены (можно только в сложных случаях, когда поведение неочевидно)
 * При добавлении/удалении/изменении переменных окружения (get_env_* в config.cpp) — проверяй docker-compose.yml на наличие висячих переменных. Если переменная удалена из C++ кода, удаляй её и из docker-compose.yml. Если переменная добавлена в C++ — добавляй её в docker-compose.yml для всех сервисов, где она используется.
-* При добавлении/удалении/переименовании метрики (регистрация через MetricsManager::create_* в cpp/l2-proxy/app_context.cpp) — обязательно обновляй раздел «Метрики Prometheus (полный каталог)» в README.md. Для family-метрик указывай метки (`status`, `db`, `type`, `ip`, `client_id`, `state`) и тип (counter/gauge/histogram). Если метрика относится к наблюдаемости или rate limiter — синхронизируй и соответствующие подразделы README. Дашборды генерируются скриптом сами, но человекочитаемый каталог в README должен оставаться актуальным.
+* При добавлении/удалении/переименовании метрики (регистрация через MetricsManager::create_* в src/app_context.cpp) — обязательно обновляй раздел «Метрики Prometheus (полный каталог)» в README.md. Для family-метрик указывай метки (`status`, `db`, `type`, `ip`, `client_id`, `state`) и тип (counter/gauge/histogram). Если метрика относится к наблюдаемости или rate limiter — синхронизируй и соответствующие подразделы README. Дашборды генерируются скриптом сами, но человекочитаемый каталог в README должен оставаться актуальным.
 
 ## ⚠️ ВАЖНО: Проверка сборки перед коммитом
 

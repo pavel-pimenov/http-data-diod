@@ -25,7 +25,7 @@ Checks: >
   google-build-using-namespace
 
 WarningsAsErrors: ''
-HeaderFilterRegex: 'l2-proxy/.*\.(hpp|h)$'
+HeaderFilterRegex: 'src/.*\.(hpp|h)$'
 FormatStyle: none
 
 CheckOptions:

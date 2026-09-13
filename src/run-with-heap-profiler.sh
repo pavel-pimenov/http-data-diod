@@ -4,7 +4,7 @@
 
 # Check if we're in the right directory
 if [ ! -f "CMakeLists.txt" ]; then
-    echo "Error: CMakeLists.txt not found. Please run this script from the cpp/l2-proxy directory."
+    echo "Error: CMakeLists.txt not found. Please run this script from the src directory."
     exit 1
 fi
 

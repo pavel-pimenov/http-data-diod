@@ -178,7 +178,7 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 # objects carry per-file .gcno), run the unit tests and render the HTML report
 # with gcovr inside the container. The report lands in /app/out/coverage/
 # (coverage.html + per-file details): `scripts/run-coverage.sh` copies it out
-# of the image. Covers only project sources (cpp/l2-proxy), excluding bundled
+# of the image. Covers only project sources (src), excluding bundled
 # third-party dirs (prometheus-cpp, httplib, base64, json).
 #
 # Note: the gcovr --filter must stay as a single backslash here. A doubled one

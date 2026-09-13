@@ -71,7 +71,7 @@ services:
       - MEMORY_DEBUG=1
       - LOG_LEVEL=INFO
     volumes:
-      - $PROJECT_ROOT/cpp/l2-proxy/valgrind.supp:/root/valgrind.supp:ro
+      - $PROJECT_ROOT/src/valgrind.supp:/root/valgrind.supp:ro
       - $PROJECT_ROOT/$ANALYSIS_DIR:/memory-logs
 EOF
 
@@ -173,11 +173,11 @@ generate_docker_report() {
 
         echo "=== How to Analyze Results ==="
         echo "1. For detailed analysis, run the individual service analysis scripts:"
-        echo "   - cd cpp/l2-proxy && ./run-with-valgrind.sh"
-        echo "   - cd cpp/l2-proxy && ./run-with-heap-profiler.sh"
+        echo "   - cd src && ./run-with-valgrind.sh"
+        echo "   - cd src && ./run-with-heap-profiler.sh"
         echo ""
         echo "2. For heap profiles, use pprof:"
-        echo "   pprof $PROJECT_ROOT/cpp/l2-proxy/build-profile/l2-proxy $ANALYSIS_DIR/*.hprof.*"
+        echo "   pprof $PROJECT_ROOT/src/build-profile/l2-proxy $ANALYSIS_DIR/*.hprof.*"
 
     } > "$ANALYSIS_DIR/docker-summary.txt"
 
@@ -191,4 +191,4 @@ generate_docker_report
 
 echo -e "${BLUE}=== Docker memory analysis completed ===${NC}"
 echo -e "${GREEN}Results saved to: $ANALYSIS_DIR${NC}"
-echo -e "${YELLOW}To analyze heap profiles, run: pprof $PROJECT_ROOT/cpp/l2-proxy/build-profile/l2-proxy $ANALYSIS_DIR/*.hprof.*${NC}"
+echo -e "${YELLOW}To analyze heap profiles, run: pprof $PROJECT_ROOT/src/build-profile/l2-proxy $ANALYSIS_DIR/*.hprof.*${NC}"

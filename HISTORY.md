@@ -1,3 +1,28 @@
+# refactor(src): cpp/l2-proxy → src (один уровень вложенности)
+
+## Date: 2026-09-13
+
+### Что сделано
+- `git mv cpp/l2-proxy src` — источник C++ с двумя уровнями (`cpp/l2-proxy/`)
+  свёрнут в один (`src/`). 346 файлов перемещено, история сохранена
+  (git видит rename, проход — `git log --follow src/<file>`).
+- Обновлены все ссылки на путь в тулинге и доках:
+  `docker-compose.yml` (build contexts x2), `.github/workflows/ci.yml`,
+  `rebuild-and-run.sh`, `scripts/run-coverage.sh`, `scripts/run-clang-tidy.sh`,
+  `scripts/resolve-crash.sh`, `scripts/generate-grafana-dashboards.py`
+  (docstring + `--check` путь к `app_context.cpp`), `run-pvs-studio.sh`,
+  `test-memory-leaks.sh`, `cleanup.sh`, `pyproject.toml`, `AGENTS.md`,
+  `README.md`.
+- Внутри `src/`: `Dockerfile` (комментарий), `VENDORED-LIBS.md`,
+  memory-скрипты (self-path), `.clang-tidy` `HeaderFilterRegex`
+  `l2-proxy/.*\.(hpp|h)$` → `src/.*\.(hpp|h)$`.
+
+### Результат
+- Путь до исходников сокращён: `cpp/l2-proxy/app_context.cpp` → `src/app_context.cpp`.
+- `./rebuild-and-run.sh` ✅ (сборка, serervices healthy, message_counter ✅).
+
+---
+
 # fix(compose): postgres pin 17-alpine под существующий volume
 
 ## Date: 2026-09-13

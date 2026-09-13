@@ -32,10 +32,10 @@ jobs:
 
       - name: Generate version header (as rebuild-and-run.sh)
         run: |
-          mkdir -p cpp/l2-proxy/build
-          ./cpp/l2-proxy/generate_version.sh > cpp/l2-proxy/build/l2-proxy-version.h
-          cp -a cpp/l2-proxy/build/l2-proxy-version.h cpp/l2-proxy/l2-proxy-version.h
-          rm -f cpp/l2-proxy/build/l2-proxy
+          mkdir -p src/build
+          ./src/generate_version.sh > src/build/l2-proxy-version.h
+          cp -a src/build/l2-proxy-version.h src/l2-proxy-version.h
+          rm -f src/build/l2-proxy
 
       # GRAFANA_URL points to a dead port so rebuild-and-run.sh skips the
       # dashboard-update block and the build/health gates stay deterministic.

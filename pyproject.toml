@@ -11,7 +11,7 @@
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-exclude = [".venv", "build", "build_tests", "build-lint", "cpp/l2-proxy/httplib", "cpp/l2-proxy/nats", "cpp/l2-proxy/base64"]
+exclude = [".venv", "build", "build_tests", "build-lint", "src/httplib", "src/nats", "src/base64"]
 
 [tool.ruff.lint]
 # Keep the initial selection conservative (PEP8 basics + undefined names only)
