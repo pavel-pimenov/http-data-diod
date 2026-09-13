@@ -855,6 +855,16 @@ void RequestHandler::route_db_request(
         attrs);
   };
 
+  // Records the NATS round-trip latency histogram on both outcomes (empty
+  // reply vs. reply received), which previously duplicated the same
+  // observe_db_request_duration call in the failure and success branches.
+  auto record_db_nats_duration = [this, &db_name,
+                                  nats_start_us](int64_t nats_end_us) {
+    observe_db_request_duration(
+        m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
+        nats_start_us, nats_end_us);
+  };
+
   // request_with_consume_span_id also returns the worker's consume span id
   // (NATS header), which links the round-trip span to the worker's consume
   // span.
@@ -873,9 +883,7 @@ void RequestHandler::route_db_request(
     } else {
       reject_db_request(504, "DB worker did not respond in time");
     }
-    observe_db_request_duration(
-        m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
-        nats_start_us, nats_end_us);
+    record_db_nats_duration(nats_end_us);
     return;
   }
 
@@ -899,9 +907,7 @@ void RequestHandler::route_db_request(
   res.status = status;
   send_json_response(res, res.status, response_body);
 
-  observe_db_request_duration(
-      m_ctx.m_proxy.m_metrics->m_db_nats_request_duration_seconds, db_name,
-      nats_start_us, nats_end_us);
+  record_db_nats_duration(nats_end_us);
   record_db_metrics(status);
 
   JaegerSpanLogger::log_proxy_response(

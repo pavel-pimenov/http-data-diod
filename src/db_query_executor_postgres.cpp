@@ -402,13 +402,7 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   const json columns_json = make_db_columns_json(name_type);
   PQclear(res);
   m_impl->release_conn(conn);
-
-  const size_t row_count = rows.size();
-  const bool truncated = rows.truncated();
-  const uint64_t end_ms = TimeUtils::steady_ms();
-  return make_db_query_response(m_impl->m_db.m_name, columns_json,
-                                rows.take_rows(), row_count, truncated,
-                                end_ms - start_ms);
+  return build_query_response(columns_json, rows, start_ms);
 }
 
 bool PostgresQueryExecutor::ping(int timeout_ms) {

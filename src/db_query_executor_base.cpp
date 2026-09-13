@@ -1,4 +1,6 @@
 #include "db_query_executor_base.hpp"
+#include "db_query_utils.hpp"
+#include "time_utils.hpp"
 #include <utility>
 
 DbExecutorBase::DbExecutorBase(DbConfig db) : m_db(std::move(db)) {}
@@ -23,4 +25,14 @@ void DbExecutorBase::set_db_pool_gauges(double idle, double active) {
   }
   m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
   m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
+}
+
+json DbExecutorBase::build_query_response(const json &columns_json,
+                                          DbRowCollector &rows,
+                                          uint64_t start_ms) const {
+  const size_t row_count = rows.size();
+  const bool truncated = rows.truncated();
+  const uint64_t end_ms = TimeUtils::steady_ms();
+  return make_db_query_response(m_db.m_name, columns_json, rows.take_rows(),
+                                row_count, truncated, end_ms - start_ms);
 }

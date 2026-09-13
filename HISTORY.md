@@ -1,3 +1,31 @@
+# refactor(src): batch 2 — общий хвост executor'ов, observability DB-ветки worker
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/db_query_executor_base.hpp/.cpp`: вынесен защищённый метод
+  `build_query_response(columns_json, rows, start_ms)` — id-хвост успешного
+  ответа (row_count/truncated/duration + make_db_query_response), ранее
+  продублированный в oracle и postgres `execute_query()`. Общий хвост
+  (~15 строк × 2) сведён к 1 строке вызова; `DbRowCollector` доступен
+  форвард-объявлением (определение — в `db_query_utils.hpp`).
+- `src/l2_worker.hpp`/`l2_worker_nats.cpp`: observability-хвост DB-ветки
+  `process_db_query_from_nats` вынесен в приватный метод
+  `observe_db_query_outcome(...)`: Sentry-захват для операционных ошибок
+  (>=500), histogram длительности и span `DB_execute`. Ветка `handle_request`
+  в обработчике сокращается с ~60 до ~7 строк.
+- `src/request_handler.cpp`: в `route_db_request` NATS round-trip duration
+  (одинаковый 3-строчный блок успеха/провала) свёрнут в лямбду
+  `record_db_nats_duration`. Контрольный осмотр показал: DB-gateway ветка
+  (handle_db_gateway/route_db_request + `reject_db_request`/
+  `reject_gateway`/`log_db_nats_roundtrip`) уже была выделена ранее — трогать
+  её структуру не стали.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): удаление мёртвого кода, DRY в main.cpp и DB-конфиге
 
 ## Date: 2026-09-13

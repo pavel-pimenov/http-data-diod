@@ -84,6 +84,15 @@ private:
                                  const std::string &reply_to);
   void process_db_query_from_nats(const std::string &request_json,
                                   const std::string &reply_to);
+  // Records the observability tail of a DB gateway request: Sentry capture for
+  // operational failures (>=500), the duration histogram and the DB_execute
+  // tracing span. db name/type are re-derived from request_data.
+  void observe_db_query_outcome(const json &request_data, int status,
+                                const json &body, uint64_t db_start_us,
+                                uint64_t db_end_us,
+                                const TraceContext &trace_ctx,
+                                const std::string &request_id,
+                                const std::string &consume_span_id);
   // Wraps the DB result {status, body} into the NATS response envelope, records
   // the per-db/type/status counter and publishes it to reply_to.
   void send_db_query_response(const std::string &reply_to, int status,

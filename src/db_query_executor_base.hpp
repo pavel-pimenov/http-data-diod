@@ -3,9 +3,12 @@
 
 #include "config.hpp"
 #include "db_query_executor.hpp"
+#include <cstdint>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <string>
+
+class DbRowCollector;
 
 // Shared state and overrides of DbQueryExecutor: the database config, the
 // configured-default getters and the pool-gauge wiring. Drivers keep their
@@ -35,6 +38,13 @@ protected:
   // Refreshes the pool gauges from the driver's current pool state. Called by
   // set_pool_metrics(); must tolerate a not-yet-created driver pool.
   virtual void refresh_pool_gauges() = 0;
+
+  // Assembles the DbResponseContract success body: collects the row count /
+  // truncated flag / duration and stamps the database name. Shared by the
+  // driver execute_query() tails.
+  [[nodiscard]] json build_query_response(const json &columns_json,
+                                          DbRowCollector &rows,
+                                          uint64_t start_ms) const;
 
   const DbConfig m_db;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
