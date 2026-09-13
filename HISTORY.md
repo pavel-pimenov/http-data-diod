@@ -1,3 +1,26 @@
+# refactor(src): batch 3+4 — дедуп per-client метрик (proxy) и span-логов worker
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/request_handler.hpp/.cpp`: добавлен приватный хелпер
+  `increment_per_client_metric(collector, client_id, bucket)` — четыре
+  байт-идентичных блока «if (collector) { collector->get(client_id, N)
+  ->Increment(); }» (счётчик запросов, duplicate-подсчёт/режект, rate-limit
+  режект) в `record_and_maybe_reject_duplicate`, `reject_rate_limited` и
+  `handle_request` свёрнуты к однострочным вызовам; конвенция bucket (0/1)
+  сохранена.
+- `src/l2_worker_nats.cpp`: в анонимном namespace добавлен хелпер
+  `log_worker_response_span(...)` — общий «tracer guard + end-timestamp +
+  log_worker_span» для двух одинаковых хвостов: dedup-cache hit (span 200 с
+  атрибутом dedup.cached) и обычного `send_l2_response` (span со статусом
+  ответа L2). Оба блока сведены к однострочным вызовам.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): batch 2 — общий хвост executor'ов, observability DB-ветки worker
 
 ## Date: 2026-09-13

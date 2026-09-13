@@ -324,10 +324,8 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
     return false;
   }
   m_ctx.m_proxy.m_metrics->m_duplicate_posts_detected.Increment();
-  if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-    m_ctx.m_proxy.m_per_client_id_duplicate_collector->get(client_id, 0)
-        ->Increment();
-  }
+  increment_per_client_metric(
+      m_ctx.m_proxy.m_per_client_id_duplicate_collector, client_id, 0);
 
   // When enabled, reject the duplicate instead of forwarding it to the
   // worker: the body was already delivered within the TTL window, so
@@ -337,13 +335,20 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
   if (!m_ctx.m_config.m_duplicate_reject_enabled) {
     return false;
   }
-  if (m_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-    m_ctx.m_proxy.m_per_client_id_duplicate_collector->get(client_id, 1)
-        ->Increment();
-  }
+  increment_per_client_metric(
+      m_ctx.m_proxy.m_per_client_id_duplicate_collector, client_id, 1);
   res.status = 409;
   send_json_response(res, res.status, make_error_json("duplicate request"));
   return true;
+}
+
+void RequestHandler::increment_per_client_metric(
+    const std::shared_ptr<DynamicLabeledFamily<prometheus::Counter>>
+        &collector,
+    const std::string &client_id, uint64_t bucket) {
+  if (collector) {
+    collector->get(client_id, bucket)->Increment();
+  }
 }
 
 // ============================================================================
@@ -375,11 +380,8 @@ bool RequestHandler::reject_rate_limited(
     const std::string &reason, prometheus::Counter &rejected_counter,
     const std::string &message, uint64_t limit, uint64_t remaining) {
   rejected_counter.Increment();
-  if (m_ctx.m_proxy.m_per_client_id_metrics_collector) {
-    m_ctx.m_proxy.m_per_client_id_metrics_collector
-        ->get(client_id, 1)
-        ->Increment();
-  }
+  increment_per_client_metric(m_ctx.m_proxy.m_per_client_id_metrics_collector,
+                              client_id, 1);
   res.set_header("Retry-After", "1");
   res.set_header("X-RateLimit-Limit", std::to_string(limit));
   res.set_header("X-RateLimit-Remaining", std::to_string(remaining));
@@ -593,11 +595,8 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // clients that share one IP (e.g. behind NAT) in Grafana.
   const auto client_id =
       get_header_value(req.headers, "X-DataHub-Client-Id", "unknown");
-  if (m_ctx.m_proxy.m_per_client_id_metrics_collector) {
-    m_ctx.m_proxy.m_per_client_id_metrics_collector
-        ->get(client_id, 0)
-        ->Increment();
-  }
+  increment_per_client_metric(m_ctx.m_proxy.m_per_client_id_metrics_collector,
+                              client_id, 0);
 
   // Duplicate POST detection: the same request body (SHA-256 hash) delivered
   // more than once counts as a duplicate from a client. GET favicon probes are

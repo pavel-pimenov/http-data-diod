@@ -17,6 +17,28 @@
 #include <thread>
 
 namespace {
+// Logs the final worker response span with the terminal HTTP status when
+// tracing is active and a trace id is present. Shared by the dedup-cache hit
+// path and the normal send_l2_response tail, which duplicated the tracer guard,
+// end-timestamp capture and log_worker_span argument list.
+void log_worker_response_span(JaegerLogger *tracer,
+                              const std::string &method,
+                              const std::string &path, int status_code,
+                              uint64_t start_us, const std::string &mode,
+                              const std::string &request_id,
+                              const TraceContext &trace_ctx,
+                              const std::string &span_id,
+                              const std::string &parent_span_id,
+                              const nlohmann::json &extra_attrs =
+                                  nlohmann::json::object()) {
+  if (!tracer || trace_ctx.m_trace_id.empty()) {
+    return;
+  }
+  log_worker_span(tracer, method, path, status_code, start_us,
+                  get_current_timestamp_us(), mode, request_id,
+                  trace_ctx.m_trace_id, span_id, parent_span_id, extra_attrs);
+}
+
 // Logs the worker-side NATS_consume span. Shared by the main and DB request
 // handlers, which duplicated the messaging.* attributes + log_span_to_jaeger
 // pair.
@@ -361,15 +383,11 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
           "request_id={} reply_to={}",
           metadata.m_request_id, reply_to);
 
-      if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
-        const uint64_t end_us = get_current_timestamp_us();
-        log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
-                        metadata.m_path, 200, start_us, end_us,
-                        m_ctx.m_config.m_mode, metadata.m_request_id,
-                        metadata.m_trace_ctx.m_trace_id, nats_consume_span_id,
-                        metadata.m_proxy_span_id, {{"dedup.cached", true}});
-      }
-
+      log_worker_response_span(
+          m_ctx.m_tracer.get(), metadata.m_method, metadata.m_path, 200,
+          start_us, m_ctx.m_config.m_mode, metadata.m_request_id,
+          metadata.m_trace_ctx, nats_consume_span_id,
+          metadata.m_proxy_span_id, {{"dedup.cached", true}});
       task.m_activity.m_status = 200;
       send_nats_response(reply_to, *cached_response);
       record_bytes_sent(cached_response->size());
@@ -438,14 +456,11 @@ int L2Worker::send_l2_response(const RequestData &metadata,
 
   record_bytes_sent(response_json_dump.size());
 
-  if (m_ctx.m_tracer && !metadata.m_trace_ctx.m_trace_id.empty()) {
-    const uint64_t end_us = get_current_timestamp_us();
-    log_worker_span(m_ctx.m_tracer.get(), metadata.m_method,
-                    metadata.m_path, l2_response.m_status_code, start_us,
-                    end_us, m_ctx.m_config.m_mode, metadata.m_request_id,
-                    metadata.m_trace_ctx.m_trace_id,
-                    spans.m_worker_process_span_id, nats_consume_span_id);
-  }
+  log_worker_response_span(m_ctx.m_tracer.get(), metadata.m_method,
+                         metadata.m_path, l2_response.m_status_code, start_us,
+                         m_ctx.m_config.m_mode, metadata.m_request_id,
+                         metadata.m_trace_ctx,
+                         spans.m_worker_process_span_id, nats_consume_span_id);
 
   record_l2_call_metrics(start_us);
 

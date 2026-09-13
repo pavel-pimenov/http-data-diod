@@ -96,10 +96,17 @@ private:
   // Records a duplicate POST (by SHA-256 of the body) and, when
   // DUPLICATE_REJECT_ENABLED, writes a 409 and returns true so the caller
   // stops processing. Returns false to continue with the request.
-  bool record_and_maybe_reject_duplicate(const std::string &client_id,
-                                         const std::string &client_ip,
-                                         const std::string &body,
-                                         httplib::Response &res);
+bool record_and_maybe_reject_duplicate(const std::string &client_id,
+                                          const std::string &client_ip,
+                                          const std::string &body,
+                                          httplib::Response &res);
+
+  // Increments a per-client-id counter bucket (request counts, duplicate or
+  // rate-limit rejections) when the dynamic-labeled collector is set.
+  void increment_per_client_metric(
+      const std::shared_ptr<DynamicLabeledFamily<prometheus::Counter>>
+          &collector,
+      const std::string &client_id, uint64_t bucket);
 
   // Admin/debug GET endpoints; dispatch helpers for handle_get.
   void handle_crash_test(const httplib::Request &req, httplib::Response &res);
