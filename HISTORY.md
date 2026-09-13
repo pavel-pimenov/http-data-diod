@@ -1,3 +1,25 @@
+# refactor(src): batch 6 — дедуп SET statement_timeout в postgres executor
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/db_query_executor_postgres.cpp`: идентичный блок
+  `SET statement_timeout` (PQexec + проверка результата + очистка PGresult)
+  в `execute_query` и `ping` свёрнут в статический хелпер
+  `Impl::set_statement_timeout(conn, timeout_ms)` (возвращает "" при успехе,
+  иначе текст ошибки из PQerrorMessage). execute_query сохраняет детализацию
+  ошибки в JSON-ответе, ping — прежний warn-лог без текста.
+- Побочный фикс: в `execute_query` вызов `PQresultStatus(set_res)` шёл без
+  проверки `set_res` на null (OOM-кейс PQexec); общий хелпер проверяет
+  `set_res && PQresultStatus(...)` как в ping.
+- Oracle-исполнитель не затронут: таймаут там ставится один раз в
+  `acquire_conn()` через `dpiConn_setCallTimeout` — дублирования нет.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): batch 5 — polish app_context (выравнивание метрик, stop-хелпер history)
 
 ## Date: 2026-09-13

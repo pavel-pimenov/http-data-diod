@@ -264,6 +264,21 @@ struct PostgresQueryExecutor::Impl {
     }
     return s;
   }
+
+  // Applies the per-query statement_timeout; returns "" on success, otherwise
+  // the connection's last error text (trimmed).
+  static std::string set_statement_timeout(PGconn *conn, int timeout_ms) {
+    PGresult *set_res = PQexec(
+        conn, std::format("SET statement_timeout = {}", timeout_ms).c_str());
+    const bool set_ok = set_res && PQresultStatus(set_res) == PGRES_COMMAND_OK;
+    if (set_res) {
+      PQclear(set_res);
+    }
+    if (!set_ok) {
+      return trim_copy(PQerrorMessage(conn));
+    }
+    return "";
+  }
 };
 
 PostgresQueryExecutor::PostgresQueryExecutor(DbConfig db)
@@ -311,18 +326,13 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
 
   const int effective_timeout =
       resolve_positive_or(timeout_ms, m_impl->m_db.m_query_timeout_ms);
-  PGresult *set_res = PQexec(
-      conn, std::format("SET statement_timeout = {}", effective_timeout)
-                .c_str());
-  const bool set_ok = PQresultStatus(set_res) == PGRES_COMMAND_OK;
-  auto set_error = Impl::trim_copy(PQerrorMessage(conn));
-  if (set_res) {
-    PQclear(set_res);
-  }
-  if (!set_ok) {
+  const std::string timeout_error =
+      Impl::set_statement_timeout(conn, effective_timeout);
+  if (!timeout_error.empty()) {
     m_impl->release_conn(conn);
-    return make_db_sql_error(
-        status_code, "Failed to set statement timeout: " + set_error);
+    return make_db_sql_error(status_code,
+                             "Failed to set statement timeout: " +
+                                 timeout_error);
   }
 
   // Bind parameters as positional $1..$N. Params are passed in text format
@@ -415,14 +425,9 @@ bool PostgresQueryExecutor::ping(int timeout_ms) {
       resolve_positive_or(timeout_ms, m_impl->m_db.m_query_timeout_ms);
   // Apply statement_timeout even to ping so an overloaded PG does not block a
   // worker thread indefinitely.
-  PGresult *set_res = PQexec(
-      conn, std::format("SET statement_timeout = {}", effective_timeout)
-                .c_str());
-  const bool set_ok = set_res && PQresultStatus(set_res) == PGRES_COMMAND_OK;
-  if (set_res) {
-    PQclear(set_res);
-  }
-  if (!set_ok) {
+  const std::string timeout_error =
+      Impl::set_statement_timeout(conn, effective_timeout);
+  if (!timeout_error.empty()) {
     Logger::warn("DB executor '{}': ping failed to set statement_timeout",
                  m_impl->m_db.m_name);
     m_impl->release_conn(conn);
