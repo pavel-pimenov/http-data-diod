@@ -143,7 +143,6 @@ private:
     std::string m_worker_process_parent_id;
     std::string m_l2_call_span_id;
     std::string m_traceparent_header;
-    std::string m_setex_span_id;
   };
 
   struct L2Response {
@@ -154,7 +153,6 @@ private:
   };
 
   struct ResponseData {
-    std::string m_response_str;
     std::string m_content_type;
     bool m_is_binary;
     uint64_t m_timestamp_us;

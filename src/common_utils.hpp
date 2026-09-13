@@ -192,27 +192,4 @@ void setup_http_connection(ClientT &client, int timeout_seconds,
 void validate_trace_context(const TraceContext &ctx,
                             const std::string &context);
 
-template <typename T>
-inline bool validate_range(const T &value, const std::string &name, T min,
-                           T max, T warn_threshold = 0) {
-  if (value <= min || value > max) {
-    Logger::error("Invalid {}: {} (must be {}-{})", name, value, min, max);
-    return false;
-  }
-  if (warn_threshold > 0 && value > warn_threshold) {
-    Logger::warn("Very high {}: {} (recommended: < {})", name, value,
-                 warn_threshold);
-  }
-  return true;
-}
-
-template <typename T>
-inline bool validate_positive(const T &value, const std::string &name) {
-  if (value <= 0) {
-    Logger::error("Invalid {}: {} (must be > 0)", name, value);
-    return false;
-  }
-  return true;
-}
-
 #endif // COMMON_UTILS_HPP

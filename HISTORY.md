@@ -1,3 +1,31 @@
+# refactor(src): удаление мёртвого кода, DRY в main.cpp и DB-конфиге
+
+## Date: 2026-09-13
+
+### Что сделано
+- Удалён мёртвый код:
+  - `src/db_query_handler.hpp` — typedef `DbResultVariant` (не использовался).
+  - `src/l2_worker.hpp` — `TracingSpans::m_setex_span_id` и
+    `ResponseData::m_response_str` (нигде не читались).
+  - `src/l2_worker.cpp` — запись `spans.m_setex_span_id = ...` удалена.
+  - `src/request_handler.hpp` — глобальные `g_default_retry_delay_ms` и
+    `g_max_retry_delay_ms` (не использовались).
+  - `src/common_utils.hpp` — шаблоны `validate_range`/`validate_positive`
+    (дублировали проверки ConfigChecker) и их тест в `src/test_components.cpp`.
+- `src/main.cpp`: вынесен хелпер `start_stats_logging(app_ctx)` — тройной
+  init+start `StatsLogger` в `run_proxy`/`run_worker`/`run_l2_server` свёрнут
+  к одному вызову (возвращает `std::unique_ptr<StatsLogger>`, т.к. класс
+  non-movable).
+- `src/config.cpp`: в `load_db_query_config` для proxy-режима два байт-идентичных
+  блока регистрации oracle/postgres свёрнуты в лямбду `add_routing_db(name, enabled)`.
+  Worker-блоки не тронуты: поля подключения и детализация логов у драйверов разные,
+  попытка унификации через лямбды дала бы больше строк, чем сами блоки.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): cpp/l2-proxy → src (один уровень вложенности)
 
 ## Date: 2026-09-13

@@ -632,9 +632,6 @@ L2Worker::create_tracing_spans(const TraceContext &parent_trace_ctx,
                   spans.m_l2_call_span_id, spans.m_traceparent_header);
   }
 
-  spans.m_setex_span_id =
-      JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
-
   return spans;
 }
 

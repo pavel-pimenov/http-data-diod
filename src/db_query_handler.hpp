@@ -60,9 +60,6 @@ public:
   // current pointer.
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
 
-  // variant<int,string> demo for DB dispatch: visit вместо if/else
-  using DbResultVariant = std::variant<json, std::string>;
-
 private:
 #if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
   // 2 базы (postgres/oracle) — flat_map(sorted vector) кэш-дружелюбнее map(rb-tree)

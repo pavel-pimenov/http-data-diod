@@ -541,24 +541,20 @@ void Config::load_db_query_config() {
   // connection config (host/port/credentials/pool) is owned solely by the
   // worker, so it is not read here.
   if (m_mode == "proxy") {
-    if (oracle_enabled) {
+    auto add_routing_db = [&](const std::string &name, bool enabled) {
+      if (!enabled) {
+        return;
+      }
       DbConfig db;
-      db.m_name = "oracle";
-      db.m_driver = "oracle";
+      db.m_name = name;
+      db.m_driver = name;
       m_databases.push_back(db);
       Logger::info("DB Gateway: registered database '{}' (driver={}) "
                    "[proxy routing only]",
                    db.m_name, db.m_driver);
-    }
-    if (postgres_enabled) {
-      DbConfig db;
-      db.m_name = "postgres";
-      db.m_driver = "postgres";
-      m_databases.push_back(db);
-      Logger::info("DB Gateway: registered database '{}' (driver={}) "
-                   "[proxy routing only]",
-                   db.m_name, db.m_driver);
-    }
+    };
+    add_routing_db("oracle", oracle_enabled);
+    add_routing_db("postgres", postgres_enabled);
     return;
   }
 

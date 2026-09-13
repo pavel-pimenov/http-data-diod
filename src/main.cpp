@@ -190,6 +190,12 @@ std::unique_ptr<prometheus::Exposer> create_metrics_exposer(
   return exposer;
 }
 
+std::unique_ptr<StatsLogger> start_stats_logging(AppContext &app_ctx) {
+  auto sl = std::make_unique<StatsLogger>(app_ctx, g_shutdown_flag);
+  sl->start_periodic_logging();
+  return sl;
+}
+
 void run_proxy(AppContext &app_ctx) {
   // Proxy runtime components are initialized here (not in the ctor) so
   // AppContext stays constructible in unit tests without the NATS library.
@@ -200,10 +206,8 @@ void run_proxy(AppContext &app_ctx) {
 
   init_proxy_components(app_ctx);
 
-  StatsLogger stats_logger(app_ctx, g_shutdown_flag);
-  stats_logger
-      .start_periodic_logging(); // Start periodic logging in proxy mode too
-  RequestHandler request_handler(app_ctx, stats_logger);
+  auto stats_logger = start_stats_logging(app_ctx);
+  RequestHandler request_handler(app_ctx, *stats_logger);
 
   if (app_ctx.m_proxy.m_per_ip_metrics_collector) {
     exposer->RegisterCollectable(app_ctx.m_proxy.m_per_ip_metrics_collector);
@@ -252,8 +256,7 @@ void run_proxy(AppContext &app_ctx) {
 }
 
 void run_worker(AppContext &app_ctx) {
-  StatsLogger stats_logger(app_ctx, g_shutdown_flag);
-  stats_logger.start_periodic_logging();
+  auto stats_logger = start_stats_logging(app_ctx);
 
   auto exposer = create_metrics_exposer(19091, app_ctx.m_worker_registry,
                                           app_ctx.m_common_registry);
@@ -316,8 +319,7 @@ void run_worker(AppContext &app_ctx) {
 }
 
 void run_l2_server(AppContext &app_ctx) {
-  StatsLogger stats_logger(app_ctx, g_shutdown_flag);
-  stats_logger.start_periodic_logging();
+  auto stats_logger = start_stats_logging(app_ctx);
 
   ServerHandler server_handler(app_ctx);
 

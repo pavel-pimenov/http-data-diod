@@ -2478,19 +2478,6 @@ TEST_CASE("Common utils: shorten_user_agent", "[common-utils]") {
               .find("Edge/") == 0);
 }
 
-TEST_CASE("Common utils: validate_range and validate_positive",
-          "[common-utils]") {
-  REQUIRE(validate_positive(5, "port") == true);
-  REQUIRE(validate_positive(0, "port") == false);
-  REQUIRE(validate_positive(-3, "port") == false);
-
-  REQUIRE(validate_range(5, "size", 1, 100) == true);
-  REQUIRE(validate_range(0, "size", 1, 100) == false);
-  REQUIRE(validate_range(101, "size", 1, 100) == false);
-  REQUIRE(validate_range(50, "size", 1, 100, 40) == true);
-  REQUIRE(validate_range(80, "size", 1, 100, 40) == true);
-}
-
 TEST_CASE("Common utils: RetryHandler manages backoff state",
           "[common-utils]") {
   RetryHandler handler(100, 1000);
