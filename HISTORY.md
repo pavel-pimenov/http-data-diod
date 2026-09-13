@@ -1,3 +1,17 @@
+# refactor(src): batch 10 — DynamicLabeledFamily: O(n²) → O(n) в replace_from_provider
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/dynamic_labeled_family.hpp`: `replace_from_provider()` после каждого
+  удаления label перезапускал цикл с `m_children.begin()` — при 10k+ IP
+  (per-IP rate limiter, gauge), снимаемых каждые 15s, это O(n²) с
+  `unordered_map::erase` внутри. Теперь итерация идёт по `m_last_seen`
+  (её ключи — зеркало `m_children`), стирание инвалидирует только текущий
+  итератор, суммарно O(n).
+
+---
+
 # refactor(src): batch 9 — удаление мёртвых includes/demo-блоков, дублирующих public:
 
 ## Date: 2026-09-13

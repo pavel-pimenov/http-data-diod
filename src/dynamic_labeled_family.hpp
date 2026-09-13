@@ -199,14 +199,14 @@ private:
         static_cast<prometheus::Gauge*>(series[i])->Set(values[i]);
       }
     }
-    for (auto it = m_children.begin(); it != m_children.end();) {
+    for (auto it = m_last_seen.begin(); it != m_last_seen.end();) {
       if (present.count(it->first) == 0) {
-        // Erase last_seen first: remove_label erases the map key, invalidating
-        // it->first afterwards.
-        auto label = it->first;
-        m_last_seen.erase(label);
+        // Iterate m_last_seen (its keys mirror m_children): erasing invalidates
+        // only the erased element, so this stays O(n) instead of restarting the
+        // loop from begin() after every removal.
+        const auto label = it->first;
+        it = m_last_seen.erase(it);
         remove_label(label);
-        it = m_children.begin();
       } else {
         ++it;
       }
