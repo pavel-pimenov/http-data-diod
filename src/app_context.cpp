@@ -19,19 +19,19 @@ AppContext::AppContext() {
 }
 
 AppContext::~AppContext() {
-  if (m_proxy_stats_history) {
-    m_proxy_stats_history->stop();
-  }
-  if (m_worker_stats_history) {
-    m_worker_stats_history->stop();
-  }
-  if (m_server_stats_history) {
-    m_server_stats_history->stop();
-  }
-  if (m_common_stats_history) {
-    m_common_stats_history->stop();
-  }
+  stop_stats_history();
   m_tracer.reset();
+}
+
+void AppContext::stop_stats_history() {
+  for (auto *history : {m_proxy_stats_history.get(),
+                        m_worker_stats_history.get(),
+                        m_server_stats_history.get(),
+                        m_common_stats_history.get()}) {
+    if (history) {
+      history->stop();
+    }
+  }
 }
 
 bool AppContext::is_proxy_components_initialized() const {
@@ -236,42 +236,42 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
-       MetricsManager::create_counter_family(
-           m_worker_registry, "l2_worker_db_requests_total",
-           "Total number of HTTP DB Gateway requests executed by the worker "
-           "by database, type and HTTP status"),
-       MetricsManager::create_histogram_family(
-           m_worker_registry, "l2_worker_db_query_duration_seconds",
-           "Histogram of DB query execution duration in seconds by database",
-           histogram_buckets::g_k_latency_ms_to_10s),
-       MetricsManager::create_gauge_family(
-           m_worker_registry, "l2_worker_db_pool_connections",
-           "Current number of DB pool connections by database and state "
-           "(active/idle)"),
-       MetricsManager::create_gauge_family(
-           m_worker_registry, "l2_worker_db_gateway_ready",
-           "DB Gateway readiness per configured database (1 = executor live, "
-           "0 = still starting up)"),
-       MetricsManager::create_counter_family(
-           m_worker_registry, "l2_worker_responses_total",
-           "Total number of worker NATS responses by HTTP status code"),
-       MetricsManager::create_gauge(
-           m_worker_registry, "l2_worker_in_flight_requests",
-           "Current number of in-flight worker requests"),
-       MetricsManager::create_gauge(
-           m_worker_registry, "l2_worker_queue_size",
-           "Current worker thread-pool queue depth"),
-       MetricsManager::create_gauge(
-            m_worker_registry, "l2_worker_nats_connected",
-            "NATS connection state (1 = connected, 0 = disconnected)"),
-        MetricsManager::create_gauge(
-            m_worker_registry, "l2_worker_health_ready",
-            "Readiness state (1 = ready, 0 = not ready) mirrored from "
-            "/health/ready"),
-        MetricsManager::create_gauge(
-            m_worker_registry, "l2_worker_graceful_shutdown_seconds",
-            "Last graceful-shutdown drain duration in seconds (time from "
-            "SIGTERM to full shutdown, 0 while running)")});
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_db_requests_total",
+          "Total number of HTTP DB Gateway requests executed by the worker "
+          "by database, type and HTTP status"),
+      MetricsManager::create_histogram_family(
+          m_worker_registry, "l2_worker_db_query_duration_seconds",
+          "Histogram of DB query execution duration in seconds by database",
+          histogram_buckets::g_k_latency_ms_to_10s),
+      MetricsManager::create_gauge_family(
+          m_worker_registry, "l2_worker_db_pool_connections",
+          "Current number of DB pool connections by database and state "
+          "(active/idle)"),
+      MetricsManager::create_gauge_family(
+          m_worker_registry, "l2_worker_db_gateway_ready",
+          "DB Gateway readiness per configured database (1 = executor live, "
+          "0 = still starting up)"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_responses_total",
+          "Total number of worker NATS responses by HTTP status code"),
+      MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_in_flight_requests",
+          "Current number of in-flight worker requests"),
+      MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_queue_size",
+          "Current worker thread-pool queue depth"),
+      MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_nats_connected",
+          "NATS connection state (1 = connected, 0 = disconnected)"),
+      MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_health_ready",
+          "Readiness state (1 = ready, 0 = not ready) mirrored from "
+          "/health/ready"),
+      MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_graceful_shutdown_seconds",
+          "Last graceful-shutdown drain duration in seconds (time from "
+          "SIGTERM to full shutdown, 0 while running)")});
 }
 
 void AppContext::init_server_metrics() {

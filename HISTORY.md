@@ -1,3 +1,24 @@
+# refactor(src): batch 5 — polish app_context (выравнивание метрик, stop-хелпер history)
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/app_context.cpp`: исправлено кривое выравнивание блока worker-метрик
+  (`init_worker_metrics`, строки с 7-9 пробелами вместо 6) — блок
+  `DB Gateway / responses / in_flight / queue / nats / health / shutdown`
+  приведён к стандартному отступу остального файла.
+- `src/app_context.hpp/.cpp`: четыре if-блока `m_*_stats_history->stop()` в
+  деструкторе свёрнуты в приватный хелпер `stop_stats_history()` (инициализатор
+  из четырёх `.get()` — истории создаются как единый набор в `init_common`).
+  Отдельно разбиралось: унификация worker-блоков добавления БД в
+  `config.cpp` даёт ≈0 строк экономии (Logger::info у драйверов разный), по
+  этой причине не выполнялась.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): batch 3+4 — дедуп per-client метрик (proxy) и span-логов worker
 
 ## Date: 2026-09-13
