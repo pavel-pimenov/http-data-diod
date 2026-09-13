@@ -189,7 +189,4 @@ void setup_http_connection(ClientT &client, int timeout_seconds,
   }
 }
 
-void validate_trace_context(const TraceContext &ctx,
-                            const std::string &context);
-
 #endif // COMMON_UTILS_HPP

@@ -43,59 +43,57 @@ void StatsLogger::start_periodic_logging() {
         break;
       }
 
-      if (!m_shutdown_flag) {
-        const ModeStats s = collect_mode_stats();
-        uint64_t active = m_active_clients.load();
-        uint64_t max = m_max_clients.load();
-        uint64_t current_requests_for_rate = s.m_client_requests;
+      const ModeStats s = collect_mode_stats();
+      uint64_t active = m_active_clients.load();
+      uint64_t max = m_max_clients.load();
+      uint64_t current_requests_for_rate = s.m_client_requests;
 
-        if (m_app_ctx.m_config.m_mode == "proxy") {
-          current_requests_for_rate = s.m_nats_requests;
-        }
-
-        // Calculate requests per second over the last logging period
-        const auto now = std::chrono::steady_clock::now();
-        const auto duration =
-            std::chrono::duration_cast<std::chrono::seconds>(now - prev_time)
-                .count();
-        uint64_t requests_in_period =
-            current_requests_for_rate >= prev_logged_requests
-                ? (current_requests_for_rate - prev_logged_requests)
-                : 0;
-        double requests_per_second =
-            duration > 0 ? static_cast<double>(requests_in_period) / duration
-                         : 0.0;
-
-        prev_logged_requests = current_requests_for_rate;
-        prev_time = now;
-
-        const bool show_common_stats =
-            s.m_bytes_received > 0 || s.m_bytes_sent > 0 ||
-            s.m_client_requests > 0 || s.m_client_errors > 0 ||
-            requests_in_period > 0;
-
-        if (show_common_stats) {
-          Logger::info("Statistics - Bytes Received: {} bytes, Bytes Sent: {} "
-                       "bytes, Client Requests: {}, Client Errors: {}",
-                       s.m_bytes_received, s.m_bytes_sent, s.m_client_requests,
-                       s.m_client_errors);
-        }
-
-        if (m_app_ctx.m_config.m_mode == "proxy") {
-          if (m_app_ctx.m_proxy.m_duplicate_detector) {
-            m_app_ctx.m_proxy.m_metrics->m_duplicate_tracked_clients.Set(
-                static_cast<double>(
-                    m_app_ctx.m_proxy.m_duplicate_detector
-                        ->per_client_count_size()));
-          }
-          Logger::info("Statistics - NATS Requests: {}, NATS Errors: {}",
-                       s.m_nats_requests, s.m_nats_errors);
-        }
-
-        Logger::info("Statistics - Active Clients: {}, Max Clients: {}, "
-                     "Requests in last 600s: {}, Req/Sec (last 600s): {:.2f}",
-                     active, max, requests_in_period, requests_per_second);
+      if (m_app_ctx.m_config.m_mode == "proxy") {
+        current_requests_for_rate = s.m_nats_requests;
       }
+
+      // Calculate requests per second over the last logging period
+      const auto now = std::chrono::steady_clock::now();
+      const auto duration =
+          std::chrono::duration_cast<std::chrono::seconds>(now - prev_time)
+              .count();
+      uint64_t requests_in_period =
+          current_requests_for_rate >= prev_logged_requests
+              ? (current_requests_for_rate - prev_logged_requests)
+              : 0;
+      double requests_per_second =
+          duration > 0 ? static_cast<double>(requests_in_period) / duration
+                       : 0.0;
+
+      prev_logged_requests = current_requests_for_rate;
+      prev_time = now;
+
+      const bool show_common_stats =
+          s.m_bytes_received > 0 || s.m_bytes_sent > 0 ||
+          s.m_client_requests > 0 || s.m_client_errors > 0 ||
+          requests_in_period > 0;
+
+      if (show_common_stats) {
+        Logger::info("Statistics - Bytes Received: {} bytes, Bytes Sent: {} "
+                     "bytes, Client Requests: {}, Client Errors: {}",
+                     s.m_bytes_received, s.m_bytes_sent, s.m_client_requests,
+                     s.m_client_errors);
+      }
+
+      if (m_app_ctx.m_config.m_mode == "proxy") {
+        if (m_app_ctx.m_proxy.m_duplicate_detector) {
+          m_app_ctx.m_proxy.m_metrics->m_duplicate_tracked_clients.Set(
+              static_cast<double>(
+                  m_app_ctx.m_proxy.m_duplicate_detector
+                      ->per_client_count_size()));
+        }
+        Logger::info("Statistics - NATS Requests: {}, NATS Errors: {}",
+                     s.m_nats_requests, s.m_nats_errors);
+      }
+
+      Logger::info("Statistics - Active Clients: {}, Max Clients: {}, "
+                   "Requests in last 600s: {}, Req/Sec (last 600s): {:.2f}",
+                   active, max, requests_in_period, requests_per_second);
     }
   });
 }

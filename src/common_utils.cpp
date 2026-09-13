@@ -299,20 +299,5 @@ void setup_ssl_client(httplib::SSLClient &client, int timeout_seconds,
   }
 }
 
-void validate_trace_context(const TraceContext &ctx,
-                            const std::string &context) {
-  const std::pair<std::string_view, std::string_view> fields[] = {
-      {"trace_id", ctx.m_trace_id},
-      {"parent_id", ctx.m_parent_id},
-      {"span_id", ctx.m_span_id},
-      {"traceparent_header", ctx.m_traceparent_header},
-  };
-  for (const auto &[name, value] : fields) {
-    if (value.empty()) {
-      Logger::warn("{} - {}: empty", context, name);
-    }
-  }
-}
-
 // extract_client_ip / extract_query_string moved to url_utils.hpp (inline)
 // so the pure request-data extraction helpers are unit-testable header-only.

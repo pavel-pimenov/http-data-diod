@@ -2822,20 +2822,6 @@ TEST_CASE("Common utils: fail_request uses log_message for logging",
   REQUIRE((*body)["error"] == "short msg");
 }
 
-TEST_CASE("Common utils: validate_trace_context does not throw for any field set",
-          "[common-utils]") {
-  TraceContext full;
-  full.m_trace_id = "0123456789abcdef0123456789abcdef";
-  full.m_span_id = "abcdef0123456789";
-  full.m_parent_id = "0123456789abcdef";
-  full.m_traceparent_header = "00-t-p-01";
-  validate_trace_context(full, "svc");
-
-  TraceContext empty;
-  validate_trace_context(empty, "svc");
-  REQUIRE(true);
-}
-
 TEST_CASE("RequestIdGenerator: generate_uuid has stable format and is unique",
           "[request-id]") {
   RequestIdGenerator gen;

@@ -12,6 +12,12 @@ void CircuitBreaker::update_gauge() {
   }
 }
 
+void CircuitBreaker::transition_to_open() {
+  m_state.store(State::OPEN);
+  m_success_count.store(0);
+  update_gauge();
+}
+
 bool CircuitBreaker::allow_request() {
   const auto current_state = m_state.load();
   if (current_state == State::CLOSED) {
@@ -55,15 +61,12 @@ void CircuitBreaker::record_failure() {
   const auto current_state = m_state.load();
   if (current_state == State::HALF_OPEN) {
     Logger::warn("Circuit breaker: HALF_OPEN -> OPEN (test request failed)");
-    m_state.store(State::OPEN);
-    m_success_count.store(0);
-    update_gauge();
+    transition_to_open();
   } else if (current_state == State::CLOSED) {
     const int count = m_failure_count.fetch_add(1) + 1;
     if (count >= g_failure_threshold) {
       Logger::warn("Circuit breaker: CLOSED -> OPEN (failures={})", count);
-      m_state.store(State::OPEN);
-      update_gauge();
+      transition_to_open();
     }
   }
   // OPEN state: already tracking via last_failure_time_us

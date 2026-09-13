@@ -31,6 +31,7 @@ struct CircuitBreaker {
 
 private:
   void update_gauge();
+  void transition_to_open();
 };
 
 #endif // CIRCUIT_BREAKER_HPP

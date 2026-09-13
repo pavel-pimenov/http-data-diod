@@ -1,3 +1,32 @@
+# refactor(src): batch 7 — удаление мёртвого кода (validate_trace_context, client_ip) + микро-DRY (circuit_breaker, stats_logger)
+
+## Date: 2026-09-13
+
+### Что сделано
+- `src/common_utils.hpp/.cpp`: удалена глобальная функция
+  `validate_trace_context()` — в прод-коде не вызывается (в production её
+  заменяет private static `TraceContextHelper::validate_trace_context` в
+  `tracing_helpers.hpp`); использовалась только тестом. Вместе с ней удалены
+  соответствующие TEST_CASE из `src/test_components.cpp`.
+- `src/server_handler.cpp`: удалены неиспользуемые локальные
+  `const std::string &client_ip = req_ctx.client_ip()` в `handle_post` и
+  `handle_get` — client_ip уже прокидывается в лог-контекст конструктором
+  `ScopedRequestContext` напрямую.
+- `src/circuit_breaker.cpp/.hpp`: переходы в OPEN в `record_failure()`
+  (HALF_OPEN-ветка с обнулением success-счётчика и CLOSED-ветка) сведены к
+  приватному хелперу `transition_to_open()` (state=OPEN + success=0 + gauge).
+  Для CLOSED-ветки обнуление success — no-op (счётчик и так 0 в состоянии
+  CLOSED).
+- `src/stats_logger.cpp`: убран избыточный вложенный `if (!m_shutdown_flag)`
+  в `start_periodic_logging` — после проверки `if (m_shutdown_flag ||
+  st.stop_requested()) break;` флаг всегда false; блок статистики развёрнут
+  в тело цикла.
+
+### Результат
+- Сборка и тесты пройдены (см. ниже).
+
+---
+
 # refactor(src): batch 6 — дедуп SET statement_timeout в postgres executor
 
 ## Date: 2026-09-13
