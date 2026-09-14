@@ -1,3 +1,39 @@
+# refactor(src): batch 16 — DB Gateway round-trip/edge-тесты + E2E-верификация стека
+
+## Date: 2026-09-14
+
+### Что сделано
+- `src/test_proxy_core.cpp` (+7 TEST_CASE, `[db-gateway-validate]` /
+  `[db-gateway-roundtrip]` / `[db-gateway-readonly]`):
+  - round-trip `build_db_query_request` → `parse_db_query_request`: query
+    сохраняет sql/params/timeout_ms/max_rows; ping не тащит `sql` и парсится.
+  - edge-валидация: отсутствующие `timeout_ms`/`max_rows` дают `-1` (= default),
+    значения < `-1` отвергаются; `params: null` превращается в пустой объект;
+    вложенный не-скаляр в params отвергается.
+  - read-only-гейт: `WITH` разрешён, ведyщие скобки/whitespace/регистр не мешают.
+- E2E-верификация живого стека (после batch 13–15):
+  - `scripts/db-gateway-e2e-test.py` — **7/7 PASS** (list, ping/query postgres,
+    read-only-gate 400, method 405, oracle не подан);
+  - `scripts/sentry-e2e-test.py` — **PASS** (событие `proxy_backend_error`
+    доставлено в mock, fingerprint/tags корректны);
+  - `scripts/e2e-graceful-shutdown-test.py` — **PASS** (l2-server drained 6774
+    in-flight, exit 0, потоки join, healthy после рестарта).
+
+### Почему
+- DB-gateway хелперы были покрыты, но без round-trip и границ контракта
+  (теперь формат запроса proxy→worker зафиксирован тестом навсегда).
+- E2E подтверждают, что изменения batch 13–15 не сломали живой
+  data-plane: DB gateway, доставку Sentry и graceful drain.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 447/1811,
+  test_proxy_core 114→120/883), все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `./scripts/pre-commit.sh "refactor(src): batch 16 — DB Gateway round-trip/edge-тесты"`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 15 — regression-тест на фикс envelope status (batch 13) через set_response_content
 
 ## Date: 2026-09-14

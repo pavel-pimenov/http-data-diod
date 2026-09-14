@@ -221,6 +221,12 @@ TEST_CASE("Gateway read-only check: strip_sql_comments edges",
   // The first keyword is still SELECT, so the read-only check stays correct
   // even though the trailing part of the string literal was eaten.
   REQUIRE(is_read_only_sql("SELECT '--x' FROM t") == true);
+  // First-meaningful-word semantics: parens, whitespace and case are ignored,
+  // WITH is explicitly allowed by the gate.
+  REQUIRE(is_read_only_sql("WITH x AS (SELECT 1) SELECT * FROM x"));
+  REQUIRE(is_read_only_sql("(SELECT 1)"));
+  REQUIRE(is_read_only_sql("  select 1"));
+  REQUIRE(is_read_only_sql("SELECT 1"));
 }
 
 TEST_CASE("Gateway request validation: parses a valid query",
@@ -278,6 +284,89 @@ TEST_CASE("Gateway request validation: clamps timeout and max_rows",
                                   {DbQueryContract::kSql, "SELECT 1"},
                                   {DbQueryContract::kTimeoutMs, 0}});
   REQUIRE_FALSE(bad_timeout.has_value());
+}
+
+TEST_CASE("Gateway validation: unused fields default to -1",
+          "[db-gateway-validate]") {
+  const auto req = parse_db_query_request(
+      json{{DbQueryContract::kType, "query"},
+           {DbQueryContract::kDb, "oracle"},
+           {DbQueryContract::kSql, "SELECT 1"}});
+  REQUIRE(req.has_value());
+  REQUIRE(req->m_timeout_ms == -1);
+  REQUIRE(req->m_max_rows == -1);
+}
+
+TEST_CASE("Gateway validation: negative values below -1 rejected",
+          "[db-gateway-validate]") {
+  const auto bad_timeout =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kTimeoutMs, -2}});
+  REQUIRE_FALSE(bad_timeout.has_value());
+
+  const auto bad_rows =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kMaxRows, -2}});
+  REQUIRE_FALSE(bad_rows.has_value());
+}
+
+TEST_CASE("Gateway validation: params null becomes empty object",
+          "[db-gateway-validate]") {
+  const auto req =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kParams, nullptr}});
+  REQUIRE(req.has_value());
+  REQUIRE(req->m_params.empty());
+}
+
+TEST_CASE("Gateway validation: nested non-scalar param rejected",
+          "[db-gateway-validate]") {
+  const auto bad =
+      parse_db_query_request(json{{DbQueryContract::kType, "query"},
+                                  {DbQueryContract::kDb, "oracle"},
+                                  {DbQueryContract::kSql, "SELECT 1"},
+                                  {DbQueryContract::kParams,
+                                   json{{"a", json::array({1})}}}});
+  REQUIRE_FALSE(bad.has_value());
+}
+
+TEST_CASE("Gateway round-trip: build -> parse preserves query fields",
+          "[db-gateway-roundtrip]") {
+  const json payload = json{
+      {DbQueryContract::kSql, "SELECT * FROM t WHERE id = :id"},
+      {DbQueryContract::kParams,
+       json{{"id", 42}, {"flag", true}, {"s", "text"}}},
+      {DbQueryContract::kTimeoutMs, 5000},
+      {DbQueryContract::kMaxRows, 25}};
+  const json request =
+      build_db_query_request("query", "req-rt-1", "oracle", payload);
+  const auto parsed = parse_db_query_request(request);
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->m_type == "query");
+  REQUIRE(parsed->m_db == "oracle");
+  REQUIRE(parsed->m_sql == "SELECT * FROM t WHERE id = :id");
+  REQUIRE(parsed->m_params["id"] == 42);
+  REQUIRE(parsed->m_params["flag"] == true);
+  REQUIRE(parsed->m_params["s"] == "text");
+  REQUIRE(parsed->m_timeout_ms == 5000);
+  REQUIRE(parsed->m_max_rows == 25);
+}
+
+TEST_CASE("Gateway round-trip: ping carries no sql and still parses",
+          "[db-gateway-roundtrip]") {
+  const json request = build_db_query_request("ping", "req-rt-2", "postgres");
+  REQUIRE_FALSE(request.contains(DbQueryContract::kSql));
+  const auto parsed = parse_db_query_request(request);
+  REQUIRE(parsed.has_value());
+  REQUIRE(parsed->m_type == "ping");
+  REQUIRE(parsed->m_db == "postgres");
+  REQUIRE(parsed->m_sql.empty());
 }
 
 TEST_CASE("Gateway responses: query and ping bodies", "[db-gateway-response]") {
