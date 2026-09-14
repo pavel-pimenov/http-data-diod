@@ -466,6 +466,7 @@ if(BUILD_TESTS)
         request_data_preparer.cpp
         metrics_manager.cpp
         trace_context_extractor.cpp
+        response_builder.cpp
         db_query_executor_base.cpp
         sentry_client.cpp
         httplib/httplib.cc
@@ -473,6 +474,7 @@ if(BUILD_TESTS)
     target_include_directories(test_components PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/base64
         ${CMAKE_CURRENT_SOURCE_DIR}/json
     )
     target_compile_options(test_components PRIVATE

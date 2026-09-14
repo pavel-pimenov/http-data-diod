@@ -15,6 +15,7 @@
 #include "rate_limiter_per_ip.hpp"
 #include "request_id_generator.hpp"
 #include "request_data_preparer.hpp"
+#include "response_builder.hpp"
 #include "retry_handler.hpp"
 #include "retry_utils.hpp"
 #include "thread_pool.hpp"
@@ -1107,6 +1108,40 @@ TEST_CASE("JsonUtils: get_body_* navigate the response envelope",
   REQUIRE(get_body_string(env, "missing", "def") == "def");
   REQUIRE(get_body_int(env, NatsResponseContract::kBodyTimestamp, -1) == 1000);
   REQUIRE(get_body_response_ref(env) == "resp");
+}
+
+TEST_CASE("ResponseBuilder: envelope without status_code -> HTTP 500, no throw",
+          "[response-builder]") {
+  EnvVarGuard mode("MODE", "proxy");
+  AppContext ctx;
+  httplib::Response res;
+  const json env = json::object(
+      {{NatsResponseContract::kBody, "{\"ok\":true}"},
+       {NatsResponseContract::kBodyIsBinary, false},
+       {NatsResponseContract::kBodyContentType, "application/json"}});
+
+  // Regression for batch 13: a worker envelope that lacks status_code must
+  // produce a 500 via safe_get_int, never throw out_of_range out of the
+  // const operator[] (which used to escape into the httplib thread).
+  REQUIRE_NOTHROW(set_response_content(res, env, "req-1", TraceContext{},
+                                       "POST", "/v1/sql", 0, ctx));
+  REQUIRE(res.status == 500);
+}
+
+TEST_CASE("ResponseBuilder: envelope status_code passthrough",
+          "[response-builder]") {
+  EnvVarGuard mode("MODE", "proxy");
+  AppContext ctx;
+  httplib::Response res;
+  const json env = json::object(
+      {{NatsResponseContract::kStatus, 201},
+       {NatsResponseContract::kBody, R"({"ok":true})"},
+       {NatsResponseContract::kBodyIsBinary, false},
+       {NatsResponseContract::kBodyContentType, "application/json"}});
+
+  set_response_content(res, env, "req-2", TraceContext{}, "GET",
+                       "/v1/db/foo/ping", 0, ctx);
+  REQUIRE(res.status == 201);
 }
 
 TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {

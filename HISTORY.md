@@ -1,3 +1,35 @@
+# refactor(src): batch 15 — regression-тест на фикс envelope status (batch 13) через set_response_content
+
+## Date: 2026-09-14
+
+### Что сделано
+- `src/CMakeLists.txt`: `response_builder.cpp` добавлен в таргет `test_components`
+  (вместе с include-путём `${CMAKE_CURRENT_SOURCE_DIR}/base64` — нужен для
+  `#include <base64.hpp>`). Зависимостей тянет минимум: `app_context.cpp`,
+  `common_utils.cpp`, `trace_logger.cpp`, `httplib.cc` уже есть в таргете.
+- `src/test_components.cpp`: +2 TEST_CASE `[response-builder]`:
+  - конверт воркера БЕЗ `status_code` → `set_response_content` не бросает и
+    выставляет HTTP 500 (регрессионный тест на фикс batch 13: раньше const
+    `operator[]` бросал `out_of_range` в поток httplib);
+  - конверт со `status_code` → статус пробрасывается без изменений (201).
+
+### Почему
+- Фикс batch 13 защищал прод от краша, но не имел unit-покрытия. Тест
+  фиксирует контракт «битый/неполный конверт → 500, никогда не throw» навсегда.
+- `set_response_content` оказалась легковесно тестируемой: её хелперы
+  (`get_body_*`, `safe_get_int`) header-only, а AppContext/JaegerLogger уже
+  линкуются в test_components.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 447/1811 (+2
+  теста), test_proxy_core 114/857), все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS
+  (путь set_response_content в проде — валидный конверт от l2-server).
+- `./scripts/pre-commit.sh "refactor(src): batch 15 — regression-тест envelope status (set_response_content)"`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 13+14 — robustness ответного контракта + чистка StatsLogger/process_request
 
 ## Date: 2026-09-14
