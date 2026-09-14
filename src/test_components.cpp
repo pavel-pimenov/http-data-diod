@@ -27,8 +27,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <future>
 #include <prometheus/counter.h>
+#include <regex>
+#include <unordered_set>
 #include <prometheus/registry.h>
 #include <set>
 #include <thread>
@@ -3230,6 +3233,65 @@ TEST_CASE("[db-query-utils] DbRowCollector enforces the row cap",
   REQUIRE(exact.try_add(json::array({9})));
   REQUIRE_FALSE(exact.truncated());
   REQUIRE(exact.size() == 1);
+}
+
+TEST_CASE("RequestIdGenerator: produces the documented format",
+          "[request-id]") {
+  RequestIdGenerator gen;
+  const std::string id = gen.generate_uuid();
+  // YYYY-MM-DD~<counter>~<6-digit-zero-padded-random>
+  const std::regex pattern(R"(^\d{4}-\d{2}-\d{2}~\d+~\d{6}$)");
+  REQUIRE(std::regex_match(id, pattern));
+}
+
+TEST_CASE("RequestIdGenerator: date part matches the local date",
+          "[request-id]") {
+  RequestIdGenerator gen;
+  const std::string id = gen.generate_uuid();
+  const std::time_t now = std::time(nullptr);
+  std::tm tm_now{};
+  localtime_r(&now, &tm_now);
+  const std::string expected =
+      std::to_string(tm_now.tm_year + 1900) + '-' +
+      (tm_now.tm_mon + 1 < 10 ? "0" : "") +
+      std::to_string(tm_now.tm_mon + 1) + '-' +
+      (tm_now.tm_mday < 10 ? "0" : "") + std::to_string(tm_now.tm_mday);
+  REQUIRE(id.rfind(expected, 0) == 0);
+}
+
+TEST_CASE("RequestIdGenerator: counter increments per call", "[request-id]") {
+  RequestIdGenerator gen;
+  const std::string first = gen.generate_uuid();
+  const std::string second = gen.generate_uuid();
+  const auto middle = [](const std::string &s) {
+    const size_t a = s.find('~');
+    const size_t b = s.find('~', a + 1);
+    return std::stoll(s.substr(a + 1, b - a - 1));
+  };
+  REQUIRE(middle(second) == middle(first) + 1);
+}
+
+TEST_CASE("RequestIdGenerator: random suffix is 6 zero-padded digits",
+          "[request-id]") {
+  RequestIdGenerator gen;
+  const std::string id = gen.generate_uuid();
+  const size_t last = id.rfind('~');
+  REQUIRE(last != std::string::npos);
+  const std::string suffix = id.substr(last + 1);
+  REQUIRE(suffix.size() == 6);
+  const int value = std::stoi(suffix);
+  REQUIRE(value >= 0);
+  REQUIRE(value <= 999999);
+}
+
+TEST_CASE("RequestIdGenerator: ids are unique across many calls",
+          "[request-id]") {
+  RequestIdGenerator gen;
+  std::unordered_set<std::string> seen;
+  for (int i = 0; i < 2000; ++i) {
+    seen.insert(gen.generate_uuid());
+  }
+  REQUIRE(seen.size() == 2000);
 }
 
 

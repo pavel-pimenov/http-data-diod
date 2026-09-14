@@ -1,3 +1,32 @@
+# refactor(src): batch 17 — unit-покрытие RequestIdGenerator (был полный пробел)
+
+## Date: 2026-09-14
+
+### Что сделано
+- `src/test_components.cpp`: +5 TEST_CASE `[request-id]` (до этого у
+  `RequestIdGenerator` не было ни одного теста):
+  - формат: `YYYY-MM-DD~<counter>~<6 цифр>`, совпадение по regex;
+  - дата-часть совпадает с локальной датой (same host, localtime_r);
+  - контрактный счётчик: каждый вызов из одного экземпляра увеличивает
+    средний сегмент на 1;
+  - random-суффикс — ровно 6 нуль-падетных цифр в диапазоне `[0, 999999]`;
+  - уникальность: 2000 вызовов → 2000 разных id (уникальность за счёт
+    счётчика, а не random-суффикса — коллизии суффикса безопасны).
+
+### Почему
+- Формат request_id разбирается в логах/трейсах/ответах и был единственным
+  публичным контрактом без unit-покрытия; теперь любое изменение формата
+  (префикс, паддинг, порядок сегментов) ломает тест, а не прод-приёмку.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 447→452/1819,
+  test_proxy_core 120/883), все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `./scripts/pre-commit.sh "refactor(src): batch 17 — unit-покрытие RequestIdGenerator"`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 16 — DB Gateway round-trip/edge-тесты + E2E-верификация стека
 
 ## Date: 2026-09-14
