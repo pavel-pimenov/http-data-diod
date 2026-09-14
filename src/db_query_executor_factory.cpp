@@ -2,7 +2,6 @@
 #include "db_query_executor_oracle.hpp"
 #include "db_query_executor_postgres.hpp"
 #include "logger.hpp"
-#include <format>
 
 std::unique_ptr<DbQueryExecutor> create_db_query_executor(const DbConfig &db) {
   if (db.m_driver == "oracle") {

@@ -18,23 +18,15 @@
 #include "nats_client.hpp"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
-#include "retry_utils.hpp"
-#include "scoped_metrics.hpp"
 #include "sentry_client.hpp"
 #include "scoped_profiler.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 #include <algorithm>
-#include <chrono>
 #include <string>
-#include <cstdlib>
 #include <format>
 #include <nlohmann/json.hpp>
 #include <prometheus/counter.h>
-#include <prometheus/registry.h>
-#include <random>
-#include <sstream>
-#include <thread>
 
 // Named struct for RAII active client tracking
 struct ActiveClientTracker {
@@ -58,8 +50,6 @@ RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
       m_request_timeout_seconds(ctx.m_config.m_request_timeout_seconds),
       m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
-
-RequestHandler::~RequestHandler() {}
 
 void RequestHandler::handle_get(const httplib::Request &req,
                                 httplib::Response &res) {
@@ -126,8 +116,6 @@ void RequestHandler::handle_crash_test(const httplib::Request &req,
   volatile int *bad_ptr = nullptr;
   // cppcheck-suppress nullPointer
   *bad_ptr = 42; // NOLINT //-V522 triggers SIGSEGV for crash handler test
-  // unreachable
-  res.status = 200;
 }
 
 void RequestHandler::handle_stacktrace(httplib::Response &res) {
@@ -211,8 +199,8 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
 
 void RequestHandler::handle_duplicates(httplib::Response &res) {
   // Simple report of duplicate POST requests detected from clients. When the
-  // detector is absent (non-proxy mode) or disabled, still answers 200 with
-  // the enabled flag so callers can distinguish "off" from "empty".
+  // detector is absent (non-proxy mode) or disabled this endpoint answers 404
+  // so callers can distinguish "not supported here" from "empty report".
   if (!m_ctx.m_proxy.m_duplicate_detector) {
     res.status = 404;
     res.set_content(

@@ -5,13 +5,16 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
-
+#include <vector>
 #include <stop_token>
 
 #include <prometheus/counter.h>

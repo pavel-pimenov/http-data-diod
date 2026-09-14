@@ -36,6 +36,15 @@ public:
             .count());
   }
 
+  // Monotonic microseconds (deltas only). Used by circuit-breaker timeouts so
+  // an NTP wall-clock jump cannot prematurely trip the breaker.
+  static uint64_t steady_us() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+  }
+
   static std::string format_rfc3339() {
     const auto now = std::chrono::system_clock::now();
     const auto now_s = std::chrono::time_point_cast<std::chrono::seconds>(now);

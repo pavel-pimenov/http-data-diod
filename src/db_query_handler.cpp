@@ -1,6 +1,5 @@
 #include "db_query_handler.hpp"
 #include "db_query_utils.hpp"
-#include "json_utils.hpp"
 #include "logger.hpp"
 #include "time_utils.hpp"
 #include <format>

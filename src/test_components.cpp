@@ -2165,6 +2165,19 @@ TEST_CASE("DedupCache: concurrent access does not lose entries",
   REQUIRE(kTotal == 1600);
 }
 
+TEST_CASE("DedupCache: max_entries == 0 means unbounded (no eviction loop)",
+          "[dedup-cache]") {
+  // Regression: max_entries=0 used to trip an infinite eviction loop in
+  // store(); now 0 is documented as "unbounded".
+  DedupCache cache(true, 0, 60000);
+  cache.store("a", "1");
+  cache.store("b", "2");
+  cache.store("c", "3");
+  REQUIRE(cache.find("a").has_value());
+  REQUIRE(cache.find("b").has_value());
+  REQUIRE(cache.find("c").has_value());
+}
+
 // ============================================================================
 // CircuitBreaker tests
 // ============================================================================
@@ -2267,11 +2280,27 @@ TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
   REQUIRE(cb.allow_request() == false);
 
   // Simulate the timeout having elapsed by backdating m_last_failure_time_us.
-  const auto now_us = static_cast<uint64_t>(TimeUtils::epoch_us());
+  const uint64_t now_us = TimeUtils::steady_us();
   cb.m_last_failure_time_us.store(
       now_us - CircuitBreaker::g_open_timeout_us - 1000);
   REQUIRE(cb.allow_request() == true);
   REQUIRE(cb.state_name() == "HALF_OPEN");
+}
+
+TEST_CASE("CircuitBreaker: failures in OPEN do not extend the open window",
+          "[circuit-breaker]") {
+  CircuitBreaker cb;
+  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
+    cb.record_failure();
+  }
+  REQUIRE(cb.state_name() == "OPEN");
+  const uint64_t trip_us = cb.m_last_failure_time_us.load();
+
+  // Late (in-flight) failures that land while already OPEN must not move the
+  // trip timestamp, otherwise the breaker would never recover.
+  cb.record_failure();
+  cb.record_failure();
+  REQUIRE(cb.m_last_failure_time_us.load() == trip_us);
 }
 
 // ============================================================================

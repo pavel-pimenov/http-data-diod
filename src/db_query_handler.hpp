@@ -8,9 +8,9 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <variant>
 #include <vector>
-#if __has_include(<flat_map>)
+
+#if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
 #include <flat_map>
 #endif
 

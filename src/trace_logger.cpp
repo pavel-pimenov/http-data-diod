@@ -3,6 +3,7 @@
 #include "logger.hpp"
 #include "time_utils.hpp"
 #include <format>
+#include <random>
 
 // Thread-local random generator for fast ID generation (initialized once per
 // thread)

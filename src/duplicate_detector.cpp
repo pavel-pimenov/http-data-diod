@@ -2,12 +2,8 @@
 #include "logger.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
-#include <chrono>
 #include <ranges>
 #include <utility>
-#if __has_include(<print>)
-#include <print>
-#endif
 
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 

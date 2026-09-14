@@ -116,7 +116,6 @@ bool record_and_maybe_reject_duplicate(const std::string &client_id,
 
 public:
   explicit RequestHandler(AppContext &ctx, StatsLogger &stats_logger);
-  ~RequestHandler();
   void handle_get(const httplib::Request &req, httplib::Response &res);
   void handle_post(const httplib::Request &req, httplib::Response &res);
 

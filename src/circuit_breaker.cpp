@@ -1,5 +1,4 @@
 #include "circuit_breaker.hpp"
-#include "logger.hpp"
 
 void CircuitBreaker::set_gauge(prometheus::Gauge &gauge) {
   m_gauge = gauge;
@@ -13,6 +12,7 @@ void CircuitBreaker::update_gauge() {
 }
 
 void CircuitBreaker::transition_to_open() {
+  m_last_failure_time_us.store(TimeUtils::steady_us());
   m_state.store(State::OPEN);
   m_success_count.store(0);
   update_gauge();
@@ -26,8 +26,9 @@ bool CircuitBreaker::allow_request() {
   if (current_state == State::HALF_OPEN) {
     return true;
   }
-  // OPEN state: check if timeout has elapsed
-  const auto now_us = static_cast<uint64_t>(TimeUtils::epoch_us());
+  // OPEN state: check if timeout has elapsed (monotonic clock so wall-clock
+  // jumps cannot flip the breaker)
+  const uint64_t now_us = TimeUtils::steady_us();
   const uint64_t elapsed = now_us - m_last_failure_time_us.load();
   if (elapsed >= g_open_timeout_us) {
     Logger::info("Circuit breaker: OPEN -> HALF_OPEN (timeout elapsed)");
@@ -57,7 +58,6 @@ void CircuitBreaker::record_success() {
 }
 
 void CircuitBreaker::record_failure() {
-  m_last_failure_time_us.store(static_cast<uint64_t>(TimeUtils::epoch_us()));
   const auto current_state = m_state.load();
   if (current_state == State::HALF_OPEN) {
     Logger::warn("Circuit breaker: HALF_OPEN -> OPEN (test request failed)");
@@ -69,7 +69,8 @@ void CircuitBreaker::record_failure() {
       transition_to_open();
     }
   }
-  // OPEN state: already tracking via last_failure_time_us
+  // OPEN state: keep the original failure timestamp so late (in-flight)
+  // requests that fail after the trip do not extend the open window.
 }
 
 std::string CircuitBreaker::state_name() const {

@@ -1,3 +1,62 @@
+# refactor(src): batch 12 — IWYU-гигиена + robustness (монотонный circuit-breaker, unbounded dedup)
+
+## Date: 2026-09-14
+
+### Что сделано
+- Удалены неиспользуемые includes (проверено грепом по каждому символу):
+  - `circuit_breaker.cpp`: дубль `logger.hpp` (уже тащит `circuit_breaker.hpp`).
+  - `duplicate_detector.cpp`: `<chrono>` и `<print>` (время через `TimeUtils`).
+  - `db_query_handler.hpp`: `<variant>`; `db_query_handler.cpp`: `json_utils.hpp`
+    (алиас `json` даёт сам `db_query_handler.hpp` / `db_query_utils.hpp`).
+  - `db_query_executor_factory.cpp`: `<format>`.
+  - `stats_logger.hpp`: `<memory>`.
+  - `nats_poll_service.cpp`: `exceptions.hpp`.
+  - `sentry_client.cpp`: `<memory>`.
+  - `request_handler.cpp`: `retry_utils.hpp`, `scoped_metrics.hpp`,
+    `<chrono>`, `<cstdlib>`, `<random>`, `<sstream>`, `<thread>`,
+    `<prometheus/registry.h>`.
+- Добавлены недостающие includes:
+  - `trace_logger.hpp`: `<cstdint>`, `<memory>`, `<string>`, `<vector>`.
+  - `trace_logger.cpp`: `<random>` (thread-local `random_device`/`mt19937_64`).
+- `db_query_handler.hpp`: guard для flat-контейнера с `defined(__cpp_lib_flat_map)`
+  (как в `duplicate_detector.hpp:78`).
+- `request_handler.cpp`: удалён пустой `~RequestHandler() {}` (rule of zero);
+  удалён недостижимый `res.status = 200;` в `/crash-test`; комментарий
+  `handle_duplicates` выровнен с кодом (404 для «режим без детектора»).
+- **Robustness — время в circuit-breaker**: `allow_request()`/`transition_to_open()`
+  переведены с wall-clock `TimeUtils::epoch_us()` на новый монотонный
+  `TimeUtils::steady_us()` — скачок системного времени (NTP) больше не может
+  вызвать unsigned underflow (мгновенный OPEN→HALF_OPEN) или преждевременный
+  размыкатель. Все остальные `epoch_us()` в проекте — это duration-метрики
+  (обычно `end-start`), им wall-clock допустим.
+- **Robustness — окно OPEN не продлевается**: `record_failure()` теперь ставит
+  timestamps только в `transition_to_open()`; запоздавшие (in-flight) провалы,
+  приземлившиеся в состоянии OPEN, не двигают точку открытия — иначе breaker
+  перманентно оставался бы открытым.
+- **Robustness — dedup**: `DedupCache::store()` при `max_entries == 0` зацикливался
+  в `while (size >= 0) { evict_oldest(); }`. Семантика: `0` = безлимит (как у
+  DuplicateDetector: `m_per_client_max_entries > 0` — LBYL). Контракт
+  задокументирован в классе, config-валидатор всё равно требует positivity.
+- Новые unit-тесты: `DedupCache: max_entries == 0 means unbounded`,
+  `CircuitBreaker: failures in OPEN do not extend the open window`;
+  тест backdating таймаута переведён на steady-время.
+
+### Почему
+- IWYU-чистота: меньше транзитивных зависимостей, clang-tidy проще.
+- Rule of zero для `RequestHandler` — убрать implicit-move suppression.
+- Устойчивость: breaker принимал решение на wall-clock с underflow-риском при
+  NTP-скачках; open-окно продлевалось запоздавшими провалами; dedup вис из-за
+  деления на возможный 0.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components +2,
+  test_proxy_core без изменений), все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `./scripts/pre-commit.sh "refactor(src): batch 12 — IWYU-гигиена + robustness (монотонный circuit-breaker, unbounded dedup)"`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 11 — l2_routing.hpp: dot-segment canonicalization + тестируемый SSRF-контракт
 
 ## Date: 2026-09-13

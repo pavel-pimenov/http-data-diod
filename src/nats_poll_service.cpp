@@ -1,6 +1,5 @@
 #include "nats_poll_service.hpp"
 #include "common_utils.hpp"
-#include "exceptions.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"

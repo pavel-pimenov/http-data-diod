@@ -16,6 +16,8 @@ consteval std::uint64_t dedup_default_ttl() { return 60000; }
 
 class DedupCache {
 public:
+  // max_entries == 0 means "unbounded" (used by callers that cap only by TTL);
+  // the config validator also enforces positive values for the proxy knob.
   explicit DedupCache(bool enabled = true, size_t max_entries = dedup_default_max(),
                       uint64_t ttl_ms = dedup_default_ttl())
       : m_enabled(enabled), m_max_entries(max_entries), m_ttl_ms(ttl_ms) {}
@@ -59,8 +61,10 @@ public:
       return;
     }
 
-    while (m_entries.size() >= m_max_entries) {
-      evict_oldest_locked();
+    if (m_max_entries != 0) {
+      while (m_entries.size() >= m_max_entries) {
+        evict_oldest_locked();
+      }
     }
     m_order.push_back(key);
     auto order_iter = std::prev(m_order.end());

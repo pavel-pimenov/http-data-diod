@@ -5,7 +5,6 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <memory>
 #if __has_include(<stop_token>)
 #include <stop_token>
 #endif

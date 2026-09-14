@@ -6,7 +6,6 @@
 #include "httplib/httplib.h"
 #include <algorithm>
 #include <atomic>
-#include <memory>
 
 namespace {
 
