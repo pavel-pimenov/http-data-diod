@@ -2,6 +2,7 @@
 #include "header_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
+#include "l2_routing.hpp"
 #include "time_utils.hpp"
 #include <base64.hpp>
 #include <cstring>
@@ -123,23 +124,6 @@ L2Worker::~L2Worker() {
   }
 }
 
-std::string L2Worker::extract_scheme_host_port(const std::string &url) {
-  // Reuse the shared URL parser instead of a second hand-rolled scheme/host
-  // split. Reconstructs "scheme://host[:port]" omitting default ports.
-  try {
-    const ParsedUrl parsed = parse_url(url);
-    std::string result = parsed.m_is_https ? "https://" : "http://";
-    result += parsed.m_host;
-    const int default_port = parsed.m_is_https ? 443 : 80;
-    if (parsed.m_port != default_port) {
-      result += ":" + std::to_string(parsed.m_port);
-    }
-    return result;
-  } catch (const std::exception &) {
-    return "";
-  }
-}
-
 void L2Worker::extract_forwarded_headers(const json &request_data,
                                          httplib::Headers &forwarded_headers) {
   if (request_data.contains(NatsContract::kHeaders)) {
@@ -182,72 +166,20 @@ json L2Worker::prepare_response_headers(const HttpResponse &l2_http_response) {
   return HeaderUtils::headers_to_json(l2_http_response.m_headers);
 }
 
-bool L2Worker::is_l2_server_allowed(const std::string &path,
-                                    std::string &selected_url) {
+bool L2Worker::validate_l2_server_access(const std::string &path,
+                                         std::string &selected_url) {
+  if (l2_routing::find_allowed_l2_server(m_l2_server_urls, path,
+                                         selected_url)) {
+    return true;
+  }
   if (m_l2_server_urls.empty()) {
     Logger::error("{}", "No L2 server URLs configured - add L2_SERVER_URLS");
     return false;
   }
-  // Canonicalize incoming path (removes dot-segments, ensures leading '/')
-  const auto normalized_path = normalize_path(path);
-  // Allow common paths that are safe to proxy on any configured backend
-  if (normalized_path == "/metrics" || normalized_path == "/" ||
-      normalized_path == "/favicon.ico") {
-    selected_url = m_l2_server_urls[0];
-    return true;
-  }
-
-  for (const auto &allowed_base : m_l2_server_urls) {
-    try {
-      const ParsedUrl parsed = parse_url(allowed_base);
-      const auto base_path = normalize_path(parsed.m_path);
-      // Base "/" matches any absolute path; otherwise require prefix match
-      // with segment boundary ("/api" matches "/api/v1" but not "/apiv2")
-      if (base_path == "/") {
-        selected_url = allowed_base;
-        return true;
-      }
-      if (normalized_path == base_path ||
-          (normalized_path.rfind(base_path, 0) == 0 &&
-           (normalized_path.size() == base_path.size() ||
-            normalized_path[base_path.size()] == '/'))) {
-        selected_url = allowed_base;
-        return true;
-      }
-    } catch (const std::exception &) {
-      // Fallback: legacy prefix check on raw allowed_base string
-      if (normalized_path.rfind(allowed_base, 0) == 0) {
-        selected_url = allowed_base;
-        return true;
-      }
-    }
-  }
-
+  Logger::error("Access to arbitrary L2 server address is forbidden: "
+                "attempted path = {} L2_SERVER_URLS = {}",
+                path, selected_url);
   return false;
-}
-
-std::string L2Worker::construct_l2_url(const std::string &selected_url,
-                                       const std::string &path) {
-  const auto base_url = extract_scheme_host_port(selected_url);
-
-  // Pre-allocate URL string to avoid multiple allocations
-  std::string url;
-  url.reserve(base_url.length() + path.length() +
-              1); // +1 for potential leading slash
-
-  // Ensure path starts with "/" for proper URL construction
-  const auto normalized_path = normalize_path(path);
-
-  // normalize_path() guarantees a non-empty path starting with '/', so only
-  // the base_url trailing slash decides whether a double slash would occur.
-  if (!base_url.empty() && base_url.back() == '/') {
-    // Remove trailing slash from base URL to avoid double slashes
-    url = base_url.substr(0, base_url.length() - 1) + normalized_path;
-  } else {
-    url = base_url + normalized_path;
-  }
-
-  return url;
 }
 
 HttpResponse L2Worker::call_l2_server(
@@ -290,7 +222,7 @@ HttpResponse L2Worker::call_l2_server(
   // url is path-only: query string is appended only for the actual HTTP call
   // so that INFO logs and Jaeger http.url stay free of query parameters
   // (they may contain credentials/tokens).
-  const auto url = construct_l2_url(selected_url, path);
+  const auto url = l2_routing::build_l2_url(selected_url, path);
   Logger::debug("Calling L2 server: URL={}", url);
 
   int final_attempt = 0;
@@ -384,17 +316,6 @@ void L2Worker::metrics_ticker_loop(const std::stop_token &st) {
 
 bool L2Worker::is_nats_connected() const {
   return m_nats_client && m_nats_client->is_connected();
-}
-
-bool L2Worker::validate_l2_server_access(const std::string &path,
-                                         std::string &selected_url) {
-  if (!is_l2_server_allowed(path, selected_url)) {
-    Logger::error("Access to arbitrary L2 server address is forbidden: "
-                  "attempted path = {} L2_SERVER_URLS = {}",
-                  path, selected_url);
-    return false;
-  }
-  return true;
 }
 
 #if __has_include(<generator>)

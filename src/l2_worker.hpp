@@ -57,16 +57,12 @@ public:
                               const std::string &query = "");
   void run();
   bool is_nats_connected() const;
-  static std::string extract_scheme_host_port(const std::string &url);
 
 private:
   void extract_forwarded_headers(const json &request_data,
                                  httplib::Headers &forwarded_headers);
   std::string extract_l2_server_span_id(const std::string &l2_response);
   json prepare_response_headers(const HttpResponse &l2_http_response);
-  bool is_l2_server_allowed(const std::string &path, std::string &selected_url);
-  std::string construct_l2_url(const std::string &selected_url,
-                               const std::string &path);
   // NATS mode methods
   void run_with_nats();
   // Subscribes the worker to the main request subject; returns false on

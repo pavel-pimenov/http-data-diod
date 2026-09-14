@@ -1,3 +1,54 @@
+# refactor(src): batch 11 — l2_routing.hpp: dot-segment canonicalization + тестируемый SSRF-контракт
+
+## Date: 2026-09-13
+
+### Что сделано
+- Новый header-only модуль `src/l2_routing.hpp` с чистыми helper'ами
+  работника (AppContext/NATS/HttpClient-free, покрываются `test_proxy_core`):
+  - `canonicalize_path()`: RFC 3986 remove_dot_segments — схлопывает `//`,
+    убирает `.` и `..` сегменты, гарантирует ведущий `/`.
+  - `find_allowed_l2_server()`: allow-проверка (SSRF-политика) — безопасные
+    пути (`/`, `/metrics`, `/favicon.ico`) всегда на первый сервер; базовая
+    префиксная проверка с сегментной границей (`/api` → `/api/v1`, но не
+    `/apiv2`).
+  - `build_l2_url()`: сборка URL без двойного слеша, путь канонизируется.
+  - `extract_scheme_host_port()`: `scheme://host[:port]` без порта по
+    умолчанию.
+- `src/l2_worker.cpp` / `src/l2_worker.hpp`: приватные методы
+  `is_l2_server_allowed`, `construct_l2_url`, `static extract_scheme_host_port`
+  удалены, вызовы переведены на `l2_routing::*` (тонкий
+  `validate_l2_server_access` остался).
+- **Исправлен баг**: комментарий обещал «removes dot-segments», а
+  `normalize_path()` только добавлял ведущий `/`. Алиас `/api/../admin`
+  проходил префиксную проверку `/api`; путь, отправляемый L2-серверу, теперь
+  канонизируется и совпадает с решением политики.
+- **Исправлен баг**: база с завершающим слешем (`L2_SERVER_URLS=.../api/`)
+  не матчила подпути (`/api/v1`) из-за граничного сравнения с `/` на
+  позиции len(`/api/`); канонизация базы чинит проверку.
+- `src/test_proxy_core.cpp`: 15 новых TEST_CASE (canonicalization, дефолтные
+  порты, allow/deny, trailing-slash base, dot-segment alias, join URL).
+
+### Почему
+- Проверка allow-списка и конструирование URL — SSRF-чувствительный контракт;
+  раньше он был приватным кодом `L2Worker` без unit-тестов (виден только через
+  интеграционные e2e).
+- Два реальных краевых бага: алиас через `..` и trailing-slash база.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 443/1803,
+  test_proxy_core 114/857), все сервисы healthy, golden metrics на месте.
+- Для тестируемости `parse_url` перенесён из `src/common_utils.cpp` в
+  `src/url_utils.hpp` (inline, как `normalize_path`/`extract_client_ip`) — иначе
+  `test_proxy_core` (намеренно без общего линка `common_utils.cpp`) не линковался.
+- Тестовые сценарии уточнены по фактическому контракту: при двух root-base
+  серверах матчится первый; `/../api/..` канонизируется в безопасный `/`, поэтому
+  проверка escape-алиасов переписана на вложенную базу (`/api/restricted`).
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `./scripts/pre-commit.sh "refactor(src): batch 11 — l2_routing.hpp ..."`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 10 — DynamicLabeledFamily: O(n²) → O(n) в replace_from_provider
 
 ## Date: 2026-09-13

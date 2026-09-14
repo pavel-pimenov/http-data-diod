@@ -8,6 +8,7 @@
 #include "header_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
+#include "l2_routing.hpp"
 #include "logger.hpp"
 #include "random_utils.hpp"
 #include "url_utils.hpp"
@@ -21,6 +22,10 @@
 using db_gateway_routing::classify_method;
 using db_gateway_routing::normalize_path_rest;
 using db_gateway_routing::parse_path;
+using l2_routing::build_l2_url;
+using l2_routing::canonicalize_path;
+using l2_routing::extract_scheme_host_port;
+using l2_routing::find_allowed_l2_server;
 
 // Должен быть первым вызовом Logger в этом процессе: init() идёт в
 // std::call_once, и эта ветка (JSON-формат + LOG_LEVEL + MODE=worker) не
@@ -1224,4 +1229,140 @@ TEST_CASE("Gateway: parse_request accepts all scalar param types",
   auto result = parse_db_query_request(req);
   REQUIRE(result.has_value());
   REQUIRE(result->m_params.size() == 5);
+}
+
+// ============================================================================
+// L2 routing helpers (l2_routing.hpp): canonicalization, SSRF-policy allow
+// check and URL construction.
+// ============================================================================
+
+TEST_CASE("L2 routing: canonicalize_path guarantees a leading slash",
+          "[l2-routing]") {
+  REQUIRE(canonicalize_path("") == "/");
+  REQUIRE(canonicalize_path("/") == "/");
+  REQUIRE(canonicalize_path("api/v1") == "/api/v1");
+  REQUIRE(canonicalize_path("/api/v1") == "/api/v1");
+}
+
+TEST_CASE("L2 routing: canonicalize_path collapses empty segments",
+          "[l2-routing]") {
+  REQUIRE(canonicalize_path("//") == "/");
+  REQUIRE(canonicalize_path("//api") == "/api");
+  REQUIRE(canonicalize_path("/api//v1") == "/api/v1");
+  REQUIRE(canonicalize_path("/api///v1/") == "/api/v1");
+}
+
+TEST_CASE("L2 routing: canonicalize_path removes dot segments", "[l2-routing]") {
+  REQUIRE(canonicalize_path("/a/./b") == "/a/b");
+  REQUIRE(canonicalize_path("/a/../b") == "/b");
+  REQUIRE(canonicalize_path("/../a") == "/a");
+  REQUIRE(canonicalize_path("/api/../api/v1") == "/api/v1");
+  REQUIRE(canonicalize_path("/api/./v1/../v2") == "/api/v2");
+  REQUIRE(canonicalize_path("/a/b/../../c") == "/c");
+  REQUIRE(canonicalize_path("/a/b/c/../..") == "/a");
+}
+
+TEST_CASE("L2 routing: canonicalize_path is idempotent", "[l2-routing]") {
+  REQUIRE(canonicalize_path(canonicalize_path("/a/../b//c/.")) == "/b/c");
+  REQUIRE(canonicalize_path(canonicalize_path("/")) == "/");
+}
+
+TEST_CASE("L2 routing: extract_scheme_host_port omits default ports",
+          "[l2-routing]") {
+  REQUIRE(extract_scheme_host_port("http://l2-server:8080/api") ==
+          "http://l2-server:8080");
+  REQUIRE(extract_scheme_host_port("http://l2-server") == "http://l2-server");
+  REQUIRE(extract_scheme_host_port("http://l2-server:80") ==
+          "http://l2-server");
+  REQUIRE(extract_scheme_host_port("https://l2-server:443/v1") ==
+          "https://l2-server");
+  REQUIRE(extract_scheme_host_port("https://l2-server:8443") ==
+          "https://l2-server:8443");
+}
+
+TEST_CASE("L2 routing: extract_scheme_host_port tolerates malformed URLs",
+          "[l2-routing]") {
+  REQUIRE(extract_scheme_host_port("") == "");
+  REQUIRE(extract_scheme_host_port(":") == "");
+}
+
+TEST_CASE("L2 routing: no servers configured is denied", "[l2-routing]") {
+  std::string selected;
+  REQUIRE_FALSE(
+      find_allowed_l2_server({}, "/api/v1", selected));
+}
+
+TEST_CASE("L2 routing: safe paths always map to the first server",
+          "[l2-routing]") {
+  const std::vector<std::string> urls{"http://a:1", "http://b:2"};
+  std::string selected;
+  REQUIRE(find_allowed_l2_server(urls, "/", selected));
+  REQUIRE(selected == "http://a:1");
+  REQUIRE(find_allowed_l2_server(urls, "/metrics", selected));
+  REQUIRE(selected == "http://a:1");
+  REQUIRE(find_allowed_l2_server(urls, "/favicon.ico", selected));
+  REQUIRE(selected == "http://a:1");
+}
+
+TEST_CASE("L2 routing: root base matches any absolute path", "[l2-routing]") {
+  // First server restricts to /special; second has a root base.
+  const std::vector<std::string> urls{"http://api-only:8080/special",
+                                      "http://any:8080"};
+  std::string selected;
+  REQUIRE(find_allowed_l2_server(urls, "/api/v1", selected));
+  REQUIRE(selected == "http://any:8080");
+}
+
+TEST_CASE("L2 routing: base prefix matches with a segment boundary",
+          "[l2-routing]") {
+  const std::vector<std::string> urls{"http://l2:8080/api"};
+  std::string selected;
+  REQUIRE(find_allowed_l2_server(urls, "/api", selected));
+  REQUIRE(selected == "http://l2:8080/api");
+  REQUIRE(find_allowed_l2_server(urls, "/api/v1", selected));
+  REQUIRE(selected == "http://l2:8080/api");
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/apiv2", selected));
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/other", selected));
+}
+
+TEST_CASE("L2 routing: trailing-slash base matches the same family",
+          "[l2-routing]") {
+  const std::vector<std::string> urls{"http://l2:8080/api/"};
+  std::string selected;
+  REQUIRE(find_allowed_l2_server(urls, "/api", selected));
+  REQUIRE(find_allowed_l2_server(urls, "/api/v1", selected));
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/apiv2", selected));
+}
+
+TEST_CASE("L2 routing: dot-segment alias cannot escape the allowed base",
+          "[l2-routing]") {
+  const std::vector<std::string> urls{"http://l2:8080/api"};
+  std::string selected;
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/api/../admin", selected));
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/api/./../admin", selected));
+}
+
+TEST_CASE("L2 routing: deep ../ does not escape under a nested base",
+          "[l2-routing]") {
+  const std::vector<std::string> urls{"http://l2:8080/api/restricted"};
+  std::string selected;
+  REQUIRE_FALSE(
+      find_allowed_l2_server(urls, "/api/restricted/../../admin", selected));
+  REQUIRE(find_allowed_l2_server(urls, "/api/restricted/v1", selected));
+}
+
+TEST_CASE("L2 routing: build_l2_url joins without a double slash",
+          "[l2-routing]") {
+  REQUIRE(build_l2_url("http://l2:8080", "/api/v1") ==
+          "http://l2:8080/api/v1");
+  REQUIRE(build_l2_url("http://l2:8080/", "/api/v1") ==
+          "http://l2:8080/api/v1");
+}
+
+TEST_CASE("L2 routing: build_l2_url forwards the canonicalized path",
+          "[l2-routing]") {
+  REQUIRE(build_l2_url("http://l2:8080/api", "/api/v1") ==
+          "http://l2:8080/api/v1");
+  REQUIRE(build_l2_url("http://l2:8080/api", "/api/../api/v1") ==
+          "http://l2:8080/api/v1");
 }
