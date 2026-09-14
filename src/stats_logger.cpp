@@ -3,8 +3,7 @@
 #include "logger.hpp"
 
 StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag)
-    : m_app_ctx(context), m_shutdown_flag(shutdown_flag),
-      m_start_time(std::chrono::steady_clock::now()) {}
+    : m_app_ctx(context), m_shutdown_flag(shutdown_flag) {}
 
 StatsLogger::~StatsLogger() {
   if (m_log_thread.joinable()) {
@@ -22,8 +21,6 @@ void StatsLogger::increment_active_clients() {
 }
 
 void StatsLogger::decrement_active_clients() { m_active_clients.fetch_sub(1); }
-
-void StatsLogger::increment_total_requests() { m_total_requests.fetch_add(1); }
 
 void StatsLogger::start_periodic_logging() {
   Logger::info("Starting statistics logging every 600 seconds");

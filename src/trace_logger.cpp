@@ -102,7 +102,9 @@ bool JaegerLogger::parse_traceparent(std::string_view traceparent,
                                      std::string &parent_span_id,
                                      bool &sampled) {
   if (!validate_traceparent(traceparent)) {
-    Logger::error("Invalid traceparent header: {}", traceparent);
+    // warn (not error): a broken client header is user input from a hot path
+    // (l2_worker/request_handler) and must not flood the ERROR log.
+    Logger::warn("Invalid traceparent header: {}", traceparent);
     return false;
   }
 

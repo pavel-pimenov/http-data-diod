@@ -38,8 +38,8 @@ private:
                          const httplib::Request &req, httplib::Response &res);
 
   // Phase 2: Process request, push to backend, poll for response, cache result
-  // Returns false on error (response already set)
-  bool process_request(const std::string &method, const std::string &path,
+  // Fills the response on both success and failure paths.
+  void process_request(const std::string &method, const std::string &path,
                        const std::string &body, const httplib::Request &req,
                        httplib::Response &res, const std::string &client_ip);
 

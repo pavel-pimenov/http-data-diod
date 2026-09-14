@@ -1,4 +1,4 @@
 #ifndef L2_PROXY_VERSION_H
 #define L2_PROXY_VERSION_H
-#define VERSION "1.0.4-eb44f1b"
+#define VERSION "1.0.4-8e71680"
 #endif

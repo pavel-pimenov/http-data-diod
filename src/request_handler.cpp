@@ -458,7 +458,7 @@ void RequestHandler::send_response(
 // ============================================================================
 // Phase 3: Process request, push to backend, poll for response, cache result
 // ============================================================================
-bool RequestHandler::process_request(const std::string &method,
+void RequestHandler::process_request(const std::string &method,
                                      const std::string &path,
                                      const std::string &body,
                                      const httplib::Request &req,
@@ -469,7 +469,6 @@ bool RequestHandler::process_request(const std::string &method,
 
   // Track active client
   m_stats_logger.increment_active_clients();
-  m_stats_logger.increment_total_requests();
 
   const RequestScopedTiming request_timing(
       m_ctx.m_proxy.m_metrics->m_request_duration_seconds,
@@ -485,13 +484,13 @@ bool RequestHandler::process_request(const std::string &method,
   const auto request_id = m_id_generator.generate_uuid();
   Logger::set_request_id(request_id);
 
-  // Extract IPs for logging
-  auto effective_client_ip = extract_client_ip(req);
+  // Extract IPs for logging (client_ip comes from the ScopedRequestContext so
+  // the header is parsed once per request, see handle_request).
   const auto proxy_ip = extract_proxy_ip(req);
 
   Logger::info("Proxy received {} request client_ip={} proxy_ip={} path={} "
                "request_id={}",
-               method, effective_client_ip, proxy_ip, path, request_id);
+               method, client_ip, proxy_ip, path, request_id);
   Logger::info("Proxy request msg_size={}", body.size());
 
   // Setup tracing
@@ -519,10 +518,11 @@ bool RequestHandler::process_request(const std::string &method,
       push_to_backend(std::move(request_data), request_id, trace_id,
                       backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
-    return fail_backend_request(
+    fail_backend_request(
         res, method, path, 500, "Failed to queue request", "queue_failed",
         "Failed to queue request via NATS", request_timing.start_us(),
         trace_ctx, request_id);
+    return;
   }
 
   // Poll for response
@@ -530,19 +530,21 @@ bool RequestHandler::process_request(const std::string &method,
   try {
     response_data_str = poll_for_response(request_id, request_json, trace_ctx);
   } catch (const TimeoutException &e) {
-    return fail_backend_request(
+    fail_backend_request(
         res, method, path, 504, "Timeout waiting for response", "timeout",
         std::format("Timeout: {}", e.what()), request_timing.start_us(),
         trace_ctx, request_id);
+    return;
   }
 
   if (response_data_str.empty()) {
-    return fail_backend_request(
+    fail_backend_request(
         res, method, path, 504, "Timeout waiting for response",
         "empty_response",
         std::format("Empty response received from NATS for request_id={}",
                     request_id),
         request_timing.start_us(), trace_ctx, request_id);
+    return;
   }
 
   // Parse response for sending
@@ -553,14 +555,13 @@ bool RequestHandler::process_request(const std::string &method,
     send_response(res, *parse_result, request_id, trace_ctx, method, path,
                   request_timing.start_us());
   } else {
-    return fail_backend_request(
+    fail_backend_request(
         res, method, path, 500, "Invalid response format", "invalid_response",
         std::format("Failed to parse response for request_id={}: {}",
                     request_id, parse_result.error()),
         request_timing.start_us(), trace_ctx, request_id);
+    return;
   }
-
-  return true;
 }
 
 // ============================================================================

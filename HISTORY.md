@@ -1,3 +1,47 @@
+# refactor(src): batch 13+14 — robustness ответного контракта + чистка StatsLogger/process_request
+
+## Date: 2026-09-14
+
+### Что сделано
+- `src/response_builder.cpp`: `set_response_content()` читал `status_code` через
+  `parsed_response_data[NatsResponseContract::kStatus]`. `operator[]` на const
+  `nlohmann::json` бросает `out_of_range`, если у конверта воркера нет ключа
+  `status_code` — исключение улетало в поток httplib (обрыв соединения вместо
+  ответа). Теперь `JsonUtils::safe_get_int(..., 500)`: битый/неполный конверт
+  даёт HTTP 500 и обычный flow логов/метрик, а не краш.
+- `src/trace_logger.cpp`: `parse_traceparent()` при невалидном клиентском
+  заголовке логировал `Logger::error` из hot-path (`handle_trace_context` в
+  l2_worker/request_handler) — клиент мог флудить ERROR-лог. Severity понижен до
+  `Logger::warn` с поясняющим комментарием.
+- `src/stats_logger.hpp/.cpp`: удалены мёртвые члены/методы — `m_total_requests`,
+  `m_start_time`, `get_active_clients()`, `get_max_clients()`, `get_total_requests()`,
+  `increment_total_requests()`. Счётчик был write-only (`increment` в
+  request_handler, нигде не читался; периодический лог использует
+  `collect_mode_stats()`), `m_start_time` нигде не читался.
+- `src/request_handler.cpp/.hpp`: `process_request()` возвращал `bool`, который
+  единственный caller игнорировал — возврат сведён к `void` (fail-ветки просто
+  `return;`). Устранено повторное парсингование заголовка: лог теперь использует
+  `client_ip` из `ScopedRequestContext` (`extract_client_ip(req)` удалён из
+  внутренностей `process_request`), header парсится один раз на запрос.
+
+### Почему
+- Прод-код не должен падать/рвать соединение по произвольному body воркера —
+  это data-plane контракт между своими процессами, но защищаться грациозно
+  дешевле, чем чинить деградацию соединений.
+- ERROR-лог на пользовательский ввод в hot-path = вектор флуда логирования.
+- Мёртвый код: write-only счётчик и геттеры без вызовов.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 445/1808,
+  test_proxy_core 114/857), все сервисы healthy, golden metrics set complete.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS
+  (POST через proxy→worker→l2-server с валидным конвертом — путь
+  `set_response_content` в работе).
+- `./scripts/pre-commit.sh "refactor(src): batch 13+14 — robustness ответного контракта + чистка StatsLogger/process_request"`:
+  passed (вкл. clang-tidy на изменённых файлах).
+
+---
+
 # refactor(src): batch 12 — IWYU-гигиена + robustness (монотонный circuit-breaker, unbounded dedup)
 
 ## Date: 2026-09-14
