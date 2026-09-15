@@ -1754,41 +1754,6 @@ TEST_CASE("TraceLogger: build_span_json omits parentId when no parent",
   REQUIRE_FALSE(span.contains("parentSpanId"));
 }
 
-TEST_CASE("Baggage: to_header URL-encodes keys and values", "[tracing]") {
-  Baggage b;
-  b.set("user_id", "a b=1,2");
-  b.set("session", "x/y");
-  const std::string header = b.to_header();
-
-  // Encoded value must not contain raw spaces, '=', ',' or '/'.
-  REQUIRE(header.find(' ') == std::string::npos);
-  REQUIRE(header.find('/') == std::string::npos);
-
-  // Round-trip through from_header must reconstruct the original items.
-  const Baggage parsed = Baggage::from_header(header);
-  REQUIRE(parsed.get("user_id") == "a b=1,2");
-  REQUIRE(parsed.get("session") == "x/y");
-}
-
-TEST_CASE("Baggage: round-trip preserves plain values", "[tracing]") {
-  Baggage b;
-  b.set("key1", "value1");
-  b.set("key2", "value2");
-  const auto parsed = Baggage::from_header(b.to_header());
-  REQUIRE(parsed.size() == 2);
-  REQUIRE(parsed.get("key1") == "value1");
-  REQUIRE(parsed.get("key2") == "value2");
-}
-
-TEST_CASE("Baggage: url_encode leaves unreserved chars untouched",
-          "[tracing]") {
-  REQUIRE(Baggage::url_encode("AZaz09-_.~") == "AZaz09-_.~");
-  REQUIRE(Baggage::url_encode("a b") == "a%20b");
-  REQUIRE(Baggage::url_encode("a=b") == "a%3Db");
-  REQUIRE(Baggage::url_encode("a,b") == "a%2Cb");
-  REQUIRE(Baggage::url_decode(Baggage::url_encode("a b=c")) == "a b=c");
-}
-
 TEST_CASE("PerIPRateLimiter: Allows requests within per-IP limit",
           "[per-ip-rate-limiter]") {
   PerIPRateLimiter limiter(5, 5, 100, 60);

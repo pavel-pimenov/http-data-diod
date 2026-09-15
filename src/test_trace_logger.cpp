@@ -1,6 +1,6 @@
 // Unit tests for the Jaeger logger: span delivery (queue -> sender thread ->
-// POST batching), retry/failure accounting, sampling, ID generation,
-// traceparent validation and baggage. Delivery is verified against a local
+// POST batching), retry/failure accounting, sampling, ID generation and
+// traceparent validation. Delivery is verified against a local
 // loopback httplib::Server on an ephemeral port (bind_to_any_port), so no
 // external Jaeger service is required.
 
@@ -225,20 +225,6 @@ TEST_CASE("TraceLogger: validate_traceparent rejects malformed headers",
       "00-0123456789abcdef0123456789abcdef-0123456789abcdef-11"));
 }
 
-TEST_CASE("TraceLogger: extract_trace_info parses and validates", "[tracing]") {
-  const auto ok = extract_trace_info(
-      "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01");
-  REQUIRE(ok.m_valid);
-  REQUIRE(ok.m_trace_id == "0123456789abcdef0123456789abcdef");
-  REQUIRE(ok.m_parent_span_id == "0123456789abcdef");
-  REQUIRE(ok.m_sampled);
-
-  const auto bad = extract_trace_info("garbage");
-  REQUIRE_FALSE(bad.m_valid);
-  REQUIRE(bad.m_trace_id.empty());
-  REQUIRE(bad.m_parent_span_id.empty());
-}
-
 TEST_CASE("TraceLogger: should_sample respects deterministic rate bounds",
           "[tracing]") {
   TraceLoggerEnv env_all("http://127.0.0.1:1/api/traces", 50, 1000, 1.0);
@@ -357,31 +343,6 @@ TEST_CASE("TraceLogger: send_span posts a single span and reports failure",
       "HTTP PUT /db", 1000, 2000, "test-service");
   REQUIRE_FALSE(failed);
   REQUIRE(dead_env.failed() >= 1.0);
-}
-
-TEST_CASE("TraceLogger: baggage set/get/get_all on the owning thread",
-          "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
-  env.m_logger->set_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "k1", "v1");
-  env.m_logger->set_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "k2", "v2");
-  env.m_logger->set_baggage("ffffffffffffffffffffffffffffffff", "k3", "v3");
-
-  REQUIRE(env.m_logger->get_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "k1") ==
-          "v1");
-  REQUIRE(env.m_logger->get_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "k2") ==
-          "v2");
-  REQUIRE(env.m_logger->get_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "k9") ==
-          "");
-  REQUIRE(env.m_logger->get_baggage("00000000000000000000000000000000", "k1") ==
-          "");
-
-  const auto all = env.m_logger->get_all_baggage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-  REQUIRE(all.size() == 2);
-  REQUIRE(all.contains("k1"));
-  REQUIRE(all.contains("k2"));
-  REQUIRE_FALSE(all.contains("k3"));
-  REQUIRE(env.m_logger->get_all_baggage("00000000000000000000000000000000")
-              .size() == 0);
 }
 
 TEST_CASE("TraceLogger: log_request merges additional attributes",
@@ -726,53 +687,6 @@ TEST_CASE("TraceLogger: remaining spans are flushed on shutdown",
   REQUIRE(wait_for_condition(
       [&] { return server.body_count() > bodies_before; }, 5000));
   REQUIRE(server.body_count() >= 2);
-}
-
-TEST_CASE("Baggage: url_encode and url_decode round-trip", "[baggage]") {
-  REQUIRE(Baggage::url_encode("hello") == "hello");
-  REQUIRE(Baggage::url_encode("hello world") == "hello%20world");
-  REQUIRE(Baggage::url_encode("a+b") == "a%2Bb");
-  REQUIRE(Baggage::url_encode("%") == "%25");
-  REQUIRE(Baggage::url_encode("") == "");
-  REQUIRE(Baggage::url_encode("abc123-_.~") == "abc123-_.~");
-
-  REQUIRE(Baggage::url_decode("hello") == "hello");
-  REQUIRE(Baggage::url_decode("hello%20world") == "hello world");
-  REQUIRE(Baggage::url_decode("a%2Bb") == "a+b");
-  REQUIRE(Baggage::url_decode("%25") == "%");
-  REQUIRE(Baggage::url_decode("") == "");
-  REQUIRE(Baggage::url_decode("abc") == "abc");
-
-  REQUIRE(Baggage::url_decode("x%0Gy") == "x%0Gy");
-  REQUIRE(Baggage::url_decode("x%2") == "x%2");
-}
-
-TEST_CASE("Baggage: to_header and from_header round-trip", "[baggage]") {
-  Baggage b;
-  b.set("key1", "value1");
-  b.set("key2", "value2");
-  const std::string header = b.to_header();
-  REQUIRE_FALSE(header.empty());
-
-  const Baggage parsed = Baggage::from_header(header);
-  REQUIRE(parsed.size() == 2);
-  REQUIRE(parsed.get("key1") == "value1");
-  REQUIRE(parsed.get("key2") == "value2");
-}
-
-TEST_CASE("Baggage: from_header handles empty and whitespace", "[baggage]") {
-  const Baggage empty = Baggage::from_header("");
-  REQUIRE(empty.size() == 0);
-
-  const Baggage whitespace = Baggage::from_header("  key = value  ");
-  REQUIRE(whitespace.size() == 1);
-  REQUIRE(whitespace.get("key") == "value");
-}
-
-TEST_CASE("Baggage: from_header with url-encoded values", "[baggage]") {
-  const Baggage decoded = Baggage::from_header("k=hello%20world");
-  REQUIRE(decoded.size() == 1);
-  REQUIRE(decoded.get("k") == "hello world");
 }
 
 TEST_CASE("DuplicateDetector: per_client_ttl_ms=0 disables client TTL eviction",

@@ -9,11 +9,9 @@
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 #include <stop_token>
 
@@ -37,123 +35,6 @@ inline constexpr int g_tracing_retry_base_delay_ms =
 inline constexpr int g_tracing_send_timeout_ms =
     5000; // HTTP send timeout in ms
 
-// RFC 3986 percent-encoding hex lookup table (shared, single definition)
-inline constexpr char g_url_encode_hex[] = "0123456789ABCDEF";
-
-// Structure to hold extracted traceparent info
-struct TraceInfo {
-  std::string m_trace_id;
-  std::string m_parent_span_id;
-  std::string m_current_span_id;
-  bool m_sampled;
-  bool m_valid;
-
-  TraceInfo() : m_sampled(true), m_valid(false) {}
-};
-
-// Structure for W3C Baggage (key-value pairs propagated across services)
-struct Baggage {
-  std::unordered_map<std::string, std::string> m_items;
-
-  void set(const std::string &key, const std::string &value) {
-    m_items[key] = value;
-  }
-
-  std::string get(const std::string &key) const {
-    auto it = m_items.find(key);
-    return (it != m_items.end()) ? it->second : "";
-  }
-
-  bool contains(const std::string &key) const {
-    return m_items.find(key) != m_items.end();
-  }
-
-  size_t size() const { return m_items.size(); }
-
-  // Percent-encodes a string per RFC 3986 (used by W3C Baggage).
-  static std::string url_encode(std::string_view in) {
-    std::string out;
-    out.reserve(in.size());
-    for (const unsigned char c : in) {
-      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
-          c == '~') {
-        out.push_back(static_cast<char>(c));
-      } else {
-        out.push_back('%');
-        out.push_back(g_url_encode_hex[c >> 4]);
-        out.push_back(g_url_encode_hex[c & 0x0f]);
-      }
-    }
-    return out;
-  }
-
-  // Decodes a percent-encoded string.
-  static std::string url_decode(std::string_view in) {
-    auto hex_val = [](char c) -> int {
-      if (c >= '0' && c <= '9') return c - '0';
-      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-      return -1;
-    };
-    std::string out;
-    out.reserve(in.size());
-    for (size_t i = 0; i < in.size(); ++i) {
-      if (in[i] == '%' && i + 2 < in.size()) {
-        const int hi = hex_val(in[i + 1]);
-        const int lo = hex_val(in[i + 2]);
-        if (hi >= 0 && lo >= 0) {
-          out.push_back(static_cast<char>((hi << 4) | lo));
-          i += 2;
-          continue;
-        }
-      }
-      out.push_back(in[i]);
-    }
-    return out;
-  }
-
-  // Serialize to W3C Baggage header format
-  std::string to_header() const {
-    std::string result;
-    for (const auto &[key, value] : m_items) {
-      if (!result.empty())
-        result += ",";
-      // URL encode key and value per W3C Baggage spec
-      result.append(url_encode(key)).append("=").append(url_encode(value));
-    }
-    return result;
-  }
-
-  // Parse from W3C Baggage header format
-  static Baggage from_header(const std::string &header) {
-    Baggage baggage;
-    if (header.empty())
-      return baggage;
-
-    for (const auto item : header | std::views::split(',')) {
-      const std::string_view item_sv(item.begin(), item.end());
-      const size_t eq_pos = item_sv.find('=');
-      if (eq_pos != std::string_view::npos) {
-        std::string key(item_sv.substr(0, eq_pos));
-        std::string value(item_sv.substr(eq_pos + 1));
-        // Trim whitespace
-        key.erase(0, key.find_first_not_of(" \t"));
-        key.erase(key.find_last_not_of(" \t") + 1);
-        value.erase(0, value.find_first_not_of(" \t"));
-        value.erase(value.find_last_not_of(" \t") + 1);
-        baggage.set(url_decode(key), url_decode(value));
-      }
-    }
-
-    return baggage;
-  }
-};
-
-// Extract trace_id, parent_span_id from traceparent header
-// Returns empty TraceInfo if parsing fails
-TraceInfo extract_trace_info(std::string_view traceparent);
-
 class JaegerLogger {
 private:
   std::string m_jaeger_url;
@@ -172,7 +53,6 @@ private:
     uint64_t m_start_us, m_end_us;
     uint64_t m_enqueue_time_us; // For queue time measurement
     nlohmann::json m_attributes;
-    Baggage m_baggage; // W3C Baggage for cross-service correlation
   };
 
   std::deque<SpanData> m_span_queue;
@@ -251,7 +131,6 @@ public:
                                    bool sampled = true);
 
   // Parse traceparent header: "00-{trace-id}-{parent-id}-{flags}"
-  // Pure function: also available to the static extract_trace_info() helper.
   static bool parse_traceparent(std::string_view traceparent,
                                 std::string &trace_id,
                                 std::string &parent_span_id, bool &sampled);
@@ -286,12 +165,6 @@ public:
   // Check if sampling should be applied (with error flag - always sample
   // errors)
   bool should_sample(bool is_error) const;
-
-  // Baggage propagation
-  void set_baggage(const std::string &trace_id, const std::string &key,
-                   const std::string &value);
-  std::string get_baggage(const std::string &trace_id, const std::string &key) const;
-  Baggage get_all_baggage(const std::string &trace_id) const;
 };
 
 #endif // TRACE_LOGGER_HPP

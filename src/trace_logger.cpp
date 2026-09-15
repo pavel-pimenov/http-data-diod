@@ -125,18 +125,6 @@ bool JaegerLogger::parse_traceparent(std::string_view traceparent,
   return true;
 }
 
-// Extract trace_id and parent_span_id from traceparent header
-// Delegate to JaegerLogger::parse_traceparent so the "00-{32}-{16}-{2}"
-// format (positions, lengths, hex/flags validation) lives in one place.
-TraceInfo extract_trace_info(std::string_view traceparent) {
-  TraceInfo info;
-  if (JaegerLogger::parse_traceparent(traceparent, info.m_trace_id,
-                                      info.m_parent_span_id, info.m_sampled)) {
-    info.m_valid = true;
-  }
-  return info;
-}
-
 bool JaegerLogger::should_sample() const {
   if (m_sample_rate >= 1.0)
     return true;
@@ -419,59 +407,4 @@ bool JaegerLogger::send_span(const std::string &trace_id,
     m_tracing_spans_failed_counter.Increment();
     return false;
   }
-}
-
-// ============================================================================
-// Baggage Propagation Implementation
-// ============================================================================
-
-// Thread-local baggage storage with TTL
-static thread_local std::unordered_map<std::string,
-                                       std::pair<Baggage, uint64_t>>
-    g_trace_baggage;
-static constexpr uint64_t g_baggage_ttl_us = 60000000; // 60 seconds
-
-static void cleanup_expired_baggage() {
-  uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-  for (auto it = g_trace_baggage.begin(); it != g_trace_baggage.end();) {
-    if (now_us - it->second.second > g_baggage_ttl_us) {
-      it = g_trace_baggage.erase(it);
-    } else {
-      ++it;
-    }
-  }
-}
-
-void JaegerLogger::set_baggage(const std::string &trace_id,
-                               const std::string &key,
-                               const std::string &value) {
-  cleanup_expired_baggage();
-  auto &entry = g_trace_baggage[trace_id];
-  entry.first.set(key, value);
-  entry.second = std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now().time_since_epoch())
-                     .count();
-  Logger::debug("Baggage set: trace_id={} key={} value={}", trace_id, key,
-                value);
-}
-
-std::string JaegerLogger::get_baggage(const std::string &trace_id,
-                                       const std::string &key) const {
-  cleanup_expired_baggage();
-  const auto it = g_trace_baggage.find(trace_id);
-  if (it != g_trace_baggage.end()) {
-    return it->second.first.get(key);
-  }
-  return "";
-}
-
-Baggage JaegerLogger::get_all_baggage(const std::string &trace_id) const {
-  cleanup_expired_baggage();
-  const auto it = g_trace_baggage.find(trace_id);
-  if (it != g_trace_baggage.end()) {
-    return it->second.first;
-  }
-  return Baggage();
 }

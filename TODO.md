@@ -1,6 +1,6 @@
 # TODO / Продолжение работы
 
-## Текущий статус (21 — чистки dead-code/констант; покрытие ≥90%)
+## Текущий статус (22 — удалена мёртвая Baggage-подсистема)
 
 Raунды покрытия юнит-тестами: **575 test cases**,
 **2 719 assertions** (test_components 455/1836 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
@@ -50,11 +50,13 @@ PROD branches 56.8%→57.2% (3893/6811).
 - М2/М3 (dedup-лимиты 4096/60000, tracing 50/1000) — **сознательно НЕ сделаны**:
   единый-source потребовал бы копил inclusive-header'ов (config.hpp ←
   dedup_cache.hpp/trace_logger.hpp), coupling дороже дрейфа двух литералов.
-- Багgage-подсистема (DE2) — мертва в продакшене (~120 строк: `Baggage`,
-  `TraceInfo`, `extract_trace_info`, `set/get/get_all_baggage`, thread-local
-  TTL-карта, `SpanData::m_baggage`, `g_url_encode_hex`), прод-путь
-  (`trace_context_extractor`/`tracing_helpers`) от неё независим. Подготовить
-  как batch 22 (см. ниже), НЕ коммитить без `./rebuild-and-run.sh`.
+- Багgage-подсистема — **удалена (batch 22)**: `Baggage`, `TraceInfo`,
+  `extract_trace_info`, `set/get/get_all_baggage`, thread-local TTL-карта,
+  `SpanData::m_baggage`, `g_url_encode_hex`, + 9 TEST_CASE в
+  test_trace_logger/test_components. Прод-путь
+  (`trace_context_extractor`/`tracing_helpers`) от неё не зависел —
+  проверено по всем файлам src. Осталось: verified build (в процессе),
+  commit, обновить цифры покрытия в след. сессии.
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -123,29 +125,12 @@ drain, reply-loss).
 к собственному реестру режима на каждом экспозере. `/stats` воркера и
 прокси рендерят плитки `l2_common` дополнительно к своему реестру.
 
-### 6. Batch 22 (подготовлен к реализации): удаление мёртвой Baggage-подсистемы
+### 6. Batch 22 — ГОТОВО (закоммичен после verified build)
 
-DE2 сканирования: `Baggage`, `TraceInfo`, `extract_trace_info`,
-`set_baggage/get_baggage/get_all_baggage`, thread-local `g_trace_baggage` +
-TTL-карта, `SpanData::m_baggage`, `g_url_encode_hex` — мертвы в продакшене
-(единственные вызовы в `test_trace_logger.cpp`; прод-путь
-`trace_context_extractor`/`tracing_helpers` от них не зависит). Удалять:
-
-1. `src/trace_logger.hpp`: строки `g_url_encode_hex` (41), `struct TraceInfo`
-   (43–52), `struct Baggage` (54–151), `TraceInfo extract_trace_info` decl
-   (153–155), `Baggage m_baggage;` в `SpanData` (175), декларации
-   set/get/get_all_baggage (290–294). После удаления проверить и снять
-   лишние include: `<ranges>` (только из `from_header`), возможно
-   `<unordered_map>`.
-2. `src/trace_logger.cpp`: определение `extract_trace_info` (128–138) и блок
-   Baggage Propagation (424–477). Aggregat-init `SpanData` (177) одной
-   строкой меньше — корректно. `g_baggage_ttl_us`/`cleanup_expired_baggage`
-   уходят вместе с блоком.
-3. `src/test_trace_logger.cpp`: удалить ~49 упоминаний (тесты Baggage /
-   extract_trace_info / url_encode-decode / set/get/get_all_baggage).
-
-После удаления метрики не меняются (README не трогать). Обязателен
-`./rebuild-and-run.sh` + `message_counter.py` перед коммитом.
+Удаление мёртвой Baggage-подсистемы реализовано и собрано в контейнере
+(`./rebuild-and-run.sh` + message_counter PASS). Детали в HISTORY.md.
+Направление на будущее: обновить цифры покрытия (строк должно стать ~98%+
+за счёт выкинутых неисполняемых строк).
 
 ## Заморожено (не делать, решение 2026-09-11)
 

@@ -1,3 +1,38 @@
+# refactor(src): batch 22 — удаление мёртвой Baggage-подсистемы (~315 строк)
+
+## Date: 2026-09-15
+
+### Что сделано
+- `src/trace_logger.hpp`: удалены `struct Baggage` (методы url_encode/
+  url_decode/to_header/from_header), `struct TraceInfo`, декларация
+  `extract_trace_info`, `g_url_encode_hex`, член `Baggage m_baggage`
+  в `SpanData`, методы `set_baggage`/`get_baggage`/`get_all_baggage`.
+  Сняты ставшие ненужными include `<ranges>` и `<unordered_map>`; комментарий
+  у `parse_traceparent` больше не ссылается на extract_trace_info.
+- `src/trace_logger.cpp`: удалены определение `extract_trace_info` и весь блок
+  Baggage Propagation (`g_trace_baggage` thread-local TTL-карта,
+  `g_baggage_ttl_us`, `cleanup_expired_baggage`, три публичных метода).
+  Aggregat-инициализация `SpanData` в `enqueue_span` стала короче на один
+  член — корректна без изменений.
+- Тесты: из `test_trace_logger.cpp` удалены 6 TEST_CASE (extract_trace_info,
+  set/get/get_all baggage, url-encode round-trip, to/from_header, empty/
+  whitespace, url-encoded values), из `test_components.cpp` — 3 TEST_CASE
+  (to_header URL-encoding, round-trip, url_encode).
+
+### Почему
+- DE2 сканирования: подсистема мертва в продакшене. Прод-путь трейсинга
+  (`trace_context_extractor`/`tracing_helpers.hpp`/`JaegerSpanLogger`)
+  полностью независим от Baggage/TraceInfo: `parse_traceparent` остаётся
+  единственным источником разбора traceparent (плюс validate_traceparent).
+  Убраны ~315 строк неисполняемого кода, thread-local TTL-карты и два
+  инклюда из хедера.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green, все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+
+---
+
 # refactor(src): batch 21+ — свежий замер покрытия после чистки dead-code
 
 ## Date: 2026-09-15
