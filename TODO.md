@@ -1,13 +1,13 @@
 # TODO / Продолжение работы
 
-## Текущий статус (17 — все файлы ≥90% строкового покрытия)
+## Текущий статус (21 — чистки dead-code/констант; покрытие ≥90%)
 
-Raунды покрытия юнит-тестами: **544 test cases**,
-**2 619 assertions** (test_components 445/1812 + test_proxy_core 99/807). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **575 test cases**,
+**2 719 assertions** (test_components 455/1836 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 97.9%** (9032/9224), гейт 90% — пройден
-- **Functions: 95.2%** (1188/1248)
-- **Branches: 41.6%** (18237/43889) — слабое место
+- **Lines: 98.0%** (9752/9952), гейт 90% — пройден
+- **Functions: 95.3%** (1244/1305)
+- **Branches: 41.5%** (19652/47389) — слабое место
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
@@ -34,6 +34,27 @@ trace_logger.cpp 61.1%→61.5% (254→256/416), tracing_helpers.hpp 55.0%→55.6
 Раунд send_envelope/stats_page: sentry_client.cpp 51.2%→53.2% (+13 ветвей),
 stats_page.hpp 59.6%→62.6% (+11 ветвей), shutdown-flush в sender_loop (+2).
 PROD branches 56.8%→57.2% (3893/6811).
+
+Раунды 19–21 (dead-code/константы, по результатам сканирования explore-агента):
+- 19: удалён `TimeoutException` (не бросался нигде; 2 catch-сайта в
+  request_handler были недостижимы), мёртвый `g_default_random_digits`,
+  интервал статистики 600с → `kStatsLogIntervalSeconds` (статс-строка и
+  `wait_for` ссылаются на одну константу).
+- 20: дефолты `Config` — единственный источник в `config.hpp`: ~45 fallback-
+  литералов `get_env_*("VAR", <lit>)` заменены на `m_field` (все сверены
+  попарно; исключения: L2_SERVER_HOST, L2_SERVER_URLS/URL-поля,
+  SENTRY_MAX_QUEUE_SIZE (size_t), весь DbConfig-блок).
+- 21: `db_gateway_routing::kDbGatewayPath = "/v1/sql"` — единый корень шлюза
+  (proxy роутинг + worker DB_execute span-name); параметры Jaeger-пула
+  HttpClientPool → именованные константы (`kJaegerPoolMaxSize` и др.).
+- М2/М3 (dedup-лимиты 4096/60000, tracing 50/1000) — **сознательно НЕ сделаны**:
+  единый-source потребовал бы копил inclusive-header'ов (config.hpp ←
+  dedup_cache.hpp/trace_logger.hpp), coupling дороже дрейфа двух литералов.
+- Багgage-подсистема (DE2) — мертва в продакшене (~120 строк: `Baggage`,
+  `TraceInfo`, `extract_trace_info`, `set/get/get_all_baggage`, thread-local
+  TTL-карта, `SpanData::m_baggage`, `g_url_encode_hex`), прод-путь
+  (`trace_context_extractor`/`tracing_helpers`) от неё независим. Подготовить
+  как batch 22 (см. ниже), НЕ коммитить без `./rebuild-and-run.sh`.
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -101,6 +122,30 @@ drain, reply-loss).
 `l2_common` (новый `AppContext::m_common_registry`), который подмешивается
 к собственному реестру режима на каждом экспозере. `/stats` воркера и
 прокси рендерят плитки `l2_common` дополнительно к своему реестру.
+
+### 6. Batch 22 (подготовлен к реализации): удаление мёртвой Baggage-подсистемы
+
+DE2 сканирования: `Baggage`, `TraceInfo`, `extract_trace_info`,
+`set_baggage/get_baggage/get_all_baggage`, thread-local `g_trace_baggage` +
+TTL-карта, `SpanData::m_baggage`, `g_url_encode_hex` — мертвы в продакшене
+(единственные вызовы в `test_trace_logger.cpp`; прод-путь
+`trace_context_extractor`/`tracing_helpers` от них не зависит). Удалять:
+
+1. `src/trace_logger.hpp`: строки `g_url_encode_hex` (41), `struct TraceInfo`
+   (43–52), `struct Baggage` (54–151), `TraceInfo extract_trace_info` decl
+   (153–155), `Baggage m_baggage;` в `SpanData` (175), декларации
+   set/get/get_all_baggage (290–294). После удаления проверить и снять
+   лишние include: `<ranges>` (только из `from_header`), возможно
+   `<unordered_map>`.
+2. `src/trace_logger.cpp`: определение `extract_trace_info` (128–138) и блок
+   Baggage Propagation (424–477). Aggregat-init `SpanData` (177) одной
+   строкой меньше — корректно. `g_baggage_ttl_us`/`cleanup_expired_baggage`
+   уходят вместе с блоком.
+3. `src/test_trace_logger.cpp`: удалить ~49 упоминаний (тесты Baggage /
+   extract_trace_info / url_encode-decode / set/get/get_all_baggage).
+
+После удаления метрики не меняются (README не трогать). Обязателен
+`./rebuild-and-run.sh` + `message_counter.py` перед коммитом.
 
 ## Заморожено (не делать, решение 2026-09-11)
 
