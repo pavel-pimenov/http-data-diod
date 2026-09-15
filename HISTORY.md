@@ -1,3 +1,45 @@
+# refactor(src): batch 18 — не-unity совместимость app_context + покрытие response_builder/db_executor_base
+
+## Date: 2026-09-15
+
+### Что сделано
+- `src/app_context.hpp/.cpp`: `~ProxyContext()` переведён в out-of-line (объявлен
+  в header, определён в cpp после include `rate_limiter.hpp` /
+  `rate_limiter_per_ip.hpp` / `duplicate_detector.hpp`). До этого inline-dtor
+  с forward-declared `unique_ptr<RateLimiter/PerIPRateLimiter/DuplicateDetector>`
+  компилировался лишь благодаря Unity Build (типы «доезжали» из соседних ТУ),
+  а продакшен уникальность не обеспечивал: coverage-стейдж Dockerfile гонит
+  `-DCMAKE_UNITY_BUILD=OFF` и падал на `sizeof(incomplete type)` (проверено
+  экспериментом: даже `-O2` не спасает, дело именно в unity). Теперь заголовок
+  пригоден для любых non-unity ТУ (coverage, clang-tidy).
+- `src/test_components.cpp`: +2 TEST_CASE `[response-builder]`:
+  - не-объектный payload (JSON массив) → HTTP 500 + error-envelope
+    (`{"error":"Invalid response format","request_id":...}`), без throw;
+  - binary-base64 конверт: тело декодируется, content-type пробрасывается,
+    Content-Length = число декодированных байт (путь от `is_binary`).
+- `src/test_db_executor_base.cpp`: +2 TEST_CASE `[db-executor-base]`
+  (`build_query_response`, раньше непокрытый):
+  - happy-path: status "ok", db/columns/rows/row_count/truncated=false/duration;
+  - truncation: лимит max_rows=1 → truncated=true, row_count=1.
+
+### Почему
+- Coverage-стейдж `src/Dockerfile` (gcovr, `--fail-under-line`) был сломан и
+  не собирал отчёт — это блокировало замер покрытия из AGENTS.md.
+- `response_builder` и `db_executor_base.build_query_response` — две самые
+  низкопокрытые продакшн-единицы (67.7% и 71.4% линий соответственно).
+
+### Верификация
+- `./scripts/run-coverage.sh`: coverage-сборка проходит, Lines 97.8%
+  (9683/9897), Functions 95.2%, Branches 41.5% (response_builder 67.7→93.5%,
+  db_query_executor_base 71.4→100%).
+- `./rebuild-and-run.sh`: сборка + unit green (test_components 452→454/1827,
+  test_proxy_core 120/883), все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `./scripts/pre-commit.sh "refactor(src): batch 18 — non-unity AppContext + coverage-тесты"`:
+  passed.
+
+---
+
 # refactor(src): batch 17 — unit-покрытие RequestIdGenerator (был полный пробел)
 
 ## Date: 2026-09-14

@@ -176,6 +176,12 @@ class SentryClient;
 // Proxy-режим требует init_proxy_components() после ctor (см. proxy_init.hpp):
 // до её вызова указатели ниже null, RequestHandler/StatsLogger это допускают.
 struct ProxyContext {
+  // Out-of-line dtor: RateLimiter/PerIPRateLimiter/DuplicateDetector are
+  // forward-declared above, so the unique_ptr deletes need complete types at
+  // the dtor definition point (app_context.cpp). Keeps this header usable in
+  // non-unity TUs (coverage --coverage build, clang-tidy -DCMAKE_UNITY_BUILD=OFF).
+  ~ProxyContext();
+
   std::unique_ptr<ProxyMetrics> m_metrics;
   std::unique_ptr<HttpPoolMetrics> m_http_pool_metrics;
   std::unique_ptr<RateLimiterMetrics> m_rate_limiter_metrics;

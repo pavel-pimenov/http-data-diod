@@ -6,6 +6,7 @@
 
 #include "db_query_executor_base.hpp"
 #include "db_query_executor.hpp"
+#include "db_query_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <prometheus/registry.h>
@@ -30,6 +31,12 @@ public:
   bool ping(int /*timeout_ms*/) override { return true; }
 
   int m_refresh_gauges_calls = 0;
+
+  // Exposes the protected build_query_response() for direct unit testing.
+  json build_response(const json &columns, DbRowCollector &rows,
+                      uint64_t start_ms) const {
+    return build_query_response(columns, rows, start_ms);
+  }
 
 protected:
   void refresh_pool_gauges() override { ++m_refresh_gauges_calls; }
@@ -113,4 +120,35 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
   ex.set_pool_metrics(nullptr);
   ex.set_db_pool_gauges(5.0, 5.0);
   REQUIRE(family.Collect().empty());
+}
+
+TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",
+          "[db-executor-base]") {
+  StubExecutor ex(make_db());
+  DbRowCollector rows(10);
+  rows.try_add(json::array({1, "a"}));
+  rows.try_add(json::array({2, "b"}));
+  const json columns = json::array({"id", "name"});
+
+  const json resp = ex.build_response(columns, rows, 0);
+  REQUIRE(resp[DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+  REQUIRE(resp[DbResponseContract::kDb] == "pg-test");
+  REQUIRE(resp[DbResponseContract::kColumns] == columns);
+  REQUIRE(resp[DbResponseContract::kRows].size() == 2);
+  REQUIRE(resp[DbResponseContract::kRowCount] == 2);
+  REQUIRE(resp[DbResponseContract::kTruncated] == false);
+  REQUIRE(resp[DbResponseContract::kDurationMs] >= 0);
+}
+
+TEST_CASE("DbExecutorBase: build_query_response marks truncation",
+          "[db-executor-base]") {
+  StubExecutor ex(make_db());
+  DbRowCollector rows(1);
+  REQUIRE(rows.try_add(json::array({1})));
+  REQUIRE_FALSE(rows.try_add(json::array({2})));
+
+  const json resp = ex.build_response(json::array(), rows, 0);
+  REQUIRE(resp[DbResponseContract::kTruncated] == true);
+  REQUIRE(resp[DbResponseContract::kRowCount] == 1);
+  REQUIRE(resp[DbResponseContract::kRows].size() == 1);
 }

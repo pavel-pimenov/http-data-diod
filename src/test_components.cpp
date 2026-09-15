@@ -1136,15 +1136,48 @@ TEST_CASE("ResponseBuilder: envelope status_code passthrough",
   EnvVarGuard mode("MODE", "proxy");
   AppContext ctx;
   httplib::Response res;
-  const json env = json::object(
-      {{NatsResponseContract::kStatus, 201},
-       {NatsResponseContract::kBody, R"({"ok":true})"},
-       {NatsResponseContract::kBodyIsBinary, false},
-       {NatsResponseContract::kBodyContentType, "application/json"}});
+  const json env = build_nats_response_envelope(
+      201, "req-2", R"({"ok":true})", 0, false, "application/json",
+      json::object(), "");
 
   set_response_content(res, env, "req-2", TraceContext{}, "GET",
                        "/v1/db/foo/ping", 0, ctx);
   REQUIRE(res.status == 201);
+  REQUIRE(res.body == R"({"ok":true})");
+}
+
+TEST_CASE("ResponseBuilder: non-object payload -> HTTP 500 error envelope",
+          "[response-builder]") {
+  EnvVarGuard mode("MODE", "proxy");
+  AppContext ctx;
+  httplib::Response res;
+  const json env = json::array({1, 2, 3});
+
+  set_response_content(res, env, "req-3", TraceContext{}, "POST", "/v1/sql",
+                       0, ctx);
+  REQUIRE(res.status == 500);
+  const auto body = JsonUtils::try_parse(res.body);
+  REQUIRE(body.has_value());
+  REQUIRE((*body)["error"] == "Invalid response format");
+  REQUIRE((*body)["request_id"] == "req-3");
+}
+
+TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
+          "[response-builder]") {
+  EnvVarGuard mode("MODE", "proxy");
+  AppContext ctx;
+  httplib::Response res;
+  const std::string raw_binary("\x00\x01\x02\xff\xfe", 5);
+  const json env = build_nats_response_envelope(
+      200, "req-4", base64::encode(raw_binary), 0, true,
+      "application/octet-stream", json::object(), "");
+
+  set_response_content(res, env, "req-4", TraceContext{}, "POST", "/v1/sql",
+                       0, ctx);
+  REQUIRE(res.status == 200);
+  REQUIRE(res.body == raw_binary);
+  REQUIRE(res.get_header_value("Content-Type") ==
+          "application/octet-stream");
 }
 
 TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {

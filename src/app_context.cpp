@@ -1,9 +1,14 @@
 #include "app_context.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "rate_limiter.hpp"
+#include "rate_limiter_per_ip.hpp"
+#include "duplicate_detector.hpp"
 #include "sentry_client.hpp"
 #include "trace_logger.hpp"
 #include <cstdlib>
+
+ProxyContext::~ProxyContext() = default;
 
 AppContext::AppContext() {
   init_common();
