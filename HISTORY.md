@@ -1,3 +1,88 @@
+# refactor(src): batch 21 — единый источник корня /v1/sql + именованные константы Jaeger-пула
+
+## Date: 2026-09-15
+
+### Что сделано
+- `src/db_gateway_routing.hpp`: добавлен `db_gateway_routing::kDbGatewayPath
+  = "/v1/sql"` (inline constexpr std::string_view) — единственный источник
+  корня HTTP DB Gateway. Proxy берёт его из локальной константы
+  request_handler.cpp (удалена), worker — из литерала в span-name
+  `DB_execute` (`l2_worker_nats.cpp`, `std::format("{}/{}", ...)`). Двойная
+  запись корня не может молча разойтись при пере-prefix.
+- `src/trace_logger.cpp`: параметры Jaeger-пула HttpClientPool (3/2/3)
+  вынесены в именованные константы `kJaegerPoolMaxSize` /
+  `kJaegerPoolTimeoutSeconds` / `kJaegerPoolAcquireTimeoutSeconds` —
+  закомментированные магические аргументы стали кодом.
+
+### Почему
+- M8/M4 следующего раунда дедупликации: литерал корня был в двух файлах,
+  а цифры Jaeger-пула читались только по комментариям.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green, все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+
+---
+
+# refactor(src): batch 20 — дефолты config: единственный источник в config.hpp
+
+## Date: 2026-09-15
+
+### Что сделано
+- `src/config.cpp`: все ~45 fallback-литералов `get_env_*("VAR", <literal>)`
+  в `load_from_env` заменены на текущее значение члена
+  `get_env_*("VAR", m_field)`. Дефолт живёт только в member-initializer'ах
+  `config.hpp`; повторная реализация того же значения в config.cpp убрана.
+- Оставлены как есть: `L2_SERVER_HOST` (промежуточная переменная URL),
+  `L2_SERVER_URLS`/URL-поля (собираются из частей), `SENTRY_MAX_QUEUE_SIZE`
+  (size_t-член, избегаем сужения int), весь блок `DbConfig` в
+  `load_db_query_config` (host/port/service/database у driver'ов не совпадают
+  с дефолтами `DbConfig` — использовать их было бы сменой поведения).
+
+### Почему
+- M1: изменение дефолта в `config.hpp` больше не может молча разойтись с
+  env-loader'ом; поведение не меняется — все заменённые литералы в точности
+  равны member-default'ам (сверено попарно), а `load_from_env` всегда
+  вызывается на свежем `Config`.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green (вкл. тесты `[config]`),
+  все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+
+---
+
+# refactor(src): batch 19 — удаление мёртвого TimeoutException и неиспользуемых констант
+
+## Date: 2026-09-15
+
+### Что сделано
+- `src/exceptions.hpp`: удалён `TimeoutException` — класс не бросается нигде
+  в продакшене (grep), оба catch-сайта были недостижимы.
+- `src/request_handler.cpp`: `catch (const TimeoutException&)` убран из
+  `poll_for_response` (обёртка стала сквозным вызовом `poll_response`) и из
+  `process_request` (504-"timeout" ветка; фактически не срабатывала —
+  `NatsPollService::poll_response` на таймаут возвращает "" и ловит
+  `std::exception` внутри). Убран `#include "exceptions.hpp"` (IWYU).
+- `src/test_coverage_ext.cpp`: удалён тест `[exceptions] TimeoutException
+  prefixes the message` (класс удалён; `L2ProxyException`-тест остался).
+- `src/request_id_generator.hpp/.cpp`: удалён мёртвый
+  `g_default_random_digits` (в `generate_uuid` формат `{:06d}` жёстко
+  зашит и покрыт тестами batch 17).
+- `src/stats_logger.cpp`: интервал статистики 600 с вынесен в
+  `kStatsLogIntervalSeconds` (одна константа, лог-строки и `wait_for`
+  ссылаются на неё).
+
+### Почему
+- DE1/DE3/M7 повторного сканирования: dead-класс + 2 недостижимых catch +
+  мёртвая константа + магическое 600 в коде и логах.
+
+### Верификация
+- `./rebuild-and-run.sh`: сборка + unit green, все сервисы healthy.
+- `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+
+---
+
 # refactor(src): batch 18 — не-unity совместимость app_context + покрытие response_builder/db_executor_base
 
 ## Date: 2026-09-15

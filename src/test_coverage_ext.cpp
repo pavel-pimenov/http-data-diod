@@ -85,13 +85,6 @@ TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
   REQUIRE(std::string(ex.what()) == "boom");
 }
 
-TEST_CASE("Exceptions: TimeoutException prefixes the message", "[exceptions]") {
-  TimeoutException ex("read failed");
-  REQUIRE_THROWS_AS(throw ex, L2ProxyException);
-  REQUIRE_THROWS_AS(throw ex, std::runtime_error);
-  REQUIRE(std::string(ex.what()) == "Timeout error: read failed");
-}
-
 // ============================================================================
 // scoped_metrics.hpp
 // ============================================================================

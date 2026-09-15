@@ -5,8 +5,6 @@
 #include <ctime>
 #include <format>
 
-const int RequestIdGenerator::g_default_random_digits;
-
 thread_local std::string RequestIdGenerator::cached_date_str;
 
 // Request ID format: YYYY-MM-DD~<counter>~<6-digit-zero-padded-random>.

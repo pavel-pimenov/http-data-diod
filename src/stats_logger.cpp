@@ -2,6 +2,10 @@
 #include "duplicate_detector.hpp"
 #include "logger.hpp"
 
+namespace {
+constexpr int kStatsLogIntervalSeconds = 600;
+}
+
 StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag)
     : m_app_ctx(context), m_shutdown_flag(shutdown_flag) {}
 
@@ -23,7 +27,8 @@ void StatsLogger::increment_active_clients() {
 void StatsLogger::decrement_active_clients() { m_active_clients.fetch_sub(1); }
 
 void StatsLogger::start_periodic_logging() {
-  Logger::info("Starting statistics logging every 600 seconds");
+  Logger::info("Starting statistics logging every {} seconds",
+               kStatsLogIntervalSeconds);
   m_log_thread = std::jthread([this](std::stop_token st) {
     uint64_t prev_logged_requests = 0;
     auto prev_time = std::chrono::steady_clock::now();
@@ -33,7 +38,7 @@ void StatsLogger::start_periodic_logging() {
         std::unique_lock lk(m_cv_mutex);
         // C++20 jthread + condition_variable_any: wait_for with stop_token wakes
         // instantly on request_stop(), no 1s polling spin.
-        m_cv.wait_for(lk, st, std::chrono::seconds(600),
+        m_cv.wait_for(lk, st, std::chrono::seconds(kStatsLogIntervalSeconds),
                       [&] { return st.stop_requested() || m_shutdown_flag.load(); });
       }
       if (m_shutdown_flag || st.stop_requested()) {
@@ -89,8 +94,9 @@ void StatsLogger::start_periodic_logging() {
       }
 
       Logger::info("Statistics - Active Clients: {}, Max Clients: {}, "
-                   "Requests in last 600s: {}, Req/Sec (last 600s): {:.2f}",
-                   active, max, requests_in_period, requests_per_second);
+                   "Requests in last {}s: {}, Req/Sec (last {}s): {:.2f}",
+                   active, max, kStatsLogIntervalSeconds, requests_in_period,
+                   kStatsLogIntervalSeconds, requests_per_second);
     }
   });
 }

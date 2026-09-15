@@ -9,7 +9,6 @@
 #include "db_query_utils.hpp"
 #include "stats_page.hpp"
 #include "duplicate_detector.hpp"
-#include "exceptions.hpp"
 #include "http_client.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
@@ -34,9 +33,6 @@ struct ActiveClientTracker {
   explicit ActiveClientTracker(StatsLogger &logger) : m_stats_logger(logger) {}
   ~ActiveClientTracker() { m_stats_logger.decrement_active_clients(); }
 };
-
-// URL prefix of the HTTP DB Gateway endpoints (docs/openapi/http-db-gate.yaml).
-inline constexpr const char *kDbGatewayPath = "/v1/sql";
 
 // Maps an unknown-db error into a ready-to-send HTTP response.
 void send_db_error(httplib::Response &res, int status, const std::string &code,
@@ -92,7 +88,7 @@ void RequestHandler::handle_get(const httplib::Request &req,
     return;
   }
 
-  if (req.path.starts_with(kDbGatewayPath)) {
+  if (req.path.starts_with(db_gateway_routing::kDbGatewayPath)) {
     handle_db_gateway(req, res, "GET", "");
     return;
   }
@@ -228,7 +224,7 @@ void RequestHandler::handle_post(const httplib::Request &req,
   // and request metrics, so its 400s (invalid/empty JSON, bad contract) are
   // counted in l2_proxy_db_requests_total instead of the generic client-error
   // path.
-  if (req.path.starts_with(kDbGatewayPath)) {
+  if (req.path.starts_with(db_gateway_routing::kDbGatewayPath)) {
     handle_db_gateway(req, res, "POST", body);
     return;
   }
@@ -425,16 +421,8 @@ std::string RequestHandler::push_to_backend(
 std::string RequestHandler::poll_for_response(const std::string &request_id,
                                               const std::string &request_json,
                                               const TraceContext &trace_ctx) {
-  std::string response_data_str;
-  try {
-    response_data_str = m_poll_service.poll_response(
-        request_id, request_json, m_request_timeout_seconds, trace_ctx);
-  } catch (const TimeoutException &e) {
-    Logger::error("Timeout waiting for response: request_id={} error={}",
-                  request_id, e.what());
-    throw; // Re-throw for caller to handle
-  }
-  return response_data_str;
+  return m_poll_service.poll_response(request_id, request_json,
+                                      m_request_timeout_seconds, trace_ctx);
 }
 
 // ============================================================================
@@ -526,16 +514,8 @@ void RequestHandler::process_request(const std::string &method,
   }
 
   // Poll for response
-  std::string response_data_str;
-  try {
-    response_data_str = poll_for_response(request_id, request_json, trace_ctx);
-  } catch (const TimeoutException &e) {
-    fail_backend_request(
-        res, method, path, 504, "Timeout waiting for response", "timeout",
-        std::format("Timeout: {}", e.what()), request_timing.start_us(),
-        trace_ctx, request_id);
-    return;
-  }
+  const std::string response_data_str =
+      poll_for_response(request_id, request_json, trace_ctx);
 
   if (response_data_str.empty()) {
     fail_backend_request(
@@ -664,7 +644,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
 
   const auto parsed = db_gateway_routing::parse_path(
       db_gateway_routing::normalize_path_rest(
-          req.path.substr(std::string(kDbGatewayPath).size())));
+          req.path.substr(std::string(db_gateway_routing::kDbGatewayPath).size())));
 
   if (parsed.m_is_list) {
     handle_db_gateway_list(res, method, req.path, start_us, trace_ctx,

@@ -7,7 +7,6 @@
 
 class RequestIdGenerator {
 private:
-  static const int g_default_random_digits = 6;
   std::atomic<long long> m_counter{0};
 
   // Thread-local storage for date caching
