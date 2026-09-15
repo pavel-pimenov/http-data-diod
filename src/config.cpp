@@ -316,18 +316,19 @@ void Config::load_from_env() {
     load_nats_config();
     load_db_query_config();
   }
-  m_crash_test = get_env_bool("CRASH_TEST", false);
+  m_crash_test = get_env_bool("CRASH_TEST", m_crash_test);
   m_enable_crash_test_endpoint =
-      get_env_bool("ENABLE_CRASH_TEST_ENDPOINT", false);
+      get_env_bool("ENABLE_CRASH_TEST_ENDPOINT", m_enable_crash_test_endpoint);
   m_health_ready_allow_connect =
-      get_env_bool("HEALTH_READY_ALLOW_CONNECT", false);
+      get_env_bool("HEALTH_READY_ALLOW_CONNECT", m_health_ready_allow_connect);
 }
 
 void Config::load_l2_server_config() {
-  m_mode = get_env_string("MODE", "proxy");
+  m_mode = get_env_string("MODE", m_mode);
   const auto l2_server_host = get_env_string("L2_SERVER_HOST", "l2-server");
-  m_l2_server_port = get_env_int("L2_SERVER_PORT", 8088);
-  m_l2_server_protocol = get_env_protocol("L2_SERVER_PROTOCOL", "http");
+  m_l2_server_port = get_env_int("L2_SERVER_PORT", m_l2_server_port);
+  m_l2_server_protocol =
+      get_env_protocol("L2_SERVER_PROTOCOL", m_l2_server_protocol);
 
   if (m_mode == "l2-server") {
     // The l2-server binds on m_l2_server_port / m_l2_server_protocol but never
@@ -374,11 +375,11 @@ void Config::load_l2_server_config() {
 }
 
 void Config::load_server_timeout_config() {
-  m_jaeger_url = get_env_string("JAEGER_URL", "");
-  m_sentry_dsn = get_env_string("SENTRY_DSN", "");
-  m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", "");
-  m_sentry_release = get_env_string("SENTRY_RELEASE", "");
-  m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", 3000);
+  m_jaeger_url = get_env_string("JAEGER_URL", m_jaeger_url);
+  m_sentry_dsn = get_env_string("SENTRY_DSN", m_sentry_dsn);
+  m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", m_sentry_environment);
+  m_sentry_release = get_env_string("SENTRY_RELEASE", m_sentry_release);
+  m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry_timeout_ms);
   m_sentry_max_queue_size =
       get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);
   if (!m_sentry_dsn.empty()) {
@@ -388,28 +389,36 @@ void Config::load_server_timeout_config() {
         m_sentry_dsn.substr(m_sentry_dsn.find_last_of('/') + 1),
         m_sentry_release, m_sentry_environment, m_sentry_max_queue_size);
   }
-  m_request_timeout_seconds = get_env_int("REQUEST_TIMEOUT_SECONDS", 30);
-  m_http_timeout_seconds = get_env_int("HTTP_TIMEOUT_SECONDS", 30);
-  m_test_response_delay_ms = get_env_int("L2_TEST_RESPONSE_DELAY_MS", 0);
-  m_enable_tracing = get_env_bool("ENABLE_TRACING", false);
-  m_log_level = get_env_string("LOG_LEVEL", "INFO");
-  m_proxy_port = get_env_int("PROXY_PORT", 8888);
-  m_proxy_protocol = get_env_protocol("PROXY_PROTOCOL", "http");
-  m_thread_pool_type = get_env_string("THREAD_POOL_TYPE", "none");
-  m_http_pool_size = get_env_int("HTTP_POOL_SIZE", 400);
-  m_http_pool_idle_timeout_seconds =
-      get_env_int("HTTP_POOL_IDLE_TIMEOUT_SECONDS", 300);
-  m_l2_worker_threads = get_env_int("L2_WORKER_THREADS", 128);
-  m_l2_worker_queue_size = get_env_int("L2_WORKER_QUEUE_SIZE", 0);
-  m_max_retries = get_env_int("MAX_RETRIES", 1);
+  m_request_timeout_seconds =
+      get_env_int("REQUEST_TIMEOUT_SECONDS", m_request_timeout_seconds);
+  m_http_timeout_seconds =
+      get_env_int("HTTP_TIMEOUT_SECONDS", m_http_timeout_seconds);
+  m_test_response_delay_ms =
+      get_env_int("L2_TEST_RESPONSE_DELAY_MS", m_test_response_delay_ms);
+  m_enable_tracing = get_env_bool("ENABLE_TRACING", m_enable_tracing);
+  m_log_level = get_env_string("LOG_LEVEL", m_log_level);
+  m_proxy_port = get_env_int("PROXY_PORT", m_proxy_port);
+  m_proxy_protocol = get_env_protocol("PROXY_PROTOCOL", m_proxy_protocol);
+  m_thread_pool_type = get_env_string("THREAD_POOL_TYPE", m_thread_pool_type);
+  m_http_pool_size = get_env_int("HTTP_POOL_SIZE", m_http_pool_size);
+  m_http_pool_idle_timeout_seconds = get_env_int(
+      "HTTP_POOL_IDLE_TIMEOUT_SECONDS", m_http_pool_idle_timeout_seconds);
+  m_l2_worker_threads = get_env_int("L2_WORKER_THREADS", m_l2_worker_threads);
+  m_l2_worker_queue_size =
+      get_env_int("L2_WORKER_QUEUE_SIZE", m_l2_worker_queue_size);
+  m_max_retries = get_env_int("MAX_RETRIES", m_max_retries);
   m_enable_ssl_server_certificate_verification =
-      get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION", false);
+      get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION",
+                   m_enable_ssl_server_certificate_verification);
   m_enable_ssl_server_hostname_verification =
-      get_env_bool("ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION", false);
-  m_ssl_ca_cert_path = get_env_string("SSL_CA_CERT_PATH", "");
+      get_env_bool("ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION",
+                   m_enable_ssl_server_hostname_verification);
+  m_ssl_ca_cert_path = get_env_string("SSL_CA_CERT_PATH", m_ssl_ca_cert_path);
 
-  m_ssl_server_cert_file = get_env_string("SSL_SERVER_CERT_FILE", "");
-  m_ssl_server_key_file = get_env_string("SSL_SERVER_KEY_FILE", "");
+  m_ssl_server_cert_file =
+      get_env_string("SSL_SERVER_CERT_FILE", m_ssl_server_cert_file);
+  m_ssl_server_key_file =
+      get_env_string("SSL_SERVER_KEY_FILE", m_ssl_server_key_file);
   if (m_proxy_protocol == "https" || m_l2_server_protocol == "https") {
     if (m_ssl_server_cert_file.empty() || m_ssl_server_key_file.empty()) {
       Logger::warn("HTTPS protocol specified but SSL_SERVER_CERT_FILE or "
@@ -422,19 +431,22 @@ void Config::load_server_timeout_config() {
 }
 
 void Config::load_feature_config() {
-  m_tracing_batch_size = get_env_int("TRACING_BATCH_SIZE", 50);
-  m_tracing_flush_interval_ms = get_env_int("TRACING_FLUSH_INTERVAL_MS", 1000);
-  m_tracing_sample_rate = get_env_double("TRACING_SAMPLE_RATE", 1.0);
+  m_tracing_batch_size = get_env_int("TRACING_BATCH_SIZE", m_tracing_batch_size);
+  m_tracing_flush_interval_ms =
+      get_env_int("TRACING_FLUSH_INTERVAL_MS", m_tracing_flush_interval_ms);
+  m_tracing_sample_rate =
+      get_env_double("TRACING_SAMPLE_RATE", m_tracing_sample_rate);
   Logger::info(
       "Tracing config: batch_size={} flush_interval={}ms sample_rate={}",
       m_tracing_batch_size, m_tracing_flush_interval_ms, m_tracing_sample_rate);
 
   m_enable_per_ip_rate_limiting =
-      get_env_bool("ENABLE_PER_IP_RATE_LIMITING", true);
-  m_per_ip_max_tokens = get_env_int("PER_IP_MAX_TOKENS", 100);
-  m_per_ip_refill_rate = get_env_int("PER_IP_REFILL_RATE", 10);
-  m_per_ip_max_ips = get_env_int("PER_IP_MAX_IPS", 10000);
-  m_per_ip_cleanup_ttl_seconds = get_env_int("PER_IP_CLEANUP_TTL_SECONDS", 300);
+      get_env_bool("ENABLE_PER_IP_RATE_LIMITING", m_enable_per_ip_rate_limiting);
+  m_per_ip_max_tokens = get_env_int("PER_IP_MAX_TOKENS", m_per_ip_max_tokens);
+  m_per_ip_refill_rate = get_env_int("PER_IP_REFILL_RATE", m_per_ip_refill_rate);
+  m_per_ip_max_ips = get_env_int("PER_IP_MAX_IPS", m_per_ip_max_ips);
+  m_per_ip_cleanup_ttl_seconds = get_env_int(
+      "PER_IP_CLEANUP_TTL_SECONDS", m_per_ip_cleanup_ttl_seconds);
   Logger::info("Per-IP Rate Limiting: enabled={} max_tokens={} refill_rate={} "
                "max_ips={} cleanup_ttl={}s",
                m_enable_per_ip_rate_limiting, m_per_ip_max_tokens,
@@ -442,35 +454,44 @@ void Config::load_feature_config() {
                m_per_ip_cleanup_ttl_seconds);
 
   m_enable_global_rate_limiting =
-      get_env_bool("ENABLE_GLOBAL_RATE_LIMITING", true);
-  m_global_max_tokens = get_env_int("GLOBAL_RATE_LIMIT_MAX_TOKENS", 10000);
-  m_global_refill_rate = get_env_int("GLOBAL_RATE_LIMIT_REFILL_RATE", 1000);
+      get_env_bool("ENABLE_GLOBAL_RATE_LIMITING", m_enable_global_rate_limiting);
+  m_global_max_tokens =
+      get_env_int("GLOBAL_RATE_LIMIT_MAX_TOKENS", m_global_max_tokens);
+  m_global_refill_rate =
+      get_env_int("GLOBAL_RATE_LIMIT_REFILL_RATE", m_global_refill_rate);
   Logger::info("Global Rate Limiting: enabled={} max_tokens={} refill_rate={}",
                m_enable_global_rate_limiting, m_global_max_tokens,
                m_global_refill_rate);
 
-  m_dedup_enabled = get_env_bool("DEDUP_ENABLED", false);
-  m_dedup_max_entries = get_env_int("DEDUP_MAX_ENTRIES", 4096);
-  m_dedup_ttl_ms = get_env_int("DEDUP_TTL_MS", 60000);
+  m_dedup_enabled = get_env_bool("DEDUP_ENABLED", m_dedup_enabled);
+  m_dedup_max_entries =
+      get_env_int("DEDUP_MAX_ENTRIES", m_dedup_max_entries);
+  m_dedup_ttl_ms = get_env_int("DEDUP_TTL_MS", m_dedup_ttl_ms);
   Logger::info("Dedup cache: enabled={} max_entries={} ttl_ms={}",
                m_dedup_enabled, m_dedup_max_entries, m_dedup_ttl_ms);
 
   m_duplicate_detection_enabled =
-      get_env_bool("DUPLICATE_DETECTION_ENABLED", true);
-  m_duplicate_reject_enabled = get_env_bool("DUPLICATE_REJECT_ENABLED", false);
-  m_duplicate_detection_top_n = get_env_int("DUPLICATE_DETECTION_TOP_N", 100);
+      get_env_bool("DUPLICATE_DETECTION_ENABLED", m_duplicate_detection_enabled);
+  m_duplicate_reject_enabled =
+      get_env_bool("DUPLICATE_REJECT_ENABLED", m_duplicate_reject_enabled);
+  m_duplicate_detection_top_n =
+      get_env_int("DUPLICATE_DETECTION_TOP_N", m_duplicate_detection_top_n);
   m_duplicate_detection_max_entries =
-      get_env_int("DUPLICATE_DETECTION_MAX_ENTRIES", 1000);
+      get_env_int("DUPLICATE_DETECTION_MAX_ENTRIES",
+                  m_duplicate_detection_max_entries);
   m_duplicate_detection_max_body_bytes =
-      get_env_int("DUPLICATE_DETECTION_MAX_BODY_BYTES", 500);
+      get_env_int("DUPLICATE_DETECTION_MAX_BODY_BYTES",
+                  m_duplicate_detection_max_body_bytes);
   m_duplicate_detection_ttl_ms =
-      get_env_int("DUPLICATE_DETECTION_TTL_MS", 60000);
+      get_env_int("DUPLICATE_DETECTION_TTL_MS", m_duplicate_detection_ttl_ms);
   m_duplicate_log_threshold =
-      get_env_int("DUPLICATE_LOG_THRESHOLD", 5);
+      get_env_int("DUPLICATE_LOG_THRESHOLD", m_duplicate_log_threshold);
   m_duplicate_detection_max_clients =
-      get_env_int("DUPLICATE_DETECTION_MAX_CLIENTS", 1000);
+      get_env_int("DUPLICATE_DETECTION_MAX_CLIENTS",
+                  m_duplicate_detection_max_clients);
   m_duplicate_detection_client_ttl_ms =
-      get_env_int("DUPLICATE_DETECTION_CLIENT_TTL_MS", 1800000);
+      get_env_int("DUPLICATE_DETECTION_CLIENT_TTL_MS",
+                  m_duplicate_detection_client_ttl_ms);
   Logger::info("Duplicate detection: enabled={} top_n={} max_entries={} "
                "max_body_bytes={} ttl_ms={} reject_enabled={} log_threshold={} "
                "max_clients={} client_ttl_ms={}",
@@ -483,20 +504,24 @@ void Config::load_feature_config() {
 }
 
 void Config::load_nats_config() {
-  m_nats_host = get_env_string("NATS_HOST", "nats-server");
-  m_nats_port = get_env_int("NATS_PORT", 4222);
-  m_nats_subject = get_env_string("NATS_SUBJECT", "service.proxy");
-  m_nats_queue_group = get_env_string("NATS_QUEUE_GROUP", "proxy_workers");
-  m_nats_timeout_ms = get_env_int("NATS_TIMEOUT_MS", 30000);
+  m_nats_host = get_env_string("NATS_HOST", m_nats_host);
+  m_nats_port = get_env_int("NATS_PORT", m_nats_port);
+  m_nats_subject = get_env_string("NATS_SUBJECT", m_nats_subject);
+  m_nats_queue_group = get_env_string("NATS_QUEUE_GROUP", m_nats_queue_group);
+  m_nats_timeout_ms = get_env_int("NATS_TIMEOUT_MS", m_nats_timeout_ms);
 
-  m_nats_username = get_env_string("NATS_USERNAME", "");
-  m_nats_password = get_env_string("NATS_PASSWORD", "");
-  m_nats_token = get_env_string("NATS_TOKEN", "");
-  m_nats_credentials_file = get_env_string("NATS_CREDENTIALS_FILE", "");
-  m_nats_enable_tls = get_env_bool("NATS_ENABLE_TLS", false);
-  m_nats_tls_cert_file = get_env_string("NATS_TLS_CERT_FILE", "");
-  m_nats_tls_key_file = get_env_string("NATS_TLS_KEY_FILE", "");
-  m_nats_tls_ca_cert_file = get_env_string("NATS_TLS_CA_CERT_FILE", "");
+  m_nats_username = get_env_string("NATS_USERNAME", m_nats_username);
+  m_nats_password = get_env_string("NATS_PASSWORD", m_nats_password);
+  m_nats_token = get_env_string("NATS_TOKEN", m_nats_token);
+  m_nats_credentials_file =
+      get_env_string("NATS_CREDENTIALS_FILE", m_nats_credentials_file);
+  m_nats_enable_tls = get_env_bool("NATS_ENABLE_TLS", m_nats_enable_tls);
+  m_nats_tls_cert_file =
+      get_env_string("NATS_TLS_CERT_FILE", m_nats_tls_cert_file);
+  m_nats_tls_key_file =
+      get_env_string("NATS_TLS_KEY_FILE", m_nats_tls_key_file);
+  m_nats_tls_ca_cert_file =
+      get_env_string("NATS_TLS_CA_CERT_FILE", m_nats_tls_ca_cert_file);
 
   if (!m_nats_username.empty() || !m_nats_token.empty() ||
       !m_nats_credentials_file.empty()) {
@@ -514,16 +539,17 @@ void Config::load_nats_config() {
 }
 
 void Config::load_db_query_config() {
-  m_db_query_enabled = get_env_bool("DB_QUERY_ENABLED", false);
+  m_db_query_enabled = get_env_bool("DB_QUERY_ENABLED", m_db_query_enabled);
   m_db_query_nats_subject =
-      get_env_string("DB_QUERY_NATS_SUBJECT", "service.db.query");
+      get_env_string("DB_QUERY_NATS_SUBJECT", m_db_query_nats_subject);
   m_db_query_nats_queue_group =
-      get_env_string("DB_QUERY_NATS_QUEUE_GROUP", "db_workers");
-  m_db_query_nats_timeout_ms = get_env_int("DB_QUERY_NATS_TIMEOUT_MS", 30000);
+      get_env_string("DB_QUERY_NATS_QUEUE_GROUP", m_db_query_nats_queue_group);
+  m_db_query_nats_timeout_ms =
+      get_env_int("DB_QUERY_NATS_TIMEOUT_MS", m_db_query_nats_timeout_ms);
   m_db_query_default_timeout_ms =
-      get_env_int("DB_QUERY_DEFAULT_TIMEOUT_MS", 5000);
+      get_env_int("DB_QUERY_DEFAULT_TIMEOUT_MS", m_db_query_default_timeout_ms);
   m_db_query_default_max_rows =
-      get_env_int("DB_QUERY_DEFAULT_MAX_ROWS", 1000);
+      get_env_int("DB_QUERY_DEFAULT_MAX_ROWS", m_db_query_default_max_rows);
   if (!m_db_query_enabled) {
     return;
   }
