@@ -1,4 +1,5 @@
 #include "common_utils.hpp"
+#include "db_gateway_routing.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
@@ -634,7 +635,9 @@ void L2Worker::observe_db_query_outcome(const json &request_data, int status,
          JsonUtils::safe_get_string(request_data, DbQueryContract::kType)},
     };
     log_span_to_jaeger(m_ctx.m_tracer.get(), "DB_execute",
-                       "/v1/sql/" + db_name, status, db_start_us, db_end_us,
+                       std::format("{}/{}", db_gateway_routing::kDbGatewayPath,
+                                   db_name),
+                       status, db_start_us, db_end_us,
                        proxy_service_name(m_ctx.m_config.m_mode), request_id,
                        trace_ctx.m_trace_id, db_span_id, consume_span_id, attrs);
   }

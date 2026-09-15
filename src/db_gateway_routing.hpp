@@ -4,6 +4,7 @@
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 
 // Pure helpers of the /v1/sql routing in the proxy request handler. Header-only
 // and free of AppContext/NATS/handlers so the proxy-core unit tests can cover
@@ -11,6 +12,11 @@
 // booting the whole stack.
 
 namespace db_gateway_routing {
+
+// Single source of truth for the HTTP DB Gateway root path. Used by the proxy
+// request handler for routing and by the worker for DB_execute span naming, so
+// a re-prefix of the gateway cannot silently desync the two sides.
+inline constexpr std::string_view kDbGatewayPath = "/v1/sql";
 
 // Normalizes the part of a /v1/sql path after the prefix: trims leading and
 // trailing slashes so "/v1/sql/" behaves like "/v1/sql" and "/v1/sql//oracle/"

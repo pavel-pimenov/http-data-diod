@@ -11,6 +11,14 @@ static thread_local std::random_device g_rd;
 static thread_local std::mt19937_64 g_gen(g_rd());
 static thread_local std::uniform_int_distribution<uint64_t> g_dis;
 
+namespace {
+// Jaeger sender pool is deliberately tiny and short-timeout: spans are
+// fire-and-forget, a blocked sender must never stall the request path.
+constexpr size_t kJaegerPoolMaxSize = 3;
+constexpr int kJaegerPoolTimeoutSeconds = 2;
+constexpr int kJaegerPoolAcquireTimeoutSeconds = 3;
+}
+
 JaegerLogger::JaegerLogger(const std::string &endpoint,
                            prometheus::Counter &spans_sent,
                            prometheus::Counter &spans_failed,
@@ -26,11 +34,8 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
       m_tracing_send_latency_histogram(send_latency),
       m_tracing_queue_time_histogram(queue_time),
       m_http_client_pool(std::make_unique<HttpClientPool>(
-          3,   // Small pool for Jaeger (fire-and-forget)
-          2,   // Very short timeout (2 seconds)
-          3,   // Short acquire timeout (3 seconds)
-          true // enable connection reuse
-          )),
+          kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
+          kJaegerPoolAcquireTimeoutSeconds, true)),
       m_batch_size(batch_size), m_flush_interval_ms(flush_interval_ms),
       m_sample_rate(sample_rate) {
   Logger::info("JaegerLogger initialized: batch_size={} flush_interval={}ms "
