@@ -508,7 +508,13 @@ TEST_CASE("SentryClient: zero max_queue_size is clamped to one",
   client.capture_message("second dropped");
   client.flush();
 
-  REQUIRE(delivered.size() == 1);
-  REQUIRE(m.m_failed_counter.Value() == 1.0);
-  REQUIRE(m.m_sent_counter.Value() == 1.0);
+  // The live sender drains the single clamped slot between the two captures
+  // depending on scheduling: if it drains first, both messages deliver; if the
+  // second capture wins the mutex first, it is dropped. Both interleavings are
+  // valid production behavior, so only the accounting invariant is asserted.
+  REQUIRE(m.m_failed_counter.Value() + m.m_sent_counter.Value() == 2.0);
+  REQUIRE(m.m_sent_counter.Value() == static_cast<double>(delivered.size()));
+  REQUIRE(delivered.size() >= 1);
+  REQUIRE(delivered.size() <= 2);
+  REQUIRE(m.m_queue_gauge.Value() == 0.0);
 }

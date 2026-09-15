@@ -30,6 +30,15 @@
 ### Верификация
 - `./rebuild-and-run.sh`: сборка + unit green, все сервисы healthy.
 - `python3 message_counter.py --iterations 1 --concurrent 1`: PASS.
+- `src/test_sentry_client.cpp`: исправлен верифицировавшийся-только-гонкой тест
+  "zero max_queue_size is clamped to one": sender-поток выгребает единственный
+  слот между двумя capture_message по расписанию, поэтому оба исхода
+  (второй message доставлен / второй отброшен) валидны в проде. Тест теперь
+  проверяет детерминированный инвариант учёта (sent+failed==2, sent==delivered,
+  delivered∈{1,2}, queue gauge возвращается в 0). В coverage-конфиге
+  (non-unity, -O0) гонку стабильно выигрывал sender → тест падал 2/2;
+  покрытие-гейт без фикса не проходил. Падение к Baggage не относится —
+  тайминговый артефакт, вскрытый новым окружением.
 
 ---
 

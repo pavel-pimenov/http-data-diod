@@ -2,12 +2,12 @@
 
 ## Текущий статус (22 — удалена мёртвая Baggage-подсистема)
 
-Raунды покрытия юнит-тестами: **575 test cases**,
-**2 719 assertions** (test_components 455/1836 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
+Raунды покрытия юнит-тестами: **566 test cases**,
+**2 668 assertions** (test_components 446/1785 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 98.0%** (9752/9952), гейт 90% — пройден
-- **Functions: 95.3%** (1244/1305)
-- **Branches: 41.5%** (19652/47389) — слабое место
+- **Lines: 98.0%** (9563/9757), гейт 90% — пройден
+- **Functions: 95.2%** (1219/1280)
+- **Branches: 41.4%** (19205/46347) — слабое место
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
@@ -55,8 +55,9 @@ PROD branches 56.8%→57.2% (3893/6811).
   `SpanData::m_baggage`, `g_url_encode_hex`, + 9 TEST_CASE в
   test_trace_logger/test_components. Прод-путь
   (`trace_context_extractor`/`tracing_helpers`) от неё не зависел —
-  проверено по всем файлам src. Осталось: verified build (в процессе),
-  commit, обновить цифры покрытия в след. сессии.
+  проверено по всем файлам src. В процессе верификации вскрыт и
+  **исправлен** скрытый race-тест sentry "clamp to one" (см. HISTORY).
+  Цифры покрытия после batch 22 — в шапке.
 
 E2E/fault-tolerance: **9 сценариев** (NATS reconnect, L2 server down, worker killed,
 NATS dedup resend, proxy restart under load, multi-restart, concurrent restart,
@@ -129,8 +130,10 @@ drain, reply-loss).
 
 Удаление мёртвой Baggage-подсистемы реализовано и собрано в контейнере
 (`./rebuild-and-run.sh` + message_counter PASS). Детали в HISTORY.md.
-Направление на будущее: обновить цифры покрытия (строк должно стать ~98%+
-за счёт выкинутых неисполняемых строк).
+В ходе верификации исправлен race-тест sentry "clamp to one"
+(test_sentry_client.cpp) — покрытие-гейт без фикса падал 2/2 в coverage-
+конфиге. Покрытие после batch 22: Lines 98.0% (9563/9757, гейт √),
+Functions 95.2%, Branches 41.4%.
 
 ## Заморожено (не делать, решение 2026-09-11)
 
