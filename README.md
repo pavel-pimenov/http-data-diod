@@ -628,7 +628,7 @@ URL datasource берётся с приоритетом: `--datasource-url` (CLI
 
 Стек может разворачиваться на нескольких ВМ. Во всех дашбордах есть одна переменная **Виртуальная машина** (`$vm`): на каждой ВМ развёрнут один экземпляр каждого сервиса (proxy/worker/nats/nginx), поэтому **метрики на всех досках показываются только одной ВМ** — выбор узла обязателен (по умолчанию — первая ВМ из списка), мультиселекта нет.
 
-Label `vm` добавляет **vmagent при скрейпе** из переменной окружения `VM_NAME` (placeholder `%{VM_NAME}` в `vmagent/vmagent.yml`). По умолчанию `VM_NAME` берётся из hostname узла — см. `rebuild-and-run.sh`:
+Label `vm` добавляет **vmagent при скрейпе** из переменной окружения `VM_NAME` (placeholder `%{VM_NAME}` в `scripts/vmagent.yml`). По умолчанию `VM_NAME` берётся из hostname узла — см. `rebuild-and-run.sh`:
 
 ```bash
 export VM_NAME="${VM_NAME:-$(hostname)}"   # rebuild-and-run.sh

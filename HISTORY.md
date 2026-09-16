@@ -1,5 +1,64 @@
 # tools(vendor): скрипт обновления/проверки вендорных либ из git
 
+## Date: 2026-09-16
+
+### Что сделано
+- `vmagent/vmagent.yml` → `scripts/vmagent.yml`: упразднён каталог из одного
+  файла, конфиг vmagent лежит рядом с генератором дашбордов. Обновлены
+  docker-compose.yml (volume) и README.md (путь к конфигу).
+
+## Date: 2026-09-16
+
+### Что сделано
+- `src/crash_handler.hpp`: краш-хендлер теперь отправляет события в Sentry
+  (DSN из окружения, по умолчанию отключено). При сигнале (SIGSEGV/SIGABRT/…)
+  делается асинхронно-безопасный `fork()`, ребёнок через Envelope API
+  (`POST /api/<project_id>/envelope/`) доставляет событие с типом SIGSEGV,
+  адресом fault address и бэктрейсом (`backtrace()`), после чего родитель
+  ре-райзит сигнал с дефолтным обработчиком для снятия core-дампа.
+- Формирование event JSON, envelope и HTTP-запроса переведено с ручной склейки
+  char-буферов на `nlohmann/json` + `std::string` (ручная эскейп-склейка
+  давала невалидный JSON — лишняя закрывающая `}` в `"exception"`, из-за чего
+  glitchtip отвечал 200, но молча дропал событие). Ребёнок ждёт ответ сервера
+  перед `_exit()`, чтобы событие ingested до рестарта контейнера.
+- `src/main.cpp`: установка CrashHandler с SENTRY_DSN при старте.
+- `src/l2-proxy-version.h`: бамп версии.
+- `src/crash_handler.hpp`: убрана временная диагностика (probe-лог шагов,
+  дамп HTTP-запроса) — после перевода на nlohmann/json не нужна.
+- `src/crash_handler.hpp`: стек в Sentry теперь с именами функций и номерами
+  строк исходников, а не только c raw-адресами: каждый фрейм обогащается
+  `function`/`filename`/`lineno` через `dladdr()` + `abi::__cxa_demangle()`
+  (имена), затем addr2line по DWARF-данным (строки). Заголовок issue стал
+  уникальным — берётся первый зарезолвленный фрейм после обработчика сигнала
+  (место падения, а не сам `signal_handler`), формат
+  `SIGSEGV: <метод> (+0x<смещение>) <файл>:<строка>`.
+- `src/crash_handler.hpp`: родитель после fork() теперь ждёт завершения
+  crash-ребёнка (`waitpid(WNOHANG)` + `nanosleep`, до ~4с), иначе Docker
+  убивал cgroup ещё до завершения addr2line.
+- `src/CMakeLists.txt`: добавлен `-rdynamic`, иначе dladdr не видит символы.
+- `src/Dockerfile`: в runtime-base добавлен `binutils` (addr2line) для
+  резолва фреймов в контейнере по DWARF (без него — только raw-адреса).
+
+### Почему
+- Краши сервисов не были видны нигде, кроме несъедобных core-файлов; детально
+  трейсили корректность Envelope-протокола и молчаливые 200-drop'ы glitchtip.
+- В glitchtip стек не отображался (фреймы без `function`/`filename`), а тайтл
+  `SIGSEGV: (nil)` не говорил, где именно упало.
+
+### Верификация
+- `./rebuild-and-run.sh` — сборка и health checks всех сервисов зелёные.
+- `python3 message_counter.py --iterations 1 --concurrent 1` — успех.
+- `curl http://localhost:8888/crash-test` → SIGSEGV; событие отражается в
+  glitchtip (issue `SIGSEGV: (nil)`, 10 фреймов бэктрейса), проверено
+  выборкой из `glitchtip-db` (`issue_events_issueevent_20260916_h0`).
+- После резолва имён title в glitchtip:
+  `SIGSEGV: RequestHandler::handle_crash_test(httplib::Request const&,
+  httplib::Response&) (+0x16c) /app/request_handler.cpp:114`, в стеке фреймы
+  с именами и номерами строк (12 фреймов с `lineno`, кадр-перехватчик
+  `signal_handler` пропускается как индекс 0).
+- `.env`: SENTRY_DSN переключён на проект doid/l2-proxy (id 2) для живого
+  просмотра в UI.
+
 ## Date: 2026-09-15
 
 ### Что сделано

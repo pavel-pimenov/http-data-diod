@@ -399,10 +399,7 @@ int main() { // NOLINT(bugprone-exception-escape)
   std::signal(SIGTERM, signal_handler);
   std::signal(SIGINT, signal_handler);
 
-  // Install crash handler for stack trace dumps
-  const char *crash_dump_dir = std::getenv("CRASH_DUMP_DIR");
-  CrashHandler::install(crash_dump_dir ? crash_dump_dir
-                                       : g_default_crash_dump_dir);
+  // (crash handler installed after AppContext to get SENTRY_DSN)
 
   try {
     Logger::info("L2-Proxy version: {}", g_l2_proxy_version);
@@ -422,6 +419,12 @@ int main() { // NOLINT(bugprone-exception-escape)
 
     AppContext app_ctx;
     init_tracer(app_ctx);
+
+    // Install crash handler for stack trace dumps + Sentry crash events
+    const char *crash_dump_dir = std::getenv("CRASH_DUMP_DIR");
+    CrashHandler::install(crash_dump_dir ? crash_dump_dir
+                                         : g_default_crash_dump_dir,
+                          app_ctx.m_config.m_sentry_dsn);
 
     // Crash test mode: raise SIGSEGV to test crash handler
     if (app_ctx.m_config.m_crash_test) {

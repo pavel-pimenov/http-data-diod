@@ -226,7 +226,15 @@ RUN rm -rf build-lint && mkdir build-lint && cd build-lint && \
 # Shared runtime base - common filesystem layout, binary, ports and base runtime libraries
 FROM ubuntu-base AS runtime-base
 
-# binutils removed to shrink image; crash handler writes raw addresses, resolved on host via scripts/resolve-crash.sh
+# addr2line (binutils) is needed at runtime: the crash handler resolves stack
+# frames to src file:line in-place (crash_handler.hpp => annotate_exe_frames).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    binutils \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Runtime libraries come from the ubuntu-base stage; here only the image
 # layout is prepared (no apt, no network).
 RUN rm -rf /tmp/* \

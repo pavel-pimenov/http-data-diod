@@ -122,6 +122,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT ENABLE_ASAN AND NOT ENABLE_PROFIL
     message(STATUS "Release optimizations enabled: -O3 -flto")
 endif()
 
+# Export dynamic symbols so the crash handler can resolve function names
+# (dladdr/backtrace_symbols in crash_handler.hpp) instead of raw addresses.
+add_link_options(-rdynamic)
+
 # Find required packages
 # Force dynamic linking for OpenSSL to avoid static library dependencies (zstd, libjent)
 set(OpenSSL_USE_STATIC_LIBS OFF)

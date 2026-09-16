@@ -130,7 +130,7 @@ services:
     ports:
       - "8429:8429"
     volumes:
-      - ./vmagent/vmagent.yml:/etc/vmagent/config.yml:ro
+      - ./scripts/vmagent.yml:/etc/vmagent/config.yml:ro
       - vmagent-data:/tmp/vmagent-remotewrite
     command:
       - '--promscrape.config=/etc/vmagent/config.yml'
