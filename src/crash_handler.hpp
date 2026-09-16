@@ -238,14 +238,7 @@ private:
     Dl_info dli{};
     char buf[64];
     if (dladdr(addr, &dli) != 0 && dli.dli_sname != nullptr) {
-      std::string name = demangle_symbol(dli.dli_sname);
-      if (dli.dli_saddr != nullptr) {
-        const unsigned long off = reinterpret_cast<unsigned long>(addr) -
-                                  reinterpret_cast<unsigned long>(dli.dli_saddr);
-        snprintf(buf, sizeof(buf), " (+0x%lx)", off);
-        name += buf;
-      }
-      return name;
+      return demangle_symbol(dli.dli_sname);
     }
     snprintf(buf, sizeof(buf), "0x%lx", reinterpret_cast<unsigned long>(addr));
     return buf;

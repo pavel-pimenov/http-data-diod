@@ -3,6 +3,14 @@
 ## Date: 2026-09-16
 
 ### Что сделано
+- `src/crash_handler.hpp`: из тайтла/`value` события убрано декоративное
+  смещение `(+0x<hex>)` — при наличии `файл:строка` (exe-фреймы) он только
+  шумел, а для libc-фреймов имя функции и так уникально
+  (`SIGSEGV: clock_nanosleep`), формат `SIGSEGV: <метод> <файл>:<строка>`.
+- Проверена доставка краша не только с l2-proxy, но и с **l2-worker**
+  (SIGSEGV в idle-ожидании): событие приходит в doid/l2-proxy, exe-фреймы
+  аннотированы `файл:строка` (`/app/crash_handler.hpp:503`), libc-фреймы
+  остаются без lineno (не принадлежат exe — by design).
 - `vmagent/vmagent.yml` → `scripts/vmagent.yml`: упразднён каталог из одного
   файла, конфиг vmagent лежит рядом с генератором дашбордов. Обновлены
   docker-compose.yml (volume) и README.md (путь к конфигу).
