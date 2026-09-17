@@ -2,6 +2,7 @@
 #define TRACE_LOGGER_HPP
 
 #include "nlohmann/json.hpp"
+#include "sentry_client.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -9,6 +10,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -47,6 +49,10 @@ private:
   prometheus::Histogram &m_tracing_queue_time_histogram;
 
   std::unique_ptr<HttpClientPool> m_http_client_pool;
+  // Dedicated pool for the Sentry/GlitchTip target: HttpClient caches its
+  // connection for the first host it sees, so reusing the Jaeger pool would
+  // send Sentry envelopes to the Jaeger host.
+  std::unique_ptr<HttpClientPool> m_sentry_client_pool;
 
   struct SpanData {
     std::string m_trace_id, m_span_id, m_parent_id, m_name, m_service_name;
@@ -59,6 +65,17 @@ private:
   std::mutex m_queue_mutex;
   std::condition_variable_any m_queue_cv;
   std::jthread m_sender_thread;
+
+  // Optional Sentry/GlitchTip performance target: when set, every delivered
+  // span batch is additionally POSTed to the DSN's envelope endpoint as a
+  // Sentry "transaction" so the Performance → Transaction Groups view of the
+  // self-hosted Sentry-compatible server (glitchtip) is populated.
+  std::optional<sentry::DsnData> m_sentry_dsn;
+  std::string m_sentry_service;
+  std::string m_sentry_environment;
+  std::string m_sentry_release;
+  prometheus::Counter *m_sentry_spans_sent;
+  prometheus::Counter *m_sentry_spans_failed;
 
   // Configuration
   size_t m_batch_size;
@@ -73,6 +90,10 @@ private:
   // Sends one batch with retries and records timing/queue/counter metrics.
   void send_batch_with_retry(const std::vector<SpanData> &batch,
                              const std::stop_token &st);
+  // Delivers a batch to the optional Sentry/GlitchTip performance target
+  // (one transaction envelope per span). Fire-and-forget, never blocks the
+  // request path; per-span outcome lands in m_sentry_spans_sent/_failed.
+  void deliver_sentry_transactions(const std::vector<SpanData> &batch);
 
   // Fast random hex generation (thread-local, no re-initialization)
   static std::string random_hex_fast(size_t len);
@@ -112,6 +133,49 @@ public:
     return span;
   }
 
+  // Sentry trace/timing helpers for the performance delivery. Pure static
+  // functions (no registry / no network) so they are unit-testable directly.
+
+  // Maps a span operation tag to a Sentry-context "op" value.
+  static std::string sentry_span_op(const std::string &name);
+
+  // Maps an HTTP status (found in the span attributes) to a Sentry trace
+  // status: <500 → "ok", errors → "internal_error".
+  static std::string sentry_transaction_status(int status_code);
+
+  // Builds the Sentry "transaction" event JSON body for a single span.
+  static nlohmann::json
+  build_sentry_transaction_json(const std::string &trace_id,
+                                const std::string &span_id,
+                                const std::string &parent_id,
+                                const std::string &name,
+                                const std::string &service_name,
+                                uint64_t start_us, uint64_t end_us,
+                                const std::string &environment,
+                                const nlohmann::json &attributes);
+
+  // Envelope endpoint URL for a DSN ("/{path_prefix}/api/{project}/envelope/").
+  static std::string sentry_envelope_url(const sentry::DsnData &dsn);
+
+  // X-Sentry-Auth header value for a DSN.
+  static std::string sentry_auth_header(const sentry::DsnData &dsn);
+
+  // Full Sentry envelope (header + transaction item + JSON body) for one span.
+  static std::string
+  build_sentry_transaction_envelope(const std::string &trace_id,
+                                    const std::string &span_id,
+                                    const std::string &parent_id,
+                                    const std::string &name,
+                                    const std::string &service_name,
+                                    uint64_t start_us, uint64_t end_us,
+                                    const sentry::DsnData &dsn,
+                                    const std::string &environment,
+                                    const nlohmann::json &attributes);
+
+  // Full Sentry envelope for an already-built transaction event JSON.
+  static std::string
+  build_sentry_transaction_envelope(const nlohmann::json &event_json);
+
   JaegerLogger(const std::string &endpoint, prometheus::Counter &spans_sent,
                prometheus::Counter &spans_failed, prometheus::Gauge &queue_size,
                prometheus::Gauge &last_send_duration,
@@ -119,7 +183,13 @@ public:
                prometheus::Histogram &queue_time,
                size_t batch_size = g_tracing_default_batch_size,
                int flush_interval_ms = g_tracing_send_interval_ms,
-               double sample_rate = 1.0);
+               double sample_rate = 1.0,
+               const std::string &sentry_dsn = "",
+               const std::string &sentry_service = "",
+               const std::string &sentry_environment = "",
+               const std::string &sentry_release = "",
+               prometheus::Counter *sentry_spans_sent = nullptr,
+               prometheus::Counter *sentry_spans_failed = nullptr);
   ~JaegerLogger();
 
   std::string generate_trace_id();

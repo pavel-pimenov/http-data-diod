@@ -84,7 +84,15 @@ void AppContext::init_common() {
       MetricsManager::create_histogram(
           m_common_registry, "l2_tracing_queue_time_seconds",
           "Histogram of time spans spend in queue before sending in seconds",
-          histogram_buckets::g_k_latency_ms_to_5s)});
+          histogram_buckets::g_k_latency_ms_to_5s),
+      MetricsManager::create_counter(
+          m_common_registry, "l2_tracing_sentry_transactions_sent_total",
+          "Total number of spans delivered to the Sentry/GlitchTip "
+          "performance endpoint as transactions"),
+      MetricsManager::create_counter(
+          m_common_registry, "l2_tracing_sentry_transactions_failed_total",
+          "Total number of spans not delivered to the Sentry/GlitchTip "
+          "performance endpoint")});
 
   m_sentry_metrics = std::make_unique<SentryMetrics>(SentryMetrics{
       MetricsManager::create_counter(

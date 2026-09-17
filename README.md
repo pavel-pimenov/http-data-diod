@@ -347,6 +347,8 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 | `l2_tracing_last_send_duration_seconds` | gauge | Длительность последней отправки партии спанов |
 | `l2_tracing_send_latency_seconds` | histogram | Латентность отправки партии спанов |
 | `l2_tracing_queue_time_seconds` | histogram | Время спана в очереди перед отправкой |
+| `l2_tracing_sentry_transactions_sent_total` | counter | Спаны, доставленные на Sentry/GlitchTip performance-эндпоинт как транзакции (при заданном `SENTRY_DSN`) |
+| `l2_tracing_sentry_transactions_failed_total` | counter | Спаны, не доставленные на Sentry/GlitchTip performance-эндпоинт (при заданном `SENTRY_DSN`) |
 
 ### Отслеживание ошибок (Sentry)
 

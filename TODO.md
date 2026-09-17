@@ -1,5 +1,15 @@
 # TODO / Продолжение работы
 
+## Раунд 23 — GlitchTip Performance
+
+`JaegerLogger` дублирует спаны в GlitchTip как Sentry-транзакции при
+заданном `SENTRY_DSN` (страница Performance → Transaction Groups).
+Отдельный HTTP-пул для хоста DSN, метрики
+`l2_tracing_sentry_transactions_sent_total`/`_failed_total`, юнит-тесты,
+healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены.
+Наблюдение: ingest GlitchTip асинхронный — группы появляются в БД через
+несколько секунд после 200-ответа.
+
 ## Текущий статус (22 — удалена мёртвая Baggage-подсистема)
 
 Raунды покрытия юнит-тестами: **566 test cases**,

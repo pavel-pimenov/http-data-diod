@@ -19,6 +19,7 @@
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #include <prometheus/registry.h>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -141,6 +142,81 @@ struct TraceLoggerEnv {
   double sent() const { return m_spans_sent.Collect().counter.value; }
   double failed() const { return m_spans_failed.Collect().counter.value; }
   double queued() const { return m_queue_size.Collect().gauge.value; }
+};
+
+struct SentryTracingEnv {
+  prometheus::Registry m_registry;
+  prometheus::Counter &m_spans_sent;
+  prometheus::Counter &m_spans_failed;
+  prometheus::Counter &m_sentry_sent;
+  prometheus::Counter &m_sentry_failed;
+  prometheus::Gauge &m_queue_size;
+  prometheus::Gauge &m_last_send_duration;
+  prometheus::Histogram &m_send_latency;
+  prometheus::Histogram &m_queue_time;
+  std::unique_ptr<JaegerLogger> m_logger;
+
+  SentryTracingEnv(const std::string &jaeger_endpoint,
+                   const std::string &sentry_dsn, size_t batch_size = 4,
+                   int flush_interval_ms = 100, double sample_rate = 1.0)
+      : m_spans_sent(
+            prometheus::BuildCounter()
+                .Name("t_sentry_spans_sent")
+                .Help("h")
+                .Register(m_registry)
+                .Add({})),
+        m_spans_failed(
+            prometheus::BuildCounter()
+                .Name("t_sentry_spans_failed")
+                .Help("h")
+                .Register(m_registry)
+                .Add({})),
+        m_sentry_sent(
+            prometheus::BuildCounter()
+                .Name("t_sentry_transactions_sent")
+                .Help("h")
+                .Register(m_registry)
+                .Add({})),
+        m_sentry_failed(
+            prometheus::BuildCounter()
+                .Name("t_sentry_transactions_failed")
+                .Help("h")
+                .Register(m_registry)
+                .Add({})),
+        m_queue_size(prometheus::BuildGauge()
+                         .Name("t_sentry_queue_size")
+                         .Help("h")
+                         .Register(m_registry)
+                         .Add({})),
+        m_last_send_duration(prometheus::BuildGauge()
+                                 .Name("t_sentry_last_send_duration")
+                                 .Help("h")
+                                 .Register(m_registry)
+                                 .Add({})),
+        m_send_latency(
+            prometheus::BuildHistogram()
+                .Name("t_sentry_send_latency")
+                .Help("h")
+                .Register(m_registry)
+                .Add({}, prometheus::Histogram::BucketBoundaries{
+                             0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_queue_time(
+            prometheus::BuildHistogram()
+                .Name("t_sentry_queue_time")
+                .Help("h")
+                .Register(m_registry)
+                .Add({}, prometheus::Histogram::BucketBoundaries{
+                             0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_logger(std::make_unique<JaegerLogger>(
+            jaeger_endpoint, m_spans_sent, m_spans_failed, m_queue_size,
+            m_last_send_duration, m_send_latency, m_queue_time, batch_size,
+            flush_interval_ms, sample_rate, sentry_dsn, "test-service",
+            "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed)) {}
+
+  double sentry_sent() const { return m_sentry_sent.Collect().counter.value; }
+  double sentry_failed() const {
+    return m_sentry_failed.Collect().counter.value;
+  }
 };
 
 bool is_hex_string(const std::string &s) {
@@ -424,6 +500,47 @@ TEST_CASE("TraceLogger: validate_traceparent short-circuit variants",
       "00-0123456789abcdef0123456789abcdef-0123456789abcdefx01"));
   REQUIRE(JaegerLogger::validate_traceparent(
       "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+}
+
+TEST_CASE("TraceLogger: validate_traceparent first-char and is_hex below '0'",
+          "[tracing]") {
+  // traceparent[0] != '0' (first operand of || at line 74)
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "1x-0123456789abcdef0123456789abcdef-0123456789abcdef-01"));
+  // is_hex at position 36 (start of span_id) with '-' (0x2D < '0')
+  // triggers false-arm of c >= '0' in the is_hex lambda
+  REQUIRE_FALSE(JaegerLogger::validate_traceparent(
+      "00-0123456789abcdef0123456789abcdef--0123456789abcdef-01"));
+}
+
+TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 1000, 0.5);
+  std::vector<std::thread> threads;
+  for (int i = 0; i < 4; ++i) {
+    threads.emplace_back([&env] {
+      for (int j = 0; j < 100; ++j) {
+        const bool r = env.m_logger->should_sample();
+        REQUIRE((r == true || r == false));
+      }
+    });
+  }
+  for (auto &t : threads)
+    t.join();
+}
+
+TEST_CASE("TraceLogger: sender loop idle-timeout resumes on enqueue",
+          "[tracing]") {
+  TraceMockServer server;
+  TraceLoggerEnv env(server.endpoint(), 50, 100, 1.0);
+  // Let sender_loop idle-poll (wait_for timeout fires, continue loop)
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  REQUIRE(env.sent() == 0.0);
+  // Enqueue — delivery should happen on the next iteration
+  env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                             "bbbbbbbbbbbbbbbb", "", "HTTP GET /idle", 1000,
+                             2000, "test-service");
+  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 5000));
+  REQUIRE(server.body_count() >= 1);
 }
 
 TEST_CASE("TracingHelpers: get_traceparent_header present and absent",
@@ -783,4 +900,262 @@ TEST_CASE("DuplicateDetector: body stored on second delivery if first was too "
 
   const auto report = detector.report();
   REQUIRE(report["top"][0]["body"] == "ok");
+}
+
+TEST_CASE("TraceLogger: sentry_span_op maps HTTP span names", "[tracing][sentry]") {
+  REQUIRE(JaegerLogger::sentry_span_op("HTTP POST /v1/request") ==
+          "http.server");
+  REQUIRE(JaegerLogger::sentry_span_op("HTTP NATS_consume /topic") ==
+          "messaging");
+  REQUIRE(JaegerLogger::sentry_span_op("HTTP DB_execute /v1/sql") == "db");
+  REQUIRE(JaegerLogger::sentry_span_op("HTTP L2_call /v1/route") ==
+          "http.client");
+  REQUIRE(JaegerLogger::sentry_span_op("NOT_HTTP_related") == "span");
+}
+
+TEST_CASE("TraceLogger: sentry_span_op maps bare issue-prefixed names",
+          "[tracing][sentry]") {
+  REQUIRE(JaegerLogger::sentry_span_op("NATS_consume topic") == "messaging");
+  REQUIRE(JaegerLogger::sentry_span_op("DB_execute sql") == "db");
+}
+
+TEST_CASE("TraceLogger: sentry_transaction_status maps HTTP status codes",
+          "[tracing][sentry]") {
+  REQUIRE(JaegerLogger::sentry_transaction_status(0) == "ok");
+  REQUIRE(JaegerLogger::sentry_transaction_status(200) == "ok");
+  REQUIRE(JaegerLogger::sentry_transaction_status(499) == "ok");
+  REQUIRE(JaegerLogger::sentry_transaction_status(500) == "internal_error");
+  REQUIRE(JaegerLogger::sentry_transaction_status(503) == "internal_error");
+}
+
+TEST_CASE("TraceLogger: build_sentry_transaction_json shapes a transaction event",
+          "[tracing][sentry]") {
+  const auto tx = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb",
+      "cccccccccccccccc", "HTTP POST /v1/request", "l2-proxy-worker",
+      1000000, 3500000, "test-staging",
+      nlohmann::json{{"http.method", "POST"},
+                     {"http.status_code", 200},
+                     {"http.flags", true}});
+
+  REQUIRE(tx["type"] == "transaction");
+  REQUIRE(tx["transaction"] == "HTTP POST /v1/request");
+  REQUIRE(tx["platform"] == "native");
+  REQUIRE(tx["environment"] == "test-staging");
+  REQUIRE(tx["start_timestamp"] == "1970-01-01T00:00:01.000Z");
+  REQUIRE(tx["timestamp"] == "1970-01-01T00:00:03.500Z");
+  REQUIRE(tx["event_id"].is_string());
+  REQUIRE(tx["event_id"].get<std::string>().size() == 32);
+
+  const auto &trace = tx["contexts"]["trace"];
+  REQUIRE(trace["trace_id"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  REQUIRE(trace["span_id"] == "bbbbbbbbbbbbbbbb");
+  REQUIRE(trace["parent_span_id"] == "cccccccccccccccc");
+  REQUIRE(trace["op"] == "http.server");
+  REQUIRE(trace["status"] == "ok");
+
+  const auto &service = tx["contexts"]["service"];
+  REQUIRE(service["name"] == "l2-proxy-worker");
+
+  REQUIRE(tx["tags"]["http.method"] == "POST");
+  REQUIRE(tx["tags"]["http.flags"] == std::string("true"));
+  REQUIRE(tx["tags"]["service"] == "l2-proxy-worker");
+  REQUIRE(tx["extra"]["http.status_code"] == 200);
+}
+
+TEST_CASE("TraceLogger: build_sentry_transaction_json omits empty optional "
+          "fields and derives status", "[tracing][sentry]") {
+  const auto tx = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "", 1000000, 2000000, "",
+      nlohmann::json{{"http.status_code", 503}});
+
+  REQUIRE(!tx["contexts"]["trace"].contains("parent_span_id"));
+  REQUIRE(tx["contexts"]["trace"]["status"] == "internal_error");
+  REQUIRE(!tx.contains("environment"));
+  REQUIRE(!tx.contains("contexts.service"));
+  REQUIRE(tx["extra"]["http.status_code"] == 503);
+}
+
+TEST_CASE("TraceLogger: sentry_envelope_url uses project id and path prefix",
+          "[tracing][sentry]") {
+  const auto dsn =
+      sentry::parse_dsn("http://PUBLIC@glitchtip:8000/2");
+  REQUIRE(dsn.has_value());
+  REQUIRE(JaegerLogger::sentry_envelope_url(*dsn) ==
+          "http://glitchtip:8000/api/2/envelope/");
+
+  const auto prefixed = sentry::parse_dsn("http://PUBLIC@127.0.0.1:9000/sub/3");
+  REQUIRE(prefixed.has_value());
+  REQUIRE(JaegerLogger::sentry_envelope_url(*prefixed) ==
+          "http://127.0.0.1:9000/sub/api/3/envelope/");
+}
+
+TEST_CASE("TraceLogger: sentry_auth_header includes optional secret",
+          "[tracing][sentry]") {
+  const auto no_secret = sentry::parse_dsn("http://PUBLIC@glitchtip:8000/2");
+  REQUIRE(no_secret.has_value());
+  REQUIRE(JaegerLogger::sentry_auth_header(*no_secret) ==
+          "Sentry sentry_version=7, sentry_key=PUBLIC");
+
+  const auto with_secret =
+      sentry::parse_dsn("http://PUBLIC:SECRET@glitchtip:8000/2");
+  REQUIRE(with_secret.has_value());
+  REQUIRE(JaegerLogger::sentry_auth_header(*with_secret) ==
+          "Sentry sentry_version=7, sentry_key=PUBLIC/SECRET");
+}
+
+TEST_CASE("TraceLogger: build_sentry_transaction_envelope is a 3-line envelope",
+          "[tracing][sentry]") {
+  const auto dsn = sentry::parse_dsn("http://PUBLIC@127.0.0.1:9000/5");
+  REQUIRE(dsn.has_value());
+
+  const auto event = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000, "",
+      nlohmann::json{});
+  const auto envelope =
+      JaegerLogger::build_sentry_transaction_envelope(event);
+
+  auto lines = std::vector<std::string>{};
+  std::istringstream stream(envelope);
+  std::string line;
+  while (std::getline(stream, line)) {
+    lines.push_back(line);
+  }
+  REQUIRE(lines.size() == 3);
+
+  const auto header = nlohmann::json::parse(lines[0]);
+  const auto item = nlohmann::json::parse(lines[1]);
+  const auto body = nlohmann::json::parse(lines[2]);
+
+  REQUIRE(header["event_id"] == event["event_id"]);
+  REQUIRE(header["sdk"]["name"] == "http-data-diod");
+  REQUIRE(item["type"] == "transaction");
+  REQUIRE(body["type"] == "transaction");
+  REQUIRE(body["event_id"] == event["event_id"]);
+}
+
+TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope",
+          "[tracing][sentry]") {
+  // Two distinct hosts: the Sentry target must not reuse the Jaeger connection
+  // (HttpClient caches its connection for the first host it sees).
+  httplib::Server jaeger_server;
+  httplib::Server sentry_server;
+  std::mutex mu;
+  std::vector<std::string> jaeger_bodies;
+  std::vector<std::string> sentry_bodies;
+  std::vector<std::string> sentry_auth_headers;
+  jaeger_server.Post("/api/traces",
+                     [&](const httplib::Request &req, httplib::Response &res) {
+                       std::lock_guard lock(mu);
+                       jaeger_bodies.push_back(req.body);
+                       res.status = 200;
+                     });
+  sentry_server.Post("/api/2/envelope/",
+                     [&](const httplib::Request &req, httplib::Response &res) {
+                       std::lock_guard lock(mu);
+                       sentry_bodies.push_back(req.body);
+                       const auto it = req.headers.find("X-Sentry-Auth");
+                       sentry_auth_headers.push_back(
+                           it != req.headers.end() ? it->second : "");
+                       res.status = 200;
+                     });
+  const int jaeger_port = jaeger_server.bind_to_any_port("127.0.0.1");
+  const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
+  std::thread jaeger_thread([&] { jaeger_server.listen_after_bind(); });
+  std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
+
+  const auto jaeger_endpoint =
+      "http://127.0.0.1:" + std::to_string(jaeger_port) + "/api/traces";
+  const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
+                          std::to_string(sentry_port) + "/2";
+  auto env =
+      std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn);
+  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
+                              1000000, 3500000, "l2-proxy-worker",
+                              nlohmann::json{{"http.status_code", 200}});
+
+  REQUIRE(wait_for_condition(
+      [&] {
+        std::lock_guard lock(mu);
+        return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
+      },
+      8000));
+
+  std::string envelope;
+  {
+    std::lock_guard lock(mu);
+    REQUIRE(!jaeger_bodies.empty());
+    envelope = sentry_bodies.front();
+  }
+  REQUIRE(envelope.find("\"type\":\"transaction\"") != std::string::npos);
+  REQUIRE(envelope.find("HTTP POST /v1/report") != std::string::npos);
+  REQUIRE(sentry_auth_headers.front().find("sentry_key=PUBLIC") !=
+          std::string::npos);
+  REQUIRE(env->sentry_failed() == 0.0);
+
+  env.reset();
+  jaeger_server.stop();
+  sentry_server.stop();
+  if (jaeger_thread.joinable())
+    jaeger_thread.join();
+  if (sentry_thread.joinable())
+    sentry_thread.join();
+}
+
+TEST_CASE("TraceLogger: sentry delivery failure is counted as failed",
+          "[tracing][sentry]") {
+  // Both targets are dead ports: Jaeger send fails and the Sentry
+  // performance delivery must still be attempted and counted as failed.
+  const auto env = std::make_unique<SentryTracingEnv>(
+      "http://127.0.0.1:1/api/traces",
+      "http://PUBLIC@127.0.0.1:1/2");
+  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
+                              1000000, 2000000, "l2-proxy-worker",
+                              nlohmann::json{});
+
+  REQUIRE(wait_for_condition([&] { return env->sentry_failed() >= 1.0; },
+                             8000));
+  REQUIRE(env->sentry_sent() == 0.0);
+}
+
+TEST_CASE("TraceLogger: sentry delivery with null counters is safe",
+          "[tracing][sentry]") {
+  prometheus::Registry reg;
+  auto &spans_sent =
+      prometheus::BuildCounter().Name("t_nc_spans_sent").Help("h").Register(reg).Add({});
+  auto &spans_failed =
+      prometheus::BuildCounter().Name("t_nc_spans_failed").Help("h").Register(reg).Add({});
+  auto &queue_size =
+      prometheus::BuildGauge().Name("t_nc_queue").Help("h").Register(reg).Add({});
+  auto &last_duration =
+      prometheus::BuildGauge().Name("t_nc_last").Help("h").Register(reg).Add({});
+  auto &send_latency =
+      prometheus::BuildHistogram()
+          .Name("t_nc_latency")
+          .Help("h")
+          .Register(reg)
+          .Add({}, prometheus::Histogram::BucketBoundaries{0.001, 0.005, 0.01,
+                                                           0.05, 0.1, 0.5, 1,
+                                                           5});
+  auto &queue_time =
+      prometheus::BuildHistogram()
+          .Name("t_nc_qtime")
+          .Help("h")
+          .Register(reg)
+          .Add({}, prometheus::Histogram::BucketBoundaries{0.001, 0.005, 0.01,
+                                                           0.05, 0.1, 0.5, 1,
+                                                           5});
+  // Sentry DSN set but the two sentry counters are deliberately null.
+  auto logger = std::make_unique<JaegerLogger>(
+      "http://127.0.0.1:1/api/traces", spans_sent, spans_failed, queue_size,
+      last_duration, send_latency, queue_time, 4, 100, 1.0,
+      "http://PUBLIC@127.0.0.1:1/2");
+  logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb",
+                       "", "HTTP POST /v1/report", 1000000, 2000000,
+                       "l2-proxy-worker", nlohmann::json{});
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }

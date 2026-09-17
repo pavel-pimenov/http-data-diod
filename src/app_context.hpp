@@ -65,6 +65,9 @@ struct TracingMetrics {
   prometheus::Gauge &m_last_send_duration;
   prometheus::Histogram &m_send_latency;
   prometheus::Histogram &m_queue_time;
+  // Sentry/GlitchTip performance transactions (delivered when SENTRY_DSN set).
+  prometheus::Counter &m_sentry_transactions_sent;
+  prometheus::Counter &m_sentry_transactions_failed;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

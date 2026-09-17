@@ -92,18 +92,19 @@ HttpClient::prepare_request(const std::string &url, const std::string &body,
 
 HttpResponse HttpClient::execute_request(const PreparedRequest &req,
                                          const std::string &body,
-                                         const std::string &operation) {
+                                         const std::string &operation,
+                                         const std::string &content_type) {
   httplib::Result result;
   if (req.m_parsed_url.m_is_https) {
     result = body.empty()
                  ? m_ssl_client->Get(req.m_parsed_url.m_path, req.m_headers)
                  : m_ssl_client->Post(req.m_parsed_url.m_path, req.m_headers,
-                                      body, "application/json");
+                                      body, content_type);
   } else {
     result = body.empty()
                  ? m_client->Get(req.m_parsed_url.m_path, req.m_headers)
                  : m_client->Post(req.m_parsed_url.m_path, req.m_headers, body,
-                                  "application/json");
+                                  content_type);
   }
 
   if (!result) {
@@ -139,10 +140,11 @@ HttpResponse HttpClient::get(const std::string &url,
 void HttpClient::post_no_response(const std::string &url,
                                   const std::string &body,
                                   const std::string &traceparent,
-                                  const httplib::Headers &additional_headers) {
+                                  const httplib::Headers &additional_headers,
+                                  const std::string &content_type) {
   PreparedRequest req =
       prepare_request(url, body, traceparent, additional_headers);
-  execute_request(req, body, "POST");
+  execute_request(req, body, "POST", content_type);
 }
 
 bool HttpClient::is_valid() const { return m_is_valid; }

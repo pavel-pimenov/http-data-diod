@@ -160,17 +160,16 @@ echo ""
 
 BUILD_STEP_START=$(date +%s)
 
-if [ "$ENABLE_GLITCHTIP" = "true" ]; then
-    COMPOSE_ARGS+=("--profile" "glitchtip")
-fi
-
-if ! docker compose build --progress=plain ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}; then
+# --profile is a compose up flag; docker compose build rejects it (profiles
+# select which services.up starts, they do not narrow the build). Keep
+# COMPOSE_ARGS for the up/down invocations below.
+if ! docker compose build --progress=plain; then
     # Remove failed containers, keep cached layers
     docker compose rm -f 2>/dev/null || true
 
     # Try building again without cache
     echo "Retrying build without cache..."
-    if ! docker compose build --no-cache --progress=plain ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}; then
+    if ! docker compose build --no-cache --progress=plain; then
         echo "❌ Build failed."
         echo ""
         echo "=========================================="
@@ -194,9 +193,14 @@ BUILD_STEP_SECONDS=$((BUILD_STEP_DURATION % 60))
 echo "⏱️  Docker image build: ${BUILD_STEP_MINUTES}m ${BUILD_STEP_SECONDS}s"
 echo ""
 
-# Start containers
+# Start containers. --profile is a global `docker compose` flag (must precede
+# the subcommand): it only affects *which services get (re)started*, never the
+# build above, so it is added here, not to the build invocations.
 CONTAINER_START=$(date +%s)
-docker compose up -d --remove-orphans ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}
+if [ "$ENABLE_GLITCHTIP" = "true" ]; then
+    COMPOSE_ARGS+=("--profile" "glitchtip")
+fi
+docker compose ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"} up -d --remove-orphans
 
 # Wait for containers to start
 echo ""

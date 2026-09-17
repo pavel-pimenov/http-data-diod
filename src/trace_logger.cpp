@@ -26,7 +26,13 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                            prometheus::Gauge &last_send_duration,
                            prometheus::Histogram &send_latency,
                            prometheus::Histogram &queue_time, size_t batch_size,
-                           int flush_interval_ms, double sample_rate)
+                           int flush_interval_ms, double sample_rate,
+                           const std::string &sentry_dsn,
+                           const std::string &sentry_service,
+                           const std::string &sentry_environment,
+                           const std::string &sentry_release,
+                           prometheus::Counter *sentry_spans_sent,
+                           prometheus::Counter *sentry_spans_failed)
     : m_jaeger_url(endpoint), m_tracing_spans_sent_counter(spans_sent),
       m_tracing_spans_failed_counter(spans_failed),
       m_tracing_queue_size_gauge(queue_size),
@@ -36,11 +42,26 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
       m_http_client_pool(std::make_unique<HttpClientPool>(
           kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
           kJaegerPoolAcquireTimeoutSeconds, true)),
+      m_sentry_dsn(sentry::parse_dsn(sentry_dsn)),
+      m_sentry_service(sentry_service),
+      m_sentry_environment(sentry_environment),
+      m_sentry_release(sentry_release),
+      m_sentry_spans_sent(sentry_spans_sent),
+      m_sentry_spans_failed(sentry_spans_failed),
       m_batch_size(batch_size), m_flush_interval_ms(flush_interval_ms),
       m_sample_rate(sample_rate) {
   Logger::info("JaegerLogger initialized: batch_size={} flush_interval={}ms "
                "sample_rate={}",
                m_batch_size, m_flush_interval_ms, m_sample_rate);
+  if (m_sentry_dsn) {
+    m_sentry_client_pool = std::make_unique<HttpClientPool>(
+        kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
+        kJaegerPoolAcquireTimeoutSeconds, true);
+    Logger::info("JaegerLogger Sentry performance target enabled: host={} "
+                 "project={} service={}",
+                 m_sentry_dsn->m_host, m_sentry_dsn->m_project_id,
+                 m_sentry_service);
+  }
   m_sender_thread =
       std::jthread([this](const std::stop_token &st) { sender_loop(st); });
 }
@@ -143,6 +164,171 @@ bool JaegerLogger::should_sample(bool is_error) const {
 
   // Apply normal sampling for non-error spans
   return should_sample();
+}
+
+std::string JaegerLogger::sentry_span_op(const std::string &name) {
+  if (name.starts_with("HTTP ")) {
+    const size_t sp = name.find(' ', 5);
+    const std::string token =
+        sp == std::string::npos ? name.substr(5) : name.substr(5, sp - 5);
+    if (token.starts_with("NATS")) {
+      return "messaging";
+    }
+    if (token.starts_with("DB")) {
+      return "db";
+    }
+    if (token.starts_with("L2")) {
+      return "http.client";
+    }
+    return "http.server";
+  }
+  if (name.starts_with("NATS")) {
+    return "messaging";
+  }
+  if (name.starts_with("DB")) {
+    return "db";
+  }
+  return "span";
+}
+
+std::string JaegerLogger::sentry_transaction_status(int status_code) {
+  if (status_code >= 500) {
+    return "internal_error";
+  }
+  return "ok";
+}
+
+nlohmann::json JaegerLogger::build_sentry_transaction_json(
+    const std::string &trace_id, const std::string &span_id,
+    const std::string &parent_id, const std::string &name,
+    const std::string &service_name, uint64_t start_us, uint64_t end_us,
+    const std::string &environment, const nlohmann::json &attributes) {
+  nlohmann::json root = nlohmann::json::object();
+  root["event_id"] = random_hex_fast(32);
+  root["type"] = "transaction";
+  root["start_timestamp"] = TimeUtils::format_rfc3339_us(start_us);
+  root["timestamp"] = TimeUtils::format_rfc3339_us(end_us);
+  root["platform"] = "native";
+  root["transaction"] = name;
+
+  int status_code = 200;
+  if (attributes.is_object() && attributes.contains("http.status_code")) {
+    const auto &code = attributes["http.status_code"];
+    if (code.is_number_integer() || code.is_number_unsigned()) {
+      status_code = code.get<int>();
+    }
+  }
+  nlohmann::json trace_ctx = {
+      {"trace_id", trace_id},
+      {"span_id", span_id},
+      {"op", sentry_span_op(name)},
+      {"status", sentry_transaction_status(status_code)},
+  };
+  if (!parent_id.empty()) {
+    trace_ctx["parent_span_id"] = parent_id;
+  }
+  nlohmann::json contexts = nlohmann::json::object();
+  contexts["trace"] = std::move(trace_ctx);
+  if (!service_name.empty()) {
+    contexts["service"] = nlohmann::json{{"name", service_name}};
+  }
+  root["contexts"] = std::move(contexts);
+  if (!environment.empty()) {
+    root["environment"] = environment;
+  }
+
+  nlohmann::json tags = nlohmann::json::object();
+  if (!service_name.empty()) {
+    tags["service"] = service_name;
+  }
+  if (attributes.is_object()) {
+    for (const auto &entry : attributes.items()) {
+      if (entry.value().is_string()) {
+        tags[entry.key()] = entry.value();
+      } else {
+        tags[entry.key()] = entry.value().dump();
+      }
+    }
+  }
+  root["tags"] = std::move(tags);
+
+  if (attributes.is_object() && !attributes.empty()) {
+    root["extra"] = attributes;
+  }
+  return root;
+}
+
+std::string JaegerLogger::sentry_envelope_url(const sentry::DsnData &dsn) {
+  const std::string scheme = dsn.m_scheme.empty() ? "http" : dsn.m_scheme;
+  return scheme + "://" + dsn.m_host + ":" + std::to_string(dsn.m_port) +
+         dsn.m_path_prefix + "/api/" + dsn.m_project_id + "/envelope/";
+}
+
+std::string JaegerLogger::sentry_auth_header(const sentry::DsnData &dsn) {
+  std::string key = dsn.m_public_key;
+  if (!dsn.m_secret_key.empty()) {
+    key += "/" + dsn.m_secret_key;
+  }
+  return "Sentry sentry_version=7, sentry_key=" + key;
+}
+
+std::string JaegerLogger::build_sentry_transaction_envelope(
+    const std::string &trace_id, const std::string &span_id,
+    const std::string &parent_id, const std::string &name,
+    const std::string &service_name, uint64_t start_us, uint64_t end_us,
+    const sentry::DsnData &dsn, const std::string &environment,
+    const nlohmann::json &attributes) {
+  const nlohmann::json event_json = build_sentry_transaction_json(
+      trace_id, span_id, parent_id, name, service_name, start_us, end_us,
+      environment, attributes);
+  return build_sentry_transaction_envelope(event_json);
+}
+
+std::string JaegerLogger::build_sentry_transaction_envelope(
+    const nlohmann::json &event_json) {
+  const std::string event_id = event_json.value("event_id", "");
+  const nlohmann::json header = {
+      {"event_id", event_id},
+      {"sent_at", TimeUtils::format_rfc3339()},
+      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
+  const nlohmann::json item_header = {{"type", "transaction"}};
+  return header.dump() + "\n" + item_header.dump() + "\n" + event_json.dump();
+}
+
+void JaegerLogger::deliver_sentry_transactions(
+    const std::vector<SpanData> &batch) {
+  if (!m_sentry_dsn || !m_sentry_client_pool || batch.empty()) {
+    return;
+  }
+  const std::string url = sentry_envelope_url(*m_sentry_dsn);
+  const std::string auth = sentry_auth_header(*m_sentry_dsn);
+  try {
+    auto client = m_sentry_client_pool->acquire_connection();
+    if (!client) {
+      if (m_sentry_spans_failed) {
+        m_sentry_spans_failed->Increment(batch.size());
+      }
+      return;
+    }
+    for (const auto &span : batch) {
+      const std::string envelope = build_sentry_transaction_envelope(
+          span.m_trace_id, span.m_span_id, span.m_parent_id, span.m_name,
+          span.m_service_name, span.m_start_us, span.m_end_us, *m_sentry_dsn,
+          m_sentry_environment, span.m_attributes);
+      client->post_no_response(
+          url, envelope, "",
+          httplib::Headers{{"X-Sentry-Auth", auth}},
+          "application/x-sentry-envelope");
+    }
+    m_sentry_client_pool->release_connection(std::move(client));
+    if (m_sentry_spans_sent) {
+      m_sentry_spans_sent->Increment(batch.size());
+    }
+  } catch (...) {
+    if (m_sentry_spans_failed) {
+      m_sentry_spans_failed->Increment(batch.size());
+    }
+  }
 }
 
 void JaegerLogger::enqueue_span(const std::string &trace_id,
@@ -275,6 +461,7 @@ void JaegerLogger::sender_loop(std::stop_token st) {
       Logger::debug("Dropped {} spans on shutdown (non-critical)",
                     final_batch.size());
     }
+    deliver_sentry_transactions(final_batch);
   }
 }
 
@@ -320,6 +507,11 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
         "Jaeger batch send failed after {} retries, dropped {} spans",
         retries, batch.size());
   }
+
+  // Sentry/GlitchTip performance delivery is once-per-batch (independent of the
+  // Jaeger retry loop so a temporary Jaeger outage cannot duplicate
+  // transactions) and fire-and-forget like the Jaeger send itself.
+  deliver_sentry_transactions(batch);
 
   const auto end_time = std::chrono::steady_clock::now();
   double duration =

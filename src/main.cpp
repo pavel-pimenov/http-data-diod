@@ -377,7 +377,12 @@ void init_tracer(AppContext &app_ctx) {
         app_ctx.m_tracing_metrics->m_queue_time,
         app_ctx.m_config.m_tracing_batch_size,
         app_ctx.m_config.m_tracing_flush_interval_ms,
-        app_ctx.m_config.m_tracing_sample_rate);
+        app_ctx.m_config.m_tracing_sample_rate,
+        app_ctx.m_config.m_sentry_dsn, app_ctx.m_config.m_mode,
+        app_ctx.m_config.m_sentry_environment,
+        app_ctx.m_config.m_sentry_release,
+        &app_ctx.m_tracing_metrics->m_sentry_transactions_sent,
+        &app_ctx.m_tracing_metrics->m_sentry_transactions_failed);
     Logger::info("JAEGER_URL set, tracing enabled: {}",
                  app_ctx.m_config.m_jaeger_url);
   } else {

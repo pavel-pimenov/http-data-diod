@@ -1,3 +1,51 @@
+# tracing: спаны в GlitchTip Performance (Sentry transactions)
+
+## Date: 2026-09-17
+
+### Что сделано
+- `JaegerLogger` теперь дублирует каждый отправленный Jaeger-батч спанов
+  в Sentry/GlitchTip: по одному `transaction`-конверту на спан
+  (`POST /api/{project}/envelope/`, заголовок `X-Sentry-Auth`,
+  content-type `application/x-sentry-envelope`). Поток Jaeger не тронут,
+  доставка fire-and-forget (без ретраев), ошибки только считаются
+  метриками и не влияют на запросы. Включается при заданном `SENTRY_DSN`.
+- Новые хелперы `JaegerLogger` (чистые static, покрыты юнит-тестами):
+  `sentry_span_op` (NATS→messaging, DB→db, L2→http.client, иначе
+  http.server/span), `sentry_transaction_status` (<500 ok,
+  >=500 internal_error), `build_sentry_transaction_json` (event_id 32hex,
+  type=transaction, RFC3339 start/timestamp, contexts.trace/service,
+  tags/extra из атрибутов, http.status_code), `sentry_envelope_url`,
+  `sentry_auth_header`, `build_sentry_transaction_envelope`.
+- `TimeUtils::format_rfc3339_us(uint64_t epoch_us)` — RFC3339 с
+  миллисекундной точностью из абсолютного epoch-µs (нужен для
+  start_timestamp/timestamp транзакций); `format_rfc3339()` делегирует в
+  него, добавлен `<cstdint>`.
+- `HttpClient::post_no_response`/`execute_request` получили параметр
+  content-type (по умолчанию прежний `application/json`) — иначе конверт
+  уходил как JSON.
+- Отдельный `m_sentry_client_pool` в `JaegerLogger`: `HttpClient` кэширует
+  соединение под первый хост, поэтому общий с Jaeger пул отправлял
+  Sentry-конверты на Jaeger-хост (счётчик «sent» рос, в GlitchTip ничего
+  не приходило). Выделенный пул (max 3, timeout 2s) ходит на хост DSN.
+- Метрики l2_common: `l2_tracing_sentry_transactions_sent_total` /
+  `_failed_total` (counter); зарегистрированы в `app_context.cpp`, прокидка
+  в `main.cpp` (`SENTRY_DSN` + окружение/release), каталог в README.
+- Тесты (`test_trace_logger.cpp`): карты op/status, JSON транзакции
+  (parent_span_id/environment/status/tags/extra), URL+auth (path-prefix,
+  secret), 3-строчный envelope, доставка на отдельный mock-хост (ловит
+  регресс с переиспользованием соединения), failure-счётчик на мёртвый
+  порт, безопасность null-счётчиков.
+- Инфраструктура: `docker-compose.yml` healthcheck glitchtip переведён с
+  отсутствующего `curl` на `/usr/local/bin/python3` + urllib.
+  `rebuild-and-run.sh`: `--profile` больше не передаётся в
+  `docker compose build` (флаг отклоняется build) и ставится перед
+  подкомандой `up` (глобальный флаг compose).
+- Проверено на живом стенде: message_counter проходит, метрики
+  sent/failed растут (proxy 16/0, worker 12/0), в GlitchTip появились
+  performance transaction groups (`HTTP INCOMING /`, `HTTP POST /`,
+  `HTTP NATS_consume /nats` messaging, `HTTP NATS_push /nats` и др.);
+  страница Performance → Transaction Groups наполняется.
+
 # tools(vendor): скрипт обновления/проверки вендорных либ из git
 
 ## Date: 2026-09-16

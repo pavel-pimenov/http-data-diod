@@ -54,7 +54,8 @@ public:
                    const httplib::Headers &additional_headers = {});
   void post_no_response(const std::string &url, const std::string &body,
                         const std::string &traceparent = "",
-                        const httplib::Headers &additional_headers = {});
+                        const httplib::Headers &additional_headers = {},
+                        const std::string &content_type = "application/json");
   bool is_valid() const;
   void invalidate();
   int get_last_status_code() const;
@@ -74,7 +75,9 @@ private:
                                   const httplib::Headers &additional_headers);
   HttpResponse execute_request(const PreparedRequest &req,
                                const std::string &body,
-                               const std::string &operation);
+                               const std::string &operation,
+                               const std::string &content_type =
+                                   "application/json");
   std::unique_ptr<httplib::Client> m_client;
   std::unique_ptr<httplib::SSLClient> m_ssl_client;
   int m_timeout_seconds;

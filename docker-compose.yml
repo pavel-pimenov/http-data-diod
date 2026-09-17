@@ -325,7 +325,9 @@ services:
     networks:
       - l2_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:8000/"]
+      # glitchtip image has no curl/wget; python3 is present at
+      # /usr/local/bin/python3
+      test: ["CMD", "/usr/local/bin/python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/', timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

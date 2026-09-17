@@ -2,6 +2,7 @@
 #define TIME_UTILS_HPP
 
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <format>
 #include <string>
@@ -46,13 +47,20 @@ public:
   }
 
   static std::string format_rfc3339() {
-    const auto now = std::chrono::system_clock::now();
-    const auto now_s = std::chrono::time_point_cast<std::chrono::seconds>(now);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        now.time_since_epoch())
-                        .count() %
-                    1000;
-    return std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", now_s, ms);
+    return format_rfc3339_us(static_cast<uint64_t>(epoch_us()));
+  }
+
+  // RFC3339 with millisecond precision from an absolute epoch-microsecond
+  // value. Used by the tracing sender for span start/end timestamps, which
+  // carry wall-clock time (Sentry transactions require absolute ISO timestamps
+  // while the span queue keeps durations in monotonic microseconds).
+  static std::string format_rfc3339_us(uint64_t epoch_us) {
+    const auto tp = std::chrono::system_clock::time_point(
+        std::chrono::microseconds(static_cast<int64_t>(epoch_us)));
+    const auto tp_s =
+        std::chrono::time_point_cast<std::chrono::seconds>(tp);
+    const auto ms = (epoch_us / 1000) % 1000;
+    return std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", tp_s, ms);
   }
 
   static int64_t
