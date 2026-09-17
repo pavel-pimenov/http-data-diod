@@ -401,6 +401,54 @@ TEST_CASE("Config: oversized HTTP pool warns but stays valid", "[config]") {
   REQUIRE(config.validate(false) == true);
 }
 
+TEST_CASE("Config: validate with logging warns on oversized pool", "[config]") {
+  Config config;
+  config.m_http_pool_size = 5000;
+  REQUIRE(config.validate(true) == true);
+}
+
+TEST_CASE("Config: per-IP rate limiting disabled skips validation",
+          "[config]") {
+  Config config;
+  config.m_enable_per_ip_rate_limiting = false;
+  config.m_per_ip_max_tokens = 0;
+  config.m_per_ip_refill_rate = 0;
+  config.m_per_ip_max_ips = 0;
+  config.m_per_ip_cleanup_ttl_seconds = -1;
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: global rate limiting disabled skips validation",
+          "[config]") {
+  Config config;
+  config.m_enable_global_rate_limiting = false;
+  config.m_global_max_tokens = 0;
+  config.m_global_refill_rate = 0;
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: dedup disabled skips validation", "[config]") {
+  Config config;
+  config.m_dedup_enabled = false;
+  config.m_dedup_max_entries = 0;
+  config.m_dedup_ttl_ms = 0;
+  REQUIRE(config.validate(false) == true);
+}
+
+TEST_CASE("Config: duplicate detection disabled skips validation",
+          "[config]") {
+  Config config;
+  config.m_duplicate_detection_enabled = false;
+  config.m_duplicate_detection_top_n = 0;
+  config.m_duplicate_detection_max_entries = 0;
+  config.m_duplicate_detection_ttl_ms = 0;
+  config.m_duplicate_detection_max_clients = -1;
+  config.m_duplicate_detection_client_ttl_ms = -1;
+  config.m_duplicate_detection_max_body_bytes = -1;
+  config.m_duplicate_log_threshold = -1;
+  REQUIRE(config.validate(false) == true);
+}
+
 TEST_CASE("Config: zero NATS timeout fails validation", "[config]") {
   Config config;
   config.m_nats_timeout_ms = 0;
@@ -595,6 +643,21 @@ TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
   REQUIRE(config.m_l2_server_url == "http://10.0.0.5:9090");
   REQUIRE(config.m_l2_server_urls.size() == 1);
   REQUIRE(config.m_l2_server_urls[0] == "http://10.0.0.5:9090");
+}
+
+TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
+  EnvVarGuard dsn("SENTRY_DSN", "https://key@host/42");
+  EnvVarGuard rel("SENTRY_RELEASE", "v1.0");
+  EnvVarGuard env("SENTRY_ENVIRONMENT", "prod");
+  EnvVarGuard timeout("SENTRY_TIMEOUT_MS", "5000");
+  EnvVarGuard qsize("SENTRY_MAX_QUEUE_SIZE", "512");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_sentry_dsn == "https://key@host/42");
+  REQUIRE(config.m_sentry_release == "v1.0");
+  REQUIRE(config.m_sentry_environment == "prod");
+  REQUIRE(config.m_sentry_timeout_ms == 5000);
+  REQUIRE(config.m_sentry_max_queue_size == 512);
 }
 
 TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
@@ -839,6 +902,19 @@ TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
   config.load_from_env();
   REQUIRE(config.m_proxy_protocol == "https");
   REQUIRE(config.validate(false) == false);
+}
+
+TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
+  EnvVarGuard mode("MODE", "proxy");
+  EnvVarGuard proto("L2_SERVER_PROTOCOL", "https");
+  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "/l2cert.pem");
+  EnvVarGuard key("SSL_SERVER_KEY_FILE", "/l2key.pem");
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_l2_server_protocol == "https");
+  REQUIRE(config.m_ssl_server_cert_file == "/l2cert.pem");
+  REQUIRE(config.m_ssl_server_key_file == "/l2key.pem");
+  REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: validate with logging enabled reports issues", "[config]") {

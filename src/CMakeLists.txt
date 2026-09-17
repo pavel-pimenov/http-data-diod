@@ -456,6 +456,7 @@ if(BUILD_TESTS)
         test_db_executor_base.cpp
         test_sentry_client.cpp
         test_trace_logger.cpp
+        test_crash_utils.cpp
         test_app_context.cpp
         app_context.cpp
         config.cpp

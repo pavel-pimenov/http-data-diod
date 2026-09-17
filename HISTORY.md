@@ -3,6 +3,30 @@
 ## Date: 2026-09-16
 
 ### Что сделано
+- Круг покрытия branch config/trace_logger:
+  - `test_components.cpp`: +8 TEST_CASE для config.cpp — ветви «фича
+    выключена пропускает валидацию» (per-IP/global rate limiting, dedup,
+    duplicate detection), `validate(true)` с warning-веткой на крупный HTTP
+    pool, чтение Sentry DSN/окружения из env, L2_SERVER_PROTOCOL=https
+    (вторая половина `||` + SSL info-ветка).
+  - `test_trace_logger.cpp`: +4 TEST_CASE — первый операнд `traceparent[0]
+    != '0'`, `is_hex` с символом ниже '0' (позиция 36), многопоточный
+    should_sample (thread_local snapshot), idle-timeout sender_loop
+    (wait_for с пустой очередью → continue → доставка после enqueue).
+  - sentry_client.cpp: проанализированы непокрытые ветви — все 5 с
+    логикой это dead-code/недостижимые defensive-guard'ы (инвариант
+    `m_dsn_data` в private-пути), остальное — GCC/gcovr-артефакты шаблонов
+    (nlohmann/std::string); покрывать их нельзя и не нужно.
+- `src/crash_utils.hpp` (новый): чистые хелперы краш-репортера вынесены из
+  crash_handler.hpp — `signal_name`, `trim_line`, `demangle_symbol`,
+  `self_exe_path` (const-correct, inline). crash_handler.hpp использует их
+  через `crash_utils::`. Добавлен `src/test_crash_utils.cpp` (5 TEST_CASE)
+  в таргет test_components — до этого код хелперов вообще не попадал в
+  тестовые единицы и не покрывался юнит-тестами.
+
+## Date: 2026-09-16
+
+### Что сделано
 - `src/crash_handler.hpp`: из тайтла/`value` события убрано декоративное
   смещение `(+0x<hex>)` — при наличии `файл:строка` (exe-фреймы) он только
   шумел, а для libc-фреймов имя функции и так уникально

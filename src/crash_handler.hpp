@@ -1,6 +1,7 @@
 #ifndef CRASH_HANDLER_HPP
 #define CRASH_HANDLER_HPP
 
+#include "crash_utils.hpp"
 #include "logger.hpp"
 #include "l2-proxy-version.h"
 #include "nlohmann/json.hpp"
@@ -10,7 +11,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <cxxabi.h>
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <netdb.h>
@@ -70,23 +70,6 @@ private:
   static inline void *m_crash_frames[kMaxFrames];
   static inline int m_crash_frame_count = 0;
 
-  static const char *signal_name(int signum) {
-    switch (signum) {
-    case SIGSEGV:
-      return "SIGSEGV";
-    case SIGABRT:
-      return "SIGABRT";
-    case SIGFPE:
-      return "SIGFPE";
-    case SIGBUS:
-      return "SIGBUS";
-    case SIGILL:
-      return "SIGILL";
-    default:
-      return "UNKNOWN";
-    }
-  }
-
   static void parse_sentry_dsn(const std::string &dsn) {
     m_sentry_dsn_raw = dsn;
     auto scheme_end = dsn.find("://");
@@ -134,7 +117,7 @@ private:
 
     char filename[512];
     const char *dir = m_dump_dir.c_str();
-    const char *sig = signal_name(signum);
+    const char *sig = crash_utils::signal_name(signum);
     // Build filename: dir/crash_YYYYMMDD_HHMMSS_SIGNAL.txt
     int pos = 0;
     auto append = [&](const char *s) {
@@ -223,22 +206,11 @@ private:
     close(fd);
   }
 
-  static std::string demangle_symbol(const char *mangled) {
-    int status = 0;
-    char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
-    if (status == 0 && demangled != nullptr) {
-      std::string res(demangled);
-      std::free(demangled);
-      return res;
-    }
-    return mangled != nullptr ? mangled : "";
-  }
-
   static std::string describe_frame(const void *addr) {
     Dl_info dli{};
     char buf[64];
     if (dladdr(addr, &dli) != 0 && dli.dli_sname != nullptr) {
-      return demangle_symbol(dli.dli_sname);
+      return crash_utils::demangle_symbol(dli.dli_sname);
     }
     snprintf(buf, sizeof(buf), "0x%lx", reinterpret_cast<unsigned long>(addr));
     return buf;
@@ -254,28 +226,6 @@ private:
     return m_crash_frame_count > 1 ? 1 : 0;
   }
 
-  static std::string trim_line(std::string s) {
-    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
-      s.pop_back();
-    }
-    return s;
-  }
-
-  static std::string self_exe_path() {
-    char buf[4096];
-    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (n <= 0) {
-      return {};
-    }
-    buf[n] = '\0';
-    return buf;
-  }
-
-  static std::string base_name(const std::string &path) {
-    const size_t slash = path.find_last_of('/');
-    return slash == std::string::npos ? path : path.substr(slash + 1);
-  }
-
   // Annotate frames that belong to the main executable with src file:line
   // resolved via addr2line (DWARF present because we link RelWithDebInfo).
   // Runs in the forked crash child, so fork/exec and tmpfile are safe.
@@ -284,11 +234,11 @@ private:
     if (access(kAddr2line, X_OK) != 0) {
       return;
     }
-    const std::string exe = self_exe_path();
+    const std::string exe = crash_utils::self_exe_path();
     if (exe.empty()) {
       return;
     }
-    const std::string exe_base = base_name(exe);
+    const std::string exe_base = crash_utils::base_name(exe);
 
     std::vector<size_t> exe_idx;
     for (size_t i = 0; i < frames.size(); ++i) {
@@ -298,7 +248,7 @@ private:
       }
       const std::string fname =
           dli.dli_fname != nullptr ? dli.dli_fname : "";
-      if (base_name(fname) != exe_base) {
+      if (crash_utils::base_name(fname) != exe_base) {
         continue;
       }
       exe_idx.push_back(i);
@@ -350,8 +300,8 @@ private:
       if (base + 1 >= lines.size()) {
         break;
       }
-      const std::string func = trim_line(lines[base]);
-      const std::string loc = trim_line(lines[base + 1]);
+      const std::string func = crash_utils::trim_line(lines[base]);
+      const std::string loc = crash_utils::trim_line(lines[base + 1]);
       nlohmann::json &frame = frames[exe_idx[k]];
       if (loc != "??:0") {
         const size_t colon = loc.find_last_of(':');
@@ -393,7 +343,7 @@ private:
       fault_addr = addr;
     }
     nlohmann::json exception_value{
-        {"type", signal_name(signum)},
+        {"type", crash_utils::signal_name(signum)},
         {"value", fault_addr},
         {"stacktrace", {{"frames", nlohmann::json::array()}}}};
     const int fault_idx = find_faulting_frame_index();
@@ -404,7 +354,7 @@ private:
       nlohmann::json frame{{"instruction_addr", std::string("0x") + addr}};
       Dl_info dli{};
       if (dladdr(m_crash_frames[i], &dli) != 0 && dli.dli_sname != nullptr) {
-        frame["function"] = demangle_symbol(dli.dli_sname);
+        frame["function"] = crash_utils::demangle_symbol(dli.dli_sname);
         frame["filename"] =
             dli.dli_fname != nullptr ? std::string(dli.dli_fname) : "l2-proxy";
       }
@@ -423,11 +373,11 @@ private:
           std::to_string(frames[fault_idx]["lineno"].get<int>());
     }
     event_json["message"] =
-        std::string(signal_name(signum)) + ": " + faulting_frame;
+        std::string(crash_utils::signal_name(signum)) + ": " + faulting_frame;
     exception_value["value"] = faulting_frame;
     event_json["exception"]["values"] =
         nlohmann::json::array({exception_value});
-    event_json["tags"]["signal"] = signal_name(signum);
+    event_json["tags"]["signal"] = crash_utils::signal_name(signum);
 
     const std::string event_str = event_json.dump();
 
