@@ -33,11 +33,13 @@ DB_PSQL = [
 
 EXPECTED_BASE_TRANSACTIONS = {
     # (transaction, op) pairs that a basic message sequence must produce.
-    "HTTP INCOMING /|http.server",
-    "HTTP POST /|http.server",
-    "HTTP NATS_consume /nats|messaging",
-    "HTTP NATS_push /nats|messaging",
-    "HTTP NATS_poll /nats|messaging",
+    # Names are prefixed with the runtime MODE so Transaction Groups stay
+    # separated per product (proxy / worker / l2-server).
+    "proxy: HTTP INCOMING /|http.server",
+    "proxy: HTTP POST /|http.server",
+    "worker: HTTP NATS_consume /nats|messaging",
+    "worker: HTTP NATS_push /nats|messaging",
+    "worker: HTTP NATS_poll /nats|messaging",
 }
 
 

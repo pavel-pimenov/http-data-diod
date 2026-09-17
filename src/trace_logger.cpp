@@ -205,14 +205,15 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     const std::string &parent_id, const std::string &name,
     const std::string &service_name, uint64_t start_us, uint64_t end_us,
     const std::string &environment, const nlohmann::json &attributes,
-    const std::string &release) {
+    const std::string &release, const std::string &product) {
   nlohmann::json root = nlohmann::json::object();
   root["event_id"] = random_hex_fast(32);
   root["type"] = "transaction";
   root["start_timestamp"] = TimeUtils::format_rfc3339_us(start_us);
   root["timestamp"] = TimeUtils::format_rfc3339_us(end_us);
   root["platform"] = "native";
-  root["transaction"] = name;
+  root["transaction"] =
+      product.empty() ? name : product + ": " + name;
   if (!release.empty()) {
     root["release"] = release;
   }
@@ -246,6 +247,9 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
   nlohmann::json tags = nlohmann::json::object();
   if (!service_name.empty()) {
     tags["service"] = service_name;
+  }
+  if (!product.empty()) {
+    tags["mode"] = product;
   }
   if (attributes.is_object()) {
     for (const auto &entry : attributes.items()) {
@@ -283,10 +287,11 @@ std::string JaegerLogger::build_sentry_transaction_envelope(
     const std::string &parent_id, const std::string &name,
     const std::string &service_name, uint64_t start_us, uint64_t end_us,
     const sentry::DsnData &dsn, const std::string &environment,
-    const nlohmann::json &attributes, const std::string &release) {
+    const nlohmann::json &attributes, const std::string &release,
+    const std::string &product) {
   const nlohmann::json event_json = build_sentry_transaction_json(
       trace_id, span_id, parent_id, name, service_name, start_us, end_us,
-      environment, attributes, release);
+      environment, attributes, release, product);
   return build_sentry_transaction_envelope(event_json);
 }
 
@@ -328,7 +333,8 @@ void JaegerLogger::deliver_sentry_transactions(
       const std::string envelope = build_sentry_transaction_envelope(
           span.m_trace_id, span.m_span_id, span.m_parent_id, span.m_name,
           span.m_service_name, span.m_start_us, span.m_end_us, *m_sentry_dsn,
-          m_sentry_environment, span.m_attributes, m_sentry_release);
+          m_sentry_environment, span.m_attributes, m_sentry_release,
+          m_sentry_service);
       client->post_no_response(
           url, envelope, "",
           httplib::Headers{{"X-Sentry-Auth", auth}},

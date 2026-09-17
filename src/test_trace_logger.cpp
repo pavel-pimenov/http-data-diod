@@ -994,6 +994,23 @@ TEST_CASE("TraceLogger: build_sentry_transaction_json embeds release when set",
   REQUIRE(!without_release.contains("release"));
 }
 
+TEST_CASE("TraceLogger: build_sentry_transaction_json prefixes the product "
+          "mode and tags it", "[tracing][sentry]") {
+  const auto with_product = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      "test-staging", nlohmann::json{}, "", "proxy");
+  REQUIRE(with_product["transaction"] == "proxy: HTTP POST /v1/request");
+  REQUIRE(with_product["tags"]["mode"] == "proxy");
+
+  const auto without_product = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      "test-staging", nlohmann::json{});
+  REQUIRE(without_product["transaction"] == "HTTP POST /v1/request");
+  REQUIRE(!without_product["tags"].contains("mode"));
+}
+
 TEST_CASE("TraceLogger: sentry_envelope_url uses project id and path prefix",
           "[tracing][sentry]") {
   const auto dsn =
@@ -1108,8 +1125,10 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
     envelope = sentry_bodies.front();
   }
   REQUIRE(envelope.find("\"type\":\"transaction\"") != std::string::npos);
-  REQUIRE(envelope.find("HTTP POST /v1/report") != std::string::npos);
+  REQUIRE(envelope.find("test-service: HTTP POST /v1/report") !=
+          std::string::npos);
   REQUIRE(envelope.find("\"release\":\"v1.0\"") != std::string::npos);
+  REQUIRE(envelope.find("\"mode\":\"test-service\"") != std::string::npos);
   REQUIRE(sentry_auth_headers.front().find("sentry_key=PUBLIC") !=
           std::string::npos);
   REQUIRE(env->sentry_failed() == 0.0);

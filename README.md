@@ -374,6 +374,12 @@ envelope-эндпоинт, по одной `transaction`-записи на сп�
 от Jaeger: `SENTRY_SAMPLE_RATE` (по умолчанию 1.0, диапазон 0.0-1.0);
 `SENTRY_RELEASE` попадает в события при задании.
 
+Один бинарь работает в режимах l2-proxy / l2-worker / l2-server (`MODE`),
+поэтому transaction groups в GlitchTip разделяются по продукту: имя
+транзакции получает префикс режима (`proxy: HTTP INCOMING /`,
+`worker: HTTP NATS_consume /nats`, `l2-server: GET /`), сам режим дублируется
+тегом `mode`, а `service`-тег/контекст остаётся пер-спановым.
+
 Точки интеграции сейчас:
 - воркер: ошибки валидации запроса (`fingerprint = ["worker_validation_error",
   "schema"]`) и исчерпание попыток вызова L2-сервера

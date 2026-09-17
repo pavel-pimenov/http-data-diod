@@ -1,3 +1,28 @@
+# round 25: разделение transaction groups по продуктам (MODE)
+
+## Date: 2026-09-17
+
+### Что сделано
+- Раньше `m_sentry_service` (режим `MODE`: proxy/worker/l2-server) хранился,
+  но в транзакции не попадал: transaction groups во всех продуктах
+  сливались в одни группы (ключ группы = transaction+op+method, единый
+  проект GlitchTip).
+- `build_sentry_transaction_json`/10-аргументный
+  `build_sentry_transaction_envelope` получили параметр `product` (`""` =
+  без изменений): имя транзакции получает префикс режима
+  (`worker: HTTP NATS_consume /nats`, `proxy: HTTP INCOMING /`,
+  `l2-server: GET /`), `tags.mode` = режим (комбинация даёт чистые группы
+  по продуктам; `service`-тег/контексты остаются пер-спановыми).
+- `deliver_sentry_transactions` прокидывает `m_sentry_service` как product.
+- Тесты: `build_sentry_transaction_json` с product (префикс + `tags.mode`) и
+  без (без изменений); E2E-доставка теперь ждёт `test-service: HTTP POST
+  /v1/report` и `"mode":"test-service"` в реальном envelope.
+- `scripts/glitchtip-performance-e2e.py`: ожидания переведены на префиксы
+  (`proxy: HTTP INCOMING /`, `proxy: HTTP POST /`,
+  `worker: HTTP NATS_consume/push/poll /nats`).
+- Проверено на живом стенде: groups разделены по продуктам, метрики
+  sent/failed по-прежнему 0 failed.
+
 # round 24: Sentry transactions — release, отдельный sample rate, E2E, фикс health-check
 
 ## Date: 2026-09-17
@@ -31,14 +56,14 @@
 - Живой стенд: E2E прошёл, counts групп выросли; метрики
   `l2_tracing_sentry_transactions_sent_total` proxy=8, worker=6, failed=0.
 
-## Date: 2026-09-17 (Покрытие после раунда)
+## Date: 2026-09-17 (Покрытие после round 25)
 - Замер `scripts/run-coverage.sh` (gcovr в coverage-образе, HTML в
   coverage-report/):
-  - **Lines: 98.0%** (10137/10340), гейт 90% — пройден
-  - **Functions: 94.6%** (1275/1348)
-  - **Branches: 41.5%** (20442/49230)
-  - `trace_logger.cpp`: 93.9% строк (336/358), 100% функций, 55.2% ветвей
-  - test cases: 473 + 120 = **593**, assertions: 2289 + 883 = **3172**
+  - **Lines: 98.0%** (10156/10358), гейт 90% — пройден
+  - **Functions: 94.6%** (1276/1349)
+  - **Branches: 41.5%** (20508/49374)
+  - `trace_logger.cpp`: 93.9% строк (336/358), 100% функций, 55.3% ветвей
+  - test cases: 474 + 120 = **594**, assertions: 2294 + 883 = **3177**
 
 # tracing: спаны в GlitchTip Performance (Sentry transactions)
 

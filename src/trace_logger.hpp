@@ -147,6 +147,9 @@ public:
   static std::string sentry_transaction_status(int status_code);
 
   // Builds the Sentry "transaction" event JSON body for a single span.
+  // `product` (the runtime MODE, e.g. "proxy"/"worker"/"l2-server") prefixes
+  // the transaction name and lands in a "mode" tag so that Transaction Groups
+  // separate by product instead of merging across the services.
   static nlohmann::json
   build_sentry_transaction_json(const std::string &trace_id,
                                 const std::string &span_id,
@@ -156,7 +159,8 @@ public:
                                 uint64_t start_us, uint64_t end_us,
                                 const std::string &environment,
                                 const nlohmann::json &attributes,
-                                const std::string &release = "");
+                                const std::string &release = "",
+                                const std::string &product = "");
 
   // Envelope endpoint URL for a DSN ("/{path_prefix}/api/{project}/envelope/").
   static std::string sentry_envelope_url(const sentry::DsnData &dsn);
@@ -175,7 +179,8 @@ public:
                                     const sentry::DsnData &dsn,
                                     const std::string &environment,
                                     const nlohmann::json &attributes,
-                                    const std::string &release = "");
+                                    const std::string &release = "",
+                                    const std::string &product = "");
 
   // Full Sentry envelope for an already-built transaction event JSON.
   static std::string

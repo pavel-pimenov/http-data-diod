@@ -18,14 +18,14 @@ healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены
 Наблюдение: ingest GlitchTip асинхронный — группы появляются в БД через
 несколько секунд после 200-ответа.
 
-## Текущий статус (24 — Sentry release/сэмплинг/E2E)
+## Текущий статус (25 — transaction groups по продуктам)
 
-Покрытие юнит-тестами: **593 test cases**,
-**3 172 assertions** (test_components 473/2289 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
+Покрытие юнит-тестами: **594 test cases**,
+**3 177 assertions** (test_components 474/2294 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 98.0%** (10137/10340), гейт 90% — пройден
-- **Functions: 94.6%** (1275/1348)
-- **Branches: 41.5%** (20442/49230) — слабое место
+- **Lines: 98.0%** (10156/10358), гейт 90% — пройден
+- **Functions: 94.6%** (1276/1349)
+- **Branches: 41.5%** (20508/49374) — слабое место
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
