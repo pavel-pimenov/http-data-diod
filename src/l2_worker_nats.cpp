@@ -61,7 +61,7 @@ void log_nats_consume_span(JaegerLogger *tracer, const std::string &request_id,
   };
   log_span_to_jaeger(tracer, "NATS_consume", "/nats", 200, start_us, start_us,
                      service_name, request_id, trace_id, consume_span_id,
-                     proxy_span_id, attrs);
+                     proxy_span_id, attrs, "NATS consume /nats");
 }
 
 // Builds the response headers carrying the worker's consume span id (or an

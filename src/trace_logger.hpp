@@ -94,7 +94,7 @@ private:
   void send_batch_with_retry(const std::vector<SpanData> &batch,
                              const std::stop_token &st);
   // Delivers a batch to the optional Sentry/GlitchTip performance target
-  // (one transaction envelope per span). Fire-and-forget, never blocks the
+  // (one multi-item envelope per batch). Fire-and-forget, never blocks the
   // request path; per-span outcome lands in m_sentry_spans_sent/_failed.
   void deliver_sentry_transactions(const std::vector<SpanData> &batch);
 
@@ -186,6 +186,12 @@ public:
   static std::string
   build_sentry_transaction_envelope(const nlohmann::json &event_json);
 
+  // Multi-item Sentry envelope: one header line shared by all events, then a
+  // "type": "transaction" item header + JSON payload pair per event. Lets a
+  // whole Jaeger batch reach GlitchTip in a single POST instead of N.
+  static std::string
+  build_sentry_envelope(const std::vector<nlohmann::json> &events);
+
   JaegerLogger(const std::string &endpoint, prometheus::Counter &spans_sent,
                prometheus::Counter &spans_failed, prometheus::Gauge &queue_size,
                prometheus::Gauge &last_send_duration,
@@ -229,7 +235,8 @@ public:
                    const std::string &trace_id = "",
                    const std::string &span_id = "",
                    const std::string &parent_id = "",
-                   const nlohmann::json &additional_attributes = {});
+                   const nlohmann::json &additional_attributes = {},
+                   const std::string &name_override = "");
 
   // Simplified validation
   static bool validate_traceparent(std::string_view traceparent);

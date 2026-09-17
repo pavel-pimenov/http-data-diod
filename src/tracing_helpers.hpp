@@ -9,7 +9,9 @@
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
 #include <cstdint>
+#include <format>
 #include <string>
+#include <string_view>
 
 // Reads the "traceparent" header value from an httplib header map, or an empty
 // string when absent. Shared by the trace-context extraction helpers and the
@@ -155,9 +157,15 @@ public:
     const int64_t end_us = TimeUtils::epoch_us();
     nlohmann::json attrs = extra_attrs;
     attrs["nats.success"] = nlohmann::json(status_code == 200);
+    // NATS ops are not HTTP calls; drop the "HTTP " prefix wired into
+    // log_request (e.g. "NATS_poll" -> "NATS poll /nats").
+    const std::string span_name =
+        operation.starts_with("NATS_")
+            ? std::format("NATS {} /nats", operation.substr(5))
+            : "";
     tracer->log_request(operation, "/nats", status_code, start_us, end_us,
                         "l2-proxy-NATS", request_id, trace_id, span_id,
-                        parent_id, attrs);
+                        parent_id, attrs, span_name);
   }
 };
 

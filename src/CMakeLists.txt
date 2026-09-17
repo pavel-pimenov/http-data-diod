@@ -458,6 +458,7 @@ if(BUILD_TESTS)
         test_trace_logger.cpp
         test_crash_utils.cpp
         test_app_context.cpp
+        version.cpp
         app_context.cpp
         config.cpp
         string_utils.cpp
@@ -522,6 +523,7 @@ if(BUILD_TESTS)
     # needed by header_utils.hpp's logger.hpp include).
     add_executable(test_proxy_core
         test_proxy_core.cpp
+        version.cpp
         config.cpp
         string_utils.cpp
     )

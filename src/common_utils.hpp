@@ -120,7 +120,8 @@ void log_span_to_jaeger(JaegerLogger *tracer, const std::string &method,
                         const std::string &trace_id = "",
                         const std::string &span_id = "",
                         const std::string &parent_id = "",
-                        const nlohmann::json &additional_attributes = {});
+                        const nlohmann::json &additional_attributes = {},
+                        const std::string &name_override = "");
 
 std::expected<json, std::string>
 validate_and_parse_json(std::string_view body,

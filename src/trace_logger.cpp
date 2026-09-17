@@ -306,48 +306,74 @@ std::string JaegerLogger::build_sentry_transaction_envelope(
   return header.dump() + "\n" + item_header.dump() + "\n" + event_json.dump();
 }
 
+std::string JaegerLogger::build_sentry_envelope(
+    const std::vector<nlohmann::json> &events) {
+  if (events.empty()) {
+    return "";
+  }
+  std::string header_event_id = events.front().value("event_id", "");
+  const nlohmann::json header = {
+      {"event_id", header_event_id},
+      {"sent_at", TimeUtils::format_rfc3339()},
+      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
+  std::string envelope = header.dump();
+  for (const auto &event : events) {
+    const std::string payload = event.dump();
+    const nlohmann::json item_header = {
+        {"type", "transaction"}, {"length", payload.size()}};
+    envelope += "\n" + item_header.dump() + "\n" + payload;
+  }
+  return envelope;
+}
+
 void JaegerLogger::deliver_sentry_transactions(
     const std::vector<SpanData> &batch) {
   if (!m_sentry_dsn || !m_sentry_client_pool || batch.empty()) {
     return;
   }
+  // Sentry target has its own sample rate; per-span Bernoulli draw keeps the
+  // loop deterministic (rate 1.0 → always send, rate 0.0 → never send).
+  thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
+  std::vector<nlohmann::json> events;
+  events.reserve(batch.size());
+  for (const auto &span : batch) {
+    if (m_sentry_sample_rate < 1.0 && dis(g_gen) >= m_sentry_sample_rate) {
+      continue;
+    }
+    events.push_back(build_sentry_transaction_json(
+        span.m_trace_id, span.m_span_id, span.m_parent_id, span.m_name,
+        span.m_service_name, span.m_start_us, span.m_end_us,
+        m_sentry_environment, span.m_attributes, m_sentry_release,
+        m_sentry_service));
+  }
+  if (events.empty()) {
+    return;
+  }
+  const size_t event_count = events.size();
   const std::string url = sentry_envelope_url(*m_sentry_dsn);
   const std::string auth = sentry_auth_header(*m_sentry_dsn);
-  size_t sent = 0;
+  // One multi-item envelope per batch: a single POST carries every sampled
+  // transaction of the batch.
+  const std::string envelope = build_sentry_envelope(events);
   try {
     auto client = m_sentry_client_pool->acquire_connection();
     if (!client) {
       if (m_sentry_spans_failed) {
-        m_sentry_spans_failed->Increment(batch.size());
+        m_sentry_spans_failed->Increment(event_count);
       }
       return;
     }
-    // Sentry target has its own sample rate; per-span Bernoulli draw keeps the
-    // loop deterministic (rate 1.0 → always send, rate 0.0 → never send).
-    thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
-    for (const auto &span : batch) {
-      if (m_sentry_sample_rate < 1.0 &&
-          dis(g_gen) >= m_sentry_sample_rate) {
-        continue;
-      }
-      const std::string envelope = build_sentry_transaction_envelope(
-          span.m_trace_id, span.m_span_id, span.m_parent_id, span.m_name,
-          span.m_service_name, span.m_start_us, span.m_end_us, *m_sentry_dsn,
-          m_sentry_environment, span.m_attributes, m_sentry_release,
-          m_sentry_service);
-      client->post_no_response(
-          url, envelope, "",
-          httplib::Headers{{"X-Sentry-Auth", auth}},
-          "application/x-sentry-envelope");
-      ++sent;
-    }
+    client->post_no_response(
+        url, envelope, "",
+        httplib::Headers{{"X-Sentry-Auth", auth}},
+        "application/x-sentry-envelope");
     m_sentry_client_pool->release_connection(std::move(client));
-    if (sent > 0 && m_sentry_spans_sent) {
-      m_sentry_spans_sent->Increment(sent);
+    if (m_sentry_spans_sent) {
+      m_sentry_spans_sent->Increment(event_count);
     }
   } catch (...) {
-    if (m_sentry_spans_failed && sent < batch.size()) {
-      m_sentry_spans_failed->Increment(batch.size() - sent);
+    if (m_sentry_spans_failed) {
+      m_sentry_spans_failed->Increment(event_count);
     }
   }
 }
@@ -381,7 +407,8 @@ void JaegerLogger::log_request(
     uint64_t start_us, uint64_t end_us, const std::string &service_name,
     const std::string &request_id, const std::string &trace_id,
     const std::string &span_id, const std::string &parent_id,
-    const nlohmann::json &additional_attributes) {
+    const nlohmann::json &additional_attributes,
+    const std::string &name_override) {
   // Apply sampling - always sample errors (4xx and 5xx status codes)
   bool is_error = (status_code >= 400);
   if (!should_sample(is_error)) {
@@ -392,9 +419,15 @@ void JaegerLogger::log_request(
       trace_id.empty() ? generate_trace_id() : trace_id;
   auto actual_span_id = span_id.empty() ? generate_span_id() : span_id;
 
+  // Non-HTTP operations (NATS, messaging) override the display name; the
+  // default "HTTP {method} {url}" convention stays for actual HTTP calls.
+  const std::string span_name = name_override.empty()
+                                    ? std::format("HTTP {} {}", method, url)
+                                    : name_override;
+
   Logger::debug(
-      "Logging span: trace_id={} span_id={} operation=HTTP {} {} service={}",
-      actual_trace_id, actual_span_id, method, url, service_name);
+      "Logging span: trace_id={} span_id={} operation={} service={}",
+      actual_trace_id, actual_span_id, span_name, service_name);
 
   nlohmann::json attrs = nlohmann::json::object();
   attrs["http.method"] = method;
@@ -409,9 +442,8 @@ void JaegerLogger::log_request(
     attrs[el.key()] = el.value();
   }
 
-  enqueue_span(actual_trace_id, actual_span_id, parent_id,
-               "HTTP " + method + " " + url, start_us, end_us, service_name,
-               attrs);
+  enqueue_span(actual_trace_id, actual_span_id, parent_id, span_name, start_us,
+               end_us, service_name, attrs);
 }
 
 // Fast random hex generation using pre-initialized thread-local generator

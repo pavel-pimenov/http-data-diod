@@ -11,6 +11,10 @@
 #include <initializer_list>
 #include <sstream>
 
+// Defined in version.cpp (kept in its own TU so version bumps recompile only
+// that file, not the heavy config/main translation units).
+extern const char *g_l2_proxy_version;
+
 namespace {
 // Single place for reading an env var. Returns false if not set.
 bool get_env_raw(const std::string &env_name, std::string &out_value) {
@@ -382,6 +386,11 @@ void Config::load_server_timeout_config() {
   m_sentry_dsn = get_env_string("SENTRY_DSN", m_sentry_dsn);
   m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", m_sentry_environment);
   m_sentry_release = get_env_string("SENTRY_RELEASE", m_sentry_release);
+  // Without an explicit SENTRY_RELEASE the running build version becomes the
+  // release, so GlitchTip events are attributable to a code revision.
+  if (m_sentry_release.empty()) {
+    m_sentry_release = g_l2_proxy_version;
+  }
   m_sentry_sample_rate =
       get_env_double("SENTRY_SAMPLE_RATE", m_sentry_sample_rate);
   m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry_timeout_ms);

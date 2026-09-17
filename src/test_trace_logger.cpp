@@ -1070,6 +1070,50 @@ TEST_CASE("TraceLogger: build_sentry_transaction_envelope is a 3-line envelope",
   REQUIRE(body["event_id"] == event["event_id"]);
 }
 
+TEST_CASE("TraceLogger: build_sentry_envelope is a multi-item envelope",
+          "[tracing][sentry]") {
+  const auto event1 = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "proxy", 1000000, 2000000, "",
+      nlohmann::json{}, "", "proxy");
+  const auto event2 = JaegerLogger::build_sentry_transaction_json(
+      "cccccccccccccccccccccccccccccccc", "dddddddddddddddd",
+      "bbbbbbbbbbbbbbbb", "HTTP GET /v1/status", "worker", 1000000, 2000000, "",
+      nlohmann::json{}, "", "worker");
+  const auto envelope =
+      JaegerLogger::build_sentry_envelope({event1, event2});
+
+  auto lines = std::vector<std::string>{};
+  std::istringstream stream(envelope);
+  std::string line;
+  while (std::getline(stream, line)) {
+    lines.push_back(line);
+  }
+  REQUIRE(lines.size() == 5);
+
+  const auto header = nlohmann::json::parse(lines[0]);
+  REQUIRE(header["event_id"] == event1["event_id"]);
+  REQUIRE(header["sdk"]["name"] == "http-data-diod");
+
+  const auto item1 = nlohmann::json::parse(lines[1]);
+  const auto body1 = nlohmann::json::parse(lines[2]);
+  REQUIRE(item1["type"] == "transaction");
+  REQUIRE(item1["length"] == body1.dump().size());
+  REQUIRE(body1["transaction"] == "proxy: HTTP POST /v1/request");
+
+  const auto item2 = nlohmann::json::parse(lines[3]);
+  const auto body2 = nlohmann::json::parse(lines[4]);
+  REQUIRE(item2["type"] == "transaction");
+  REQUIRE(item2["length"] == body2.dump().size());
+  REQUIRE(body2["transaction"] == "worker: HTTP GET /v1/status");
+  REQUIRE(body2["contexts"]["trace"]["parent_span_id"] == "bbbbbbbbbbbbbbbb");
+}
+
+TEST_CASE("TraceLogger: build_sentry_envelope is empty for no events",
+          "[tracing][sentry]") {
+  REQUIRE(JaegerLogger::build_sentry_envelope({}) == "");
+}
+
 TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope",
           "[tracing][sentry]") {
   // Two distinct hosts: the Sentry target must not reuse the Jaeger connection

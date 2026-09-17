@@ -119,11 +119,12 @@ void log_span_to_jaeger(JaegerLogger *tracer, const std::string &method,
                         const std::string &request_id,
                         const std::string &trace_id, const std::string &span_id,
                         const std::string &parent_id,
-                        const nlohmann::json &additional_attributes) {
+                        const nlohmann::json &additional_attributes,
+                        const std::string &name_override) {
   if (tracer) {
     tracer->log_request(method, url, status_code, start_us, end_us,
                         service_name, request_id, trace_id, span_id, parent_id,
-                        additional_attributes);
+                        additional_attributes, name_override);
   }
 }
 

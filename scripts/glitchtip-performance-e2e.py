@@ -37,9 +37,9 @@ EXPECTED_BASE_TRANSACTIONS = {
     # separated per product (proxy / worker / l2-server).
     "proxy: HTTP INCOMING /|http.server",
     "proxy: HTTP POST /|http.server",
-    "worker: HTTP NATS_consume /nats|messaging",
-    "worker: HTTP NATS_push /nats|messaging",
-    "worker: HTTP NATS_poll /nats|messaging",
+    "worker: NATS consume /nats|messaging",
+    "worker: NATS push /nats|messaging",
+    "worker: NATS poll /nats|messaging",
 }
 
 
