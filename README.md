@@ -367,6 +367,13 @@ Sentry (`POST /api/{project}/envelope/`, content-type
 Клиент создаётся во всех режимах (l2-proxy, l2-server, l2-worker), тег
 `service` = режим (`MODE`).
 
+Performance-транзакции (спаны трассировки → GlitchTip Performance)
+включаются тем же `SENTRY_DSN` при `ENABLE_TRACING=1`. Работают через тот же
+envelope-эндпоинт, по одной `transaction`-записи на спан (метрики
+`l2_tracing_sentry_transactions_sent/failed_total`). Семплирование независимо
+от Jaeger: `SENTRY_SAMPLE_RATE` (по умолчанию 1.0, диапазон 0.0-1.0);
+`SENTRY_RELEASE` попадает в события при задании.
+
 Точки интеграции сейчас:
 - воркер: ошибки валидации запроса (`fingerprint = ["worker_validation_error",
   "schema"]`) и исчерпание попыток вызова L2-сервера

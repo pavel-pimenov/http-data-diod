@@ -74,6 +74,9 @@ private:
   std::string m_sentry_service;
   std::string m_sentry_environment;
   std::string m_sentry_release;
+  // Separate trace sampling for the Sentry/GlitchTip target: independent of
+  // the Jaeger sample rate so the two sinks can be tuned differently.
+  double m_sentry_sample_rate{1.0};
   prometheus::Counter *m_sentry_spans_sent;
   prometheus::Counter *m_sentry_spans_failed;
 
@@ -152,7 +155,8 @@ public:
                                 const std::string &service_name,
                                 uint64_t start_us, uint64_t end_us,
                                 const std::string &environment,
-                                const nlohmann::json &attributes);
+                                const nlohmann::json &attributes,
+                                const std::string &release = "");
 
   // Envelope endpoint URL for a DSN ("/{path_prefix}/api/{project}/envelope/").
   static std::string sentry_envelope_url(const sentry::DsnData &dsn);
@@ -170,7 +174,8 @@ public:
                                     uint64_t start_us, uint64_t end_us,
                                     const sentry::DsnData &dsn,
                                     const std::string &environment,
-                                    const nlohmann::json &attributes);
+                                    const nlohmann::json &attributes,
+                                    const std::string &release = "");
 
   // Full Sentry envelope for an already-built transaction event JSON.
   static std::string
@@ -189,7 +194,8 @@ public:
                const std::string &sentry_environment = "",
                const std::string &sentry_release = "",
                prometheus::Counter *sentry_spans_sent = nullptr,
-               prometheus::Counter *sentry_spans_failed = nullptr);
+               prometheus::Counter *sentry_spans_failed = nullptr,
+               double sentry_sample_rate = 1.0);
   ~JaegerLogger();
 
   std::string generate_trace_id();

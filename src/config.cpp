@@ -305,6 +305,9 @@ void validate_tracing(const Config &cfg, ConfigChecker &check) {
   check(cfg.m_tracing_sample_rate >= 0.0 && cfg.m_tracing_sample_rate <= 1.0,
         std::format("Invalid tracing sample rate: {} (must be 0.0-1.0)",
                     cfg.m_tracing_sample_rate));
+  check(cfg.m_sentry_sample_rate >= 0.0 && cfg.m_sentry_sample_rate <= 1.0,
+        std::format("Invalid sentry sample rate: {} (must be 0.0-1.0)",
+                    cfg.m_sentry_sample_rate));
 }
 } // namespace
 
@@ -379,6 +382,8 @@ void Config::load_server_timeout_config() {
   m_sentry_dsn = get_env_string("SENTRY_DSN", m_sentry_dsn);
   m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", m_sentry_environment);
   m_sentry_release = get_env_string("SENTRY_RELEASE", m_sentry_release);
+  m_sentry_sample_rate =
+      get_env_double("SENTRY_SAMPLE_RATE", m_sentry_sample_rate);
   m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry_timeout_ms);
   m_sentry_max_queue_size =
       get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);

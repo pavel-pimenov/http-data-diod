@@ -158,7 +158,8 @@ struct SentryTracingEnv {
 
   SentryTracingEnv(const std::string &jaeger_endpoint,
                    const std::string &sentry_dsn, size_t batch_size = 4,
-                   int flush_interval_ms = 100, double sample_rate = 1.0)
+                   int flush_interval_ms = 100, double sample_rate = 1.0,
+                   double sentry_sample_rate = 1.0)
       : m_spans_sent(
             prometheus::BuildCounter()
                 .Name("t_sentry_spans_sent")
@@ -211,7 +212,8 @@ struct SentryTracingEnv {
             jaeger_endpoint, m_spans_sent, m_spans_failed, m_queue_size,
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
             flush_interval_ms, sample_rate, sentry_dsn, "test-service",
-            "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed)) {}
+            "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed,
+            sentry_sample_rate)) {}
 
   double sentry_sent() const { return m_sentry_sent.Collect().counter.value; }
   double sentry_failed() const {
@@ -977,6 +979,21 @@ TEST_CASE("TraceLogger: build_sentry_transaction_json omits empty optional "
   REQUIRE(tx["extra"]["http.status_code"] == 503);
 }
 
+TEST_CASE("TraceLogger: build_sentry_transaction_json embeds release when set",
+          "[tracing][sentry]") {
+  const auto with_release = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      "test-staging", nlohmann::json{}, "1.0.4-5d7e7db");
+  REQUIRE(with_release["release"] == "1.0.4-5d7e7db");
+
+  const auto without_release = JaegerLogger::build_sentry_transaction_json(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      "test-staging", nlohmann::json{});
+  REQUIRE(!without_release.contains("release"));
+}
+
 TEST_CASE("TraceLogger: sentry_envelope_url uses project id and path prefix",
           "[tracing][sentry]") {
   const auto dsn =
@@ -1092,6 +1109,7 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
   }
   REQUIRE(envelope.find("\"type\":\"transaction\"") != std::string::npos);
   REQUIRE(envelope.find("HTTP POST /v1/report") != std::string::npos);
+  REQUIRE(envelope.find("\"release\":\"v1.0\"") != std::string::npos);
   REQUIRE(sentry_auth_headers.front().find("sentry_key=PUBLIC") !=
           std::string::npos);
   REQUIRE(env->sentry_failed() == 0.0);
@@ -1101,6 +1119,46 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
   sentry_server.stop();
   if (jaeger_thread.joinable())
     jaeger_thread.join();
+  if (sentry_thread.joinable())
+    sentry_thread.join();
+}
+
+TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
+          "[tracing][sentry]") {
+  httplib::Server sentry_server;
+  std::mutex mu;
+  std::vector<std::string> sentry_bodies;
+  sentry_server.Post("/api/2/envelope/",
+                     [&](const httplib::Request &req, httplib::Response &res) {
+                       std::lock_guard lock(mu);
+                       sentry_bodies.push_back(req.body);
+                       res.status = 200;
+                     });
+  const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
+  std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
+
+  const auto jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
+                          std::to_string(sentry_port) + "/2";
+  auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,
+                                                4, 100, 1.0,
+                                                0.0 /*sentry_sample_rate*/);
+  for (int i = 0; i < 8; ++i) {
+    env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
+                                1000000, 2000000, "l2-proxy-worker",
+                                nlohmann::json{{"http.status_code", 200}});
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  {
+    std::lock_guard lock(mu);
+    REQUIRE(sentry_bodies.empty());
+  }
+  REQUIRE(env->sentry_sent() == 0.0);
+
+  env.reset();
+  sentry_server.stop();
   if (sentry_thread.joinable())
     sentry_thread.join();
 }

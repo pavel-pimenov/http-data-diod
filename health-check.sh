@@ -58,7 +58,9 @@ check_http() {
     local endpoint="${3:-/metrics}"
     local retries=0
     while [ $retries -lt $MAX_RETRIES ]; do
-        if curl -sf --connect-timeout 5 --max-time 10 "http://localhost:${port}${endpoint}" > /dev/null 2>&1; then
+        # --noproxy '*' : на dev-машинах ALL_PROXY (socks5h) может перехватывать
+        # localhost-запросы и валить чек, хотя сервис жив
+        if curl -sf --noproxy '*' --connect-timeout 5 --max-time 10 "http://localhost:${port}${endpoint}" > /dev/null 2>&1; then
             log_info "✓ $name endpoint OK (port $port$endpoint)"
             return 0
         fi

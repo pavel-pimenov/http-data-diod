@@ -32,7 +32,8 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                            const std::string &sentry_environment,
                            const std::string &sentry_release,
                            prometheus::Counter *sentry_spans_sent,
-                           prometheus::Counter *sentry_spans_failed)
+                           prometheus::Counter *sentry_spans_failed,
+                           double sentry_sample_rate)
     : m_jaeger_url(endpoint), m_tracing_spans_sent_counter(spans_sent),
       m_tracing_spans_failed_counter(spans_failed),
       m_tracing_queue_size_gauge(queue_size),
@@ -46,6 +47,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
       m_sentry_service(sentry_service),
       m_sentry_environment(sentry_environment),
       m_sentry_release(sentry_release),
+      m_sentry_sample_rate(sentry_sample_rate),
       m_sentry_spans_sent(sentry_spans_sent),
       m_sentry_spans_failed(sentry_spans_failed),
       m_batch_size(batch_size), m_flush_interval_ms(flush_interval_ms),
@@ -202,7 +204,8 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     const std::string &trace_id, const std::string &span_id,
     const std::string &parent_id, const std::string &name,
     const std::string &service_name, uint64_t start_us, uint64_t end_us,
-    const std::string &environment, const nlohmann::json &attributes) {
+    const std::string &environment, const nlohmann::json &attributes,
+    const std::string &release) {
   nlohmann::json root = nlohmann::json::object();
   root["event_id"] = random_hex_fast(32);
   root["type"] = "transaction";
@@ -210,6 +213,9 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
   root["timestamp"] = TimeUtils::format_rfc3339_us(end_us);
   root["platform"] = "native";
   root["transaction"] = name;
+  if (!release.empty()) {
+    root["release"] = release;
+  }
 
   int status_code = 200;
   if (attributes.is_object() && attributes.contains("http.status_code")) {
@@ -277,10 +283,10 @@ std::string JaegerLogger::build_sentry_transaction_envelope(
     const std::string &parent_id, const std::string &name,
     const std::string &service_name, uint64_t start_us, uint64_t end_us,
     const sentry::DsnData &dsn, const std::string &environment,
-    const nlohmann::json &attributes) {
+    const nlohmann::json &attributes, const std::string &release) {
   const nlohmann::json event_json = build_sentry_transaction_json(
       trace_id, span_id, parent_id, name, service_name, start_us, end_us,
-      environment, attributes);
+      environment, attributes, release);
   return build_sentry_transaction_envelope(event_json);
 }
 
@@ -302,6 +308,7 @@ void JaegerLogger::deliver_sentry_transactions(
   }
   const std::string url = sentry_envelope_url(*m_sentry_dsn);
   const std::string auth = sentry_auth_header(*m_sentry_dsn);
+  size_t sent = 0;
   try {
     auto client = m_sentry_client_pool->acquire_connection();
     if (!client) {
@@ -310,23 +317,31 @@ void JaegerLogger::deliver_sentry_transactions(
       }
       return;
     }
+    // Sentry target has its own sample rate; per-span Bernoulli draw keeps the
+    // loop deterministic (rate 1.0 → always send, rate 0.0 → never send).
+    thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
     for (const auto &span : batch) {
+      if (m_sentry_sample_rate < 1.0 &&
+          dis(g_gen) >= m_sentry_sample_rate) {
+        continue;
+      }
       const std::string envelope = build_sentry_transaction_envelope(
           span.m_trace_id, span.m_span_id, span.m_parent_id, span.m_name,
           span.m_service_name, span.m_start_us, span.m_end_us, *m_sentry_dsn,
-          m_sentry_environment, span.m_attributes);
+          m_sentry_environment, span.m_attributes, m_sentry_release);
       client->post_no_response(
           url, envelope, "",
           httplib::Headers{{"X-Sentry-Auth", auth}},
           "application/x-sentry-envelope");
+      ++sent;
     }
     m_sentry_client_pool->release_connection(std::move(client));
-    if (m_sentry_spans_sent) {
-      m_sentry_spans_sent->Increment(batch.size());
+    if (sent > 0 && m_sentry_spans_sent) {
+      m_sentry_spans_sent->Increment(sent);
     }
   } catch (...) {
-    if (m_sentry_spans_failed) {
-      m_sentry_spans_failed->Increment(batch.size());
+    if (m_sentry_spans_failed && sent < batch.size()) {
+      m_sentry_spans_failed->Increment(batch.size() - sent);
     }
   }
 }

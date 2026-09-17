@@ -223,8 +223,13 @@ fi
 echo ""
 echo "Running application health checks..."
 if [ -f "./health-check.sh" ]; then
+    # health-check.sh returns non-zero when services need attention; under
+    # `set -e` a failed command substitution would abort the script before the
+    # restart/logic below runs, so capture it explicitly.
+    set +e
     HEALTH_OUTPUT=$(./health-check.sh all 2 2>&1)
     HEALTH_RC=$?
+    set -e
     echo "$HEALTH_OUTPUT"
 
     HEALTH_ERRORS=$(printf "%s\n" "$HEALTH_OUTPUT" | grep '^\[ERROR\]' || true)

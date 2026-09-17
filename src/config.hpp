@@ -40,6 +40,7 @@ public:
   std::string m_sentry_dsn;
   std::string m_sentry_environment;
   std::string m_sentry_release;
+  double m_sentry_sample_rate{1.0}; // Sentry trace sampling 0.0-1.0 (1.0 = 100%)
   std::string m_log_level{"INFO"};
   std::string m_l2_server_protocol{"http"};
   std::string m_proxy_protocol{"http"};
