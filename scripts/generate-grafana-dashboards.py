@@ -590,6 +590,49 @@ def create_tracing_dashboard() -> Dict:
     ))
     y += 8
 
+    # Row 3: Sentry/GlitchTip performance transactions
+    panels.append(create_row_panel("Sentry/GlitchTip performance", 20, y))
+    y += 1
+
+    # Panel 21: Sentry transactions sent vs failed
+    panels.append(create_timeseries_panel(
+        title="Sentry-транзакций отправлено vs ошибок",
+        id=21,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": "rate(l2_tracing_sentry_transactions_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено/с", "refId": "A"},
+            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "B"}
+        ]
+    ))
+
+    # Panel 22: Sentry transactions failed rate
+    panels.append(create_timeseries_panel(
+        title="Скорость ошибок Sentry-транзакций",
+        id=22,
+        x=12, y=y, w=12, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 10},
+                {"color": "red", "value": 50}
+            ]
+        },
+        targets=[
+            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 def create_sentry_dashboard() -> Dict:
@@ -1721,6 +1764,27 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 74: Число client_id, отслеживаемых duplicate-детектором (gauge;
+    # ограничено DUPLICATE_DETECTION_MAX_CLIENTS, idle-счётчики чистит TTL)
+    panels.append(create_timeseries_panel(
+        title="Отслеживаемых client-id (детектор дублей)",
+        id=74,
+        x=0, y=y, w=24, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1000},
+                {"color": "red", "value": 4000}
+            ]
+        },
+        targets=[
+            {"expr": "l2_proxy_duplicate_tracked_clients{vm=~\"${vm:regex}\"}", "legendFormat": "client-id", "refId": "A"}
+        ]
+    ))
+    y += 8
+
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1
@@ -2582,6 +2646,18 @@ def create_worker_dashboard() -> Dict:
         },
         targets=[
             {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+        ]
+    ))
+    y += 8
+
+    # Panel 206: Время drain при graceful shutdown (SIGTERM до выхода, 0 в работе)
+    panels.append(create_timeseries_panel(
+        title="Время graceful shutdown",
+        id=206,
+        x=8, y=y, w=8, h=8,
+        unit="s",
+        targets=[
+            {"expr": "l2_worker_graceful_shutdown_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "drain, c", "refId": "A"}
         ]
     ))
     y += 8

@@ -1,3 +1,46 @@
+# round 27: интеграция настроек предохранителя трассировки (TracingBreakerSettings) + coverage метрик в дашбордах Grafana
+
+## Date: 2026-09-19
+
+### Что сделано
+- `src/trace_logger.hpp/.cpp`: полка `TracingBreakerSettings` (`failure_threshold`,
+  `cooldown_base_ms`, `cooldown_max_ms`) взамен отдельных глобальных констант
+  `g_tracing_outage_*`; конструктор трейсера принимает настройки как параметр
+  (`breaker_settings = {}`). Jaeger-порог переключён с «критичного коолдауна»
+  на суммарный счётчик зарегистрированных спанов (`m_tracing_spans_failed_counter`
+  с порогом `TRACING_FAILURE_THRESHOLD`), Sentry-порог — на `m_sentry_spans_failed`.
+- `src/config.cpp/.hpp`: новые env `TRACING_OUTAGE_FAILURE_THRESHOLD`,
+  `TRACING_OUTAGE_COOLDOWN_BASE_MS`, `TRACING_OUTAGE_COOLDOWN_MAX_MS` с валидацией
+  (порог > 0, base >= 0, max >= base). `docker-compose.yml`: переменные добавлены
+  во все сервисы окружения.
+- `src/main.cpp`: `init_tracer` прокидывает настройки предохранителя.
+- `src/trace_logger.cpp`: логгер catch-блоков переведён с `std::runtime_error`
+  на `std::exception` c `Logger::error(e.what())`, `catch (...)` на уровне
+  error; деструкторные `catch (...)` остались «must not throw».
+- `src/l2_worker.cpp` (`record_l2_call_metrics`): добавлена `catch (const
+  std::exception&)` с `Logger::error`.
+- Юнит-тесты: `src/test_trace_logger.cpp` — Jaeger-предохранитель сбрасывает
+  батчи в open-состоянии и считает их в `failed`, Sentry-предохранитель
+  сбрасывает envelope при open; `TraceLoggerEnv`/`SentryTracingEnv` принимают
+  `TracingBreakerSettings breaker_settings = {}`. `src/test_components.cpp` —
+  валидация настроек (дефолты, threshold=0, base < 0, max < base).
+- Дашборды Grafana (`scripts/generate-grafana-dashboards.py`): добавлены панели
+  `l2_proxy_duplicate_tracked_clients` (proxy), `l2_tracing_sentry_transactions_sent/failed_total`
+  (tracing, новый ряд Sentry/GlitchTip performance), `l2_worker_graceful_shutdown_seconds`
+  (worker). Все 67 C++-метрик теперь покрыты дашбордами (прогон `--check`).
+- `scripts/metrics-golden-check.py`: в каталог добавлены
+  `l2_proxy_duplicate_tracked_clients`, `l2_tracing_sentry_transactions_sent_total`,
+  `l2_tracing_sentry_transactions_failed_total`; golden-check проходит 69/69 families.
+- Постгрес: пересоздан volume `postgres-data` (данные от PG16 несовместимы с
+  postgres:17-alpine, контейнер падал в `FATAL database files are incompatible`);
+  после пересоздания volume все метрики DB-гейта экспортируются.
+
+### Проверка
+- `./rebuild-and-run.sh`: сборка успешна, юнит-тесты (test_components +
+  test_proxy_core) прошли, health checks OK, golden metrics 69/69, дашборды
+  обновлены (8/8).
+- `python3 message_counter.py --iterations 1 --concurrent 1 --dup-check` — без потерь.
+
 # round 26: фикс core-дампа при сборке + доделка прерванной ветки изменений
 
 ## Date: 2026-09-17

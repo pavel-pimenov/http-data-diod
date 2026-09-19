@@ -44,6 +44,7 @@ CATALOG = [
     "l2_proxy_response_size_bytes",
     "l2_proxy_duplicate_requests_total",
     "l2_proxy_duplicate_posts_detected_total",
+    "l2_proxy_duplicate_tracked_clients",
     "l2_proxy_responses_total",
     "l2_proxy_in_flight_requests",
     "l2_proxy_nats_connected",
@@ -101,6 +102,8 @@ CATALOG = [
     "l2_tracing_last_send_duration_seconds",
     "l2_tracing_send_latency_seconds",
     "l2_tracing_queue_time_seconds",
+    "l2_tracing_sentry_transactions_sent_total",
+    "l2_tracing_sentry_transactions_failed_total",
 ]
 
 # Families emitted lazily by DynamicLabeledFamily: checked under --all only.
