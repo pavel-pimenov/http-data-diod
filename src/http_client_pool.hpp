@@ -38,21 +38,37 @@ public:
   using client_type = HttpClient;
 
 private:
-  std::queue<std::unique_ptr<HttpClient>> m_available_connections;
-  mutable std::mutex m_pool_mutex;
-  std::condition_variable m_condition;
-  size_t m_max_pool_size;
-  int m_timeout_seconds;
-  int m_acquire_timeout_seconds; // Timeout for waiting on available connection
-  bool m_enable_connection_reuse;
-  bool m_enable_ssl_server_certificate_verification;
-  bool m_enable_ssl_server_hostname_verification;
-  std::string m_ssl_ca_cert_path;
-  std::atomic<size_t> m_total_clients{0};
-  std::atomic<size_t> m_active_clients{
-      0}; // Currently in use (acquired but not released)
-  std::chrono::seconds m_max_idle_time{300};
-  std::atomic<size_t> m_stale_evictions{0};
+  // Tunables controlling pool/Gateway behaviour. Mirrors the constructor
+  // parameters (without connection metrics, which live in m_stats).
+  struct PoolConfig {
+    size_t m_max_pool_size;
+    int m_timeout_seconds;
+    int m_acquire_timeout_seconds; // Timeout for waiting on available conn
+    bool m_enable_connection_reuse;
+    bool m_enable_ssl_server_certificate_verification;
+    bool m_enable_ssl_server_hostname_verification;
+    std::string m_ssl_ca_cert_path;
+    std::chrono::seconds m_max_idle_time{300};
+  };
+
+  // Wire-level state of the pool: the available (idle) connections, their
+  // mutex and the condition signalled on release/eviction.
+  struct ConnState {
+    std::queue<std::unique_ptr<HttpClient>> m_available_connections;
+    mutable std::mutex m_pool_mutex;
+    std::condition_variable m_condition;
+  };
+
+  struct Counters {
+    std::atomic<size_t> m_total_clients{0};
+    std::atomic<size_t> m_active_clients{0}; // Currently in use
+    std::atomic<size_t> m_stale_evictions{0};
+  };
+
+  PoolConfig m_config;
+  ConnState m_state;
+  Counters m_counters;
+
 
   PoolMetrics m_metrics;
 
@@ -75,8 +91,8 @@ public:
   void release_connection(std::unique_ptr<HttpClient> client);
 
   size_t available_count() const;
-  size_t total_clients() const { return m_total_clients.load(); }
-  size_t active_clients() const { return m_active_clients.load(); }
+  size_t total_clients() const { return m_counters.m_total_clients.load(); }
+  size_t active_clients() const { return m_counters.m_active_clients.load(); }
 
 private:
   void update_metrics();

@@ -1,3 +1,13 @@
+# round 29: завершение группировки приватных членов HttpClientPool — getters + cpp (PoolConfig/ConnState/Counters)
+
+## Date: 2026-09-19
+
+### Что сделано
+- http_client_pool.hpp: приватный блок сгруппирован во вложенные struct PoolConfig/ConnState/Counters с экземплярами m_config/m_state/m_counters; инлайн-геттеры total_clients()/active_clients() переведены на m_counters.m_*
+- http_client_pool.cpp: конструктор переведён на агрегатную инициализацию m_config{...}/m_state{}/m_counters{}; все тела методов переименованы на сгруппированные имена
+
+### Проверка
+- Сборка в контейнере ./rebuild-and-run.sh + smoke message_counter.py
 # round 28: финальный аудит группировки вложенных struct (JaegerLogger/RateLimiter/RateLimiterPerIP/NatsClient/CrashHandler) — тела методов переведены на m_config.*/m_frames.*/m_sentry.*
 
 ## Date: 2026-09-19
