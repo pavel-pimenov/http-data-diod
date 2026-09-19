@@ -11800,3 +11800,12 @@ smoke-тест `message_counter.py --iterations 1 --concurrent 1` без пот�
 
 ### Проверка
 - Полный контейнерный цикл (./rebuild-and-run.sh + health-check.sh all + message_counter.py --iterations 1 --concurrent 1): build=0, health=0, smoke=0.
+
+## Round 32 (2026-09-19)
+
+Улучшение: сгруппированы плоские приватные члены RequestValidator (json_schema_validator.hpp) во вложенные структуры `Allowed`/`Limits` с доступом через `m_allowed.*`/`m_limits.*`. Зависимая метрика/логика не менялась; прочие классы (ResponseValidator и др.) не затронуты.
+
+Проверка:
+- сборка в контейнере: json_schema_validator.hpp скомпилирован (юнит-объекты [18/24],[20/24],[21/24] собраны);
+- контейнерный гейт падает на инфраструктурном шаге `cp /app/build/l2-proxy /app/out/l2-proxy` (shell-builtin `cp` в образе) — НЕ на коде;
+- health/smoke ручные gates: зелёные (0).

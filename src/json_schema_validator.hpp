@@ -1,34 +1,3 @@
-#ifndef JSON_SCHEMA_VALIDATOR_HPP
-#define JSON_SCHEMA_VALIDATOR_HPP
-
-#include "json_utils.hpp"
-#include "logger.hpp"
-#include <format>
-#include <nlohmann/json.hpp>
-#include <string>
-#include <unordered_set>
-#include <vector>
-#if __has_include(<flat_set>)
-#include <flat_set>
-#endif
-
-using json = nlohmann::json;
-
-// JSON Schema Validator
-// Validates JSON requests against a defined schema
-//
-// Usage:
-//   RequestValidator validator;
-//   validator.add_required_field("method");
-//   validator.add_required_field("path");
-//   validator.add_allowed_method("GET");
-//   validator.add_allowed_method("POST");
-//
-//   std::string error;
-//   if (!validator.validate(request_json, error)) {
-//       // Return 400 Bad Request with error
-//   }
-
 class RequestValidator {
 private:
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
@@ -36,46 +5,50 @@ private:
 #else
   using SmallStringSet = std::unordered_set<std::string>;
 #endif
-  SmallStringSet m_required_fields;
-  SmallStringSet m_allowed_methods;
-  SmallStringSet m_allowed_paths;
-  size_t m_max_body_size;
-  size_t m_max_path_length;
+  struct Allowed {
+    SmallStringSet m_required_fields;
+    SmallStringSet m_allowed_methods;
+    SmallStringSet m_allowed_paths;
+  } m_allowed;
+  struct Limits {
+    size_t m_max_body_size;
+    size_t m_max_path_length;
+  } m_limits;
 
 public:
   RequestValidator()
-      : m_max_body_size(static_cast<size_t>(10) * 1024 * 1024) // 10MB default
+      : m_limits.m_max_body_size(static_cast<size_t>(10) * 1024 * 1024) // 10MB default
         ,
-        m_max_path_length(2048) // 2KB default
+        m_limits.m_max_path_length(2048) // 2KB default
   {}
 
   RequestValidator &add_required_field(const std::string &field) {
-    m_required_fields.insert(field);
+    m_allowed.m_required_fields.insert(field);
     return *this;
   }
 
   RequestValidator &add_allowed_method(const std::string &method) {
-    m_allowed_methods.insert(method);
+    m_allowed.m_allowed_methods.insert(method);
     return *this;
   }
 
   RequestValidator &add_allowed_path(const std::string &path_prefix) {
-    m_allowed_paths.insert(path_prefix);
+    m_allowed.m_allowed_paths.insert(path_prefix);
     return *this;
   }
 
   RequestValidator &set_max_body_size(size_t bytes) {
-    m_max_body_size = bytes;
+    m_limits.m_max_body_size = bytes;
     return *this;
   }
 
   RequestValidator &set_max_path_length(size_t length) {
-    m_max_path_length = length;
+    m_limits.m_max_path_length = length;
     return *this;
   }
 
   bool validate(const json &request, std::string &error) const {
-    for (const auto &field : m_required_fields) {
+    for (const auto &field : m_allowed.m_required_fields) {
       if (request.find(field) == request.end()) {
         error = "Missing required field: " + field;
         return false;
@@ -84,11 +57,11 @@ public:
 
     if (request.contains("method")) {
       const std::string &method = request["method"];
-      if (!m_allowed_methods.empty() &&
+      if (!m_allowed.m_allowed_methods.empty() &&
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
-          !m_allowed_methods.contains(method)) {
+          !m_allowed.m_allowed_methods.contains(method)) {
 #else
-          m_allowed_methods.find(method) == m_allowed_methods.end()) {
+          m_allowed.m_allowed_methods.find(method) == m_allowed.m_allowed_methods.end()) {
 #endif
         error = "Method not allowed: " + method;
         return false;
@@ -99,15 +72,15 @@ public:
     if (request.contains("path")) {
       const std::string &path = request["path"];
 
-      if (path.length() > m_max_path_length) {
+      if (path.length() > m_limits.m_max_path_length) {
         error = std::format("Path too long: {} > {}", path.length(),
-                            m_max_path_length);
+                            m_limits.m_max_path_length);
         return false;
       }
 
-      if (!m_allowed_paths.empty()) {
+      if (!m_allowed.m_allowed_paths.empty()) {
         // ranges::any_of — C++23 сахар вместо ручного цикла
-        const bool path_allowed = std::ranges::any_of(m_allowed_paths, [&](const auto &prefix) {
+        const bool path_allowed = std::ranges::any_of(m_allowed.m_allowed_paths, [&](const auto &prefix) {
           return path.starts_with(prefix);
         });
         if (!path_allowed) {
@@ -120,9 +93,9 @@ public:
     // Check body size if present
     if (request.contains("body")) {
       const std::string &body = request["body"];
-      if (body.length() > m_max_body_size) {
+      if (body.length() > m_limits.m_max_body_size) {
         error = std::format("Body too large: {} > {}", body.length(),
-                            m_max_body_size);
+                            m_limits.m_max_body_size);
         return false;
       }
     }
