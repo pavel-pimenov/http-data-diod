@@ -2,6 +2,7 @@
 #define URL_UTILS_HPP
 
 #include "httplib/httplib.h"
+#include "logger.hpp"
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -55,6 +56,8 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
       try {
         result.m_port = std::stoi(port_str);
       } catch (...) {
+        // Fallback: non-numeric port in URL → use default for scheme
+        Logger::debug("URL port parse failed, using default for scheme");
         result.m_port = result.m_is_https ? 443 : 80;
       }
       result.m_path =

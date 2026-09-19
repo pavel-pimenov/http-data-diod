@@ -435,8 +435,11 @@ void L2Worker::record_l2_call_metrics(uint64_t start_us) {
   try {
     m_ctx.m_worker.m_metrics->m_request_duration_seconds.Observe(
         duration_seconds);
+  } catch (const std::exception &e) {
+    Logger::error("Failed to record request duration histogram: {}", e.what());
   } catch (...) {
-    Logger::error("Failed to record request duration histogram");
+    Logger::error(
+        "Failed to record request duration histogram with unknown error");
   }
 }
 

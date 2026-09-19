@@ -288,6 +288,39 @@ TEST_CASE("Config: Invalid tracing sample rate fails validation", "[config]") {
   REQUIRE(valid == false);
 }
 
+TEST_CASE("Config: Invalid tracing outage failure threshold fails validation",
+          "[config]") {
+  Config config;
+  config.m_tracing_outage_failure_threshold = 0;
+  bool valid = config.validate(false);
+  REQUIRE(valid == false);
+}
+
+TEST_CASE("Config: Invalid tracing outage cooldown base fails validation",
+          "[config]") {
+  Config config;
+  config.m_tracing_outage_cooldown_base_ms = -5;
+  bool valid = config.validate(false);
+  REQUIRE(valid == false);
+}
+
+TEST_CASE("Config: Tracing outage cooldown max below base fails validation",
+          "[config]") {
+  Config config;
+  config.m_tracing_outage_cooldown_max_ms = 100;
+  config.m_tracing_outage_cooldown_base_ms = 5000;
+  bool valid = config.validate(false);
+  REQUIRE(valid == false);
+}
+
+TEST_CASE("Config: Tracing outage breaker defaults validate", "[config]") {
+  Config config;
+  REQUIRE(config.m_tracing_outage_failure_threshold == 3);
+  REQUIRE(config.m_tracing_outage_cooldown_base_ms == 1000);
+  REQUIRE(config.m_tracing_outage_cooldown_max_ms == 30000);
+  REQUIRE(config.validate(false) == true);
+}
+
 TEST_CASE("Config: HTTP pool idle timeout default validates", "[config]") {
   Config config;
   REQUIRE(config.m_http_pool_idle_timeout_seconds == 300);

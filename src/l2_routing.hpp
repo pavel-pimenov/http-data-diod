@@ -73,7 +73,8 @@ namespace l2_routing {
       result += ":" + std::to_string(parsed.m_port);
     }
     return result;
-  } catch (const std::exception &) {
+  } catch (const std::exception &e) {
+    Logger::debug("Canonicalize failed for url '{}': {}", url, e.what());
     return "";
   }
 }
@@ -116,8 +117,11 @@ namespace l2_routing {
         selected_url = allowed_base;
         return true;
       }
-    } catch (const std::exception &) {
+    } catch (const std::exception &e) {
       // Fallback: legacy prefix check on raw allowed_base string
+      Logger::debug("Canonicalize failed for allowed_base '{}', legacy prefix "
+                    "fallback: {}",
+                    allowed_base, e.what());
       if (normalized_path.rfind(allowed_base, 0) == 0) {
         selected_url = allowed_base;
         return true;

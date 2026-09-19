@@ -2,6 +2,7 @@
 #include "http_client_pool.hpp"
 #include "logger.hpp"
 #include "time_utils.hpp"
+#include <algorithm>
 #include <format>
 #include <random>
 
@@ -33,7 +34,8 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                            const std::string &sentry_release,
                            prometheus::Counter *sentry_spans_sent,
                            prometheus::Counter *sentry_spans_failed,
-                           double sentry_sample_rate)
+                           double sentry_sample_rate,
+                           TracingBreakerSettings breaker_settings)
     : m_jaeger_url(endpoint), m_tracing_spans_sent_counter(spans_sent),
       m_tracing_spans_failed_counter(spans_failed),
       m_tracing_queue_size_gauge(queue_size),
@@ -51,7 +53,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
       m_sentry_spans_sent(sentry_spans_sent),
       m_sentry_spans_failed(sentry_spans_failed),
       m_batch_size(batch_size), m_flush_interval_ms(flush_interval_ms),
-      m_sample_rate(sample_rate) {
+      m_sample_rate(sample_rate), m_breaker_settings(breaker_settings) {
   Logger::info("JaegerLogger initialized: batch_size={} flush_interval={}ms "
                "sample_rate={}",
                m_batch_size, m_flush_interval_ms, m_sample_rate);
@@ -331,6 +333,24 @@ void JaegerLogger::deliver_sentry_transactions(
   if (!m_sentry_dsn || !m_sentry_client_pool || batch.empty()) {
     return;
   }
+  // Circuit breaker (Sentry/GlitchTip has no built-in retry loop, so a long
+  // outage would otherwise fire one multi-item envelope POST per batch
+  // forever). After the consecutive-failure threshold the breaker opens:
+  // delivery is skipped for the exponential cooldown window (capped) and the
+  // batch is shed instead of bombarding the dead target.
+  const uint64_t now_steady_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count();
+  const uint64_t cooldown_until =
+      m_sentry_breaker.cooldown_until_steady_ms.load();
+  if (cooldown_until != 0 && now_steady_ms < cooldown_until) {
+    m_tracing_spans_failed_counter.Increment(batch.size());
+    if (m_sentry_spans_failed) {
+      m_sentry_spans_failed->Increment(batch.size());
+    }
+    return;
+  }
   // Sentry target has its own sample rate; per-span Bernoulli draw keeps the
   // loop deterministic (rate 1.0 → always send, rate 0.0 → never send).
   thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -368,10 +388,49 @@ void JaegerLogger::deliver_sentry_transactions(
         httplib::Headers{{"X-Sentry-Auth", auth}},
         "application/x-sentry-envelope");
     m_sentry_client_pool->release_connection(std::move(client));
+    m_sentry_breaker.consecutive_failures = 0;
+    m_sentry_breaker.cooldown_until_steady_ms = 0;
     if (m_sentry_spans_sent) {
       m_sentry_spans_sent->Increment(event_count);
     }
+  } catch (const std::exception &e) {
+    Logger::error(
+        "Sentry transaction delivery failed (non-critical): {}", e.what());
+    m_sentry_breaker.consecutive_failures++;
+    if (m_sentry_breaker.consecutive_failures >=
+        m_breaker_settings.m_failure_threshold) {
+      uint64_t cooldown_ms =
+          std::min<uint64_t>(
+              (uint64_t)m_breaker_settings.m_cooldown_base_ms
+                  << (std::min(m_sentry_breaker.consecutive_failures.load(),
+                               20) -
+                      1),
+              (uint64_t)m_breaker_settings.m_cooldown_max_ms);
+      m_sentry_breaker.cooldown_until_steady_ms =
+          now_steady_ms + cooldown_ms;
+      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
+    }
+    if (m_sentry_spans_failed) {
+      m_sentry_spans_failed->Increment(event_count);
+    }
   } catch (...) {
+    Logger::error(
+        "Sentry transaction delivery failed with unknown error "
+        "(non-critical)");
+    m_sentry_breaker.consecutive_failures++;
+    if (m_sentry_breaker.consecutive_failures >=
+        m_breaker_settings.m_failure_threshold) {
+      uint64_t cooldown_ms =
+          std::min<uint64_t>(
+              (uint64_t)m_breaker_settings.m_cooldown_base_ms
+                  << (std::min(m_sentry_breaker.consecutive_failures.load(),
+                               20) -
+                      1),
+              (uint64_t)m_breaker_settings.m_cooldown_max_ms);
+      m_sentry_breaker.cooldown_until_steady_ms =
+          now_steady_ms + cooldown_ms;
+      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
+    }
     if (m_sentry_spans_failed) {
       m_sentry_spans_failed->Increment(event_count);
     }
@@ -536,15 +595,51 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   int retries = 0;
   int delay_ms = g_tracing_retry_base_delay_ms;
 
+  // Circuit breaker (Jaeger). After the consecutive-failure threshold the
+  // breaker opens, delivery of the batch is shed for the exponential cooldown
+  // window (capped) instead of bombarding the dead target with a fresh batch
+  // of retries every flush interval forever. Closing the breaker resets the
+  // consecutive-failure counter.
+  const auto now_ms = TimeUtils::steady_ms();
+  if (now_ms < m_jaeger_breaker.cooldown_until_steady_ms.load()) {
+    m_tracing_spans_failed_counter.Increment(batch.size());
+    Logger::debug(
+        "Jaeger breaker open, shed batch of {} spans during cooldown", 
+        batch.size());
+    deliver_sentry_transactions(batch);
+    const auto end_time = std::chrono::steady_clock::now();
+    double duration =
+        std::chrono::duration<double>(end_time - start_time).count();
+    m_tracing_last_send_duration_gauge.Set(duration);
+    m_tracing_send_latency_histogram.Observe(duration);
+    return;
+  }
+
   while (!success && retries < g_tracing_max_retries && !st.stop_requested()) {
     if (send_batch(batch)) {
       success = true;
       m_consecutive_failures = 0;
+      m_jaeger_breaker.consecutive_failures = 0;
+      m_jaeger_breaker.cooldown_until_steady_ms = 0;
     } else {
       retries++;
       m_consecutive_failures++;
+      m_jaeger_breaker.consecutive_failures++;
       Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
                    g_tracing_max_retries, delay_ms);
+      if (m_jaeger_breaker.consecutive_failures >=
+          m_breaker_settings.m_failure_threshold) {
+        uint64_t cooldown_ms =
+            std::min<uint64_t>(
+                (uint64_t)m_breaker_settings.m_cooldown_base_ms
+                    << (std::min(m_jaeger_breaker.consecutive_failures.load(),
+                                 20) -
+                        1),
+                (uint64_t)m_breaker_settings.m_cooldown_max_ms);
+        m_jaeger_breaker.cooldown_until_steady_ms =
+            now_ms + cooldown_ms;
+        Logger::warn("Jaeger breaker opened, shedding for {}ms", cooldown_ms);
+      }
       if (retries < g_tracing_max_retries) {
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         delay_ms *= 2;
@@ -609,14 +704,17 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
                     m_consecutive_failures.load());
     }
     return true;
-  } catch (const std::runtime_error &e) {
-    // Log at debug level - tracing failures are not critical
-    Logger::debug("Jaeger batch send failed (non-critical): {} spans dropped",
-                  batch.size());
+  } catch (const std::exception &e) {
+    // Tracing failures are not critical but an exception message must reach
+    // the error log to debug outages.
+    Logger::error("Jaeger batch send failed (non-critical): {} spans dropped: "
+                  "{}",
+                  batch.size(), e.what());
     return false;
   } catch (...) {
     // Catch all exceptions - tracing must never crash
-    Logger::debug("Jaeger batch send failed with unknown error (non-critical)");
+    Logger::error(
+        "Jaeger batch send failed with unknown error (non-critical)");
     return false;
   }
 }
@@ -643,12 +741,12 @@ bool JaegerLogger::send_span(const std::string &trace_id,
     client->post_no_response(m_jaeger_url, payload_str, "");
     m_http_client_pool->release_connection(std::move(client));
     return true;
-  } catch (const std::runtime_error &e) {
-    Logger::debug("Jaeger span send failed (non-critical): {}", e.what());
+  } catch (const std::exception &e) {
+    Logger::error("Jaeger span send failed (non-critical): {}", e.what());
     m_tracing_spans_failed_counter.Increment();
     return false;
   } catch (...) {
-    Logger::debug("Jaeger span send failed with unknown error (non-critical)");
+    Logger::error("Jaeger span send failed with unknown error (non-critical)");
     m_tracing_spans_failed_counter.Increment();
     return false;
   }

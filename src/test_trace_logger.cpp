@@ -96,7 +96,8 @@ struct TraceLoggerEnv {
   std::unique_ptr<JaegerLogger> m_logger;
 
   explicit TraceLoggerEnv(const std::string &endpoint, size_t batch_size = 50,
-                          int flush_interval_ms = 1000, double sample_rate = 1.0)
+                          int flush_interval_ms = 1000, double sample_rate = 1.0,
+                          TracingBreakerSettings breaker_settings = {})
       : m_spans_sent(
             prometheus::BuildCounter()
                 .Name("l2_tracing_spans_sent_total")
@@ -137,7 +138,8 @@ struct TraceLoggerEnv {
         m_logger(std::make_unique<JaegerLogger>(
             endpoint, m_spans_sent, m_spans_failed, m_queue_size,
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
-            flush_interval_ms, sample_rate)) {}
+            flush_interval_ms, sample_rate, "", "", "", "", nullptr, nullptr,
+            1.0, breaker_settings)) {}
 
   double sent() const { return m_spans_sent.Collect().counter.value; }
   double failed() const { return m_spans_failed.Collect().counter.value; }
@@ -159,7 +161,8 @@ struct SentryTracingEnv {
   SentryTracingEnv(const std::string &jaeger_endpoint,
                    const std::string &sentry_dsn, size_t batch_size = 4,
                    int flush_interval_ms = 100, double sample_rate = 1.0,
-                   double sentry_sample_rate = 1.0)
+                   double sentry_sample_rate = 1.0,
+                   TracingBreakerSettings breaker_settings = {})
       : m_spans_sent(
             prometheus::BuildCounter()
                 .Name("t_sentry_spans_sent")
@@ -213,7 +216,7 @@ struct SentryTracingEnv {
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
             flush_interval_ms, sample_rate, sentry_dsn, "test-service",
             "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed,
-            sentry_sample_rate)) {}
+            sentry_sample_rate, breaker_settings)) {}
 
   double sentry_sent() const { return m_sentry_sent.Collect().counter.value; }
   double sentry_failed() const {
@@ -387,6 +390,63 @@ TEST_CASE("TraceLogger: failed batch increments failed counter", "[tracing]") {
   REQUIRE(wait_for_condition([&] { return env.failed() >= 1.0; }, 8000));
   REQUIRE(env.sent() == 0.0);
   REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
+}
+
+TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "
+          "them failed",
+          "[tracing]") {
+  // Threshold 1 with a huge cooldown: the very first failing batch opens the
+  // breaker, every later batch is shed in the cooldown window (fast, no retry
+  // loop of ~300ms+ per batch). 10000 spans / batch 50 = 200 batches, whose
+  // full retry loops would run for ~60s — finishing within the wait timeout
+  // proves the batches were shed, not retried.
+  TracingBreakerSettings settings;
+  settings.m_failure_threshold = 1;
+  settings.m_cooldown_base_ms = 60000;
+  settings.m_cooldown_max_ms = 60000;
+  TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 100, 1.0, settings);
+
+  const auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < 10000; ++i) {
+    env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                               "bbbbbbbbbbbbbbbb", "",
+                               "HTTP POST /breaker", 1000, 2000,
+                               "test-service");
+  }
+  REQUIRE(wait_for_condition([&] { return env.failed() >= 10000.0; }, 8000));
+  const auto elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  // Shedding finishes the whole drain within a second or so, far below the
+  // ~60s that plain retrying of 200 batches would need.
+  REQUIRE(elapsed_ms < 2500);
+  REQUIRE(env.sent() == 0.0);
+  REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
+}
+
+TEST_CASE("TraceLogger: sentry breaker sheds envelopes while open", "[tracing]"
+          "[sentry]") {
+  // Healthy Jaeger target, dead Sentry target: the first envelope delivery
+  // fails and opens the sentry breaker (threshold 1, long cooldown), the
+  // second batch is shed in the cooldown window.
+  TraceMockServer server;
+  TracingBreakerSettings settings;
+  settings.m_failure_threshold = 1;
+  settings.m_cooldown_base_ms = 60000;
+  settings.m_cooldown_max_ms = 60000;
+  const auto env = std::make_unique<SentryTracingEnv>(
+      server.endpoint(), "http://PUBLIC@127.0.0.1:1/2", 4, 100, 1.0, 1.0,
+      settings);
+  for (int i = 0; i < 8; ++i) {
+    env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                "bbbbbbbbbbbbbbbb", "",
+                                "HTTP POST /v1/report", 1000000, 2000000,
+                                "l2-proxy-worker", nlohmann::json{});
+  }
+  REQUIRE(wait_for_condition([&] { return env->sentry_failed() >= 8.0; },
+                             8000));
+  REQUIRE(env->sentry_sent() == 0.0);
 }
 
 TEST_CASE("TraceLogger: full queue drops spans and increments failed",

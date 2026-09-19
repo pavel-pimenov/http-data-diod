@@ -128,7 +128,9 @@ json pg_value(Oid oid, const char *text, int len) {
   case kPgOidOid:
     try {
       return std::stoll(s);
-    } catch (const std::exception &) {
+    } catch (const std::exception &e) {
+      Logger::debug("Non-numeric int8/oid value '{}', keeping raw string: {}",
+                    s, e.what());
       return s;
     }
   case kPgFloat4Oid:
@@ -136,7 +138,10 @@ json pg_value(Oid oid, const char *text, int len) {
   case kPgNumericOid:
     try {
       return std::stod(s);
-    } catch (const std::exception &) {
+    } catch (const std::exception &e) {
+      Logger::debug("Non-numeric float/numeric value '{}', keeping raw "
+                    "string: {}",
+                    s, e.what());
       return s;
     }
   case kPgByteaOid:

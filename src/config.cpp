@@ -312,6 +312,21 @@ void validate_tracing(const Config &cfg, ConfigChecker &check) {
   check(cfg.m_sentry_sample_rate >= 0.0 && cfg.m_sentry_sample_rate <= 1.0,
         std::format("Invalid sentry sample rate: {} (must be 0.0-1.0)",
                     cfg.m_sentry_sample_rate));
+  // Tracing outage circuit-breaker: threshold must trip at least after one
+  // failure, cooldown must stay within [base, max].
+  check(positive(cfg.m_tracing_outage_failure_threshold),
+        std::format("Invalid tracing outage failure threshold: {} "
+                    "(must be > 0)",
+                    cfg.m_tracing_outage_failure_threshold));
+  check(positive(cfg.m_tracing_outage_cooldown_base_ms),
+        std::format("Invalid tracing outage cooldown base: {} (must be > 0)",
+                    cfg.m_tracing_outage_cooldown_base_ms));
+  check(cfg.m_tracing_outage_cooldown_max_ms >=
+            cfg.m_tracing_outage_cooldown_base_ms,
+        std::format("Invalid tracing outage cooldown max: {} (must be >= "
+                    "base {})",
+                    cfg.m_tracing_outage_cooldown_max_ms,
+                    cfg.m_tracing_outage_cooldown_base_ms));
 }
 } // namespace
 
@@ -450,9 +465,21 @@ void Config::load_feature_config() {
       get_env_int("TRACING_FLUSH_INTERVAL_MS", m_tracing_flush_interval_ms);
   m_tracing_sample_rate =
       get_env_double("TRACING_SAMPLE_RATE", m_tracing_sample_rate);
+  // Tracing outage circuit-breaker: after TRACING_OUTAGE_FAILURE_THRESHOLD
+  // consecutive delivery failures a tracing sink is shed for an exponential
+  // cooldown window (base, doubled per opening, clamped by the max).
+  m_tracing_outage_failure_threshold = get_env_int(
+      "TRACING_OUTAGE_FAILURE_THRESHOLD", m_tracing_outage_failure_threshold);
+  m_tracing_outage_cooldown_base_ms = get_env_int(
+      "TRACING_OUTAGE_COOLDOWN_BASE_MS", m_tracing_outage_cooldown_base_ms);
+  m_tracing_outage_cooldown_max_ms = get_env_int(
+      "TRACING_OUTAGE_COOLDOWN_MAX_MS", m_tracing_outage_cooldown_max_ms);
   Logger::info(
-      "Tracing config: batch_size={} flush_interval={}ms sample_rate={}",
-      m_tracing_batch_size, m_tracing_flush_interval_ms, m_tracing_sample_rate);
+      "Tracing config: batch_size={} flush_interval={}ms sample_rate={} "
+      "outage_breaker(failures={}, cooldown={}/{}/{}ms)",
+      m_tracing_batch_size, m_tracing_flush_interval_ms, m_tracing_sample_rate,
+      m_tracing_outage_failure_threshold, m_tracing_outage_cooldown_base_ms,
+      m_tracing_outage_cooldown_base_ms, m_tracing_outage_cooldown_max_ms);
 
   m_enable_per_ip_rate_limiting =
       get_env_bool("ENABLE_PER_IP_RATE_LIMITING", m_enable_per_ip_rate_limiting);

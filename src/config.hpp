@@ -94,6 +94,11 @@ public:
   int m_max_retries{1};
   int m_tracing_flush_interval_ms{1000};
   int m_sentry_timeout_ms{3000};
+  // Tracing outage circuit-breaker tuning (fires when a tracing sink keeps
+  // failing delivery; sheds batches during the exponential cooldown window).
+  int m_tracing_outage_failure_threshold{3};
+  int m_tracing_outage_cooldown_base_ms{1000};
+  int m_tracing_outage_cooldown_max_ms{30000};
   int m_per_ip_max_tokens{100};
   int m_per_ip_refill_rate{10};
   int m_per_ip_max_ips{10000};

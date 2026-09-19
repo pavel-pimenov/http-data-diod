@@ -36,6 +36,17 @@ inline constexpr int g_tracing_retry_base_delay_ms =
     100; // Base delay for exponential backoff
 inline constexpr int g_tracing_send_timeout_ms =
     5000; // HTTP send timeout in ms
+// Tuning of the tracing outage circuit-breaker (предохранитель). After
+// m_failure_threshold consecutive delivery failures the target (Jaeger or the
+// optional Sentry/GlitchTip performance sink) is considered out of order and
+// delivery is shed for an exponential cooldown window (m_cooldown_base_ms,
+// doubled on every consecutive opening, clamped to m_cooldown_max_ms) instead
+// of bombarding the dead target with one POST per flush interval forever.
+struct TracingBreakerSettings {
+  int m_failure_threshold = 3;    // Consecutive failures before opening
+  int m_cooldown_base_ms = 1000;  // First cooldown window after opening, ms
+  int m_cooldown_max_ms = 30000;  // Upper clamp of the cooldown window, ms
+};
 
 class JaegerLogger {
 private:
@@ -87,6 +98,26 @@ private:
 
   // Retry state
   std::atomic<int> m_consecutive_failures{0};
+
+  // Exponential circuit breaker state shared by the Jaeger and
+  // Sentry/GlitchTip sinks. Both are "one multi-item POST per batch" style
+  // targets: Jaeger with a retry loop of up to 3 POSTs per batch,
+  // Sentry/GlitchTip with a single multi-item envelope POST per batch and no
+  // retry loop at all. During a long target outage each sink would otherwise
+  // keep firing its POST per batch forever. After the consecutive-failure
+  // threshold (TracingBreakerSettings::m_failure_threshold) the breaker opens:
+  // delivery of the batch is shed for the exponential cooldown window (capped
+  // by m_cooldown_max_ms) instead of bombarding the dead target. Closing the
+  // breaker resets the consecutive-failure counter.
+  struct ExponentialBreaker {
+    std::atomic<int> consecutive_failures{0};
+    std::atomic<uint64_t> cooldown_until_steady_ms{0};
+  };
+  ExponentialBreaker m_sentry_breaker;
+  ExponentialBreaker m_jaeger_breaker;
+
+  // Per-sink breaker tuning (thresholds/cooldowns).
+  TracingBreakerSettings m_breaker_settings;
 
 private:
   bool send_batch(const std::vector<SpanData> &batch);
@@ -206,7 +237,8 @@ public:
                const std::string &sentry_release = "",
                prometheus::Counter *sentry_spans_sent = nullptr,
                prometheus::Counter *sentry_spans_failed = nullptr,
-               double sentry_sample_rate = 1.0);
+               double sentry_sample_rate = 1.0,
+               TracingBreakerSettings breaker_settings = {});
   ~JaegerLogger();
 
   std::string generate_trace_id();

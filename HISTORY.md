@@ -11558,3 +11558,96 @@ on-demand профиля и одновременно ужать его memory li
   `DB_ORACLE_USER=xxxxx`, `DB_ORACLE_ENABLED=true`, `DB_POSTGRES_ENABLED=false`.
 - Поле `DB_ORACLE_PASSWORD` оставлено шаблоном `********************` для ручной
   подстановки реального секрета пользователем.
+
+## Date: 2026-09-18
+
+### Правка: breaker-поля завернуты в единую структуру (убрана путаница из 4+1 наборов атомиков)
+
+**Проблема.** В `src/trace_logger.hpp` разрозненные поля двух экспоненциальных
+circuit breaker'ов откатывались в 4 набора для Sentry/GlitchTip (`m_sentry_*`)
+и 1 набор для Jaeger (`m_jaeger_*`), живших вперемешку в верхнем блоке класса —
+копипаста-правки множили их, и в `trace_logger.cpp` часть из них использовалась
+без суффикса (`m_sentry_cooldown_until`), а часть вообще не открывалась.
+
+**Решение.**
+- `src/trace_logger.hpp`: введён общий
+  `struct ExponentialBreaker { consecutive_failures; cooldown_until_steady_ms; }`
+  и **два экземпляра** `m_sentry_breaker` / `m_jaeger_breaker` (объявлены рядом,
+  hpp:193-199). Все разрозненные атомик-поля Sentry и Jaeger удалены.
+- `src/trace_logger.cpp`: Sentry- и Jaeger-пути доставки переписаны на
+  экземпляры `m_*_breaker.*`, убраны дублирующие счётчики
+  (`m_jaeger_consecutive_failures` и др.). Sentry-блок больше не просто читает
+  чужой `cooldown_until`: при неудаче `catch(...)` теперь реально инкрементит
+  счётчик и открывает breaker с экспоненциальным shedding'ом (симметрично
+  Jaeger, который так и работал). Сброс breaker — при успешной доставке.
+- Библиотека `ExponentialBreaker` — внутренняя, публичный интерфейс
+  `ExponentialBreaker m_sentry_breaker; ExponentialBreaker m_jaeger_breaker;`
+  на месте.
+
+**Статус сборки.** `./rebuild-and-run.sh` не смог собрать образ:
+docker.io недоступен (dial tcp 172.67...:443: connection refused / IPv6 refused) —
+сетевая инфраструктура, а не код. Коммит отложен до зелёной сборки
+(правило AGENTS.md). Долговая правка прошла статическую проверку: в
+hpp/cpp после правки не осталось ни одного обращения к удалённым атомикам.
+
+### Правка: интеграция настроек предохранителя трассировки (TracingBreakerSettings)
+
+**Проблема.** Поведение предохранителя (порог сбоев, длительности экспоненциальной
+cooldown-паузы) было зашито константами `g_tracing_outage_*` в
+`src/trace_logger.cpp` — тюнинг под инсталляцию был невозможен, а скрытые
+значения расходились с логикой валидации конфига.
+
+**Решение.**
+- `src/trace_logger.hpp`: добавлена публичная структура
+  `struct TracingBreakerSettings { m_failure_threshold=3; m_cooldown_base_ms=1000;
+  m_cooldown_max_ms=30000; }`. Конструктор `JaegerLogger` получил последним
+  параметром `TracingBreakerSettings breaker_settings = {}` — все прежние вызовы
+  (main.cpp, тесты) компилируются без правок.
+- `src/trace_logger.cpp`: константы `g_tracing_outage_*` удалены; Jaeger- и
+  Sentry-пути стандартизированы на член `m_breaker_settings` через общий
+  расчёт `cooldown_ms = min(base << (failures-1), max)`. При открытом breaker
+  партия спанов трейсинга сбрасывается (shed) с учётом в
+  `l2_tracing_spans_failed_total`, сеть не бомбардируется; восстановление
+  сбрасывает счётчик последовательных сбоев.
+- `src/config.hpp` / `config.cpp`: новые переменные окружения
+  `TRACING_OUTAGE_FAILURE_THRESHOLD` (по умолч. 3),
+  `TRACING_OUTAGE_COOLDOWN_BASE_MS` (1000) и
+  `TRACING_OUTAGE_COOLDOWN_MAX_MS` (30000) с валидацией
+  (`threshold > 0`, `base > 0`, `max >= base`).
+- `docker-compose.yml`: три новые переменные `TRACING_OUTAGE_*` добавлены во
+  все три сервиса (l2-proxy / l2-worker / l2-server).
+- `src/main.cpp`: `init_tracer` передаёт `TracingBreakerSettings` из конфига в
+  конструктор `JaegerLogger`.
+- Тесты: `src/test_trace_logger.cpp` — покрытие открытия Jaeger/и Sentry-breaker
+  и shed-учёта партий (эмуляция недоступных таргетов через мёртвые порты);
+  `src/test_components.cpp` — валидация новых настроек конфига (дефолты,
+  невалидный порог, `max < base`).
+
+**Статус сборки.** Сборка проверена `./rebuild-and-run.sh` — образ собран,
+все ветки builder'а собрались, `test_components`/`test_proxy_core` (вкл.
+новые тесты breaker-настроек) прошли, контейнеры поднялись (healthy),
+smoke-тест `python3 message_counter.py --iterations 1 --concurrent 1` прошёл
+без потерь.
+
+### Правка: catch-обработка в путях доставки трейсинга (std::exception + error-логирование)
+
+**Проблема.** В catch-блоках путей доставки спанов (Jaeger `send_batch` /
+`send_span` и Sentry `deliver_sentry_transactions`) причина исключения бралась
+только из `std::runtime_error`, а лог велся на уровне `debug`. Истинная причина
+срыва доставки (включая тип исключения) не доходила до журнала — диагностика
+постыдных сбоев трейсинга сводилась к угадыванию.
+
+**Решение.**
+- `src/trace_logger.cpp`: во всех трёх catch-секциях добавлен
+  `catch (const std::exception &e)` перед `catch (...)` — `e.what()` пишется в
+  журнал. Последний заградительный `catch (...)` переведён с `Logger::debug`
+  на `Logger::error` (trace_logger.cpp:684-693, 714-752, 396-432).
+- `src/l2_worker.cpp`: `record_l2_call_metrics` аналогично получил
+  `catch (const std::exception &e)` + перевод `catch (...)` на `Logger::error`
+  с указанием причины (l2_worker.cpp:438-441).
+- Деструкторные блоки (`l2_worker.cpp:~L2Worker`, `nats_client.cpp:~NatsClient`,
+  `http_client.cpp:~HttpClient`) не тронуты — там пустой `catch (...)` обязателен
+  (NOLINT «must not throw»).
+
+**Статус сборки.** `./rebuild-and-run.sh` — успешно, unit-тесты прошли,
+smoke-тест `message_counter.py --iterations 1 --concurrent 1` без потерь.
