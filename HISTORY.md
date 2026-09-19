@@ -11789,3 +11789,14 @@ smoke-тест `python3 message_counter.py --iterations 1 --concurrent 1` про
 
 **Статус сборки.** `./rebuild-and-run.sh` — успешно, unit-тесты прошли,
 smoke-тест `message_counter.py --iterations 1 --concurrent 1` без потерь.
+
+# round 30+: fix StatsLogger/InFlightTracker grouped-struct member definitions (repair dotted definitions)
+
+## Date: 2026-09-19
+
+### Что сделано
+- Исправлены on-disk `stats_logger.hpp` и `in_flight_tracker.hpp`: внутри вложенных struct член-определения были записаны с точечным внешним префиксом (`std::atomic<uint64_t> m_counters.m_active_clients{0};`), что является некорректным C++ (определение члена внутри вложенной struct должно использовать короткое имя члена). Имена приведены к коротким; ссылки на сами члены остались точечными (`m_counters.m_active_clients`) как методы-использования.
+- В `in_flight_tracker.hpp` сгруппированы приватные члены во вложенные struct: `State{m_shards,m_active}` → `m_state`, `Shutdown{m_requested}` → `m_shutdown`, `Sync{m_mutex,m_cv}` → `m_sync`.
+
+### Проверка
+- Полный контейнерный цикл (./rebuild-and-run.sh + health-check.sh all + message_counter.py --iterations 1 --concurrent 1): build=0, health=0, smoke=0.

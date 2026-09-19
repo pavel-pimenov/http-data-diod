@@ -26,15 +26,23 @@ private:
     std::atomic<uint64_t> m_in_flight{0};
     std::atomic<uint64_t> m_total{0};
   };
-  std::array<Shard, g_shard_count> m_shards{};
+  struct State {
+    std::array<Shard, g_shard_count> m_shards{};
 
-  // Number of shards with a non-zero in-flight count. Only this atomic is
-  // updated when a shard transitions between empty and non-empty, so the
-  // notification path stays out of the per-request hot path.
-  std::atomic<uint64_t> m_active{0};
-  std::atomic<bool> m_shutdown_requested{false};
-  mutable std::mutex m_mutex;
-  std::condition_variable m_cv;
+    // Number of shards with a non-zero in-flight count. Only this atomic is
+    // updated when a shard transitions between empty and non-empty, so the
+    // notification path stays out of the per-request hot path.
+    std::atomic<uint64_t> m_active{0};
+  } m_state;
+
+  struct Shutdown {
+    std::atomic<bool> m_requested{false};
+  } m_shutdown;
+
+  struct Sync {
+    mutable std::mutex m_mutex;
+    std::condition_variable m_cv;
+  } m_sync;
 
   static size_t shard_index() {
     static thread_local const size_t g_shard =
@@ -46,7 +54,7 @@ private:
   template <typename M>
   uint64_t shard_sum(M member) const {
     uint64_t total = 0;
-    for (const Shard &shard : m_shards) {
+    for (const Shard &shard : m_state.m_shards) {
       total += (shard.*member).load(std::memory_order_acquire);
     }
     return total;
@@ -109,44 +117,44 @@ public:
 
 private:
   void increment(size_t shard) {
-    Shard &s = m_shards[shard];
+    Shard &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_add(1, std::memory_order_relaxed);
     s.m_total.fetch_add(1, std::memory_order_relaxed);
     // First request on this shard: register the shard as active
     if (prev == 0) {
-      m_active.fetch_add(1, std::memory_order_relaxed);
+      m_state.m_active.fetch_add(1, std::memory_order_relaxed);
     }
   }
 
   void decrement(size_t shard) {
-    Shard &s = m_shards[shard];
+    Shard &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_sub(1, std::memory_order_release);
     // Shard became empty: unregister it. If it was the last active shard,
     // wake up any thread waiting for completion (notify under the mutex to
     // avoid a lost-wakeup race with wait_for_completion).
-    if (prev == 1 && m_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      std::lock_guard lock(m_mutex);
-      m_cv.notify_all();
+    if (prev == 1 && m_state.m_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      std::lock_guard lock(m_sync.m_mutex);
+      m_sync.m_cv.notify_all();
     }
   }
 
 public:
   void request_shutdown() {
-    m_shutdown_requested = true;
+    m_shutdown.m_requested = true;
     Logger::info("Shutdown requested - waiting for {} in-flight requests",
                  in_flight());
   }
 
-  bool is_shutdown_requested() const { return m_shutdown_requested.load(); }
+  bool is_shutdown_requested() const { return m_shutdown.m_requested.load(); }
 
   // Wait for all in-flight requests to complete (with timeout)
   bool wait_for_completion(std::chrono::seconds timeout,
                            bool log_issues = true) {
-    std::unique_lock lock(m_mutex);
+    std::unique_lock lock(m_sync.m_mutex);
 
     bool completed =
-        m_cv.wait_for(lock, timeout,
-                      [this] { return m_active.load(std::memory_order_acquire) == 0; });
+        m_sync.m_cv.wait_for(lock, timeout,
+                      [this] { return m_state.m_active.load(std::memory_order_acquire) == 0; });
 
     if (!completed) {
       if (log_issues) {
