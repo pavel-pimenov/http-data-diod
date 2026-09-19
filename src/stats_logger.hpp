@@ -14,12 +14,20 @@ private:
   AppContext &m_app_ctx;
   std::atomic<bool> &m_shutdown_flag;
 
-  std::atomic<uint64_t> m_active_clients{0};
-  std::atomic<uint64_t> m_max_clients{0};
+  // Independent counters exposed for the periodic statistics log.
+  struct Counters {
+    std::atomic<uint64_t> m_counters.m_active_clients{0};
+    std::atomic<uint64_t> m_counters.m_max_clients{0};
+  };
+  Counters m_counters;
 
-  std::jthread m_log_thread;
-  std::condition_variable_any m_cv;
-  std::mutex m_cv_mutex;
+  // Background logger thread + its wake/sleep primitives.
+  struct Runner {
+    std::jthread m_runner.m_log_thread;
+    std::condition_variable_any m_runner.m_cv;
+    std::mutex m_runner.m_cv_mutex;
+  };
+  Runner m_runner;
 
 public:
   StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag);

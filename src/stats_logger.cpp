@@ -10,35 +10,35 @@ StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag)
     : m_app_ctx(context), m_shutdown_flag(shutdown_flag) {}
 
 StatsLogger::~StatsLogger() {
-  if (m_log_thread.joinable()) {
-    m_log_thread.request_stop();
-    m_cv.notify_all();
-    m_log_thread.join();
+  if (m_runner.m_log_thread.joinable()) {
+    m_runner.m_log_thread.request_stop();
+    m_runner.m_cv.notify_all();
+    m_runner.m_log_thread.join();
   }
 }
 
 void StatsLogger::increment_active_clients() {
-  uint64_t current = m_active_clients.fetch_add(1) + 1;
-  uint64_t max = m_max_clients.load(std::memory_order_relaxed);
+  uint64_t current = m_counters.m_active_clients.fetch_add(1) + 1;
+  uint64_t max = m_counters.m_max_clients.load(std::memory_order_relaxed);
   // Single CAS attempt — slightly stale max is acceptable for stats
-  m_max_clients.compare_exchange_weak(max, current, std::memory_order_relaxed);
+  m_counters.m_max_clients.compare_exchange_weak(max, current, std::memory_order_relaxed);
 }
 
-void StatsLogger::decrement_active_clients() { m_active_clients.fetch_sub(1); }
+void StatsLogger::decrement_active_clients() { m_counters.m_active_clients.fetch_sub(1); }
 
 void StatsLogger::start_periodic_logging() {
   Logger::info("Starting statistics logging every {} seconds",
                kStatsLogIntervalSeconds);
-  m_log_thread = std::jthread([this](std::stop_token st) {
+  m_runner.m_log_thread = std::jthread([this](std::stop_token st) {
     uint64_t prev_logged_requests = 0;
     auto prev_time = std::chrono::steady_clock::now();
 
     while (!m_shutdown_flag && !st.stop_requested()) {
       {
-        std::unique_lock lk(m_cv_mutex);
+        std::unique_lock lk(m_runner.m_cv_mutex);
         // C++20 jthread + condition_variable_any: wait_for with stop_token wakes
         // instantly on request_stop(), no 1s polling spin.
-        m_cv.wait_for(lk, st, std::chrono::seconds(kStatsLogIntervalSeconds),
+        m_runner.m_cv.wait_for(lk, st, std::chrono::seconds(kStatsLogIntervalSeconds),
                       [&] { return st.stop_requested() || m_shutdown_flag.load(); });
       }
       if (m_shutdown_flag || st.stop_requested()) {
@@ -46,8 +46,8 @@ void StatsLogger::start_periodic_logging() {
       }
 
       const ModeStats s = collect_mode_stats();
-      uint64_t active = m_active_clients.load();
-      uint64_t max = m_max_clients.load();
+      uint64_t active = m_counters.m_active_clients.load();
+      uint64_t max = m_counters.m_max_clients.load();
       uint64_t current_requests_for_rate = s.m_client_requests;
 
       if (m_app_ctx.m_config.m_mode == "proxy") {
