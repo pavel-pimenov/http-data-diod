@@ -43,27 +43,20 @@ void nats_message_callback(natsConnection *nc, natsSubscription *sub,
 } // namespace
 
 NatsClient::NatsClient(const NatsConfig &cfg)
-    : m_host(cfg.m_host), m_port(cfg.m_port), m_subject(cfg.m_subject),
-      m_queue_group(cfg.m_queue_group), m_timeout_ms(cfg.m_timeout_ms),
-      m_username(cfg.m_username), m_password(cfg.m_password),
-      m_token(cfg.m_token), m_credentials_file(cfg.m_credentials_file),
-      m_enable_tls(cfg.m_enable_tls), m_tls_cert_file(cfg.m_tls_cert_file),
-      m_tls_key_file(cfg.m_tls_key_file),
-      m_tls_ca_cert_file(cfg.m_tls_ca_cert_file), m_conn(nullptr),
-      m_opts(nullptr), m_connected(false) {
+    : m_config(cfg), m_conn(nullptr), m_opts(nullptr), m_connected(false) {
   std::string auth_info;
-  if (!m_username.empty())
-    auth_info += " username=" + m_username;
-  if (!m_token.empty())
+  if (!m_config.m_username.empty())
+    auth_info += " username=" + m_config.m_username;
+  if (!m_config.m_token.empty())
     auth_info += " token=***";
-  if (!m_credentials_file.empty())
-    auth_info += " creds_file=" + m_credentials_file;
-  if (m_enable_tls)
+  if (!m_config.m_credentials_file.empty())
+    auth_info += " creds_file=" + m_config.m_credentials_file;
+  if (m_config.m_enable_tls)
     auth_info += " tls=enabled";
 
   Logger::info("NATS client created: {}:{} subject={} queue_group={}{}",
-               cfg.m_host, cfg.m_port, cfg.m_subject, cfg.m_queue_group,
-               auth_info);
+               m_config.m_host, m_config.m_port, m_config.m_subject,
+               m_config.m_queue_group, auth_info);
 }
 
 NatsClient::~NatsClient() {
@@ -111,7 +104,8 @@ bool NatsClient::connect() {
     return true;
   }
 
-  const auto url = std::format("nats://{}:{}", m_host, m_port);
+  const auto url = std::format("nats://{}:{}", m_config.m_host,
+                               m_config.m_port);
   bool first_attempt = true;
 
   while (true) {
@@ -211,43 +205,48 @@ bool NatsClient::setup_options(const std::string &url) {
                 "Failed to set NATS reconnect wait");
   CHECK_NATS_OK(natsOptions_SetClosedCB(m_opts, &NatsClient::closed_cb, this),
                 "Failed to set NATS closed callback");
-  CHECK_NATS_OK(natsOptions_SetTimeout(m_opts, ms_to_seconds(m_timeout_ms)),
+  CHECK_NATS_OK(natsOptions_SetTimeout(
+                    m_opts, ms_to_seconds(m_config.m_timeout_ms)),
                 "Failed to set NATS timeout");
 
-  if (!m_token.empty()) {
-    CHECK_NATS_OK(natsOptions_SetToken(m_opts, m_token.c_str()),
+  if (!m_config.m_token.empty()) {
+    CHECK_NATS_OK(natsOptions_SetToken(m_opts, m_config.m_token.c_str()),
                   "Failed to set NATS token");
     Logger::debug("NATS token authentication configured");
-  } else if (!m_username.empty() || !m_password.empty()) {
-    CHECK_NATS_OK(natsOptions_SetUserInfo(m_opts, m_username.c_str(),
-                                          m_password.c_str()),
+  } else if (!m_config.m_username.empty() ||
+             !m_config.m_password.empty()) {
+    CHECK_NATS_OK(natsOptions_SetUserInfo(m_opts, m_config.m_username.c_str(),
+                                          m_config.m_password.c_str()),
                   "Failed to set NATS username/password");
     Logger::debug("NATS username/password authentication configured");
   }
 
-  if (!m_credentials_file.empty()) {
-    CHECK_NATS_OK(natsOptions_SetUserCredentialsFromFiles(
-                      m_opts, m_credentials_file.c_str(), nullptr),
-                  "Failed to set NATS credentials file: " +
-                      m_credentials_file);
-    Logger::debug("NATS credentials file configured: {}", m_credentials_file);
+  if (!m_config.m_credentials_file.empty()) {
+    CHECK_NATS_OK(
+        natsOptions_SetUserCredentialsFromFiles(
+            m_opts, m_config.m_credentials_file.c_str(), nullptr),
+        "Failed to set NATS credentials file: " + m_config.m_credentials_file);
+    Logger::debug("NATS credentials file configured: {}",
+                  m_config.m_credentials_file);
   }
 
   // Set TLS configuration
-  if (m_enable_tls) {
+  if (m_config.m_enable_tls) {
     CHECK_NATS_OK(natsOptions_SetSecure(m_opts, true),
                   "Failed to enable NATS TLS");
 
-    if (!m_tls_ca_cert_file.empty()) {
+    if (!m_config.m_tls_ca_cert_file.empty()) {
       CHECK_NATS_OK(natsOptions_LoadCATrustedCertificates(
-                        m_opts, m_tls_ca_cert_file.c_str()),
+                        m_opts, m_config.m_tls_ca_cert_file.c_str()),
                     "Failed to load NATS CA certificate: " +
-                        m_tls_ca_cert_file);
+                        m_config.m_tls_ca_cert_file);
     }
 
-    if (!m_tls_cert_file.empty() && !m_tls_key_file.empty()) {
+    if (!m_config.m_tls_cert_file.empty() &&
+        !m_config.m_tls_key_file.empty()) {
       CHECK_NATS_OK(natsOptions_LoadCertificatesChain(
-                        m_opts, m_tls_cert_file.c_str(), m_tls_key_file.c_str()),
+                        m_opts, m_config.m_tls_cert_file.c_str(),
+                        m_config.m_tls_key_file.c_str()),
                     "Failed to load NATS client certificates");
     }
 
@@ -443,7 +442,8 @@ NatsClient::request_impl(std::string_view subject, std::string_view data,
 
   natsMsg *reply = nullptr;
   s = natsConnection_RequestMsg(&reply, conn, msg,
-                                timeout_ms > 0 ? timeout_ms : m_timeout_ms);
+                                timeout_ms > 0 ? timeout_ms
+                                               : m_config.m_timeout_ms);
   natsMsg_Destroy(msg);
 
   if (s != NATS_OK) {
@@ -645,8 +645,10 @@ std::optional<std::string> NatsClient::ping() {
 }
 
 std::optional<std::string> NatsClient::get_last_error() const {
-  std::lock_guard lock(m_error_mutex);
-  return m_last_error.empty() ? std::nullopt : std::optional(m_last_error);
+  std::lock_guard lock(m_error_state.m_error_mutex);
+  return m_error_state.m_last_error.empty()
+             ? std::nullopt
+             : std::optional(m_error_state.m_last_error);
 }
 
 bool NatsClient::set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
@@ -719,8 +721,8 @@ void NatsClient::set_error(const std::string &error) {
 }
 
 void NatsClient::set_last_error(const std::string &error) {
-  std::lock_guard lock(m_error_mutex);
-  m_last_error = error;
+  std::lock_guard lock(m_error_state.m_error_mutex);
+  m_error_state.m_last_error = error;
 }
 
 natsConnection *NatsClient::acquire_connection(const std::string &operation) {

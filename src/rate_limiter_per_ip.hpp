@@ -35,20 +35,33 @@ private:
           m_last_seen(std::chrono::steady_clock::now()), m_lru_it(it) {}
   };
 
-  const uint64_t m_max_tokens_per_ip;
-  const uint64_t m_refill_tokens_per_second_per_ip;
-  const size_t m_max_ips;
-  const int m_cleanup_interval_seconds;
+  // Bucket tuning — read-only after construction.
+  struct Config {
+    uint64_t m_max_tokens_per_ip;
+    uint64_t m_refill_tokens_per_second_per_ip;
+    size_t m_max_ips;
+    int m_cleanup_interval_seconds;
+  };
 
-  std::unordered_map<std::string, IPEntry> m_ip_entries;
-  std::list<std::string> m_lru_list; // front = oldest, back = newest
-  mutable std::mutex m_mutex;
+  // Client cache: IP → limiter map plus the LRU order, guarded by m_mutex.
+  struct IpCache {
+    std::unordered_map<std::string, IPEntry> m_ip_entries;
+    std::list<std::string> m_lru_list; // front = oldest, back = newest
+    mutable std::mutex m_mutex;
+  };
 
-  std::atomic<uint64_t> m_total_requests{0};
-  std::atomic<uint64_t> m_allowed_requests{0};
-  std::atomic<uint64_t> m_rejected_requests{0};
-  std::atomic<uint64_t> m_unique_ips{0};
-  std::atomic<uint64_t> m_evictions{0};
+  // Aggregate request/lifecycle counters.
+  struct Counters {
+    std::atomic<uint64_t> m_total_requests{0};
+    std::atomic<uint64_t> m_allowed_requests{0};
+    std::atomic<uint64_t> m_rejected_requests{0};
+    std::atomic<uint64_t> m_unique_ips{0};
+    std::atomic<uint64_t> m_evictions{0};
+  };
+
+  Config m_config;
+  IpCache m_cache;
+  Counters m_counters;
 
   std::jthread m_cleanup_thread;
 
@@ -56,10 +69,8 @@ public:
   PerIPRateLimiter(uint64_t max_tokens_per_ip,
                    uint64_t refill_tokens_per_second_per_ip,
                    size_t max_ips = 10000, int cleanup_interval_seconds = 300)
-      : m_max_tokens_per_ip(max_tokens_per_ip),
-        m_refill_tokens_per_second_per_ip(refill_tokens_per_second_per_ip),
-        m_max_ips(max_ips),
-        m_cleanup_interval_seconds(cleanup_interval_seconds) {
+      : m_config{max_tokens_per_ip, refill_tokens_per_second_per_ip, max_ips,
+                 cleanup_interval_seconds} {
     Logger::info("PerIPRateLimiter initialized: max_tokens_per_ip={} "
                  "refill_per_sec={} max_ips={} cleanup_ttl={}s",
                  max_tokens_per_ip, refill_tokens_per_second_per_ip, max_ips,
@@ -76,29 +87,29 @@ public:
   PerIPRateLimiter &operator=(PerIPRateLimiter &&) = delete;
 
   bool acquire(const std::string &client_ip) {
-    m_total_requests.fetch_add(1, std::memory_order_relaxed);
+    m_counters.m_total_requests.fetch_add(1, std::memory_order_relaxed);
 
     std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
     if (!limiter) {
-      m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
       size_t tracked = 0;
       {
-        std::lock_guard lock(m_mutex);
-        tracked = m_ip_entries.size();
+        std::lock_guard lock(m_cache.m_mutex);
+        tracked = m_cache.m_ip_entries.size();
       }
       Logger::warn(
           "PerIPRateLimiter: too many IPs tracked ({} >= max_ips={}), "
           "rejecting request from {}. Consider increasing PER_IP_MAX_IPS "
           "and/or lowering PER_IP_CLEANUP_TTL_SECONDS to free stale entries",
-          tracked, m_max_ips, client_ip);
+          tracked, m_config.m_max_ips, client_ip);
       return false;
     }
 
     if (limiter->acquire()) {
-      m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
       return true;
     } else {
-      m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
       record_rejection(client_ip);
       Logger::debug(
           "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
@@ -106,46 +117,49 @@ public:
           "per-IP request rate. If this is legitimate traffic, increase "
           "PER_IP_MAX_TOKENS (burst capacity) or PER_IP_REFILL_RATE "
           "(sustained req/s per IP)",
-          client_ip, m_max_tokens_per_ip, m_refill_tokens_per_second_per_ip);
+          client_ip, m_config.m_max_tokens_per_ip,
+          m_config.m_refill_tokens_per_second_per_ip);
       return false;
     }
   }
 
   std::shared_ptr<RateLimiter>
   get_or_create_limiter(const std::string &client_ip) {
-    std::lock_guard lock(m_mutex);
+    std::lock_guard lock(m_cache.m_mutex);
 
-    auto it = m_ip_entries.find(client_ip);
-    if (it != m_ip_entries.end()) {
+    auto it = m_cache.m_ip_entries.find(client_ip);
+    if (it != m_cache.m_ip_entries.end()) {
       it->second.m_last_seen = std::chrono::steady_clock::now();
       it->second.m_requests.fetch_add(1, std::memory_order_relaxed);
       // Move to back (most recently used) — O(1)
-      m_lru_list.splice(m_lru_list.end(), m_lru_list, it->second.m_lru_it);
+      m_cache.m_lru_list.splice(m_cache.m_lru_list.end(), m_cache.m_lru_list,
+                                it->second.m_lru_it);
       return it->second.m_limiter;
     }
 
-    if (m_ip_entries.size() >= m_max_ips) {
+    if (m_cache.m_ip_entries.size() >= m_config.m_max_ips) {
       evict_oldest_ips(1);
 
-      if (m_ip_entries.size() >= m_max_ips) {
+      if (m_cache.m_ip_entries.size() >= m_config.m_max_ips) {
         return nullptr;
       }
     }
 
-    m_lru_list.push_back(client_ip);
-    const auto lru_it = std::prev(m_lru_list.end());
+    m_cache.m_lru_list.push_back(client_ip);
+    const auto lru_it = std::prev(m_cache.m_lru_list.end());
     const auto limiter = std::make_shared<RateLimiter>(
-        m_max_tokens_per_ip, m_refill_tokens_per_second_per_ip);
+        m_config.m_max_tokens_per_ip,
+        m_config.m_refill_tokens_per_second_per_ip);
     // try_emplace builds IPEntry in place: the atomic counter members make
     // IPEntry non-copyable, so a temporary IPEntry(...) cannot be emplaced.
-    const auto insert_result =
-        m_ip_entries.try_emplace(client_ip, limiter, lru_it);
-    m_unique_ips.fetch_add(1, std::memory_order_relaxed);
+    const auto insert_result = m_cache.m_ip_entries.try_emplace(
+        client_ip, limiter, lru_it);
+    m_counters.m_unique_ips.fetch_add(1, std::memory_order_relaxed);
     insert_result.first->second.m_requests.fetch_add(1,
                                                      std::memory_order_relaxed);
 
     Logger::debug("PerIPRateLimiter: created limiter for IP {} (total IPs: {})",
-                  client_ip, m_ip_entries.size());
+                  client_ip, m_cache.m_ip_entries.size());
 
     return limiter;
   }
@@ -161,23 +175,23 @@ public:
   };
 
   [[nodiscard]] uint64_t max_tokens_per_ip() const {
-    return m_max_tokens_per_ip;
+    return m_config.m_max_tokens_per_ip;
   }
 
   [[nodiscard]] uint64_t refill_tokens_per_second_per_ip() const {
-    return m_refill_tokens_per_second_per_ip;
+    return m_config.m_refill_tokens_per_second_per_ip;
   }
 
   Stats get_stats() const {
-    uint64_t total = m_total_requests.load();
-    uint64_t rejected = m_rejected_requests.load();
-    std::lock_guard lock(m_mutex);
+    uint64_t total = m_counters.m_total_requests.load();
+    uint64_t rejected = m_counters.m_rejected_requests.load();
+    std::lock_guard lock(m_cache.m_mutex);
     return Stats{total,
-                 m_allowed_requests.load(),
+                 m_counters.m_allowed_requests.load(),
                  rejected,
-                 m_unique_ips.load(),
-                 m_ip_entries.size(),
-                 m_evictions.load(),
+                 m_counters.m_unique_ips.load(),
+                 m_cache.m_ip_entries.size(),
+                 m_counters.m_evictions.load(),
                  total > 0 ? static_cast<double>(rejected) / total : 0.0};
   }
 
@@ -186,15 +200,15 @@ public:
   // Capped to 1000 most-recent IPs to bound Prometheus scrape time and lock
   // hold (p99 mitigation for max_ips=10000, see M4).
   std::vector<std::pair<std::string, IPStats>> get_per_ip_stats() const {
-    std::lock_guard lock(m_mutex);
+    std::lock_guard lock(m_cache.m_mutex);
     constexpr size_t kMaxExpose = 1000;
     std::vector<std::pair<std::string, IPStats>> result;
-    result.reserve(std::min(m_ip_entries.size(), kMaxExpose));
+    result.reserve(std::min(m_cache.m_ip_entries.size(), kMaxExpose));
     size_t count = 0;
-    for (const std::string &ip : std::views::reverse(m_lru_list)) {
+    for (const std::string &ip : std::views::reverse(m_cache.m_lru_list)) {
       if (count >= kMaxExpose) break;
-      const auto entry_it = m_ip_entries.find(ip);
-      if (entry_it != m_ip_entries.end()) {
+      const auto entry_it = m_cache.m_ip_entries.find(ip);
+      if (entry_it != m_cache.m_ip_entries.end()) {
         result.emplace_back(
             ip,
             IPStats{
@@ -207,15 +221,15 @@ public:
   }
 
   size_t cleanup_expired_ips() {
-    std::lock_guard lock(m_mutex);
+    std::lock_guard lock(m_cache.m_mutex);
     return do_cleanup_expired();
   }
 
 private:
   void record_rejection(const std::string &client_ip) {
-    std::lock_guard lock(m_mutex);
-    const auto it = m_ip_entries.find(client_ip);
-    if (it != m_ip_entries.end()) {
+    std::lock_guard lock(m_cache.m_mutex);
+    const auto it = m_cache.m_ip_entries.find(client_ip);
+    if (it != m_cache.m_ip_entries.end()) {
       it->second.m_rejected.fetch_add(1, std::memory_order_relaxed);
     }
   }
@@ -223,7 +237,8 @@ private:
   void start_background_cleanup() {
     m_cleanup_thread = std::jthread([this](const std::stop_token &st) {
       Logger::debug("PerIPRateLimiter: background cleanup thread started");
-      const int cleanup_every_seconds = m_cleanup_interval_seconds / 2 + 1;
+      const int cleanup_every_seconds =
+          m_config.m_cleanup_interval_seconds / 2 + 1;
       while (!st.stop_requested()) {
         for (int i = 0; i < cleanup_every_seconds && !st.stop_requested();
              ++i) {
@@ -248,14 +263,15 @@ private:
     const auto now = std::chrono::steady_clock::now();
     size_t removed = 0;
 
-    for (auto it = m_ip_entries.begin(); it != m_ip_entries.end();) {
+    for (auto it = m_cache.m_ip_entries.begin();
+         it != m_cache.m_ip_entries.end();) {
       const auto age = std::chrono::duration_cast<std::chrono::seconds>(
                            now - it->second.m_last_seen)
                            .count();
 
-      if (age >= m_cleanup_interval_seconds) {
-        m_lru_list.erase(it->second.m_lru_it);
-        it = m_ip_entries.erase(it);
+      if (age >= m_config.m_cleanup_interval_seconds) {
+        m_cache.m_lru_list.erase(it->second.m_lru_it);
+        it = m_cache.m_ip_entries.erase(it);
         removed++;
       } else {
         ++it;
@@ -263,10 +279,10 @@ private:
     }
 
     if (removed > 0) {
-      m_evictions.fetch_add(removed, std::memory_order_relaxed);
+      m_counters.m_evictions.fetch_add(removed, std::memory_order_relaxed);
       Logger::debug("PerIPRateLimiter: TTL cleanup removed {} expired IPs "
                     "(remaining: {})",
-                    removed, m_ip_entries.size());
+                    removed, m_cache.m_ip_entries.size());
     }
 
     return removed;
@@ -274,20 +290,20 @@ private:
 
   void evict_oldest_ips(size_t count) {
     size_t removed = 0;
-    for (size_t i = 0; i < count && !m_lru_list.empty(); ++i) {
-      const std::string &oldest_ip = m_lru_list.front();
-      m_ip_entries.erase(oldest_ip);
-      m_lru_list.pop_front();
+    for (size_t i = 0; i < count && !m_cache.m_lru_list.empty(); ++i) {
+      const std::string &oldest_ip = m_cache.m_lru_list.front();
+      m_cache.m_ip_entries.erase(oldest_ip);
+      m_cache.m_lru_list.pop_front();
       removed++;
     }
 
     if (removed > 0) {
-      m_evictions.fetch_add(removed, std::memory_order_relaxed);
+      m_counters.m_evictions.fetch_add(removed, std::memory_order_relaxed);
       Logger::debug("PerIPRateLimiter: LRU eviction removed {} oldest IPs "
                     "(remaining: {})",
-                    removed, m_ip_entries.size());
+                    removed, m_cache.m_ip_entries.size());
     }
   }
-};
+}; // class PerIPRateLimiter
 
 #endif // RATE_LIMITER_PER_IP_HPP

@@ -56,22 +56,33 @@ public:
 
     Logger::info("Crash handler installed, dumps will be written to {}{}",
                  m_dump_dir,
-                 m_sentry_project.empty() ? "" : " (Sentry enabled)");
+                 m_sentry.m_project.empty() ? "" : " (Sentry enabled)");
   }
 
 private:
+  // Crash backtrace buffer (async-signal-safe: fixed-size array, no
+  // allocation) plus its frame count, captured by the signal handler.
+  struct CrashFrames {
+    static inline constexpr int kMaxFrames = 128;
+    static inline void *m_addrs[kMaxFrames];
+    static inline int m_count = 0;
+  };
+
+  // Sentry DSN pieces parsed from the raw DSN at install() time.
+  struct SentryDsnConfig {
+    static inline std::string m_dsn_raw;
+    static inline std::string m_host;
+    static inline uint16_t m_port = 0;
+    static inline std::string m_key;
+    static inline std::string m_project;
+  };
+
   static inline std::string m_dump_dir = g_default_crash_dump_dir;
-  static inline std::string m_sentry_dsn_raw;
-  static inline std::string m_sentry_host;
-  static inline uint16_t m_sentry_port = 0;
-  static inline std::string m_sentry_key;
-  static inline std::string m_sentry_project;
-  static inline constexpr int kMaxFrames = 128;
-  static inline void *m_crash_frames[kMaxFrames];
-  static inline int m_crash_frame_count = 0;
+  static inline CrashFrames m_frames;
+  static inline SentryDsnConfig m_sentry;
 
   static void parse_sentry_dsn(const std::string &dsn) {
-    m_sentry_dsn_raw = dsn;
+    m_sentry.m_dsn_raw = dsn;
     auto scheme_end = dsn.find("://");
     if (scheme_end == std::string::npos) {
       return;
@@ -81,7 +92,7 @@ private:
     if (at_pos == std::string::npos) {
       return;
     }
-    m_sentry_key = dsn.substr(start, at_pos - start);
+    m_sentry.m_key = dsn.substr(start, at_pos - start);
     size_t host_start = at_pos + 1;
     auto slash_pos = dsn.find('/', host_start);
     std::string host_port;
@@ -92,16 +103,16 @@ private:
     }
     auto colon = host_port.find(':');
     if (colon != std::string::npos) {
-      m_sentry_host = host_port.substr(0, colon);
-      m_sentry_port = static_cast<uint16_t>(
+      m_sentry.m_host = host_port.substr(0, colon);
+      m_sentry.m_port = static_cast<uint16_t>(
           std::stoi(host_port.substr(colon + 1)));
     } else {
-      m_sentry_host = host_port;
-      m_sentry_port =
+      m_sentry.m_host = host_port;
+      m_sentry.m_port =
           (dsn.substr(0, scheme_end) == "https") ? 443 : 80;
     }
     if (slash_pos != std::string::npos) {
-      m_sentry_project = dsn.substr(slash_pos + 1);
+      m_sentry.m_project = dsn.substr(slash_pos + 1);
     }
   }
 
@@ -217,13 +228,13 @@ private:
   }
 
   static int find_faulting_frame_index() {
-    for (int i = 1; i < m_crash_frame_count; ++i) {
+    for (int i = 1; i < m_frames.m_count; ++i) {
       Dl_info dli{};
-      if (dladdr(m_crash_frames[i], &dli) != 0 && dli.dli_sname != nullptr) {
+      if (dladdr(m_frames.m_addrs[i], &dli) != 0 && dli.dli_sname != nullptr) {
         return i;
       }
     }
-    return m_crash_frame_count > 1 ? 1 : 0;
+    return m_frames.m_count > 1 ? 1 : 0;
   }
 
   // Annotate frames that belong to the main executable with src file:line
@@ -243,7 +254,7 @@ private:
     std::vector<size_t> exe_idx;
     for (size_t i = 0; i < frames.size(); ++i) {
       Dl_info dli{};
-      if (dladdr(m_crash_frames[i], &dli) == 0 || dli.dli_sname == nullptr) {
+      if (dladdr(m_frames.m_addrs[i], &dli) == 0 || dli.dli_sname == nullptr) {
         continue;
       }
       const std::string fname =
@@ -267,9 +278,9 @@ private:
     }
     for (const size_t i : exe_idx) {
       Dl_info dli{};
-      if (dladdr(m_crash_frames[i], &dli) != 0) {
+      if (dladdr(m_frames.m_addrs[i], &dli) != 0) {
         const unsigned long off =
-            reinterpret_cast<unsigned long>(m_crash_frames[i]) -
+            reinterpret_cast<unsigned long>(m_frames.m_addrs[i]) -
             reinterpret_cast<unsigned long>(dli.dli_fbase);
         fprintf(wf, "0x%lx\n", off);
       }
@@ -320,7 +331,7 @@ private:
   }
 
   static void send_crash_to_sentry(int signum, const siginfo_t *info) {
-    if (m_sentry_host.empty()) {
+    if (m_sentry.m_host.empty()) {
       return;
     }
 
@@ -332,7 +343,7 @@ private:
       snprintf(event_id.data(), event_id.size(), "%08x%08x%08x%08x", a, b, c, d);
     }
 
-    // Build event JSON (truncated stack for safety; bounded by kMaxFrames)
+    // Build event JSON (truncated stack for safety; bounded by m_frames.kMaxFrames)
     nlohmann::json event_json{{"event_id", event_id.data()},
                               {"level", "fatal"},
                               {"platform", "native"}};
@@ -347,13 +358,13 @@ private:
         {"value", fault_addr},
         {"stacktrace", {{"frames", nlohmann::json::array()}}}};
     const int fault_idx = find_faulting_frame_index();
-    for (int i = 0; i < m_crash_frame_count; ++i) {
+    for (int i = 0; i < m_frames.m_count; ++i) {
       char addr[32];
       snprintf(addr, sizeof(addr), "%lx",
-               reinterpret_cast<unsigned long>(m_crash_frames[i]));
+               reinterpret_cast<unsigned long>(m_frames.m_addrs[i]));
       nlohmann::json frame{{"instruction_addr", std::string("0x") + addr}};
       Dl_info dli{};
-      if (dladdr(m_crash_frames[i], &dli) != 0 && dli.dli_sname != nullptr) {
+      if (dladdr(m_frames.m_addrs[i], &dli) != 0 && dli.dli_sname != nullptr) {
         frame["function"] = crash_utils::demangle_symbol(dli.dli_sname);
         frame["filename"] =
             dli.dli_fname != nullptr ? std::string(dli.dli_fname) : "l2-proxy";
@@ -363,7 +374,7 @@ private:
     annotate_exe_frames(exception_value["stacktrace"]["frames"]);
 
     std::string faulting_frame =
-        m_crash_frame_count > 0 ? describe_frame(m_crash_frames[fault_idx])
+        m_frames.m_count > 0 ? describe_frame(m_frames.m_addrs[fault_idx])
                                 : "?";
     nlohmann::json &frames = exception_value["stacktrace"]["frames"];
     if (fault_idx >= 0 && static_cast<size_t>(fault_idx) < frames.size() &&
@@ -384,7 +395,7 @@ private:
     // Build envelope
     const nlohmann::json header = {
         {"event_id", event_id.data()},
-        {"dsn", m_sentry_dsn_raw},
+        {"dsn", m_sentry.m_dsn_raw},
         {"sdk", {{"name", "http-data-diod"}, {"version", g_l2_proxy_version}}}};
     const nlohmann::json item_header = {
         {"type", "event"}, {"length", event_str.size()}};
@@ -396,7 +407,7 @@ private:
     if (sockfd < 0) {
       return;
     }
-    struct hostent *server = gethostbyname(m_sentry_host.c_str());
+    struct hostent *server = gethostbyname(m_sentry.m_host.c_str());
     if (server == nullptr) {
       close(sockfd);
       return;
@@ -404,7 +415,7 @@ private:
     struct sockaddr_in serv_addr {};
     serv_addr.sin_family = AF_INET;
     memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
-    serv_addr.sin_port = htons(m_sentry_port);
+    serv_addr.sin_port = htons(m_sentry.m_port);
     if (connect(sockfd,
                 reinterpret_cast<struct sockaddr *>(&serv_addr),
                 sizeof(serv_addr)) < 0) {
@@ -416,12 +427,12 @@ private:
     std::string http_req;
     http_req.reserve(envelope.size() + 512);
     http_req += "POST /api/";
-    http_req += m_sentry_project;
+    http_req += m_sentry.m_project;
     http_req += "/envelope/ HTTP/1.1\r\nHost: ";
-    http_req += m_sentry_host;
+    http_req += m_sentry.m_host;
     http_req += "\r\nContent-Type: application/json\r\nX-Sentry-Auth: Sentry "
                 "sentry_version=7, sentry_key=";
-    http_req += m_sentry_key;
+    http_req += m_sentry.m_key;
     http_req += ", sentry_client=http-data-diod/";
     http_req += g_l2_proxy_version;
     http_req += "\r\nContent-Length: " + std::to_string(envelope.size());
@@ -442,7 +453,7 @@ private:
 
   static void signal_handler(int signum, siginfo_t *info,
                              void * /*context*/) {
-    m_crash_frame_count = backtrace(m_crash_frames, kMaxFrames);
+    m_frames.m_count = backtrace(m_frames.m_addrs, m_frames.kMaxFrames);
     write_crash_report(signum, info);
 
     // Send to Sentry in a short-lived child process (fork is async-signal-safe)

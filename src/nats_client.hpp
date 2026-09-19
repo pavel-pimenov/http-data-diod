@@ -57,6 +57,12 @@ struct NatsSubscription {
   std::string m_subject;
 };
 
+// Config bundle + last-error record for NatsClient.
+struct NatsErrorState {
+  mutable std::mutex m_error_mutex;
+  std::string m_last_error;
+};
+
 // NATS client for request/response messaging pattern
 class NatsClient : public IConnectableClient {
 public:
@@ -131,21 +137,10 @@ public:
   std::optional<std::string> get_last_error() const;
 
 private:
-  std::string m_host;
-  int m_port;
-  std::string m_subject;
-  std::string m_queue_group;
-  int m_timeout_ms;
-
-  // Authentication fields
-  std::string m_username;
-  std::string m_password;
-  std::string m_token;
-  std::string m_credentials_file;
-  bool m_enable_tls;
-  std::string m_tls_cert_file;
-  std::string m_tls_key_file;
-  std::string m_tls_ca_cert_file;
+  // Connection/auth/TLS settings snapshot passed in at construction. Read-only
+  // after the ctor (NatsConfig is copied wholesale), consumed by
+  // setup_options/connect and the Info log.
+  NatsConfig m_config;
 
   natsConnection *m_conn;
   natsOptions *m_opts;
@@ -164,8 +159,7 @@ private:
   std::atomic<uint64_t> m_connected_instances{0};
   std::atomic<uint64_t> m_closed_callbacks_delivered{0};
   mutable std::mutex m_conn_mutex;
-  mutable std::mutex m_error_mutex;
-  std::string m_last_error;
+  NatsErrorState m_error_state;
 
   // Builds all NATS options (callbacks, auth, TLS); returns false on any failed
   // option without cleaning up (the next connect() iteration starts with

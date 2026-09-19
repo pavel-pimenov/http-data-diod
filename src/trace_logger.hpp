@@ -50,14 +50,34 @@ struct TracingBreakerSettings {
 
 class JaegerLogger {
 private:
-  std::string m_jaeger_url;
-  prometheus::Counter &m_tracing_spans_sent_counter;
-  prometheus::Counter &m_tracing_spans_failed_counter;
-  prometheus::Gauge &m_tracing_queue_size_gauge;
-  prometheus::Gauge &m_tracing_last_send_duration_gauge;
+  // ===== Jaeger sink configuration (endpoint + batching/sampling) =====
+  struct JaegerConfig {
+    std::string m_url;
+    size_t m_batch_size = g_tracing_default_batch_size;
+    int m_flush_interval_ms = g_tracing_send_interval_ms;
+    double m_sample_rate = 1.0; // 0.0-1.0, 1.0 = 100% sampling
+  };
 
-  prometheus::Histogram &m_tracing_send_latency_histogram;
-  prometheus::Histogram &m_tracing_queue_time_histogram;
+  // ===== Delivery metrics. Prometheus references are owned by the registry
+  // and injected at construction; Jaeger sinks are always registered, the
+  // Sentry/GlitchTip counters are nullable pointers (absent without DSN).
+  struct JaegerMetrics {
+    prometheus::Counter &m_spans_sent;
+    prometheus::Counter &m_spans_failed;
+    prometheus::Gauge &m_queue_size;
+    prometheus::Gauge &m_last_send_duration;
+    prometheus::Histogram &m_send_latency;
+    prometheus::Histogram &m_queue_time;
+  };
+
+  struct SentryMetrics {
+    prometheus::Counter *m_spans_sent;
+    prometheus::Counter *m_spans_failed;
+  };
+
+  JaegerConfig m_jaeger;
+  JaegerMetrics m_jaeger_metrics;
+  SentryMetrics m_sentry_metrics;
 
   std::unique_ptr<HttpClientPool> m_http_client_pool;
   // Dedicated pool for the Sentry/GlitchTip target: HttpClient caches its
@@ -72,34 +92,30 @@ private:
     nlohmann::json m_attributes;
   };
 
-  std::deque<SpanData> m_span_queue;
-  std::mutex m_queue_mutex;
-  std::condition_variable_any m_queue_cv;
+  // ===== Span queue + its synchronization (guarded by m_mutex) =====
+  struct SpanQueue {
+    std::deque<SpanData> m_spans;
+    std::mutex m_mutex;
+    std::condition_variable_any m_cv;
+  };
+  SpanQueue m_span_queue;
   std::jthread m_sender_thread;
 
   // Optional Sentry/GlitchTip performance target: when set, every delivered
   // span batch is additionally POSTed to the DSN's envelope endpoint as a
   // Sentry "transaction" so the Performance → Transaction Groups view of the
-  // self-hosted Sentry-compatible server (glitchtip) is populated.
-  std::optional<sentry::DsnData> m_sentry_dsn;
-  std::string m_sentry_service;
-  std::string m_sentry_environment;
-  std::string m_sentry_release;
-  // Separate trace sampling for the Sentry/GlitchTip target: independent of
-  // the Jaeger sample rate so the two sinks can be tuned differently.
-  double m_sentry_sample_rate{1.0};
-  prometheus::Counter *m_sentry_spans_sent;
-  prometheus::Counter *m_sentry_spans_failed;
+  // self-hosted Sentry-compatible server (glitchtip) is populated. Separate
+  // sample rate keeps this sink independently tunable from the Jaeger one.
+  struct SentryConfig {
+    std::optional<sentry::DsnData> m_dsn;
+    std::string m_service;
+    std::string m_environment;
+    std::string m_release;
+    double m_sample_rate = 1.0;
+  };
+  SentryConfig m_sentry;
 
-  // Configuration
-  size_t m_batch_size;
-  int m_flush_interval_ms;
-  double m_sample_rate; // 0.0-1.0, 1.0 = 100% sampling
-
-  // Retry state
-  std::atomic<int> m_consecutive_failures{0};
-
-  // Exponential circuit breaker state shared by the Jaeger and
+  // Exponential outage circuit-breaker shared by the Jaeger and
   // Sentry/GlitchTip sinks. Both are "one multi-item POST per batch" style
   // targets: Jaeger with a retry loop of up to 3 POSTs per batch,
   // Sentry/GlitchTip with a single multi-item envelope POST per batch and no
@@ -113,11 +129,13 @@ private:
     std::atomic<int> consecutive_failures{0};
     std::atomic<uint64_t> cooldown_until_steady_ms{0};
   };
-  ExponentialBreaker m_sentry_breaker;
-  ExponentialBreaker m_jaeger_breaker;
-
-  // Per-sink breaker tuning (thresholds/cooldowns).
-  TracingBreakerSettings m_breaker_settings;
+  // Per-sink breaker state plus its threshold/cooldown tuning.
+  struct BreakerState {
+    ExponentialBreaker m_jaeger;
+    ExponentialBreaker m_sentry;
+    TracingBreakerSettings m_settings;
+  };
+  BreakerState m_breaker;
 
 private:
   bool send_batch(const std::vector<SpanData> &batch);
@@ -126,7 +144,7 @@ private:
                              const std::stop_token &st);
   // Delivers a batch to the optional Sentry/GlitchTip performance target
   // (one multi-item envelope per batch). Fire-and-forget, never blocks the
-  // request path; per-span outcome lands in m_sentry_spans_sent/_failed.
+  // request path; per-span outcome lands in m_sentry_metrics.m_spans_sent/_failed.
   void deliver_sentry_transactions(const std::vector<SpanData> &batch);
 
   // Fast random hex generation (thread-local, no re-initialization)
