@@ -40,9 +40,9 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
       m_jaeger_metrics({spans_sent, spans_failed, queue_size,
                         last_send_duration, send_latency, queue_time}),
       m_sentry_metrics({sentry_spans_sent, sentry_spans_failed}),
-      m_http_client_pool(std::make_unique<HttpClientPool>(
-          kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
-          kJaegerPoolAcquireTimeoutSeconds, true)),
+      m_pools{.m_http_client_pool = std::make_unique<HttpClientPool>(
+                  kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
+                  kJaegerPoolAcquireTimeoutSeconds, true)},
       m_sentry({sentry::parse_dsn(sentry_dsn), sentry_service,
                 sentry_environment, sentry_release, sentry_sample_rate}),
       m_breaker({}, {}, breaker_settings) {
@@ -51,7 +51,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                m_jaeger.m_batch_size, m_jaeger.m_flush_interval_ms,
                m_jaeger.m_sample_rate);
   if (m_sentry.m_dsn) {
-    m_sentry_client_pool = std::make_unique<HttpClientPool>(
+    m_pools.m_sentry_client_pool = std::make_unique<HttpClientPool>(
         kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,
         kJaegerPoolAcquireTimeoutSeconds, true);
     Logger::info("JaegerLogger Sentry performance target enabled: host={} "
@@ -59,15 +59,15 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                  m_sentry.m_dsn->m_host, m_sentry.m_dsn->m_project_id,
                  m_sentry.m_service);
   }
-  m_sender_thread =
+  m_delivery.m_sender_thread =
       std::jthread([this](const std::stop_token &st) { sender_loop(st); });
 }
 
 JaegerLogger::~JaegerLogger() {
-  if (m_sender_thread.joinable()) {
-    m_sender_thread.request_stop();
-    m_span_queue.m_cv.notify_all();
-    m_sender_thread.join();
+  if (m_delivery.m_sender_thread.joinable()) {
+    m_delivery.m_sender_thread.request_stop();
+    m_delivery.m_span_queue.m_cv.notify_all();
+    m_delivery.m_sender_thread.join();
   }
 }
 
@@ -323,7 +323,7 @@ std::string JaegerLogger::build_sentry_envelope(
 
 void JaegerLogger::deliver_sentry_transactions(
     const std::vector<SpanData> &batch) {
-  if (!m_sentry.m_dsn || !m_sentry_client_pool || batch.empty()) {
+  if (!m_sentry.m_dsn || !m_pools.m_sentry_client_pool || batch.empty()) {
     return;
   }
   // Circuit breaker (Sentry/GlitchTip has no built-in retry loop, so a long
@@ -370,7 +370,7 @@ void JaegerLogger::deliver_sentry_transactions(
   // transaction of the batch.
   const std::string envelope = build_sentry_envelope(events);
   try {
-    auto client = m_sentry_client_pool->acquire_connection();
+    auto client = m_pools.m_sentry_client_pool->acquire_connection();
     if (!client) {
       if (m_sentry_metrics.m_spans_failed) {
         m_sentry_metrics.m_spans_failed->Increment(event_count);
@@ -381,7 +381,7 @@ void JaegerLogger::deliver_sentry_transactions(
         url, envelope, "",
         httplib::Headers{{"X-Sentry-Auth", auth}},
         "application/x-sentry-envelope");
-    m_sentry_client_pool->release_connection(std::move(client));
+    m_pools.m_sentry_client_pool->release_connection(std::move(client));
     m_breaker.m_sentry.consecutive_failures = 0;
     m_breaker.m_sentry.cooldown_until_steady_ms = 0;
     if (m_sentry_metrics.m_spans_sent) {
@@ -439,8 +439,8 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                  const std::string &service_name,
                                  const nlohmann::json &attributes) {
   {
-    std::unique_lock lock(m_span_queue.m_mutex);
-    if (m_span_queue.m_spans.size() >= g_tracing_max_queue_size) {
+    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
+    if (m_delivery.m_span_queue.m_spans.size() >= g_tracing_max_queue_size) {
       m_jaeger_metrics.m_spans_failed.Increment();
       Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
       return;
@@ -448,12 +448,12 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
     uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
                           std::chrono::steady_clock::now().time_since_epoch())
                           .count();
-    m_span_queue.m_spans.push_back({trace_id, span_id, parent_id, name,
+    m_delivery.m_span_queue.m_spans.push_back({trace_id, span_id, parent_id, name,
                                     service_name, start_us, end_us, now_us,
                                     attributes});
-    m_jaeger_metrics.m_queue_size.Set(m_span_queue.m_spans.size());
+    m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
   }
-  m_span_queue.m_cv.notify_one();
+  m_delivery.m_span_queue.m_cv.notify_one();
 }
 
 void JaegerLogger::log_request(
@@ -524,24 +524,24 @@ void JaegerLogger::sender_loop(std::stop_token st) {
     batch.reserve(m_jaeger.m_batch_size);
 
     {
-      std::unique_lock lock(m_span_queue.m_mutex);
+      std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
       // Wait for work or stop — replaces poll sleep 100ms
-      if (m_span_queue.m_spans.empty()) {
-        m_span_queue.m_cv.wait_for(
+      if (m_delivery.m_span_queue.m_spans.empty()) {
+        m_delivery.m_span_queue.m_cv.wait_for(
             lock, st,
             std::chrono::milliseconds(m_jaeger.m_flush_interval_ms / 10),
             [&] {
-              return st.stop_requested() || !m_span_queue.m_spans.empty();
+              return st.stop_requested() || !m_delivery.m_span_queue.m_spans.empty();
             });
         if (st.stop_requested()) break;
-        if (m_span_queue.m_spans.empty()) continue;
+        if (m_delivery.m_span_queue.m_spans.empty()) continue;
       }
-      while (!m_span_queue.m_spans.empty() &&
+      while (!m_delivery.m_span_queue.m_spans.empty() &&
              batch.size() < m_jaeger.m_batch_size) {
-        batch.push_back(std::move(m_span_queue.m_spans.front()));
-        m_span_queue.m_spans.pop_front();
+        batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
+        m_delivery.m_span_queue.m_spans.pop_front();
       }
-      m_jaeger_metrics.m_queue_size.Set(m_span_queue.m_spans.size());
+      m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
     }
 
     if (!batch.empty()) {
@@ -552,10 +552,10 @@ void JaegerLogger::sender_loop(std::stop_token st) {
   // Flush remaining spans on shutdown (quick, non-blocking)
   std::vector<SpanData> final_batch;
   {
-    std::unique_lock lock(m_span_queue.m_mutex);
-    while (!m_span_queue.m_spans.empty()) {
-      final_batch.push_back(std::move(m_span_queue.m_spans.front()));
-      m_span_queue.m_spans.pop_front();
+    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
+    while (!m_delivery.m_span_queue.m_spans.empty()) {
+      final_batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
+      m_delivery.m_span_queue.m_spans.pop_front();
     }
     m_jaeger_metrics.m_queue_size.Set(0);
   }
@@ -687,7 +687,7 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
   // double-counting: send_batch returns false and the caller decides.
   try {
     // Use very short timeout for tracing (don't block on Jaeger issues)
-    auto client = m_http_client_pool->acquire_connection();
+    auto client = m_pools.m_http_client_pool->acquire_connection();
     if (!client) {
       // Pool exhausted - drop spans silently (tracing is not critical)
       return false;
@@ -695,7 +695,7 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
 
     // Send with very short timeout - tracing should never block
     client->post_no_response(m_jaeger.m_url, payload_str, "");
-    m_http_client_pool->release_connection(std::move(client));
+    m_pools.m_http_client_pool->release_connection(std::move(client));
 
     if (m_breaker.m_jaeger.consecutive_failures.load() > 0) {
       Logger::debug("Jaeger send recovered after {} failures",
@@ -730,14 +730,14 @@ bool JaegerLogger::send_span(const std::string &trace_id,
 
   // Fire-and-forget: never block main logic
   try {
-    auto client = m_http_client_pool->acquire_connection();
+    auto client = m_pools.m_http_client_pool->acquire_connection();
     if (!client) {
       m_jaeger_metrics.m_spans_failed.Increment();
       return false;
     }
 
     client->post_no_response(m_jaeger.m_url, payload_str, "");
-    m_http_client_pool->release_connection(std::move(client));
+    m_pools.m_http_client_pool->release_connection(std::move(client));
     return true;
   } catch (const std::exception &e) {
     Logger::error("Jaeger span send failed (non-critical): {}", e.what());

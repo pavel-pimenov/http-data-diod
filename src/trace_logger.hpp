@@ -79,11 +79,14 @@ private:
   JaegerMetrics m_jaeger_metrics;
   SentryMetrics m_sentry_metrics;
 
-  std::unique_ptr<HttpClientPool> m_http_client_pool;
-  // Dedicated pool for the Sentry/GlitchTip target: HttpClient caches its
-  // connection for the first host it sees, so reusing the Jaeger pool would
-  // send Sentry envelopes to the Jaeger host.
-  std::unique_ptr<HttpClientPool> m_sentry_client_pool;
+  // HTTP transport pools: one for the Jaeger endpoint, a dedicated one for the
+  // Sentry/GlitchTip target (HttpClient caches its connection for the first
+  // host it sees, so reusing the Jaeger pool would send Sentry envelopes to the
+  // Jaeger host).
+  struct Pools {
+    std::unique_ptr<HttpClientPool> m_http_client_pool;
+    std::unique_ptr<HttpClientPool> m_sentry_client_pool;
+  } m_pools;
 
   struct SpanData {
     std::string m_trace_id, m_span_id, m_parent_id, m_name, m_service_name;
@@ -92,14 +95,16 @@ private:
     nlohmann::json m_attributes;
   };
 
-  // ===== Span queue + its synchronization (guarded by m_mutex) =====
-  struct SpanQueue {
-    std::deque<SpanData> m_spans;
-    std::mutex m_mutex;
-    std::condition_variable_any m_cv;
-  };
-  SpanQueue m_span_queue;
-  std::jthread m_sender_thread;
+  // ===== Span queue + its synchronization (guarded by m_mutex) and the sender
+  // thread draining it =====
+  struct Delivery {
+    struct SpanQueue {
+      std::deque<SpanData> m_spans;
+      std::mutex m_mutex;
+      std::condition_variable_any m_cv;
+    } m_span_queue;
+    std::jthread m_sender_thread;
+  } m_delivery;
 
   // Optional Sentry/GlitchTip performance target: when set, every delivered
   // span batch is additionally POSTed to the DSN's envelope endpoint as a
