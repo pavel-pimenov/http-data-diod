@@ -221,53 +221,53 @@ SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
                            std::string service_name, std::string environment,
                            std::string release, int timeout_ms,
                            size_t max_queue_size, const TransportFn &transport)
-    : m_dsn(std::move(dsn)),
-      m_dsn_data(sentry::parse_dsn(m_dsn)),
-      m_service_name(std::move(service_name)),
-      m_environment(std::move(environment)),
-      m_release(std::move(release)),
-      m_events_sent(events_sent),
-      m_events_failed(events_failed),
-      m_queue_size(queue_size),
-      m_timeout_ms(timeout_ms),
-      m_max_queue_size(max_queue_size == 0 ? 1 : max_queue_size),
-      m_transport(transport) {
+    : m_config{std::move(dsn),
+               sentry::parse_dsn(m_config.m_dsn),
+               std::move(service_name),
+               std::move(environment),
+               std::move(release),
+               timeout_ms,
+               max_queue_size == 0 ? 1 : max_queue_size,
+               transport},
+      m_metrics{events_sent, events_failed, queue_size} {
   if (enabled()) {
     Logger::info("Sentry client enabled: host={} project={} service={}",
-                 m_dsn_data->m_host, m_dsn_data->m_project_id,
-                 m_service_name);
-    m_sender_thread = std::jthread([this](std::stop_token st) {
+                 m_config.m_dsn_data->m_host,
+                 m_config.m_dsn_data->m_project_id,
+                 m_config.m_service_name);
+    m_queue.m_sender_thread = std::jthread([this](std::stop_token st) {
       sender_loop(std::move(st));
     });
   }
 }
 
 SentryClient::~SentryClient() {
-  if (m_sender_thread.joinable()) {
-    m_sender_thread.request_stop();
-    m_cv.notify_all();
-    m_sender_thread.join();
+  if (m_queue.m_sender_thread.joinable()) {
+    m_queue.m_sender_thread.request_stop();
+    m_queue.m_cv.notify_all();
+    m_queue.m_sender_thread.join();
   }
 }
 
-bool SentryClient::enabled() const { return m_dsn_data.has_value(); }
+bool SentryClient::enabled() const { return m_config.m_dsn_data.has_value(); }
 
 void SentryClient::capture(const sentry::SentryEvent &event) {
   if (!enabled()) {
     return;
   }
   {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_queue.size() >= m_max_queue_size) {
-      m_queue.pop_front();
-      --m_pending;
-      m_events_failed.Increment();
+    std::lock_guard<std::mutex> lock(m_queue.m_mutex);
+    if (m_queue.m_queue.size() >= m_config.m_max_queue_size) {
+      m_queue.m_queue.pop_front();
+      --m_queue.m_pending;
+      m_metrics.m_events_failed.Increment();
     }
-    m_queue.push_back(event);
-    ++m_pending;
-    m_queue_size.Set(static_cast<double>(m_pending));
+    m_queue.m_queue.push_back(event);
+    ++m_queue.m_pending;
+    m_metrics.m_queue_size.Set(
+        static_cast<double>(m_queue.m_pending));
   }
-  m_cv.notify_one();
+  m_queue.m_cv.notify_one();
 }
 
 void SentryClient::capture_message(
@@ -284,8 +284,8 @@ void SentryClient::flush() {
   if (!enabled()) {
     return;
   }
-  std::unique_lock<std::mutex> lock(m_mutex);
-  m_cv.wait(lock, [this] { return m_pending.load() == 0; });
+  std::unique_lock<std::mutex> lock(m_queue.m_mutex);
+  m_queue.m_cv.wait(lock, [this] { return m_queue.m_pending.load() == 0; });
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param) - cv.wait requires stop_token by value
@@ -293,79 +293,85 @@ void SentryClient::sender_loop(std::stop_token st) {
   while (true) {
     std::vector<sentry::SentryEvent> batch;
     {
-      std::unique_lock<std::mutex> lock(m_mutex);
-      m_cv.wait(lock, st, [this] { return !m_queue.empty(); });
-      if (m_queue.empty()) {
+      std::unique_lock<std::mutex> lock(m_queue.m_mutex);
+      m_queue.m_cv.wait(lock, st,
+                        [this] { return !m_queue.m_queue.empty(); });
+      if (m_queue.m_queue.empty()) {
         break;
       }
-      const size_t to_take = std::min(m_queue.size(), size_t{8});
+      const size_t to_take =
+          std::min(m_queue.m_queue.size(), size_t{8});
       batch.reserve(to_take);
       for (size_t i = 0; i < to_take; ++i) {
-        batch.push_back(std::move(m_queue.front()));
-        m_queue.pop_front();
+        batch.push_back(std::move(m_queue.m_queue.front()));
+        m_queue.m_queue.pop_front();
       }
     }
     for (const auto &event : batch) {
       process_event(event);
     }
     {
-      std::lock_guard<std::mutex> lock(m_mutex);
-      m_pending -= batch.size();
-      m_queue_size.Set(static_cast<double>(m_pending));
-      m_cv.notify_all();
+      std::lock_guard<std::mutex> lock(m_queue.m_mutex);
+      m_queue.m_pending -= batch.size();
+      m_metrics.m_queue_size.Set(
+          static_cast<double>(m_queue.m_pending));
+      m_queue.m_cv.notify_all();
     }
   }
   Logger::info("{}", "Sentry sender thread stopped");
 }
 
 void SentryClient::process_event(const sentry::SentryEvent &event) {
-  if (!m_dsn_data) {
+  if (!m_config.m_dsn_data) {
     return;
   }
   const std::string envelope = sentry::build_envelope(
-      event, *m_dsn_data, m_service_name, m_environment, m_release);
+      event, *m_config.m_dsn_data, m_config.m_service_name,
+      m_config.m_environment, m_config.m_release);
   bool delivered = false;
-  if (m_transport) {
-    delivered = m_transport(envelope);
+  if (m_config.m_transport) {
+    delivered = m_config.m_transport(envelope);
   } else {
     delivered = send_envelope(envelope);
   }
   if (delivered) {
-    m_events_sent.Increment();
+    m_metrics.m_events_sent.Increment();
   } else {
-    m_events_failed.Increment();
+    m_metrics.m_events_failed.Increment();
   }
 }
 
 bool SentryClient::send_envelope(const std::string &envelope) {
-  if (!m_dsn_data) {
+  if (!m_config.m_dsn_data) {
     return false;
   }
   const std::string path =
-      m_dsn_data->m_path_prefix + "/api/" + m_dsn_data->m_project_id +
-      "/envelope/";
+      m_config.m_dsn_data->m_path_prefix + "/api/" +
+      m_config.m_dsn_data->m_project_id + "/envelope/";
   // Modern Sentry-compatible servers (glitchtip >= 6) authenticate the DSN
   // via the X-Sentry-Auth header, not the URL userinfo part. The public key
   // is required; the legacy secret key goes after the slash if present.
-  std::string sentry_key = m_dsn_data->m_public_key;
-  if (!m_dsn_data->m_secret_key.empty()) {
-    sentry_key += "/" + m_dsn_data->m_secret_key;
+  std::string sentry_key = m_config.m_dsn_data->m_public_key;
+  if (!m_config.m_dsn_data->m_secret_key.empty()) {
+    sentry_key += "/" + m_config.m_dsn_data->m_secret_key;
   }
   httplib::Headers headers{
       {"X-Sentry-Auth",
        "Sentry sentry_version=7, sentry_key=" + sentry_key}};
-  const int timeout_seconds = m_timeout_ms / 1000;
+  const int timeout_seconds = m_config.m_timeout_ms / 1000;
 
   httplib::Result res;
-  if (m_dsn_data->m_scheme == "https") {
-    httplib::SSLClient client(m_dsn_data->m_host, m_dsn_data->m_port);
+  if (m_config.m_dsn_data->m_scheme == "https") {
+    httplib::SSLClient client(m_config.m_dsn_data->m_host,
+                              m_config.m_dsn_data->m_port);
     client.set_connection_timeout(5, 0);
     client.set_read_timeout(timeout_seconds, 0);
     client.set_write_timeout(timeout_seconds, 0);
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   } else {
-    httplib::Client client(m_dsn_data->m_host, m_dsn_data->m_port);
+    httplib::Client client(m_config.m_dsn_data->m_host,
+                           m_config.m_dsn_data->m_port);
     client.set_connection_timeout(5, 0);
     client.set_read_timeout(timeout_seconds, 0);
     client.set_write_timeout(timeout_seconds, 0);

@@ -93,23 +93,28 @@ private:
   void process_event(const sentry::SentryEvent &event);
   bool send_envelope(const std::string &envelope);
 
-  std::string m_dsn;
-  std::optional<sentry::DsnData> m_dsn_data;
-  std::string m_service_name;
-  std::string m_environment;
-  std::string m_release;
-  prometheus::Counter &m_events_sent;
-  prometheus::Counter &m_events_failed;
-  prometheus::Gauge &m_queue_size;
-  int m_timeout_ms;
-  size_t m_max_queue_size;
-  TransportFn m_transport;
-
-  std::mutex m_mutex;
-  std::condition_variable_any m_cv;
-  std::deque<sentry::SentryEvent> m_queue;
-  std::jthread m_sender_thread;
-  std::atomic<size_t> m_pending{0};
+  struct Config {
+    std::string m_dsn;
+    std::optional<sentry::DsnData> m_dsn_data;
+    std::string m_service_name;
+    std::string m_environment;
+    std::string m_release;
+    int m_timeout_ms;
+    size_t m_max_queue_size;
+    TransportFn m_transport;
+  } m_config;
+  struct Metrics {
+    prometheus::Counter &m_events_sent;
+    prometheus::Counter &m_events_failed;
+    prometheus::Gauge &m_queue_size;
+  } m_metrics;
+  struct QueueState {
+    std::mutex m_mutex;
+    std::condition_variable_any m_cv;
+    std::deque<sentry::SentryEvent> m_queue;
+    std::jthread m_sender_thread;
+    std::atomic<size_t> m_pending{0};
+  } m_queue;
 };
 
 #endif // SENTRY_CLIENT_HPP
