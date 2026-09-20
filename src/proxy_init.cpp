@@ -116,8 +116,8 @@ void init_proxy_components(AppContext &app_ctx) {
                "Request processing latency per X-DataHub-Client-Id header"}},
           DynamicLabeledFamily<prometheus::Histogram>::Provider{}, 300, 10000,
           std::vector<double>(
-              histogram_buckets::g_k_latency_5ms_to_10s.begin(),
-              histogram_buckets::g_k_latency_5ms_to_10s.end()));
+              histogram_buckets::g_buckets.m_latency_5ms_to_10s.begin(),
+              histogram_buckets::g_buckets.m_latency_5ms_to_10s.end()));
 
   app_ctx.m_proxy.m_per_client_id_duplicate_collector =
       std::make_shared<DynamicLabeledFamily<prometheus::Counter>>(

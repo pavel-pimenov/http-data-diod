@@ -293,10 +293,10 @@ TEST_CASE("MetricsManager: array-arg creators forward bucket bounds",
           "[metrics-manager]") {
   auto registry = std::make_shared<prometheus::Registry>();
   auto &hist = MetricsManager::create_histogram(
-      registry, "mm_hist_arr", "", histogram_buckets::g_k_latency_ms_to_10s);
+      registry, "mm_hist_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_10s);
   hist.Observe(5.0);
   auto &fam = MetricsManager::create_histogram_family(
-      registry, "mm_hfam_arr", "", histogram_buckets::g_k_latency_ms_to_5s);
+      registry, "mm_hfam_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_5s);
   REQUIRE(fam.Collect().empty());
 }
 

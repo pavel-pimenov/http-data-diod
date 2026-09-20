@@ -80,11 +80,11 @@ void AppContext::init_common() {
       MetricsManager::create_histogram(
           m_common_registry, "l2_tracing_send_latency_seconds",
           "Histogram of span batch send latency in seconds",
-          histogram_buckets::g_k_latency_ms_to_5s),
+          histogram_buckets::g_buckets.m_latency_ms_to_5s),
       MetricsManager::create_histogram(
           m_common_registry, "l2_tracing_queue_time_seconds",
           "Histogram of time spans spend in queue before sending in seconds",
-          histogram_buckets::g_k_latency_ms_to_5s),
+          histogram_buckets::g_buckets.m_latency_ms_to_5s),
       MetricsManager::create_counter(
           m_common_registry, "l2_tracing_sentry_transactions_sent_total",
           "Total number of spans delivered to the Sentry/GlitchTip "
@@ -130,7 +130,7 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_histogram(
           m_proxy_registry, "l2_proxy_nats_request_duration_seconds",
           "Histogram of NATS request duration in seconds",
-          histogram_buckets::g_k_latency_ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_ms_to_10s),
       MetricsManager::create_counter(
           m_proxy_registry, "l2_proxy_bytes_received_total",
           "Total number of bytes received from clients"),
@@ -140,15 +140,15 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_histogram(
           m_proxy_registry, "l2_proxy_request_duration_seconds",
           "Histogram of request processing duration in seconds",
-          histogram_buckets::g_k_latency_5ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_5ms_to_10s),
       MetricsManager::create_histogram(
           m_proxy_registry, "l2_proxy_request_size_bytes",
           "Histogram of client request sizes in bytes",
-          histogram_buckets::g_k_size_100b_to_5mb),
+          histogram_buckets::g_buckets.m_size_100b_to_5mb),
       MetricsManager::create_histogram(m_proxy_registry,
                                        "l2_proxy_response_size_bytes",
                                        "Histogram of response sizes in bytes",
-                                       histogram_buckets::g_k_size_100b_to_5mb),
+                                       histogram_buckets::g_buckets.m_size_100b_to_5mb),
       MetricsManager::create_counter(
           m_proxy_registry, "l2_proxy_duplicate_requests_total",
           "Total number of NATS request/reply re-sends by the proxy after "
@@ -168,12 +168,12 @@ void AppContext::init_proxy_metrics() {
           m_proxy_registry, "l2_proxy_db_request_duration_seconds",
           "Histogram of HTTP DB Gateway request processing duration in "
           "seconds by database",
-          histogram_buckets::g_k_latency_ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_ms_to_10s),
       MetricsManager::create_histogram_family(
           m_proxy_registry, "l2_proxy_db_nats_request_duration_seconds",
           "Histogram of HTTP DB Gateway NATS round-trip duration in seconds "
           "by database",
-          histogram_buckets::g_k_latency_ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_ms_to_10s),
       MetricsManager::create_gauge(
           m_proxy_registry, "l2_proxy_in_flight_requests",
           "Current number of in-flight proxy HTTP requests"),
@@ -228,11 +228,11 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_histogram(
           m_worker_registry, "l2_worker_request_duration_seconds",
           "Histogram of request processing duration in seconds",
-          histogram_buckets::g_k_latency_5ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_5ms_to_10s),
       MetricsManager::create_histogram(
           m_worker_registry, "l2_worker_l2_call_duration_seconds",
           "Histogram of L2 server call duration in seconds",
-          histogram_buckets::g_k_latency_5ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_5ms_to_10s),
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_processing_json_errors_total",
           "JSON parsing errors during request processing"),
@@ -242,7 +242,7 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_histogram(
           m_worker_registry, "l2_worker_l2_response_size_bytes",
           "Histogram of L2 response sizes in bytes",
-          histogram_buckets::g_k_size_100b_to_5mb),
+          histogram_buckets::g_buckets.m_size_100b_to_5mb),
       MetricsManager::create_gauge(
           m_worker_registry, "l2_worker_circuit_breaker_state",
           "Circuit breaker state (0=closed, 1=open, 2=half_open)"),
@@ -256,7 +256,7 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_histogram_family(
           m_worker_registry, "l2_worker_db_query_duration_seconds",
           "Histogram of DB query execution duration in seconds by database",
-          histogram_buckets::g_k_latency_ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_ms_to_10s),
       MetricsManager::create_gauge_family(
           m_worker_registry, "l2_worker_db_pool_connections",
           "Current number of DB pool connections by database and state "
@@ -304,7 +304,7 @@ void AppContext::init_server_metrics() {
       MetricsManager::create_histogram(
           m_server_registry, "l2_server_request_duration_seconds",
           "Histogram of request processing duration in seconds",
-          histogram_buckets::g_k_latency_5ms_to_10s),
+          histogram_buckets::g_buckets.m_latency_5ms_to_10s),
       MetricsManager::create_counter_family(
           m_server_registry, "l2_server_responses_total",
           "Total number of L2 server HTTP responses by HTTP status code"),

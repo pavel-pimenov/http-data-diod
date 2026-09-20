@@ -13,22 +13,27 @@
 #include <vector>
 
 namespace histogram_buckets {
-constexpr std::array<double, 11> g_k_latency_ms_to_5s = {
-    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0};
-constexpr std::array<double, 12> g_k_latency_ms_to_10s = {
-    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
-constexpr std::array<double, 11> g_k_latency_5ms_to_10s = {
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
-constexpr std::array<double, 10> g_k_size_100b_to_5mb = {
-    100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000};
+// Histogram bucket bounds grouped in one struct so the related latency/size
+// tables stay together and are exposed through a single global instance.
+struct Buckets {
+  std::array<double, 11> m_latency_ms_to_5s;
+  std::array<double, 12> m_latency_ms_to_10s;
+  std::array<double, 11> m_latency_5ms_to_10s;
+  std::array<double, 10> m_size_100b_to_5mb;
+};
+inline constexpr Buckets g_buckets = {
+    {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0}},
+    {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
+    {{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
+    {{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000}}};
 } // namespace histogram_buckets
 
 // Histogram families need the bucket bounds on every Family::Add call (the
 // family itself does not remember them), so labeled call sites pass this
 // helper instead of rebuilding the vector inline.
 inline std::vector<double> latency_buckets_ms_to_10s() {
-  return {histogram_buckets::g_k_latency_ms_to_10s.begin(),
-          histogram_buckets::g_k_latency_ms_to_10s.end()};
+  return {histogram_buckets::g_buckets.m_latency_ms_to_10s.begin(),
+          histogram_buckets::g_buckets.m_latency_ms_to_10s.end()};
 }
 
 class MetricsManager {
