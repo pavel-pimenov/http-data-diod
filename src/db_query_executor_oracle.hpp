@@ -28,19 +28,21 @@ protected:
 
 private:
   struct Impl;
-  std::unique_ptr<Impl> m_impl;
+  struct Init {
+    // True once the background init() reported the ODPI pool ready. Requests
+    // arrive only after init() returns, so until this flips they are answered
+    // with DB_UNAVAILABLE instead of touching a not-yet-created pool.
+    std::atomic<bool> m_ready{false};
+    // Set on destruction: the background thread stops retrying and, when not
+    // parked in a blocked ODPI call, exits so the destructor's join() returns.
+    std::atomic<bool> m_stop{false};
+    // Runs the (potentially long) ODPI pool creation off the worker main loop so
+    // an unreachable Oracle host cannot block the worker's NATS subscription.
+    // Retries on its own until the pool is created or destruction is requested.
+    std::thread m_init_thread;
+  } m_init;
 
-  // True once the background init() reported the ODPI pool ready. Requests
-  // arrive only after init() returns, so until this flips they are answered
-  // with DB_UNAVAILABLE instead of touching a not-yet-created pool.
-  std::atomic<bool> m_ready{false};
-  // Set on destruction: the background thread stops retrying and, when not
-  // parked in a blocked ODPI call, exits so the destructor's join() returns.
-  std::atomic<bool> m_stop{false};
-  // Runs the (potentially long) ODPI pool creation off the worker main loop so
-  // an unreachable Oracle host cannot block the worker's NATS subscription.
-  // Retries on its own until the pool is created or destruction is requested.
-  std::thread m_init_thread;
+  std::unique_ptr<Impl> m_impl;
 
   // Returns the pooled connection to the pool and refreshes pool gauges.
   void release_conn(dpiConn *conn);

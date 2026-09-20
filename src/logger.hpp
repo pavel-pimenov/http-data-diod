@@ -51,25 +51,27 @@ class LogContextScope {
 public:
   LogContextScope() {
     const auto &ctx = LogContext::get();
-    m_prev_request_id = ctx.m_request_id;
-    m_prev_trace_id = ctx.m_trace_id;
-    m_prev_client_ip = ctx.m_client_ip;
+    m_previous.m_request_id = ctx.m_request_id;
+    m_previous.m_trace_id = ctx.m_trace_id;
+    m_previous.m_client_ip = ctx.m_client_ip;
   }
 
   ~LogContextScope() {
     auto &ctx = LogContext::get();
-    ctx.m_request_id = std::move(m_prev_request_id);
-    ctx.m_trace_id = std::move(m_prev_trace_id);
-    ctx.m_client_ip = std::move(m_prev_client_ip);
+    ctx.m_request_id = std::move(m_previous.m_request_id);
+    ctx.m_trace_id = std::move(m_previous.m_trace_id);
+    ctx.m_client_ip = std::move(m_previous.m_client_ip);
   }
 
   LogContextScope(const LogContextScope &) = delete;
   LogContextScope &operator=(const LogContextScope &) = delete;
 
 private:
-  std::string m_prev_request_id;
-  std::string m_prev_trace_id;
-  std::string m_prev_client_ip;
+  struct Previous {
+    std::string m_request_id;
+    std::string m_trace_id;
+    std::string m_client_ip;
+  } m_previous;
 };
 
 // Custom JSON formatter for structured logging

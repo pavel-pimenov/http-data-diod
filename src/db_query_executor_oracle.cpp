@@ -275,9 +275,9 @@ OracleQueryExecutor::OracleQueryExecutor(DbConfig db)
       m_impl(std::make_unique<Impl>(m_db, this)) {}
 
 OracleQueryExecutor::~OracleQueryExecutor() {
-  m_stop.store(true, std::memory_order_release);
-  if (m_init_thread.joinable()) {
-    m_init_thread.join();
+  m_init.m_stop.store(true, std::memory_order_release);
+  if (m_init.m_init_thread.joinable()) {
+    m_init.m_init_thread.join();
   }
 }
 
@@ -287,22 +287,22 @@ OracleQueryExecutor::~OracleQueryExecutor() {
 // whole HTTP flow) until the DB becomes reachable. Returns true once the
 // thread is scheduled so the caller registers the executor immediately; the
 // thread keeps retrying until the pool exists or the executor is destroyed,
-// and queries are answered with DB_UNAVAILABLE until m_ready flips.
+// and queries are answered with DB_UNAVAILABLE until m_init.m_ready flips.
 bool OracleQueryExecutor::init() {
-  if (m_init_thread.joinable()) {
+  if (m_init.m_init_thread.joinable()) {
     return true;
   }
-  m_init_thread = std::thread([this]() {
+  m_init.m_init_thread = std::thread([this]() {
     bool first_attempt = true;
-    while (!m_stop.load(std::memory_order_acquire)) {
+    while (!m_init.m_stop.load(std::memory_order_acquire)) {
       if (m_impl->init(first_attempt)) {
         Logger::info("DB executor '{}': background init succeeded",
                      m_impl->m_db.m_name);
-        m_ready.store(true, std::memory_order_release);
+        m_init.m_ready.store(true, std::memory_order_release);
         return;
       }
       first_attempt = false;
-      if (m_stop.load(std::memory_order_acquire)) {
+      if (m_init.m_stop.load(std::memory_order_acquire)) {
         return;
       }
       std::this_thread::sleep_for(
@@ -313,7 +313,7 @@ bool OracleQueryExecutor::init() {
 }
 
 [[nodiscard]] bool OracleQueryExecutor::is_ready() const {
-  return m_ready.load(std::memory_order_acquire);
+  return m_init.m_ready.load(std::memory_order_acquire);
 }
 
 void OracleQueryExecutor::release_conn(dpiConn *conn) {
@@ -328,7 +328,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
                                         const json &params, int timeout_ms,
                                         int max_rows, int &status_code) {
   status_code = 200;
-  if (!m_ready.load(std::memory_order_acquire)) {
+  if (!m_init.m_ready.load(std::memory_order_acquire)) {
     Logger::warn("DB executor '{}': pool not ready yet, rejecting query",
                  m_impl->m_db.m_name);
     return make_db_unavailable(status_code, "database is still initializing");
@@ -549,7 +549,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
 }
 
 bool OracleQueryExecutor::ping(int timeout_ms) {
-  if (!m_ready.load(std::memory_order_acquire)) {
+  if (!m_init.m_ready.load(std::memory_order_acquire)) {
     Logger::warn("DB executor '{}': pool not ready yet, ping failed",
                  m_impl->m_db.m_name);
     return false;
