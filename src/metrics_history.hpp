@@ -57,24 +57,25 @@ public:
       std::chrono::seconds interval = std::chrono::seconds(15),
       std::size_t max_series_per_family = 8,
       std::size_t max_samples = 240)
-      : m_registry(std::move(registry)),
-        m_interval(interval),
-        m_max_series_per_family(max_series_per_family),
-        m_max_samples(max_samples) {}
+      : m_config{std::move(registry),
+                 interval,
+                 max_series_per_family,
+                 max_samples} {}
 
   ~MetricsHistory() { stop(); }
 
   void start() {
-    if (m_thread.joinable()) {
+    if (m_sampler.m_thread.joinable()) {
       return;
     }
-    m_thread = std::jthread([this](const std::stop_token &st) { run(st); });
+    m_sampler.m_thread = std::jthread(
+        [this](const std::stop_token &st) { run(st); });
   }
 
   void stop() {
-    if (m_thread.joinable()) {
-      m_thread.request_stop();
-      m_thread.join();
+    if (m_sampler.m_thread.joinable()) {
+      m_sampler.m_thread.request_stop();
+      m_sampler.m_thread.join();
     }
   }
 
@@ -84,17 +85,17 @@ public:
   };
 
   bool has_family(const std::string &family) const {
-    std::lock_guard lk(m_mutex);
-    return m_data.find(family) != m_data.end();
+    std::lock_guard lk(m_store.m_mutex);
+    return m_store.m_data.find(family) != m_store.m_data.end();
   }
 
   // Returns up to `limit` series (insertion order) for a metric family.
   std::vector<Series> get_series(const std::string &family,
                                  std::size_t limit) const {
     std::vector<Series> out;
-    std::lock_guard lk(m_mutex);
-    const auto it = m_data.find(family);
-    if (it == m_data.end()) {
+    std::lock_guard lk(m_store.m_mutex);
+    const auto it = m_store.m_data.find(family);
+    if (it == m_store.m_data.end()) {
       return out;
     }
     for (const auto &kv : it->second) {
@@ -112,9 +113,9 @@ public:
 #if __has_include(<generator>)
   // C++23 generator: lazy iteration over series, no vector allocation until consumed
   std::generator<Series> series_view(const std::string &family, std::size_t limit) const {
-    std::lock_guard lk(m_mutex);
-    const auto it = m_data.find(family);
-    if (it == m_data.end()) co_return;
+    std::lock_guard lk(m_store.m_mutex);
+    const auto it = m_store.m_data.find(family);
+    if (it == m_store.m_data.end()) co_return;
     std::size_t n = 0;
     for (const auto &kv : it->second) {
       if (n++ >= limit) break;
@@ -131,29 +132,30 @@ private:
   void run(std::stop_token st) {
     while (!st.stop_requested()) {
       sample();
-      std::unique_lock lk(m_cv_mutex);
-      m_cv.wait_for(lk, st, m_interval, [&] { return st.stop_requested(); });
+      std::unique_lock lk(m_sampler.m_cv_mutex);
+      m_sampler.m_cv.wait_for(lk, st, m_config.m_interval,
+                              [&] { return st.stop_requested(); });
     }
   }
 
   void sample() {
-    if (!m_registry) {
+    if (!m_config.m_registry) {
       return;
     }
-    const auto families = m_registry->Collect();
+    const auto families = m_config.m_registry->Collect();
     const std::time_t now = std::time(nullptr);
     // span<const MetricFamily> — non-owning view над families, 0 копий
     std::span<const prometheus::MetricFamily> fam_view(families);
-    std::lock_guard lk(m_mutex);
+    std::lock_guard lk(m_store.m_mutex);
     for (const auto &family : fam_view) {
       if (family.metric.empty()) {
         continue;
       }
-      auto &smap = m_data[family.name];
+      auto &smap = m_store.m_data[family.name];
       std::size_t stored = 0;
       std::span<const prometheus::ClientMetric> view(family.metric);
       for (const auto &metric : view) {
-        if (stored >= m_max_series_per_family) {
+        if (stored >= m_config.m_max_series_per_family) {
           break;
         }
         const std::string key = mh_format_labels(metric.label);
@@ -161,7 +163,7 @@ private:
         auto &buf = smap[key];
         if (buf.empty() || buf.back().first != now) {
           buf.emplace_back(now, val);
-          if (buf.size() > m_max_samples) {
+          if (buf.size() > m_config.m_max_samples) {
             buf.pop_front();
           }
         } else {
@@ -188,18 +190,24 @@ private:
     }
   }
 
-  std::shared_ptr<prometheus::Registry> m_registry;
-  std::chrono::seconds m_interval;
-  std::size_t m_max_series_per_family;
-  std::size_t m_max_samples;
-  mutable std::mutex m_mutex;
-  std::map<std::string,
-           std::map<std::string,
-                    std::deque<std::pair<std::time_t, double>>>>
-      m_data;
-  std::jthread m_thread;
-  std::mutex m_cv_mutex;
-  std::condition_variable_any m_cv;
+  struct Config {
+    std::shared_ptr<prometheus::Registry> m_registry;
+    std::chrono::seconds m_interval;
+    std::size_t m_max_series_per_family;
+    std::size_t m_max_samples;
+  } m_config;
+  struct Store {
+    mutable std::mutex m_mutex;
+    std::map<std::string,
+             std::map<std::string,
+                      std::deque<std::pair<std::time_t, double>>>>
+        m_data;
+  } m_store;
+  struct Sampler {
+    std::jthread m_thread;
+    std::mutex m_cv_mutex;
+    std::condition_variable_any m_cv;
+  } m_sampler;
 };
 
 #endif // METRICS_HISTORY_HPP

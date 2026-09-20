@@ -18,13 +18,13 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
   const uint64_t now_ms = TimeUtils::steady_ms();
-  std::lock_guard lock(m_mutex);
+  std::lock_guard lock(m_state.m_mutex);
   evict_expired_locked(now_ms);
 
   const std::string key(body_hash);
-  auto it = m_entries.find(key);
-  if (it == m_entries.end()) {
-    if (m_entries.size() >= m_options.m_max_entries) {
+  auto it = m_state.m_entries.find(key);
+  if (it == m_state.m_entries.end()) {
+    if (m_state.m_entries.size() >= m_options.m_max_entries) {
       evict_lowest_count_locked();
     }
     Entry entry;
@@ -35,7 +35,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     if (body.size() <= m_options.m_max_body_bytes) {
       entry.m_body = std::string(body);
     }
-    m_entries.emplace(key, std::move(entry));
+    m_state.m_entries.emplace(key, std::move(entry));
     return {false, 0};
   }
 
@@ -50,13 +50,13 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
   const std::string client_key(client_id);
-  auto cit = m_per_client_count.find(client_key);
-  if (cit == m_per_client_count.end()) {
+  auto cit = m_state.m_per_client_count.find(client_key);
+  if (cit == m_state.m_per_client_count.end()) {
     if (m_options.m_per_client_max_entries > 0 &&
-        m_per_client_count.size() >= m_options.m_per_client_max_entries) {
+        m_state.m_per_client_count.size() >= m_options.m_per_client_max_entries) {
       evict_oldest_client_locked();
     }
-    cit = m_per_client_count.emplace(client_key, ClientCount{})
+    cit = m_state.m_per_client_count.emplace(client_key, ClientCount{})
               .first;
   }
   ClientCount &client_state = cit->second;
@@ -75,18 +75,18 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
 }
 
 size_t DuplicateDetector::duplicate_bodies() const {
-  std::lock_guard lock(m_mutex);
+  std::lock_guard lock(m_state.m_mutex);
   return static_cast<size_t>(std::ranges::count_if(
-      m_entries, [](const auto &kv) { return kv.second.m_count >= 2; }));
+      m_state.m_entries, [](const auto &kv) { return kv.second.m_count >= 2; }));
 }
 
 size_t DuplicateDetector::per_client_count_size() const {
-  std::lock_guard lock(m_mutex);
-  return m_per_client_count.size();
+  std::lock_guard lock(m_state.m_mutex);
+  return m_state.m_per_client_count.size();
 }
 
 nlohmann::json DuplicateDetector::report() const {
-  std::lock_guard lock(m_mutex);
+  std::lock_guard lock(m_state.m_mutex);
   nlohmann::json result;
   result["enabled"] = m_options.m_enabled; //-V601 nlohmann::json handles bool
 
@@ -95,7 +95,7 @@ nlohmann::json DuplicateDetector::report() const {
   size_t same_client = 0;
   size_t cross_client = 0;
   // ranges::filter + ranges::to — C++23 сахар вместо ручного цикла
-  for (const auto &[hash, entry] : m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
+  for (const auto &[hash, entry] : m_state.m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
     duplicates.push_back(&entry);
     duplicate_occurrences += entry.m_count - 1;
     if (entry.m_client_ids.size() <= 1) ++same_client; else ++cross_client;
@@ -134,9 +134,9 @@ nlohmann::json DuplicateDetector::report() const {
 }
 
 void DuplicateDetector::evict_expired_locked(uint64_t now_ms) {
-  for (auto it = m_entries.begin(); it != m_entries.end();) {
+  for (auto it = m_state.m_entries.begin(); it != m_state.m_entries.end();) {
     if (now_ms - it->second.m_last_seen_ms > m_options.m_ttl_ms) {
-      it = m_entries.erase(it);
+      it = m_state.m_entries.erase(it);
     } else {
       ++it;
     }
@@ -148,9 +148,9 @@ void DuplicateDetector::evict_expired_clients_locked(uint64_t now_ms) {
   if (m_options.m_per_client_ttl_ms == 0) {
     return;
   }
-  for (auto it = m_per_client_count.begin(); it != m_per_client_count.end();) {
+  for (auto it = m_state.m_per_client_count.begin(); it != m_state.m_per_client_count.end();) {
     if (now_ms - it->second.m_last_seen_ms > m_options.m_per_client_ttl_ms) {
-      it = m_per_client_count.erase(it);
+      it = m_state.m_per_client_count.erase(it);
     } else {
       ++it;
     }
@@ -158,26 +158,26 @@ void DuplicateDetector::evict_expired_clients_locked(uint64_t now_ms) {
 }
 
 void DuplicateDetector::evict_oldest_client_locked() {
-  if (m_per_client_count.empty()) {
+  if (m_state.m_per_client_count.empty()) {
     return;
   }
   const auto victim = std::ranges::min_element(
-      m_per_client_count, [](const auto &a, const auto &b) {
+      m_state.m_per_client_count, [](const auto &a, const auto &b) {
         return a.second.m_last_seen_ms < b.second.m_last_seen_ms;
       });
-  m_per_client_count.erase(victim);
+  m_state.m_per_client_count.erase(victim);
 }
 
 void DuplicateDetector::evict_lowest_count_locked() {
-  if (m_entries.empty()) {
+  if (m_state.m_entries.empty()) {
     return;
   }
   auto victim = std::ranges::min_element(
-      m_entries, [](const auto &a, const auto &b) {
+      m_state.m_entries, [](const auto &a, const auto &b) {
         if (a.second.m_count != b.second.m_count) {
           return a.second.m_count < b.second.m_count;
         }
         return a.second.m_first_seen_ms < b.second.m_first_seen_ms;
       });
-  m_entries.erase(victim);
+  m_state.m_entries.erase(victim);
 }

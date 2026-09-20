@@ -104,10 +104,12 @@ private:
   void evict_oldest_client_locked();
 
   Options m_options;
-  mutable std::mutex m_mutex;
-  std::unordered_map<std::string, Entry> m_entries; // key: sha256 hex
-  std::unordered_map<std::string, ClientCount>
-      m_per_client_count; // client_id -> duplicate counter
+  struct State {
+    mutable std::mutex m_mutex;
+    std::unordered_map<std::string, Entry> m_entries; // key: sha256 hex
+    std::unordered_map<std::string, ClientCount>
+        m_per_client_count; // client_id -> duplicate counter
+  } m_state;
 };
 
 #endif // DUPLICATE_DETECTOR_HPP
