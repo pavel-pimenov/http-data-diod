@@ -22,11 +22,21 @@ class RequestHandler {
 private:
   AppContext &m_ctx;
   StatsLogger &m_stats_logger;
-  int m_request_timeout_seconds = 30;
 
-  RequestIdGenerator m_id_generator;
-  NatsPushService m_push_service;
-  NatsPollService m_poll_service;
+  struct Config {
+    int m_request_timeout_seconds = 30;
+  } m_config;
+
+  // Backend delivery stack instantiated once per handler (ID generator + the
+  // NATS push/poll services bound to m_ctx).
+  struct Services {
+    explicit Services(AppContext &ctx)
+        : m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
+
+    RequestIdGenerator m_id_generator;
+    NatsPushService m_push_service;
+    NatsPollService m_poll_service;
+  } m_services;
 
   void handle_request(const httplib::Request &req, httplib::Response &res,
                       const std::string &method, const std::string &body = "");

@@ -44,8 +44,9 @@ void send_db_error(httplib::Response &res, int status, const std::string &code,
 
 RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
-      m_request_timeout_seconds(ctx.m_config.m_request_timeout_seconds),
-      m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
+      m_config{.m_request_timeout_seconds =
+                   ctx.m_config.m_request_timeout_seconds},
+      m_services(ctx) {}
 
 void RequestHandler::handle_get(const httplib::Request &req,
                                 httplib::Response &res) {
@@ -403,7 +404,7 @@ std::string RequestHandler::push_to_backend(
   Logger::debug("Proxy queueing request via NATS: request_id={} size={}",
                 request_id, request_data.size());
 
-  auto request_json = m_push_service.push_request(
+  auto request_json = m_services.m_push_service.push_request(
       std::move(request_data), trace_id, backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
     Logger::error("Failed to push request to backend: request_id={}",
@@ -421,8 +422,8 @@ std::string RequestHandler::push_to_backend(
 std::string RequestHandler::poll_for_response(const std::string &request_id,
                                               const std::string &request_json,
                                               const TraceContext &trace_ctx) {
-  return m_poll_service.poll_response(request_id, request_json,
-                                      m_request_timeout_seconds, trace_ctx);
+  return m_services.m_poll_service.poll_response(request_id, request_json,
+                                      m_config.m_request_timeout_seconds, trace_ctx);
 }
 
 // ============================================================================
@@ -469,7 +470,7 @@ void RequestHandler::process_request(const std::string &method,
   Logger::debug("Proxy received request body ({} bytes): {}", req.body.size(),
                 log_body_preview(req.body));
 
-  const auto request_id = m_id_generator.generate_uuid();
+  const auto request_id = m_services.m_id_generator.generate_uuid();
   Logger::set_request_id(request_id);
 
   // Extract IPs for logging (client_ip comes from the ScopedRequestContext so
@@ -602,7 +603,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   // generate) the trace context, log the INCOMING span and correlate all DB
   // gateway log lines via the thread-local request context.
   const uint64_t start_us = get_current_timestamp_us();
-  const auto request_id = m_id_generator.generate_uuid();
+  const auto request_id = m_services.m_id_generator.generate_uuid();
 
   ScopedRequestContext req_ctx(req);
   Logger::set_request_id(request_id);
