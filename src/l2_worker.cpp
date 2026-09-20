@@ -36,15 +36,15 @@ L2Worker::L2Worker(AppContext &context)
     // Initialize HTTP client pool with optimized settings
     // Parameters: max_pool_size, timeout_seconds, acquire_timeout_seconds,
     // enable_connection_reuse
-    : m_http_client_pool(std::make_unique<HttpClientPool>(
-          context.m_config.m_http_pool_size,       // max connections
-          context.m_config.m_http_timeout_seconds, // request timeout
-          30,   // acquire timeout (30 seconds)
-          true, // enable connection reuse (keep-alive)
-          context.m_config.m_enable_ssl_server_certificate_verification,
-          context.m_config.m_enable_ssl_server_hostname_verification,
-          context.m_config.m_ssl_ca_cert_path,
-          context.m_config.m_http_pool_idle_timeout_seconds)),
+    : m_clients{.m_http_client_pool = std::make_unique<HttpClientPool>(
+                    context.m_config.m_http_pool_size,       // max connections
+                    context.m_config.m_http_timeout_seconds, // request timeout
+                    30,   // acquire timeout (30 seconds)
+                    true, // enable connection reuse (keep-alive)
+                    context.m_config.m_enable_ssl_server_certificate_verification,
+                    context.m_config.m_enable_ssl_server_hostname_verification,
+                    context.m_config.m_ssl_ca_cert_path,
+                    context.m_config.m_http_pool_idle_timeout_seconds)},
       m_ctx(context), m_l2_server_urls(context.m_config.m_l2_server_urls),
       m_dedup_cache(context.m_config.m_dedup_enabled,
                     context.m_config.m_dedup_max_entries,
@@ -52,7 +52,7 @@ L2Worker::L2Worker(AppContext &context)
 
   if (context.m_proxy.m_http_pool_metrics) {
     const auto &metrics = *context.m_proxy.m_http_pool_metrics;
-    m_http_client_pool->set_metrics(
+    m_clients.m_http_client_pool->set_metrics(
         PoolMetrics{metrics.m_active_clients, metrics.m_available_clients,
                     metrics.m_client_acquisitions_total,
                     metrics.m_client_releases_total,
@@ -65,10 +65,10 @@ L2Worker::L2Worker(AppContext &context)
                context.m_config.m_nats_subject,
                context.m_config.m_nats_queue_group);
 
-  m_nats_client =
+  m_clients.m_nats_client =
       std::make_unique<NatsClient>(context.m_config.create_nats_config());
 
-  if (!m_nats_client->connect()) {
+  if (!m_clients.m_nats_client->connect()) {
     Logger::error("Failed to connect to NATS server. Worker is configured for "
                   "NATS only.");
   } else {
@@ -94,7 +94,7 @@ L2Worker::L2Worker(AppContext &context)
   } else {
     pool_type = ThreadPoolWrapper::Type::CUSTOM;
   }
-  m_thread_pool = std::make_unique<ThreadPoolWrapper>(
+  m_clients.m_thread_pool = std::make_unique<ThreadPoolWrapper>(
       pool_type, m_ctx.m_config.m_l2_worker_threads,
       static_cast<size_t>(m_ctx.m_config.m_l2_worker_queue_size));
 
@@ -108,14 +108,14 @@ L2Worker::~L2Worker() {
     Logger::info("L2Worker shutting down pools...");
 
     // Shutdown thread pool first to prevent new tasks
-    if (m_thread_pool) {
+    if (m_clients.m_thread_pool) {
       Logger::debug("Shutting down thread pool...");
-      m_thread_pool.reset();
+      m_clients.m_thread_pool.reset();
     }
 
-    if (m_http_client_pool) {
+    if (m_clients.m_http_client_pool) {
       Logger::debug("Shutting down HTTP client pool...");
-      m_http_client_pool.reset();
+      m_clients.m_http_client_pool.reset();
     }
 
     Logger::info("L2Worker shutdown complete");
@@ -258,15 +258,15 @@ void L2Worker::run() {
 
   // Sample pool saturation in the background so the queue-depth gauge is not
   // flat between requests. jthread auto-joins and respects stop_token.
-  m_metrics_ticker = std::jthread([this](const std::stop_token &st) {
+  m_state.m_metrics_ticker = std::jthread([this](const std::stop_token &st) {
     metrics_ticker_loop(st);
   });
 
   run_with_nats();
 
-  if (m_metrics_ticker.joinable()) {
-    m_metrics_ticker.request_stop();
-    m_metrics_ticker.join();
+  if (m_state.m_metrics_ticker.joinable()) {
+    m_state.m_metrics_ticker.request_stop();
+    m_state.m_metrics_ticker.join();
   }
 
   Logger::info("Shutting down gracefully...");
@@ -277,8 +277,8 @@ void L2Worker::run() {
 
   // Thread pool destructor drains all in-flight tasks before joining
   Logger::info("Waiting for in-flight requests to complete...");
-  if (m_thread_pool) {
-    m_thread_pool.reset();
+  if (m_clients.m_thread_pool) {
+    m_clients.m_thread_pool.reset();
   }
 
   const auto drain_seconds = std::chrono::duration<double>(
@@ -290,9 +290,9 @@ void L2Worker::run() {
 }
 
 void L2Worker::update_queue_size_metric() {
-  if (m_thread_pool) {
+  if (m_clients.m_thread_pool) {
     m_ctx.m_worker.m_metrics->m_queue_size.Set(
-        static_cast<double>(m_thread_pool->queue_size()));
+        static_cast<double>(m_clients.m_thread_pool->queue_size()));
   }
 }
 
@@ -315,7 +315,7 @@ void L2Worker::metrics_ticker_loop(const std::stop_token &st) {
 }
 
 bool L2Worker::is_nats_connected() const {
-  return m_nats_client && m_nats_client->is_connected();
+  return m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
 }
 
 #if __has_include(<generator>)
@@ -353,7 +353,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
     final_attempt = attempt;
     try {
       const auto [http_response, http_code] = execute_http_command_with_status(
-          m_http_client_pool.get(),
+          m_clients.m_http_client_pool.get(),
           [&url, &query, &body, &traceparent, &forwarded_headers,
            &method](HttpClient *client) {
             // Append the query string only to the request URL; the `url`

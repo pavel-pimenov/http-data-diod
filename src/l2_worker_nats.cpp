@@ -82,7 +82,7 @@ bool L2Worker::subscribe_nats_subject(const std::string &subject,
                                       const std::string &queue_group,
                                       const std::string &error_context,
                                       Fn &&fn) {
-  const bool subscribed = m_nats_client->subscribe_queue(
+  const bool subscribed = m_clients.m_nats_client->subscribe_queue(
       subject, queue_group,
       [this, error_context, fn](const std::string &, const std::string &data,
                                 const std::string &reply_to) {
@@ -91,7 +91,7 @@ bool L2Worker::subscribe_nats_subject(const std::string &subject,
           return;
         }
         try {
-          m_thread_pool->enqueue(
+          m_clients.m_thread_pool->enqueue(
               [this, data, reply_to, fn]() { fn(data, reply_to); });
         } catch (const std::exception &e) {
           // Pool is shutting down (enqueue throws on stopped pool). The
@@ -125,33 +125,33 @@ void L2Worker::run_with_nats() {
   RetryHandler backoff(1, 150);
   bool subscription_active = false;
   bool db_subscription_active = false;
-  bool was_connected = m_nats_client && m_nats_client->is_connected();
+  bool was_connected = m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
 
   while (!g_shutdown_flag) {
-    const bool is_connected = m_nats_client && m_nats_client->is_connected();
+    const bool is_connected = m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
 
     if (is_connected && !was_connected) {
       Logger::info("Worker detected restored NATS connection, forcing "
                    "subscription refresh");
       subscription_active = false;
       db_subscription_active = false;
-      if (m_nats_client) {
-        m_nats_client->unsubscribe();
+      if (m_clients.m_nats_client) {
+        m_clients.m_nats_client->unsubscribe();
       }
     }
     was_connected = is_connected;
 
-    if (!m_nats_client) {
+    if (!m_clients.m_nats_client) {
       Logger::error("NATS client is not initialized. Waiting before retry...");
-    } else if (!m_nats_client->is_connected()) {
+    } else if (!m_clients.m_nats_client->is_connected()) {
       Logger::error("Worker lost connection to NATS or NATS is unavailable. "
                     "Waiting for server recovery...");
       Logger::warn("Worker reconnect attempt in {}ms",
                    backoff.get_current_delay_ms());
 
-      if (!m_nats_client->connect()) {
+      if (!m_clients.m_nats_client->connect()) {
         Logger::error("Worker reconnect to NATS failed. Last error: {}",
-                      m_nats_client->get_last_error().value_or(""));
+                      m_clients.m_nats_client->get_last_error().value_or(""));
       } else {
         Logger::info("Worker connected to NATS");
         backoff.record_success();
@@ -162,7 +162,7 @@ void L2Worker::run_with_nats() {
       break;
     }
 
-    if (m_nats_client && m_nats_client->is_connected() &&
+    if (m_clients.m_nats_client && m_clients.m_nats_client->is_connected() &&
         !subscription_active) {
       if (!subscribe_worker_subject()) {
         Logger::warn("Subscription is not active yet, will retry in {}ms",
@@ -181,7 +181,7 @@ void L2Worker::run_with_nats() {
     // one (e.g. PostgreSQL) is never blocked by a slow one; per-request
     // dispatch answers DB_UNAVAILABLE/UNKNOWN_DATABASE for databases whose
     // executor is not up yet.
-    if (m_nats_client && m_nats_client->is_connected()) {
+    if (m_clients.m_nats_client && m_clients.m_nats_client->is_connected()) {
       // Per-database gateway readiness: publish independent of subscription so
       // a fully-down set of databases still shows 0 for each configured name.
       publish_db_gateway_ready_metric();
@@ -190,7 +190,7 @@ void L2Worker::run_with_nats() {
           db_subscription_active = ensure_db_query_subscription(backoff);
         } else if (m_db_query_handler &&
                    !m_db_query_handler->all_configured() &&
-                   ++m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
+                   ++m_state.m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
           // Pick up databases that came up after the subscription became
           // active (e.g. Oracle cold start): init() is incremental and only
           // creates the missing executors, so this never disturbs
@@ -203,7 +203,7 @@ void L2Worker::run_with_nats() {
       }
     }
 
-    if (m_nats_client && !m_nats_client->is_connected()) {
+    if (m_clients.m_nats_client && !m_clients.m_nats_client->is_connected()) {
       subscription_active = false;
       db_subscription_active = false;
     }
@@ -214,8 +214,8 @@ void L2Worker::run_with_nats() {
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
 
-    if (!subscription_active || !m_nats_client ||
-        !m_nats_client->is_connected()) {
+    if (!subscription_active || !m_clients.m_nats_client ||
+        !m_clients.m_nats_client->is_connected()) {
       backoff.record_failure();
     } else {
       backoff.record_success();
@@ -223,9 +223,9 @@ void L2Worker::run_with_nats() {
   }
 
   Logger::info("NATS worker shutting down...");
-  if (m_nats_client) {
+  if (m_clients.m_nats_client) {
     // Drain waits for in-flight messages to finish processing before closing
-    m_nats_client->drain(5000);
+    m_clients.m_nats_client->drain(5000);
   }
 }
 
@@ -491,15 +491,15 @@ void L2Worker::send_nats_response_impl(const std::string &reply_to,
   constexpr int retry_delay_ms = 100;
 
   for (int attempt = 0; attempt < max_retries; ++attempt) {
-    if (!m_nats_client) {
+    if (!m_clients.m_nats_client) {
       Logger::error("Cannot send NATS response: client not initialized");
       return;
     }
 
     try {
-      bool success = headers ? m_nats_client->publish_with_headers(
+      bool success = headers ? m_clients.m_nats_client->publish_with_headers(
                                    reply_to, response_json, *headers)
-                             : m_nats_client->publish(reply_to, response_json);
+                             : m_clients.m_nats_client->publish(reply_to, response_json);
       if (success) {
         Logger::debug("NATS response sent to: {}, size: {}", reply_to,
                       response_json.size());

@@ -26,9 +26,14 @@ using json = nlohmann::json;
 class L2Worker {
 
 private:
-  std::unique_ptr<HttpClientPool> m_http_client_pool;
-  std::unique_ptr<ThreadPoolWrapper> m_thread_pool;
-  std::unique_ptr<NatsClient> m_nats_client;
+  // Dependency clients created by the ctor and torn down together: HTTP client
+  // pool (init-list), NATS client and thread pool (ctor body).
+  struct Clients {
+    std::unique_ptr<HttpClientPool> m_http_client_pool;
+    std::unique_ptr<ThreadPoolWrapper> m_thread_pool;
+    std::unique_ptr<NatsClient> m_nats_client;
+  } m_clients;
+
   AppContext &m_ctx;
   std::vector<std::string> m_l2_server_urls;
   CircuitBreaker m_circuit_breaker;
@@ -38,12 +43,15 @@ private:
   // HTTP DB Gateway: initialized only in NATS worker mode when
   // DB_QUERY_ENABLED=true.
   std::unique_ptr<DbQueryHandler> m_db_query_handler;
-  // Loop-pass counter throttling the incremental DB init retry that picks up
-  // databases which come up after the subscription became active.
-  int m_db_init_retry_count = 0;
-  // Background ticker samples pool saturation so the queue-depth gauge stays
-  // meaningful between requests (otherwise it only moves on request arrival).
-  std::jthread m_metrics_ticker;
+  // Runtime loop state: DB init retry throttling + the metrics ticker thread.
+  struct State {
+    // Loop-pass counter throttling the incremental DB init retry that picks up
+    // databases which come up after the subscription became active.
+    int m_db_init_retry_count = 0;
+    // Background ticker samples pool saturation so the queue-depth gauge stays
+    // meaningful between requests (otherwise it only moves on request arrival).
+    std::jthread m_metrics_ticker;
+  } m_state;
 
 public:
   explicit L2Worker(AppContext &context);
