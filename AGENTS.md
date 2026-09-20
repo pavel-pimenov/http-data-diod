@@ -88,3 +88,8 @@ SKIP_PRECOMMIT=1 git commit -m "WIP: work in progress"
 ```bash
 ./health-check.sh all
 ```
+
+* После успешной зелёной сборки (./rebuild-and-run.sh + health-check.sh all + message_counter.py --iterations 1 --concurrent 1, все rc=0) — удаляй старые логи в /tmp/*.txt.
+
+## сборка (2015d55)
+Сборка в контейнере зелёная (gate=0, health=0, smoke=0). После успешной сборки старые логи /tmp/*.txt удаляются.

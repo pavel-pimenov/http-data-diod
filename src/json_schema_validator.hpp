@@ -1,3 +1,22 @@
+#ifndef JSON_SCHEMA_VALIDATOR_HPP
+#define JSON_SCHEMA_VALIDATOR_HPP
+
+#include <cstddef>
+#include <format>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "json_utils.hpp"
+
+// Request Validator
+// Validates L2 server requests
+//
+// NOTE: get_body_response_ref is declared in json_utils.hpp (included above).
 class RequestValidator {
 private:
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
@@ -17,9 +36,8 @@ private:
 
 public:
   RequestValidator()
-      : m_limits.m_max_body_size(static_cast<size_t>(10) * 1024 * 1024) // 10MB default
-        ,
-        m_limits.m_max_path_length(2048) // 2KB default
+      : m_allowed(),
+        m_limits{static_cast<size_t>(10) * 1024 * 1024, 2048} // 10MB, 2KB defaults
   {}
 
   RequestValidator &add_required_field(const std::string &field) {
@@ -61,7 +79,8 @@ public:
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
           !m_allowed.m_allowed_methods.contains(method)) {
 #else
-          m_allowed.m_allowed_methods.find(method) == m_allowed.m_allowed_methods.end()) {
+          m_allowed.m_allowed_methods.find(method) ==
+              m_allowed.m_allowed_methods.end()) {
 #endif
         error = "Method not allowed: " + method;
         return false;
@@ -80,9 +99,11 @@ public:
 
       if (!m_allowed.m_allowed_paths.empty()) {
         // ranges::any_of — C++23 сахар вместо ручного цикла
-        const bool path_allowed = std::ranges::any_of(m_allowed.m_allowed_paths, [&](const auto &prefix) {
-          return path.starts_with(prefix);
-        });
+        const bool path_allowed =
+            std::ranges::any_of(m_allowed.m_allowed_paths,
+                                [&](const auto &prefix) {
+                                  return path.starts_with(prefix);
+                                });
         if (!path_allowed) {
           error = "Path not allowed: " + path;
           return false;
@@ -90,7 +111,7 @@ public:
       }
     }
 
-    // Check body size if present
+    // Check body if present
     if (request.contains("body")) {
       const std::string &body = request["body"];
       if (body.length() > m_limits.m_max_body_size) {
@@ -152,7 +173,8 @@ public:
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
           !m_allowed_status_codes.contains(status)) {
 #else
-          m_allowed_status_codes.find(status) == m_allowed_status_codes.end()) {
+          m_allowed_status_codes.find(status) ==
+              m_allowed_status_codes.end()) {
 #endif
         error = std::format("Status code not allowed: {}", status);
         return false;
