@@ -51,18 +51,20 @@ using json = nlohmann::json;
 // Logger::set_client_ip(...)` block at the top of each handler.
 class ScopedRequestContext {
 public:
-  explicit ScopedRequestContext(const httplib::Request &req)
-      : m_scope(), m_client_ip(extract_client_ip(req)) {
-    if (m_client_ip.empty()) {
-      m_client_ip = "unknown";
+  explicit ScopedRequestContext(const httplib::Request &req) {
+    m_state.m_client_ip = extract_client_ip(req);
+    if (m_state.m_client_ip.empty()) {
+      m_state.m_client_ip = "unknown";
     }
-    Logger::set_client_ip(m_client_ip);
+    Logger::set_client_ip(m_state.m_client_ip);
   }
-  const std::string &client_ip() const { return m_client_ip; }
+  const std::string &client_ip() const { return m_state.m_client_ip; }
 
 private:
-  LogContextScope m_scope;
-  std::string m_client_ip;
+  struct State {
+    LogContextScope m_scope;
+    std::string m_client_ip;
+  } m_state;
 };
 
 // Logs the error, increments the prometheus counter (if set), writes a JSON

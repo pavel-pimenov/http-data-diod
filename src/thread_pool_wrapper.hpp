@@ -13,10 +13,11 @@ public:
   enum class Type : uint8_t { CUSTOM, NONE };
 
   ThreadPoolWrapper(Type type, size_t num_threads, size_t max_queue_size = 0)
-      : m_type(type) {
-    switch (m_type) {
+      : m_backend{.m_type = type} {
+    switch (m_backend.m_type) {
     case Type::CUSTOM:
-      m_custom_pool = std::make_unique<ThreadPool>(num_threads, max_queue_size);
+      m_backend.m_custom_pool =
+          std::make_unique<ThreadPool>(num_threads, max_queue_size);
       break;
     case Type::NONE:
       break;
@@ -27,10 +28,10 @@ public:
   auto enqueue(F &&f, Args &&...args)
       -> std::future<std::invoke_result_t<F, Args...>> {
 
-    switch (m_type) {
+    switch (m_backend.m_type) {
     case Type::CUSTOM:
-      return m_custom_pool->enqueue(std::forward<F>(f),
-                                    std::forward<Args>(args)...);
+      return m_backend.m_custom_pool->enqueue(std::forward<F>(f),
+                                              std::forward<Args>(args)...);
     case Type::NONE: {
       auto task = std::make_shared<
           std::packaged_task<std::invoke_result_t<F, Args...>()>>(
@@ -48,12 +49,14 @@ public:
   }
 
   [[nodiscard]] size_t queue_size() const {
-    return m_custom_pool ? m_custom_pool->queue_size() : 0;
+    return m_backend.m_custom_pool ? m_backend.m_custom_pool->queue_size() : 0;
   }
 
 private:
-  Type m_type;
-  std::unique_ptr<ThreadPool> m_custom_pool;
+  struct Backend {
+    Type m_type;
+    std::unique_ptr<ThreadPool> m_custom_pool;
+  } m_backend;
 };
 
 #endif // THREAD_POOL_WRAPPER_HPP
