@@ -6,23 +6,23 @@
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   {
-    std::lock_guard lock(m_mutex);
-    m_expected_count = databases.size();
-    m_configured_names.clear();
-    m_configured_names.reserve(databases.size());
+    std::lock_guard lock(m_state.m_mutex);
+    m_state.m_expected_count = databases.size();
+    m_state.m_configured_names.clear();
+    m_state.m_configured_names.reserve(databases.size());
     for (const DbConfig &db : databases) {
-      m_configured_names.push_back(db.m_name);
+      m_state.m_configured_names.push_back(db.m_name);
     }
   }
   for (const DbConfig &db : databases) {
     {
-      std::lock_guard lock(m_mutex);
-      if (m_executors.contains(db.m_name)) {
+      std::lock_guard lock(m_state.m_mutex);
+      if (m_state.m_executors.contains(db.m_name)) {
         continue;
       }
     }
     // Created outside the lock: creating an executor may block (libpq connect
-    // probe, ODPI pool creation), so holding m_mutex across it would stall
+    // probe, ODPI pool creation), so holding m_state.m_mutex across it would stall
     // request dispatch on the pool threads.
     auto executor = create_db_query_executor(db);
     if (!executor || !executor->init()) {
@@ -32,18 +32,18 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
       continue;
     }
     executor->set_pool_metrics(m_pool_metrics);
-    std::lock_guard lock(m_mutex);
-    if (!m_executors.contains(db.m_name)) {
-      m_executors.try_emplace(db.m_name, std::move(executor));
+    std::lock_guard lock(m_state.m_mutex);
+    if (!m_state.m_executors.contains(db.m_name)) {
+      m_state.m_executors.try_emplace(db.m_name, std::move(executor));
     }
   }
-  std::lock_guard lock(m_mutex);
-  if (m_executors.empty()) {
+  std::lock_guard lock(m_state.m_mutex);
+  if (m_state.m_executors.empty()) {
     Logger::warn("DB handler: no database executor initialized");
     return false;
   }
-  Logger::info("DB handler: ready with {}/{} database(s)", m_executors.size(),
-               m_expected_count);
+  Logger::info("DB handler: ready with {}/{} database(s)", m_state.m_executors.size(),
+               m_state.m_expected_count);
   return true;
 }
 
@@ -53,15 +53,15 @@ void DbQueryHandler::set_pool_metrics(
 }
 
 std::vector<std::string> DbQueryHandler::configured_databases() const {
-  std::lock_guard lock(m_mutex);
-  return m_configured_names;
+  std::lock_guard lock(m_state.m_mutex);
+  return m_state.m_configured_names;
 }
 
 std::vector<std::string> DbQueryHandler::ready_databases() const {
-  std::lock_guard lock(m_mutex);
+  std::lock_guard lock(m_state.m_mutex);
   std::vector<std::string> names;
-  names.reserve(m_executors.size());
-  for (const auto &[name, executor] : m_executors) {
+  names.reserve(m_state.m_executors.size());
+  for (const auto &[name, executor] : m_state.m_executors) {
     (void)executor;
     names.push_back(name);
   }
@@ -80,11 +80,11 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
 
   DbQueryExecutor *executor = nullptr;
   {
-    std::lock_guard lock(m_mutex);
-    if (req.m_db.empty() && m_executors.size() == 1) {
-      executor = m_executors.begin()->second.get();
-    } else if (const auto it = m_executors.find(req.m_db);
-               it != m_executors.end()) {
+    std::lock_guard lock(m_state.m_mutex);
+    if (req.m_db.empty() && m_state.m_executors.size() == 1) {
+      executor = m_state.m_executors.begin()->second.get();
+    } else if (const auto it = m_state.m_executors.find(req.m_db);
+               it != m_state.m_executors.end()) {
       executor = it->second.get();
     }
   }

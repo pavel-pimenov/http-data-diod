@@ -31,16 +31,17 @@ public:
   bool init(const std::vector<DbConfig> &databases);
 
   [[nodiscard]] bool is_enabled() const {
-    std::lock_guard lock(m_mutex);
-    return !m_executors.empty();
+    std::lock_guard lock(m_state.m_mutex);
+    return !m_state.m_executors.empty();
   }
 
   // True when every configured database has an initialized executor. The
   // worker retries init() until this holds so a fast-starting database (e.g.
   // PostgreSQL) cannot mask a slow one (Oracle cold start).
   [[nodiscard]] bool all_configured() const {
-    std::lock_guard lock(m_mutex);
-    return m_expected_count > 0 && m_executors.size() >= m_expected_count;
+    std::lock_guard lock(m_state.m_mutex);
+    return m_state.m_expected_count > 0 &&
+           m_state.m_executors.size() >= m_state.m_expected_count;
   }
 
   // Names of every configured database. Used for the per-database gateway
@@ -62,19 +63,31 @@ public:
 
 private:
 #if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
-  // 2 базы (postgres/oracle) — flat_map(sorted vector) кэш-дружелюбнее map(rb-tree)
-  std::flat_map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+  struct State {
+    // 2 базы (postgres/oracle) — flat_map(sorted vector) кэш-дружелюбнее map(rb-tree)
+    std::flat_map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+    // Serializes init() (runs on the worker main loop) against request dispatch
+    // (runs on pool threads) so a slow/blocked executor creation can never race
+    // with reads of m_executors.
+    mutable std::mutex m_mutex;
+    size_t m_expected_count = 0;
+    // Insertion-ordered configured database names (mirrors m_expected_count);
+    // kept so readiness can be reported for databases that have no executor yet.
+    std::vector<std::string> m_configured_names;
+  } m_state;
 #else
-  std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+  struct State {
+    std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
+    // Serializes init() (runs on the worker main loop) against request dispatch
+    // (runs on pool threads) so a slow/blocked executor creation can never race
+    // with reads of m_executors.
+    mutable std::mutex m_mutex;
+    size_t m_expected_count = 0;
+    // Insertion-ordered configured database names (mirrors m_expected_count);
+    // kept so readiness can be reported for databases that have no executor yet.
+    std::vector<std::string> m_configured_names;
+  } m_state;
 #endif
-  // Serializes init() (runs on the worker main loop) against request dispatch
-  // (runs on pool threads) so a slow/blocked executor creation can never race
-  // with reads of m_executors.
-  mutable std::mutex m_mutex;
-  size_t m_expected_count = 0;
-  // Insertion-ordered configured database names (mirrors m_expected_count);
-  // kept so readiness can be reported for databases that have no executor yet.
-  std::vector<std::string> m_configured_names;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
 };
 
