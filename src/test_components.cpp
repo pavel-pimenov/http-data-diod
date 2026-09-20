@@ -2424,9 +2424,9 @@ TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
   REQUIRE(cb.state_name() == "OPEN");
   REQUIRE(cb.allow_request() == false);
 
-  // Simulate the timeout having elapsed by backdating m_last_failure_time_us.
+  // Simulate the timeout having elapsed by backdating m_counters.m_last_failure_time_us.
   const uint64_t now_us = TimeUtils::steady_us();
-  cb.m_last_failure_time_us.store(
+  cb.m_counters.m_last_failure_time_us.store(
       now_us - CircuitBreaker::g_open_timeout_us - 1000);
   REQUIRE(cb.allow_request() == true);
   REQUIRE(cb.state_name() == "HALF_OPEN");
@@ -2439,13 +2439,13 @@ TEST_CASE("CircuitBreaker: failures in OPEN do not extend the open window",
     cb.record_failure();
   }
   REQUIRE(cb.state_name() == "OPEN");
-  const uint64_t trip_us = cb.m_last_failure_time_us.load();
+  const uint64_t trip_us = cb.m_counters.m_last_failure_time_us.load();
 
   // Late (in-flight) failures that land while already OPEN must not move the
   // trip timestamp, otherwise the breaker would never recover.
   cb.record_failure();
   cb.record_failure();
-  REQUIRE(cb.m_last_failure_time_us.load() == trip_us);
+  REQUIRE(cb.m_counters.m_last_failure_time_us.load() == trip_us);
 }
 
 // ============================================================================

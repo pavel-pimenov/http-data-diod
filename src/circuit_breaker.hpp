@@ -15,9 +15,11 @@ struct CircuitBreaker {
 
   std::optional<std::reference_wrapper<prometheus::Gauge>> m_gauge;
   std::atomic<State> m_state{State::CLOSED};
-  std::atomic<int> m_failure_count{0};
-  std::atomic<int> m_success_count{0};
-  std::atomic<uint64_t> m_last_failure_time_us{0};
+  struct Counters {
+    std::atomic<int> m_failure_count{0};
+    std::atomic<int> m_success_count{0};
+    std::atomic<uint64_t> m_last_failure_time_us{0};
+  } m_counters;
 
   static constexpr int g_failure_threshold = 5;
   static constexpr uint64_t g_open_timeout_us = 10'000'000; // 10 seconds

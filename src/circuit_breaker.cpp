@@ -12,9 +12,9 @@ void CircuitBreaker::update_gauge() {
 }
 
 void CircuitBreaker::transition_to_open() {
-  m_last_failure_time_us.store(TimeUtils::steady_us());
+  m_counters.m_last_failure_time_us.store(TimeUtils::steady_us());
   m_state.store(State::OPEN);
-  m_success_count.store(0);
+  m_counters.m_success_count.store(0);
   update_gauge();
 }
 
@@ -29,11 +29,11 @@ bool CircuitBreaker::allow_request() {
   // OPEN state: check if timeout has elapsed (monotonic clock so wall-clock
   // jumps cannot flip the breaker)
   const uint64_t now_us = TimeUtils::steady_us();
-  const uint64_t elapsed = now_us - m_last_failure_time_us.load();
+  const uint64_t elapsed = now_us - m_counters.m_last_failure_time_us.load();
   if (elapsed >= g_open_timeout_us) {
     Logger::info("Circuit breaker: OPEN -> HALF_OPEN (timeout elapsed)");
     m_state.store(State::HALF_OPEN);
-    m_success_count.store(0);
+    m_counters.m_success_count.store(0);
     update_gauge();
     return true;
   }
@@ -43,17 +43,17 @@ bool CircuitBreaker::allow_request() {
 void CircuitBreaker::record_success() {
   const auto current_state = m_state.load();
   if (current_state == State::HALF_OPEN) {
-    const int count = m_success_count.fetch_add(1) + 1;
+    const int count = m_counters.m_success_count.fetch_add(1) + 1;
     if (count >= g_half_open_success_threshold) {
       Logger::info("Circuit breaker: HALF_OPEN -> CLOSED (successes={})",
                    count);
       m_state.store(State::CLOSED);
-      m_failure_count.store(0);
-      m_success_count.store(0);
+      m_counters.m_failure_count.store(0);
+      m_counters.m_success_count.store(0);
       update_gauge();
     }
   } else if (current_state == State::CLOSED) {
-    m_failure_count.store(0);
+    m_counters.m_failure_count.store(0);
   }
 }
 
@@ -63,7 +63,7 @@ void CircuitBreaker::record_failure() {
     Logger::warn("Circuit breaker: HALF_OPEN -> OPEN (test request failed)");
     transition_to_open();
   } else if (current_state == State::CLOSED) {
-    const int count = m_failure_count.fetch_add(1) + 1;
+    const int count = m_counters.m_failure_count.fetch_add(1) + 1;
     if (count >= g_failure_threshold) {
       Logger::warn("Circuit breaker: CLOSED -> OPEN (failures={})", count);
       transition_to_open();
