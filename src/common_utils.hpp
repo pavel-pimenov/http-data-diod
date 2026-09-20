@@ -155,15 +155,18 @@ class RequestScopedTiming {
 public:
   RequestScopedTiming(prometheus::Histogram &histogram,
                       prometheus::Counter &counter)
-      : m_profiler(histogram), m_counter(counter),
-        m_start_us(get_current_timestamp_us()) {}
+      : m_state{.m_profiler = ScopedProfiler(histogram),
+                .m_counter = ScopedMetrics(counter),
+                .m_start_us = get_current_timestamp_us()} {}
 
-  uint64_t start_us() const { return m_start_us; }
+  uint64_t start_us() const { return m_state.m_start_us; }
 
 private:
-  ScopedProfiler m_profiler;
-  ScopedMetrics m_counter;
-  const uint64_t m_start_us;
+  struct State {
+    ScopedProfiler m_profiler;
+    ScopedMetrics m_counter;
+    const uint64_t m_start_us;
+  } m_state;
 };
 
 std::string format_http_error(httplib::Error error, int timeout_seconds,

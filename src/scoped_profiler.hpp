@@ -9,18 +9,20 @@
 class ScopedProfiler {
 public:
   explicit ScopedProfiler(prometheus::Histogram &histogram)
-      : m_histogram(histogram), m_start_time(std::chrono::steady_clock::now()) {
-  }
+      : m_state{.m_histogram = histogram,
+                .m_start_time = std::chrono::steady_clock::now()} {}
 
   ~ScopedProfiler() {
     const auto end_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> duration = end_time - m_start_time;
-    m_histogram.Observe(duration.count());
+    std::chrono::duration<double> duration = end_time - m_state.m_start_time;
+    m_state.m_histogram.Observe(duration.count());
   }
 
 private:
-  prometheus::Histogram &m_histogram;
-  std::chrono::steady_clock::time_point m_start_time;
+  struct State {
+    prometheus::Histogram &m_histogram;
+    std::chrono::steady_clock::time_point m_start_time;
+  } m_state;
 };
 
 // RAII latency observer for a DynamicLabeledFamily<prometheus::Histogram>:
@@ -32,21 +34,25 @@ public:
   explicit ScopedLabeledProfiler(
       DynamicLabeledFamily<prometheus::Histogram> *collector,
       const std::string &label_value)
-      : m_collector(collector), m_label_value(label_value),
-        m_start_time(std::chrono::steady_clock::now()) {}
+      : m_state{.m_collector = collector,
+                .m_label_value = label_value,
+                .m_start_time = std::chrono::steady_clock::now()} {}
 
   ~ScopedLabeledProfiler() {
-    if (m_collector != nullptr) {
+    if (m_state.m_collector != nullptr) {
       const auto end_time = std::chrono::steady_clock::now();
-      std::chrono::duration<double> duration = end_time - m_start_time;
-      m_collector->get(m_label_value, 0)->Observe(duration.count());
+      std::chrono::duration<double> duration =
+          end_time - m_state.m_start_time;
+      m_state.m_collector->get(m_state.m_label_value, 0)->Observe(duration.count());
     }
   }
 
 private:
-  DynamicLabeledFamily<prometheus::Histogram> *m_collector;
-  const std::string m_label_value;
-  std::chrono::steady_clock::time_point m_start_time;
+  struct State {
+    DynamicLabeledFamily<prometheus::Histogram> *m_collector;
+    const std::string m_label_value;
+    std::chrono::steady_clock::time_point m_start_time;
+  } m_state;
 };
 
 #endif // SCOPED_PROFILER_HPP

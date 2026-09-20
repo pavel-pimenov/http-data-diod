@@ -246,27 +246,30 @@ inline json make_db_response_envelope(int status, const json &body) {
 // the `rows.size() >= max_rows -> truncated` bookkeeping.
 class DbRowCollector {
 public:
-  explicit DbRowCollector(size_t max_rows) : m_max_rows(max_rows) {}
+  explicit DbRowCollector(size_t max_rows)
+      : m_state{.m_max_rows = max_rows} {}
 
   // Returns false when the row limit is reached (and marks the result as
   // truncated); the caller must stop fetching.
   bool try_add(json &&row) {
-    if (m_rows.size() >= m_max_rows) {
-      m_truncated = true;
+    if (m_state.m_rows.size() >= m_state.m_max_rows) {
+      m_state.m_truncated = true;
       return false;
     }
-    m_rows.push_back(std::move(row));
+    m_state.m_rows.push_back(std::move(row));
     return true;
   }
 
-  json take_rows() { return std::move(m_rows); }
-  size_t size() const { return m_rows.size(); }
-  bool truncated() const { return m_truncated; }
+  json take_rows() { return std::move(m_state.m_rows); }
+  size_t size() const { return m_state.m_rows.size(); }
+  bool truncated() const { return m_state.m_truncated; }
 
 private:
-  const size_t m_max_rows;
-  json m_rows = json::array();
-  bool m_truncated = false;
+  struct State {
+    size_t m_max_rows;
+    json m_rows = json::array();
+    bool m_truncated = false;
+  } m_state;
 };
 
 // Builds the DbResponseContract columns array from (name, type) pairs. Shared
