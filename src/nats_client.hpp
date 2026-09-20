@@ -142,23 +142,30 @@ private:
   // setup_options/connect and the Info log.
   NatsConfig m_config;
 
-  natsConnection *m_conn;
-  natsOptions *m_opts;
-  std::vector<NatsSubscription> m_subscriptions;
+  // Low-level NATS handles and the mutex serializing connect/disconnect/request
+  // against the async callbacks.
+  struct Connection {
+    natsConnection *m_conn = nullptr;
+    natsOptions *m_opts = nullptr;
+    mutable std::mutex m_mutex;
+  } m_connection;
 
-  std::atomic<bool> m_connected;
-  std::atomic<bool> m_shutdown{false};
-  // The NATS async-callback thread delivers the Closed callback
-  // asynchronously after each of our connections is destroyed. Keeping a
-  // simple "closed" flag is not enough: a worker thread may open a new
-  // connection while the pool is being drained, so several Closed callbacks
-  // can be in flight at once (one per created connection). We therefore count
-  // created connections and delivered Closed callbacks; the destructor blocks
-  // until every created connection has delivered its Closed callback, so no
-  // connection-level callback can dereference `this` after the object dies.
-  std::atomic<uint64_t> m_connected_instances{0};
-  std::atomic<uint64_t> m_closed_callbacks_delivered{0};
-  mutable std::mutex m_conn_mutex;
+  struct State {
+    std::atomic<bool> m_connected{false};
+    std::atomic<bool> m_shutdown{false};
+    // The NATS async-callback thread delivers the Closed callback
+    // asynchronously after each of our connections is destroyed. Keeping a
+    // simple "closed" flag is not enough: a worker thread may open a new
+    // connection while the pool is being drained, so several Closed callbacks
+    // can be in flight at once (one per created connection). We therefore count
+    // created connections and delivered Closed callbacks; the destructor blocks
+    // until every created connection has delivered its Closed callback, so no
+    // connection-level callback can dereference `this` after the object dies.
+    std::atomic<uint64_t> m_connected_instances{0};
+    std::atomic<uint64_t> m_closed_callbacks_delivered{0};
+  } m_state;
+
+  std::vector<NatsSubscription> m_subscriptions;
   NatsErrorState m_error_state;
 
   // Builds all NATS options (callbacks, auth, TLS); returns false on any failed
