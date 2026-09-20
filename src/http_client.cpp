@@ -11,14 +11,12 @@ HttpClient::HttpClient(const int timeout_seconds,
                        bool enable_ssl_server_certificate_verification,
                        bool enable_ssl_server_hostname_verification,
                        const std::string &ssl_ca_cert_path)
-    : m_timeout_seconds(timeout_seconds),
-      m_enable_connection_reuse(enable_connection_reuse),
-      m_enable_ssl_server_certificate_verification(
-          enable_ssl_server_certificate_verification),
-      m_enable_ssl_server_hostname_verification(
-          enable_ssl_server_hostname_verification),
-      m_ssl_ca_cert_path(ssl_ca_cert_path), m_last_status_code(0),
-      m_is_valid(true), m_last_used(std::chrono::steady_clock::now()) {
+    : m_config{timeout_seconds,
+               enable_connection_reuse,
+               enable_ssl_server_certificate_verification,
+               enable_ssl_server_hostname_verification,
+               ssl_ca_cert_path},
+      m_state{0, true, std::chrono::steady_clock::now()} {
   ++g_instance_count;
   ++g_total_created;
   Logger::debug("new HttpClient created (active: {}, total: {}), timeout: {}s",
@@ -49,17 +47,19 @@ void HttpClient::setup_client(const ParsedUrl &parsed_url) {
   }
 
   if (parsed_url.m_is_https) {
-    m_ssl_client = std::make_unique<httplib::SSLClient>(parsed_url.m_host,
-                                                        parsed_url.m_port);
-    setup_ssl_client(*m_ssl_client, m_timeout_seconds,
-                     m_enable_ssl_server_certificate_verification,
-                     m_enable_ssl_server_hostname_verification,
-                     m_ssl_ca_cert_path, m_enable_connection_reuse);
+    m_transport.m_ssl_client = std::make_unique<httplib::SSLClient>(
+        parsed_url.m_host, parsed_url.m_port);
+    setup_ssl_client(*m_transport.m_ssl_client, m_config.m_timeout_seconds,
+                     m_config.m_enable_ssl_server_certificate_verification,
+                     m_config.m_enable_ssl_server_hostname_verification,
+                     m_config.m_ssl_ca_cert_path,
+                     m_config.m_enable_connection_reuse);
   } else {
-    m_client =
-        std::make_unique<httplib::Client>(parsed_url.m_host, parsed_url.m_port);
-    setup_http_connection(*m_client, m_timeout_seconds,
-                          m_enable_connection_reuse);
+    m_transport.m_client = std::make_unique<httplib::Client>(
+        parsed_url.m_host, parsed_url.m_port);
+    setup_http_connection(*m_transport.m_client,
+                          m_config.m_timeout_seconds,
+                          m_config.m_enable_connection_reuse);
   }
 }
 
@@ -71,8 +71,8 @@ HttpClient::prepare_request(const std::string &url, const std::string &body,
 
   parsed_url.m_path = normalize_path(parsed_url.m_path);
 
-  if ((parsed_url.m_is_https && !m_ssl_client) ||
-      (!parsed_url.m_is_https && !m_client)) {
+  if ((parsed_url.m_is_https && !m_transport.m_ssl_client) ||
+      (!parsed_url.m_is_https && !m_transport.m_client)) {
     setup_client(parsed_url);
   }
 
@@ -97,23 +97,27 @@ HttpResponse HttpClient::execute_request(const PreparedRequest &req,
   httplib::Result result;
   if (req.m_parsed_url.m_is_https) {
     result = body.empty()
-                 ? m_ssl_client->Get(req.m_parsed_url.m_path, req.m_headers)
-                 : m_ssl_client->Post(req.m_parsed_url.m_path, req.m_headers,
-                                      body, content_type);
+                 ? m_transport.m_ssl_client->Get(req.m_parsed_url.m_path,
+                                                 req.m_headers)
+                 : m_transport.m_ssl_client->Post(req.m_parsed_url.m_path,
+                                                  req.m_headers, body,
+                                                  content_type);
   } else {
     result = body.empty()
-                 ? m_client->Get(req.m_parsed_url.m_path, req.m_headers)
-                 : m_client->Post(req.m_parsed_url.m_path, req.m_headers, body,
-                                  content_type);
+                 ? m_transport.m_client->Get(req.m_parsed_url.m_path,
+                                             req.m_headers)
+                 : m_transport.m_client->Post(req.m_parsed_url.m_path,
+                                              req.m_headers, body,
+                                              content_type);
   }
 
   if (!result) {
-    m_last_status_code = 0;
-    throw std::runtime_error(
-        format_http_error(result.error(), m_timeout_seconds, operation));
+    m_state.m_last_status_code = 0;
+    throw std::runtime_error(format_http_error(
+        result.error(), m_config.m_timeout_seconds, operation));
   }
 
-  m_last_status_code = result->status;
+  m_state.m_last_status_code = result->status;
   return {result->body, result->headers, result->status};
 }
 
@@ -147,14 +151,18 @@ void HttpClient::post_no_response(const std::string &url,
   execute_request(req, body, "POST", content_type);
 }
 
-bool HttpClient::is_valid() const { return m_is_valid; }
+bool HttpClient::is_valid() const { return m_state.m_is_valid; }
 
-void HttpClient::invalidate() { m_is_valid = false; }
+void HttpClient::invalidate() { m_state.m_is_valid = false; }
 
-int HttpClient::get_last_status_code() const { return m_last_status_code; }
-
-std::chrono::steady_clock::time_point HttpClient::get_last_used() const {
-  return m_last_used;
+int HttpClient::get_last_status_code() const {
+  return m_state.m_last_status_code;
 }
 
-void HttpClient::touch() { m_last_used = std::chrono::steady_clock::now(); }
+std::chrono::steady_clock::time_point HttpClient::get_last_used() const {
+  return m_state.m_last_used;
+}
+
+void HttpClient::touch() {
+  m_state.m_last_used = std::chrono::steady_clock::now();
+}

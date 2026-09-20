@@ -68,6 +68,22 @@ private:
     ParsedUrl m_parsed_url;
     httplib::Headers m_headers;
   };
+  struct Config {
+    int m_timeout_seconds;
+    bool m_enable_connection_reuse;
+    bool m_enable_ssl_server_certificate_verification;
+    bool m_enable_ssl_server_hostname_verification;
+    std::string m_ssl_ca_cert_path;
+  } m_config;
+  struct Transport {
+    std::unique_ptr<httplib::Client> m_client;
+    std::unique_ptr<httplib::SSLClient> m_ssl_client;
+  } m_transport;
+  struct ConnState {
+    int m_last_status_code;
+    bool m_is_valid;
+    std::chrono::steady_clock::time_point m_last_used;
+  } m_state;
   void setup_client(const ParsedUrl &parsed_url);
   PreparedRequest prepare_request(const std::string &url,
                                   const std::string &body,
@@ -78,16 +94,6 @@ private:
                                const std::string &operation,
                                const std::string &content_type =
                                    "application/json");
-  std::unique_ptr<httplib::Client> m_client;
-  std::unique_ptr<httplib::SSLClient> m_ssl_client;
-  int m_timeout_seconds;
-  bool m_enable_connection_reuse;
-  bool m_enable_ssl_server_certificate_verification;
-  bool m_enable_ssl_server_hostname_verification;
-  std::string m_ssl_ca_cert_path;
-  int m_last_status_code;
-  bool m_is_valid;
-  std::chrono::steady_clock::time_point m_last_used;
 };
 
 #endif // HTTP_CLIENT_HPP
