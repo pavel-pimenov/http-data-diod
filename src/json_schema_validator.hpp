@@ -141,40 +141,43 @@ private:
 #else
   using SmallIntSet = std::unordered_set<int>;
 #endif
-  SmallIntSet m_allowed_status_codes;
-  bool m_require_body;
-  size_t m_max_body_size;
+  struct Allowed {
+    SmallIntSet m_status_codes;
+  } m_allowed;
+  struct Limits {
+    bool m_require_body;
+    size_t m_max_body_size;
+  } m_limits;
 
 public:
   ResponseValidator()
-      : m_require_body(false),
-        m_max_body_size(static_cast<size_t>(50) * 1024 * 1024) // 50MB default
+      : m_limits({false, static_cast<size_t>(50) * 1024 * 1024}) // 50MB default
   {}
 
   ResponseValidator &add_allowed_status_code(int code) {
-    m_allowed_status_codes.insert(code);
+    m_allowed.m_status_codes.insert(code);
     return *this;
   }
 
   ResponseValidator &require_body(bool required = true) {
-    m_require_body = required;
+    m_limits.m_require_body = required;
     return *this;
   }
 
   ResponseValidator &set_max_body_size(size_t bytes) {
-    m_max_body_size = bytes;
+    m_limits.m_max_body_size = bytes;
     return *this;
   }
 
   bool validate(const json &response, std::string &error) const {
     if (response.contains("status_code")) {
       int status = response["status_code"];
-      if (!m_allowed_status_codes.empty() &&
+      if (!m_allowed.m_status_codes.empty() &&
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
-          !m_allowed_status_codes.contains(status)) {
+          !m_allowed.m_status_codes.contains(status)) {
 #else
-          m_allowed_status_codes.find(status) ==
-              m_allowed_status_codes.end()) {
+          m_allowed.m_status_codes.find(status) ==
+              m_allowed.m_status_codes.end()) {
 #endif
         error = std::format("Status code not allowed: {}", status);
         return false;
@@ -182,16 +185,16 @@ public:
     }
 
     // Check body if required
-    if (m_require_body) {
+    if (m_limits.m_require_body) {
       if (!response.contains("body")) {
         error = "Response body required but missing";
         return false;
       }
 
       const std::string &body_str = get_body_response_ref(response);
-      if (body_str.length() > m_max_body_size) {
+      if (body_str.length() > m_limits.m_max_body_size) {
         error = std::format("Response body too large: {} > {}",
-                            body_str.length(), m_max_body_size);
+                            body_str.length(), m_limits.m_max_body_size);
         return false;
       }
     }
