@@ -113,11 +113,54 @@ public:
     int m_default_max_rows{1000};
   };
 
+  // Request rate limiting: per-IP token buckets (one RateLimiter per client
+  // IP, LRU-bounded) plus a global token bucket shared across all clients.
+  struct RateLimit {
+    struct PerIp {
+      bool m_enabled = true;
+      int m_max_tokens{100};
+      int m_refill_rate{10};
+      int m_max_ips{10000};
+      int m_cleanup_ttl_seconds{300};
+    } m_per_ip;
+    struct Global {
+      bool m_enabled = true;
+      int m_max_tokens{10000};
+      int m_refill_rate{1000};
+    } m_global;
+  };
+
+  // Response dedup cache: caches produced responses by request_id so a
+  // re-delivered NATS request is answered without a duplicate upstream call.
+  struct Dedup {
+    bool m_enabled = false;
+    int m_max_entries{4096};
+    int m_ttl_ms{60000};
+  };
+
+  // Proxy-side POST-body duplicate detection (keyed by SHA-256 hash of the
+  // body). When m_reject_enabled the proxy answers HTTP 409 for a repeated
+  // body instead of forwarding it; otherwise it only counts/logs duplicates.
+  struct Duplicate {
+    bool m_enabled = true;
+    bool m_reject_enabled = false;
+    int m_top_n{100};
+    int m_max_entries{1000};
+    int m_max_body_bytes{500};
+    int m_ttl_ms{60000};
+    int m_log_threshold{5};
+    int m_max_clients{1000};
+    int m_client_ttl_ms{1800000};
+  };
+
   Ssl m_ssl;
   Nats m_nats;
   Tracing m_tracing;
   Sentry m_sentry;
   DbQuery m_db_query;
+  RateLimit m_rate_limit;
+  Dedup m_dedup;
+  Duplicate m_duplicate;
 
   // ========================================================================
   // Group 1: std::string fields (32 bytes each on libstdc++)
@@ -146,21 +189,6 @@ public:
   int m_http_pool_size{400};
   int m_http_pool_idle_timeout_seconds{300};
   int m_max_retries{1};
-  int m_per_ip_max_tokens{100};
-  int m_per_ip_refill_rate{10};
-  int m_per_ip_max_ips{10000};
-  int m_per_ip_cleanup_ttl_seconds{300};
-  int m_global_max_tokens{10000};
-  int m_global_refill_rate{1000};
-  int m_dedup_max_entries{4096};
-  int m_dedup_ttl_ms{60000};
-  int m_duplicate_detection_top_n{100};
-  int m_duplicate_detection_max_entries{1000};
-  int m_duplicate_detection_max_body_bytes{500};
-  int m_duplicate_detection_ttl_ms{60000};
-  int m_duplicate_log_threshold{5};
-  int m_duplicate_detection_max_clients{1000};
-  int m_duplicate_detection_client_ttl_ms{1800000};
   // Test-only: random response delay in ms on the l2-server (0 = disabled).
   // Used to desynchronize response order from request order for the
   // response-to-request correlation test.
@@ -169,15 +197,6 @@ public:
   // ========================================================================
   // Group 6: bool fields (1 byte each) — packed together at the end
   // ========================================================================
-  bool m_enable_per_ip_rate_limiting{true};
-  bool m_enable_global_rate_limiting{true};
-  bool m_dedup_enabled{false};
-  bool m_duplicate_detection_enabled{true};
-  // When true the proxy rejects (HTTP 409) a POST whose body hash was already
-  // seen within the detector TTL instead of forwarding it to the worker.
-  // Off by default: only counting/logging happens (see /debug/duplicates).
-  bool m_duplicate_reject_enabled{false};
-
   bool m_crash_test{false};
   // Gates the /crash-test HTTP endpoint (default off). Deliberately separate
   // from m_crash_test: CRASH_TEST=true crashes at startup, while this flag

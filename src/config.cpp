@@ -228,73 +228,73 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
 
 void validate_rate_limiting(const Config &cfg, ConfigChecker &check) {
   // Per-IP Rate Limiting
-  if (cfg.m_enable_per_ip_rate_limiting) {
-    check(positive(cfg.m_per_ip_max_tokens),
+  if (cfg.m_rate_limit.m_per_ip.m_enabled) {
+    check(positive(cfg.m_rate_limit.m_per_ip.m_max_tokens),
           std::format("Invalid PER_IP_MAX_TOKENS: {} (must be > 0)",
-                      cfg.m_per_ip_max_tokens));
-    check(positive(cfg.m_per_ip_refill_rate),
+                      cfg.m_rate_limit.m_per_ip.m_max_tokens));
+    check(positive(cfg.m_rate_limit.m_per_ip.m_refill_rate),
           std::format("Invalid PER_IP_REFILL_RATE: {} (must be > 0)",
-                      cfg.m_per_ip_refill_rate));
-    check(positive(cfg.m_per_ip_max_ips),
+                      cfg.m_rate_limit.m_per_ip.m_refill_rate));
+    check(positive(cfg.m_rate_limit.m_per_ip.m_max_ips),
           std::format("Invalid PER_IP_MAX_IPS: {} (must be > 0)",
-                      cfg.m_per_ip_max_ips));
-    check(non_negative(cfg.m_per_ip_cleanup_ttl_seconds),
+                      cfg.m_rate_limit.m_per_ip.m_max_ips));
+    check(non_negative(cfg.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds),
           std::format("Invalid PER_IP_CLEANUP_TTL_SECONDS: {} (must be >= 0)",
-                      cfg.m_per_ip_cleanup_ttl_seconds));
+                      cfg.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds));
   }
 
   // Global Rate Limiting
-  if (cfg.m_enable_global_rate_limiting) {
-    check(positive(cfg.m_global_max_tokens),
+  if (cfg.m_rate_limit.m_global.m_enabled) {
+    check(positive(cfg.m_rate_limit.m_global.m_max_tokens),
           std::format("Invalid GLOBAL_RATE_LIMIT_MAX_TOKENS: {} (must be > 0)",
-                      cfg.m_global_max_tokens));
-    check(positive(cfg.m_global_refill_rate),
+                      cfg.m_rate_limit.m_global.m_max_tokens));
+    check(positive(cfg.m_rate_limit.m_global.m_refill_rate),
           std::format("Invalid GLOBAL_RATE_LIMIT_REFILL_RATE: {} (must be > 0)",
-                      cfg.m_global_refill_rate));
+                      cfg.m_rate_limit.m_global.m_refill_rate));
   }
 }
 
 void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
   // Dedup cache
-  if (cfg.m_dedup_enabled) {
-    check(positive(cfg.m_dedup_max_entries),
+  if (cfg.m_dedup.m_enabled) {
+    check(positive(cfg.m_dedup.m_max_entries),
           std::format("Invalid DEDUP_MAX_ENTRIES: {} (must be > 0)",
-                      cfg.m_dedup_max_entries));
-    check(positive(cfg.m_dedup_ttl_ms),
+                      cfg.m_dedup.m_max_entries));
+    check(positive(cfg.m_dedup.m_ttl_ms),
           std::format("Invalid DEDUP_TTL_MS: {} (must be > 0)",
-                      cfg.m_dedup_ttl_ms));
+                      cfg.m_dedup.m_ttl_ms));
   }
 
   // Duplicate detection
-  if (cfg.m_duplicate_detection_enabled) {
-    check(positive(cfg.m_duplicate_detection_top_n),
+  if (cfg.m_duplicate.m_enabled) {
+    check(positive(cfg.m_duplicate.m_top_n),
           std::format("Invalid DUPLICATE_DETECTION_TOP_N: {} (must be > 0)",
-                      cfg.m_duplicate_detection_top_n));
+                      cfg.m_duplicate.m_top_n));
     check(
-        positive(cfg.m_duplicate_detection_max_entries),
+        positive(cfg.m_duplicate.m_max_entries),
         std::format(
             "Invalid DUPLICATE_DETECTION_MAX_ENTRIES: {} (must be > 0)",
-            cfg.m_duplicate_detection_max_entries));
-    check(positive(cfg.m_duplicate_detection_ttl_ms),
+            cfg.m_duplicate.m_max_entries));
+    check(positive(cfg.m_duplicate.m_ttl_ms),
           std::format("Invalid DUPLICATE_DETECTION_TTL_MS: {} (must be > 0)",
-                      cfg.m_duplicate_detection_ttl_ms));
-    check(non_negative(cfg.m_duplicate_detection_max_clients),
+                      cfg.m_duplicate.m_ttl_ms));
+    check(non_negative(cfg.m_duplicate.m_max_clients),
           std::format(
               "Invalid DUPLICATE_DETECTION_MAX_CLIENTS: {} (must be >= 0, "
               "0 = unbounded)",
-              cfg.m_duplicate_detection_max_clients));
-    check(non_negative(cfg.m_duplicate_detection_client_ttl_ms),
+              cfg.m_duplicate.m_max_clients));
+    check(non_negative(cfg.m_duplicate.m_client_ttl_ms),
           std::format(
               "Invalid DUPLICATE_DETECTION_CLIENT_TTL_MS: {} (must be >= 0, "
               "0 = no TTL eviction)",
-              cfg.m_duplicate_detection_client_ttl_ms));
-    check(non_negative(cfg.m_duplicate_detection_max_body_bytes),
+              cfg.m_duplicate.m_client_ttl_ms));
+    check(non_negative(cfg.m_duplicate.m_max_body_bytes),
           std::format(
               "Invalid DUPLICATE_DETECTION_MAX_BODY_BYTES: {} (must be >= 0)",
-              cfg.m_duplicate_detection_max_body_bytes));
-    check(non_negative(cfg.m_duplicate_log_threshold),
+              cfg.m_duplicate.m_max_body_bytes));
+    check(non_negative(cfg.m_duplicate.m_log_threshold),
           std::format("Invalid DUPLICATE_LOG_THRESHOLD: {} (must be >= 0)",
-                      cfg.m_duplicate_log_threshold));
+                      cfg.m_duplicate.m_log_threshold));
   }
 }
 
@@ -481,67 +481,67 @@ void Config::load_feature_config() {
       m_tracing.m_outage_failure_threshold, m_tracing.m_outage_cooldown_base_ms,
       m_tracing.m_outage_cooldown_base_ms, m_tracing.m_outage_cooldown_max_ms);
 
-  m_enable_per_ip_rate_limiting =
-      get_env_bool("ENABLE_PER_IP_RATE_LIMITING", m_enable_per_ip_rate_limiting);
-  m_per_ip_max_tokens = get_env_int("PER_IP_MAX_TOKENS", m_per_ip_max_tokens);
-  m_per_ip_refill_rate = get_env_int("PER_IP_REFILL_RATE", m_per_ip_refill_rate);
-  m_per_ip_max_ips = get_env_int("PER_IP_MAX_IPS", m_per_ip_max_ips);
-  m_per_ip_cleanup_ttl_seconds = get_env_int(
-      "PER_IP_CLEANUP_TTL_SECONDS", m_per_ip_cleanup_ttl_seconds);
+  m_rate_limit.m_per_ip.m_enabled =
+      get_env_bool("ENABLE_PER_IP_RATE_LIMITING", m_rate_limit.m_per_ip.m_enabled);
+  m_rate_limit.m_per_ip.m_max_tokens = get_env_int("PER_IP_MAX_TOKENS", m_rate_limit.m_per_ip.m_max_tokens);
+  m_rate_limit.m_per_ip.m_refill_rate = get_env_int("PER_IP_REFILL_RATE", m_rate_limit.m_per_ip.m_refill_rate);
+  m_rate_limit.m_per_ip.m_max_ips = get_env_int("PER_IP_MAX_IPS", m_rate_limit.m_per_ip.m_max_ips);
+  m_rate_limit.m_per_ip.m_cleanup_ttl_seconds = get_env_int(
+      "PER_IP_CLEANUP_TTL_SECONDS", m_rate_limit.m_per_ip.m_cleanup_ttl_seconds);
   Logger::info("Per-IP Rate Limiting: enabled={} max_tokens={} refill_rate={} "
                "max_ips={} cleanup_ttl={}s",
-               m_enable_per_ip_rate_limiting, m_per_ip_max_tokens,
-               m_per_ip_refill_rate, m_per_ip_max_ips,
-               m_per_ip_cleanup_ttl_seconds);
+               m_rate_limit.m_per_ip.m_enabled, m_rate_limit.m_per_ip.m_max_tokens,
+               m_rate_limit.m_per_ip.m_refill_rate, m_rate_limit.m_per_ip.m_max_ips,
+               m_rate_limit.m_per_ip.m_cleanup_ttl_seconds);
 
-  m_enable_global_rate_limiting =
-      get_env_bool("ENABLE_GLOBAL_RATE_LIMITING", m_enable_global_rate_limiting);
-  m_global_max_tokens =
-      get_env_int("GLOBAL_RATE_LIMIT_MAX_TOKENS", m_global_max_tokens);
-  m_global_refill_rate =
-      get_env_int("GLOBAL_RATE_LIMIT_REFILL_RATE", m_global_refill_rate);
+  m_rate_limit.m_global.m_enabled =
+      get_env_bool("ENABLE_GLOBAL_RATE_LIMITING", m_rate_limit.m_global.m_enabled);
+  m_rate_limit.m_global.m_max_tokens =
+      get_env_int("GLOBAL_RATE_LIMIT_MAX_TOKENS", m_rate_limit.m_global.m_max_tokens);
+  m_rate_limit.m_global.m_refill_rate =
+      get_env_int("GLOBAL_RATE_LIMIT_REFILL_RATE", m_rate_limit.m_global.m_refill_rate);
   Logger::info("Global Rate Limiting: enabled={} max_tokens={} refill_rate={}",
-               m_enable_global_rate_limiting, m_global_max_tokens,
-               m_global_refill_rate);
+               m_rate_limit.m_global.m_enabled, m_rate_limit.m_global.m_max_tokens,
+               m_rate_limit.m_global.m_refill_rate);
 
-  m_dedup_enabled = get_env_bool("DEDUP_ENABLED", m_dedup_enabled);
-  m_dedup_max_entries =
-      get_env_int("DEDUP_MAX_ENTRIES", m_dedup_max_entries);
-  m_dedup_ttl_ms = get_env_int("DEDUP_TTL_MS", m_dedup_ttl_ms);
+  m_dedup.m_enabled = get_env_bool("DEDUP_ENABLED", m_dedup.m_enabled);
+  m_dedup.m_max_entries =
+      get_env_int("DEDUP_MAX_ENTRIES", m_dedup.m_max_entries);
+  m_dedup.m_ttl_ms = get_env_int("DEDUP_TTL_MS", m_dedup.m_ttl_ms);
   Logger::info("Dedup cache: enabled={} max_entries={} ttl_ms={}",
-               m_dedup_enabled, m_dedup_max_entries, m_dedup_ttl_ms);
+               m_dedup.m_enabled, m_dedup.m_max_entries, m_dedup.m_ttl_ms);
 
-  m_duplicate_detection_enabled =
-      get_env_bool("DUPLICATE_DETECTION_ENABLED", m_duplicate_detection_enabled);
-  m_duplicate_reject_enabled =
-      get_env_bool("DUPLICATE_REJECT_ENABLED", m_duplicate_reject_enabled);
-  m_duplicate_detection_top_n =
-      get_env_int("DUPLICATE_DETECTION_TOP_N", m_duplicate_detection_top_n);
-  m_duplicate_detection_max_entries =
+  m_duplicate.m_enabled =
+      get_env_bool("DUPLICATE_DETECTION_ENABLED", m_duplicate.m_enabled);
+  m_duplicate.m_reject_enabled =
+      get_env_bool("DUPLICATE_REJECT_ENABLED", m_duplicate.m_reject_enabled);
+  m_duplicate.m_top_n =
+      get_env_int("DUPLICATE_DETECTION_TOP_N", m_duplicate.m_top_n);
+  m_duplicate.m_max_entries =
       get_env_int("DUPLICATE_DETECTION_MAX_ENTRIES",
-                  m_duplicate_detection_max_entries);
-  m_duplicate_detection_max_body_bytes =
+                  m_duplicate.m_max_entries);
+  m_duplicate.m_max_body_bytes =
       get_env_int("DUPLICATE_DETECTION_MAX_BODY_BYTES",
-                  m_duplicate_detection_max_body_bytes);
-  m_duplicate_detection_ttl_ms =
-      get_env_int("DUPLICATE_DETECTION_TTL_MS", m_duplicate_detection_ttl_ms);
-  m_duplicate_log_threshold =
-      get_env_int("DUPLICATE_LOG_THRESHOLD", m_duplicate_log_threshold);
-  m_duplicate_detection_max_clients =
+                  m_duplicate.m_max_body_bytes);
+  m_duplicate.m_ttl_ms =
+      get_env_int("DUPLICATE_DETECTION_TTL_MS", m_duplicate.m_ttl_ms);
+  m_duplicate.m_log_threshold =
+      get_env_int("DUPLICATE_LOG_THRESHOLD", m_duplicate.m_log_threshold);
+  m_duplicate.m_max_clients =
       get_env_int("DUPLICATE_DETECTION_MAX_CLIENTS",
-                  m_duplicate_detection_max_clients);
-  m_duplicate_detection_client_ttl_ms =
+                  m_duplicate.m_max_clients);
+  m_duplicate.m_client_ttl_ms =
       get_env_int("DUPLICATE_DETECTION_CLIENT_TTL_MS",
-                  m_duplicate_detection_client_ttl_ms);
+                  m_duplicate.m_client_ttl_ms);
   Logger::info("Duplicate detection: enabled={} top_n={} max_entries={} "
                "max_body_bytes={} ttl_ms={} reject_enabled={} log_threshold={} "
                "max_clients={} client_ttl_ms={}",
-               m_duplicate_detection_enabled, m_duplicate_detection_top_n,
-               m_duplicate_detection_max_entries,
-               m_duplicate_detection_max_body_bytes,
-               m_duplicate_detection_ttl_ms, m_duplicate_reject_enabled,
-               m_duplicate_log_threshold, m_duplicate_detection_max_clients,
-               m_duplicate_detection_client_ttl_ms);
+               m_duplicate.m_enabled, m_duplicate.m_top_n,
+               m_duplicate.m_max_entries,
+               m_duplicate.m_max_body_bytes,
+               m_duplicate.m_ttl_ms, m_duplicate.m_reject_enabled,
+               m_duplicate.m_log_threshold, m_duplicate.m_max_clients,
+               m_duplicate.m_client_ttl_ms);
 }
 
 void Config::load_nats_config() {

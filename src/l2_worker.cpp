@@ -46,9 +46,9 @@ L2Worker::L2Worker(AppContext &context)
                     context.m_config.m_ssl.m_ca_cert_path,
                     context.m_config.m_http_pool_idle_timeout_seconds)},
       m_ctx(context), m_l2_server_urls(context.m_config.m_l2_server_urls),
-      m_dedup_cache(context.m_config.m_dedup_enabled,
-                    context.m_config.m_dedup_max_entries,
-                    context.m_config.m_dedup_ttl_ms) {
+m_dedup_cache(context.m_config.m_dedup.m_enabled,
+                  context.m_config.m_dedup.m_max_entries,
+                  context.m_config.m_dedup.m_ttl_ms) {
 
   if (context.m_proxy.m_http_pool_metrics) {
     const auto &metrics = *context.m_proxy.m_http_pool_metrics;

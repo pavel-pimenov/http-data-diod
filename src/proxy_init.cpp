@@ -47,24 +47,24 @@ void init_proxy_components(AppContext &app_ctx) {
               app_ctx.m_proxy_registry, "l2_per_ip_rate_limiter_rejected_total",
               "Total requests rejected by per-IP rate limiter")});
 
-  if (app_ctx.m_config.m_enable_global_rate_limiting) {
+  if (app_ctx.m_config.m_rate_limit.m_global.m_enabled) {
     app_ctx.m_proxy.m_rate_limiter = std::make_unique<RateLimiter>(
-        static_cast<uint64_t>(app_ctx.m_config.m_global_max_tokens),
-        static_cast<uint64_t>(app_ctx.m_config.m_global_refill_rate));
+        static_cast<uint64_t>(app_ctx.m_config.m_rate_limit.m_global.m_max_tokens),
+        static_cast<uint64_t>(app_ctx.m_config.m_rate_limit.m_global.m_refill_rate));
     Logger::info("Global rate limiter initialized: max={} tokens, "
                  "refill={}/sec",
-                 app_ctx.m_config.m_global_max_tokens,
-                 app_ctx.m_config.m_global_refill_rate);
+                 app_ctx.m_config.m_rate_limit.m_global.m_max_tokens,
+                 app_ctx.m_config.m_rate_limit.m_global.m_refill_rate);
   } else {
     Logger::info(
         "Global rate limiter disabled (ENABLE_GLOBAL_RATE_LIMITING=false)");
   }
 
-  if (app_ctx.m_config.m_enable_per_ip_rate_limiting) {
+  if (app_ctx.m_config.m_rate_limit.m_per_ip.m_enabled) {
     app_ctx.m_proxy.m_per_ip_rate_limiter = std::make_unique<PerIPRateLimiter>(
-        app_ctx.m_config.m_per_ip_max_tokens,
-        app_ctx.m_config.m_per_ip_refill_rate, app_ctx.m_config.m_per_ip_max_ips,
-        app_ctx.m_config.m_per_ip_cleanup_ttl_seconds);
+        app_ctx.m_config.m_rate_limit.m_per_ip.m_max_tokens,
+        app_ctx.m_config.m_rate_limit.m_per_ip.m_refill_rate, app_ctx.m_config.m_rate_limit.m_per_ip.m_max_ips,
+        app_ctx.m_config.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds);
     app_ctx.m_proxy.m_per_ip_metrics_collector =
         std::make_shared<DynamicLabeledFamily<prometheus::Gauge>>(
             "ip",
@@ -89,10 +89,10 @@ void init_proxy_components(AppContext &app_ctx) {
             });
     Logger::info("Per-IP rate limiter initialized: max_tokens={} "
                  "refill_rate={} max_ips={} cleanup_ttl={}s",
-                 app_ctx.m_config.m_per_ip_max_tokens,
-                 app_ctx.m_config.m_per_ip_refill_rate,
-                 app_ctx.m_config.m_per_ip_max_ips,
-                 app_ctx.m_config.m_per_ip_cleanup_ttl_seconds);
+                 app_ctx.m_config.m_rate_limit.m_per_ip.m_max_tokens,
+                 app_ctx.m_config.m_rate_limit.m_per_ip.m_refill_rate,
+                 app_ctx.m_config.m_rate_limit.m_per_ip.m_max_ips,
+                 app_ctx.m_config.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds);
   } else {
     Logger::info("Per-IP rate limiting disabled");
   }
@@ -131,18 +131,18 @@ void init_proxy_components(AppContext &app_ctx) {
                "header"}});
 
   DuplicateDetector::Options dup_options;
-  dup_options.m_enabled = app_ctx.m_config.m_duplicate_detection_enabled;
-  dup_options.m_top_n = app_ctx.m_config.m_duplicate_detection_top_n;
-  dup_options.m_max_entries = app_ctx.m_config.m_duplicate_detection_max_entries;
+  dup_options.m_enabled = app_ctx.m_config.m_duplicate.m_enabled;
+  dup_options.m_top_n = app_ctx.m_config.m_duplicate.m_top_n;
+  dup_options.m_max_entries = app_ctx.m_config.m_duplicate.m_max_entries;
   dup_options.m_max_body_bytes =
-      app_ctx.m_config.m_duplicate_detection_max_body_bytes;
-  dup_options.m_ttl_ms = app_ctx.m_config.m_duplicate_detection_ttl_ms;
+      app_ctx.m_config.m_duplicate.m_max_body_bytes;
+  dup_options.m_ttl_ms = app_ctx.m_config.m_duplicate.m_ttl_ms;
   dup_options.m_duplicate_log_threshold =
-      app_ctx.m_config.m_duplicate_log_threshold;
+      app_ctx.m_config.m_duplicate.m_log_threshold;
   dup_options.m_per_client_max_entries =
-      app_ctx.m_config.m_duplicate_detection_max_clients;
+      app_ctx.m_config.m_duplicate.m_max_clients;
   dup_options.m_per_client_ttl_ms =
-      app_ctx.m_config.m_duplicate_detection_client_ttl_ms;
+      app_ctx.m_config.m_duplicate.m_client_ttl_ms;
   app_ctx.m_proxy.m_duplicate_detector =
       std::make_unique<DuplicateDetector>(dup_options);
   Logger::info("Duplicate POST detector initialized: enabled={} top_n={} "

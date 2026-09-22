@@ -317,7 +317,7 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
   // forwarding would only repeat a side effect. Off by default — the proxy
   // then still counts and reports the duplicate (see /debug/duplicates and
   // l2_proxy_per_client_id_duplicate_* metrics).
-  if (!m_ctx.m_config.m_duplicate_reject_enabled) {
+  if (!m_ctx.m_config.m_duplicate.m_reject_enabled) {
     return false;
   }
   increment_per_client_metric(
@@ -572,7 +572,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // more than once counts as a duplicate from a client. GET favicon probes are
   // ignored; the hashing cost is skipped entirely when the feature is off.
   if (method == "POST" && !body.empty() &&
-      m_ctx.m_config.m_duplicate_detection_enabled &&
+      m_ctx.m_config.m_duplicate.m_enabled &&
       m_ctx.m_proxy.m_duplicate_detector &&
       record_and_maybe_reject_duplicate(client_id, client_ip, body, res)) {
     return;

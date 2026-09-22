@@ -443,42 +443,42 @@ TEST_CASE("Config: validate with logging warns on oversized pool", "[config]") {
 TEST_CASE("Config: per-IP rate limiting disabled skips validation",
           "[config]") {
   Config config;
-  config.m_enable_per_ip_rate_limiting = false;
-  config.m_per_ip_max_tokens = 0;
-  config.m_per_ip_refill_rate = 0;
-  config.m_per_ip_max_ips = 0;
-  config.m_per_ip_cleanup_ttl_seconds = -1;
+  config.m_rate_limit.m_per_ip.m_enabled = false;
+  config.m_rate_limit.m_per_ip.m_max_tokens = 0;
+  config.m_rate_limit.m_per_ip.m_refill_rate = 0;
+  config.m_rate_limit.m_per_ip.m_max_ips = 0;
+  config.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds = -1;
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: global rate limiting disabled skips validation",
           "[config]") {
   Config config;
-  config.m_enable_global_rate_limiting = false;
-  config.m_global_max_tokens = 0;
-  config.m_global_refill_rate = 0;
+  config.m_rate_limit.m_global.m_enabled = false;
+  config.m_rate_limit.m_global.m_max_tokens = 0;
+  config.m_rate_limit.m_global.m_refill_rate = 0;
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: dedup disabled skips validation", "[config]") {
   Config config;
-  config.m_dedup_enabled = false;
-  config.m_dedup_max_entries = 0;
-  config.m_dedup_ttl_ms = 0;
+  config.m_dedup.m_enabled = false;
+  config.m_dedup.m_max_entries = 0;
+  config.m_dedup.m_ttl_ms = 0;
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: duplicate detection disabled skips validation",
           "[config]") {
   Config config;
-  config.m_duplicate_detection_enabled = false;
-  config.m_duplicate_detection_top_n = 0;
-  config.m_duplicate_detection_max_entries = 0;
-  config.m_duplicate_detection_ttl_ms = 0;
-  config.m_duplicate_detection_max_clients = -1;
-  config.m_duplicate_detection_client_ttl_ms = -1;
-  config.m_duplicate_detection_max_body_bytes = -1;
-  config.m_duplicate_log_threshold = -1;
+  config.m_duplicate.m_enabled = false;
+  config.m_duplicate.m_top_n = 0;
+  config.m_duplicate.m_max_entries = 0;
+  config.m_duplicate.m_ttl_ms = 0;
+  config.m_duplicate.m_max_clients = -1;
+  config.m_duplicate.m_client_ttl_ms = -1;
+  config.m_duplicate.m_max_body_bytes = -1;
+  config.m_duplicate.m_log_threshold = -1;
   REQUIRE(config.validate(false) == true);
 }
 
@@ -514,62 +514,62 @@ TEST_CASE("Config: NATS TLS cert without key fails validation", "[config]") {
 
 TEST_CASE("Config: negative per-IP tokens fail validation", "[config]") {
   Config config;
-  config.m_per_ip_max_tokens = -1;
+  config.m_rate_limit.m_per_ip.m_max_tokens = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: zero global max tokens fails validation", "[config]") {
   Config config;
-  config.m_global_max_tokens = 0;
+  config.m_rate_limit.m_global.m_max_tokens = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: zero dedup max entries fails validation", "[config]") {
   Config config;
-  config.m_dedup_enabled = true;
-  config.m_dedup_max_entries = 0;
+  config.m_dedup.m_enabled = true;
+  config.m_dedup.m_max_entries = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: zero dedup TTL fails validation", "[config]") {
   Config config;
-  config.m_dedup_enabled = true;
-  config.m_dedup_ttl_ms = 0;
+  config.m_dedup.m_enabled = true;
+  config.m_dedup.m_ttl_ms = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: zero duplicate detection top N fails validation",
           "[config]") {
   Config config;
-  config.m_duplicate_detection_top_n = 0;
+  config.m_duplicate.m_top_n = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: negative duplicate max body bytes fails validation",
           "[config]") {
   Config config;
-  config.m_duplicate_detection_max_body_bytes = -1;
+  config.m_duplicate.m_max_body_bytes = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: negative duplicate log threshold fails validation",
           "[config]") {
   Config config;
-  config.m_duplicate_log_threshold = -1;
+  config.m_duplicate.m_log_threshold = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: negative duplicate max clients fails validation",
           "[config]") {
   Config config;
-  config.m_duplicate_detection_max_clients = -1;
+  config.m_duplicate.m_max_clients = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: negative duplicate client TTL fails validation",
           "[config]") {
   Config config;
-  config.m_duplicate_detection_client_ttl_ms = -1;
+  config.m_duplicate.m_client_ttl_ms = -1;
   REQUIRE(config.validate(false) == false);
 }
 
@@ -1049,35 +1049,35 @@ TEST_CASE("Config: proxy skips per-database connection fields", "[config]") {
 
 TEST_CASE("Config: rate limiting values must be positive", "[config]") {
   Config config;
-  config.m_enable_per_ip_rate_limiting = true;
-  config.m_per_ip_max_tokens = 0;
-  config.m_per_ip_refill_rate = -1;
-  config.m_per_ip_max_ips = 0;
-  config.m_per_ip_cleanup_ttl_seconds = -1;
-  config.m_enable_global_rate_limiting = true;
-  config.m_global_max_tokens = 0;
-  config.m_global_refill_rate = -1;
+  config.m_rate_limit.m_per_ip.m_enabled = true;
+  config.m_rate_limit.m_per_ip.m_max_tokens = 0;
+  config.m_rate_limit.m_per_ip.m_refill_rate = -1;
+  config.m_rate_limit.m_per_ip.m_max_ips = 0;
+  config.m_rate_limit.m_per_ip.m_cleanup_ttl_seconds = -1;
+  config.m_rate_limit.m_global.m_enabled = true;
+  config.m_rate_limit.m_global.m_max_tokens = 0;
+  config.m_rate_limit.m_global.m_refill_rate = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: dedup cache values must be positive", "[config]") {
   Config config;
-  config.m_dedup_enabled = true;
-  config.m_dedup_max_entries = 0;
-  config.m_dedup_ttl_ms = -1;
+  config.m_dedup.m_enabled = true;
+  config.m_dedup.m_max_entries = 0;
+  config.m_dedup.m_ttl_ms = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: duplicate detection values must be positive", "[config]") {
   Config config;
-  config.m_duplicate_detection_enabled = true;
-  config.m_duplicate_detection_top_n = 0;
-  config.m_duplicate_detection_max_entries = -1;
-  config.m_duplicate_detection_ttl_ms = 0;
-  config.m_duplicate_detection_max_clients = -1;
-  config.m_duplicate_detection_client_ttl_ms = -1;
-  config.m_duplicate_detection_max_body_bytes = -1;
-  config.m_duplicate_log_threshold = -1;
+  config.m_duplicate.m_enabled = true;
+  config.m_duplicate.m_top_n = 0;
+  config.m_duplicate.m_max_entries = -1;
+  config.m_duplicate.m_ttl_ms = 0;
+  config.m_duplicate.m_max_clients = -1;
+  config.m_duplicate.m_client_ttl_ms = -1;
+  config.m_duplicate.m_max_body_bytes = -1;
+  config.m_duplicate.m_log_threshold = -1;
   REQUIRE(config.validate(false) == false);
 }
 
