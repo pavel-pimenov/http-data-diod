@@ -638,7 +638,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
                               db, type, status);
   };
 
-  if (!m_ctx.m_config.m_db_query_enabled) {
+  if (!m_ctx.m_config.m_db_query.m_enabled) {
     reject_gateway(404, "NOT_FOUND", "DB gateway is disabled", "", "");
     return;
   }
@@ -662,7 +662,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   }
 
   const bool known_db = std::ranges::any_of(
-      m_ctx.m_config.m_databases,
+      m_ctx.m_config.m_db_query.m_databases,
       [&db_name](const DbConfig &db) { return db.m_name == db_name; });
   if (!known_db) {
     reject_gateway(404, "UNKNOWN_DATABASE",
@@ -722,7 +722,7 @@ void RequestHandler::handle_db_gateway_list(
                               "list", 405);
     return;
   }
-  json names = db_gateway_routing::databases_list_json(m_ctx.m_config.m_databases);
+  json names = db_gateway_routing::databases_list_json(m_ctx.m_config.m_db_query.m_databases);
   res.status = 200;
   send_json_response(res, res.status, json{{"databases", names}});
   record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
@@ -809,7 +809,7 @@ void RequestHandler::route_db_request(
     }
     nlohmann::json attrs = {
         {"nats.success", success},
-        {"nats.destination", m_ctx.m_config.m_db_query_nats_subject},
+        {"nats.destination", m_ctx.m_config.m_db_query.m_subject},
         {"nats.duration_us", nats_end_us - nats_start_us},
         {"db.name", db_name},
     };
@@ -839,8 +839,8 @@ void RequestHandler::route_db_request(
   // span.
   auto [reply, consume_span_id] =
       m_ctx.m_nats_client->request_with_consume_span_id(
-          m_ctx.m_config.m_db_query_nats_subject, request_json,
-          m_ctx.m_config.m_db_query_nats_timeout_ms);
+          m_ctx.m_config.m_db_query.m_subject, request_json,
+          m_ctx.m_config.m_db_query.m_timeout_ms);
   const int64_t nats_end_us = TimeUtils::epoch_us();
 
   if (reply.m_data.empty()) {

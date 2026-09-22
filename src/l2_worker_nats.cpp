@@ -116,7 +116,7 @@ void L2Worker::run_with_nats() {
                m_ctx.m_config.m_nats.m_subject,
                m_ctx.m_config.m_nats.m_queue_group);
 
-  if (m_ctx.m_config.m_db_query_enabled) {
+  if (m_ctx.m_config.m_db_query.m_enabled) {
     m_db_query_handler = std::make_unique<DbQueryHandler>();
     m_db_query_handler->set_pool_metrics(
         &m_ctx.m_worker.m_metrics->m_db_pool_connections);
@@ -197,8 +197,8 @@ void L2Worker::run_with_nats() {
           // already-served databases.
           Logger::info("DB gateway: retrying init for {} configured "
                        "database(s)",
-                       m_ctx.m_config.m_databases.size());
-          m_db_query_handler->init(m_ctx.m_config.m_databases);
+                       m_ctx.m_config.m_db_query.m_databases.size());
+          m_db_query_handler->init(m_ctx.m_config.m_db_query.m_databases);
         }
       }
     }
@@ -253,20 +253,20 @@ bool L2Worker::subscribe_db_query_subject() {
     return true;
   }
   const bool subscribed =
-      subscribe_nats_subject(m_ctx.m_config.m_db_query_nats_subject,
-                             m_ctx.m_config.m_db_query_nats_queue_group,
+      subscribe_nats_subject(m_ctx.m_config.m_db_query.m_subject,
+                             m_ctx.m_config.m_db_query.m_queue_group,
                              "DB query", [this](const std::string &data,
                                                 const std::string &reply_to) {
                                process_db_query_from_nats(data, reply_to);
                              });
   if (!subscribed) {
     Logger::error("Failed to subscribe worker to DB NATS subject: {}",
-                  m_ctx.m_config.m_db_query_nats_subject);
+                  m_ctx.m_config.m_db_query.m_subject);
     return false;
   }
   Logger::info("Worker subscribed to DB NATS subject: {} (queue group {})",
-               m_ctx.m_config.m_db_query_nats_subject,
-               m_ctx.m_config.m_db_query_nats_queue_group);
+               m_ctx.m_config.m_db_query.m_subject,
+               m_ctx.m_config.m_db_query.m_queue_group);
   return true;
 }
 
@@ -279,7 +279,7 @@ bool L2Worker::ensure_db_query_subscription(RetryHandler &backoff) {
   // unavailable are picked up later by the incremental init retry in the main
   // loop.
   if (!m_db_query_handler->is_enabled()) {
-    m_db_query_handler->init(m_ctx.m_config.m_databases);
+    m_db_query_handler->init(m_ctx.m_config.m_db_query.m_databases);
     if (!m_db_query_handler->is_enabled()) {
       Logger::warn("DB gateway is not ready yet (database(s) "
                    "unavailable?), will retry");
@@ -556,7 +556,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
           m_ctx.m_tracer.get(), request_id, trace_ctx.m_trace_id, start_us,
           consume_span_id, proxy_span_id,
           proxy_service_name(m_ctx.m_config.m_mode),
-          m_ctx.m_config.m_db_query_nats_subject, reply_to);
+          m_ctx.m_config.m_db_query.m_subject, reply_to);
 
       if (!m_db_query_handler) {
         status = 503;

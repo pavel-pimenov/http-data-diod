@@ -183,19 +183,19 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
     }
 
     // DB Gateway
-    if (cfg.m_db_query_enabled) {
-      check(!cfg.m_db_query_nats_subject.empty(),
+    if (cfg.m_db_query.m_enabled) {
+      check(!cfg.m_db_query.m_subject.empty(),
             "DB_QUERY_NATS_SUBJECT cannot be empty");
-      check(positive(cfg.m_db_query_nats_timeout_ms),
+      check(positive(cfg.m_db_query.m_timeout_ms),
             std::format("Invalid DB_QUERY_NATS_TIMEOUT_MS: {} (must be > 0)",
-                        cfg.m_db_query_nats_timeout_ms));
-      check(positive(cfg.m_db_query_default_timeout_ms),
+                        cfg.m_db_query.m_timeout_ms));
+      check(positive(cfg.m_db_query.m_default_timeout_ms),
             std::format("Invalid DB_QUERY_DEFAULT_TIMEOUT_MS: {} (must be > 0)",
-                        cfg.m_db_query_default_timeout_ms));
-      check(positive(cfg.m_db_query_default_max_rows),
+                        cfg.m_db_query.m_default_timeout_ms));
+      check(positive(cfg.m_db_query.m_default_max_rows),
             std::format("Invalid DB_QUERY_DEFAULT_MAX_ROWS: {} (must be > 0)",
-                        cfg.m_db_query_default_max_rows));
-      for (const auto &db : cfg.m_databases) {
+                        cfg.m_db_query.m_default_max_rows));
+      for (const auto &db : cfg.m_db_query.m_databases) {
         check(db.m_driver == "oracle" || db.m_driver == "postgres",
               std::format("DB '{}': unknown driver '{}'", db.m_name,
                           db.m_driver));
@@ -580,18 +580,18 @@ void Config::load_nats_config() {
 }
 
 void Config::load_db_query_config() {
-  m_db_query_enabled = get_env_bool("DB_QUERY_ENABLED", m_db_query_enabled);
-  m_db_query_nats_subject =
-      get_env_string("DB_QUERY_NATS_SUBJECT", m_db_query_nats_subject);
-  m_db_query_nats_queue_group =
-      get_env_string("DB_QUERY_NATS_QUEUE_GROUP", m_db_query_nats_queue_group);
-  m_db_query_nats_timeout_ms =
-      get_env_int("DB_QUERY_NATS_TIMEOUT_MS", m_db_query_nats_timeout_ms);
-  m_db_query_default_timeout_ms =
-      get_env_int("DB_QUERY_DEFAULT_TIMEOUT_MS", m_db_query_default_timeout_ms);
-  m_db_query_default_max_rows =
-      get_env_int("DB_QUERY_DEFAULT_MAX_ROWS", m_db_query_default_max_rows);
-  if (!m_db_query_enabled) {
+  m_db_query.m_enabled = get_env_bool("DB_QUERY_ENABLED", m_db_query.m_enabled);
+  m_db_query.m_subject =
+      get_env_string("DB_QUERY_NATS_SUBJECT", m_db_query.m_subject);
+  m_db_query.m_queue_group =
+      get_env_string("DB_QUERY_NATS_QUEUE_GROUP", m_db_query.m_queue_group);
+  m_db_query.m_timeout_ms =
+      get_env_int("DB_QUERY_NATS_TIMEOUT_MS", m_db_query.m_timeout_ms);
+  m_db_query.m_default_timeout_ms =
+      get_env_int("DB_QUERY_DEFAULT_TIMEOUT_MS", m_db_query.m_default_timeout_ms);
+  m_db_query.m_default_max_rows =
+      get_env_int("DB_QUERY_DEFAULT_MAX_ROWS", m_db_query.m_default_max_rows);
+  if (!m_db_query.m_enabled) {
     return;
   }
   const bool oracle_enabled = get_env_bool("DB_ORACLE_ENABLED", false);
@@ -615,7 +615,7 @@ void Config::load_db_query_config() {
       DbConfig db;
       db.m_name = name;
       db.m_driver = name;
-      m_databases.push_back(db);
+      m_db_query.m_databases.push_back(db);
       Logger::info("DB Gateway: registered database '{}' (driver={}) "
                    "[proxy routing only]",
                    db.m_name, db.m_driver);
@@ -637,9 +637,9 @@ void Config::load_db_query_config() {
     db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
     db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
     db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
-    db.m_query_timeout_ms = m_db_query_default_timeout_ms;
-    db.m_max_rows = m_db_query_default_max_rows;
-    m_databases.push_back(db);
+    db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
+    db.m_max_rows = m_db_query.m_default_max_rows;
+    m_db_query.m_databases.push_back(db);
     Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
                  "service={})",
                  db.m_name, db.m_driver, db.m_host, db.m_port, db.m_service);
@@ -655,9 +655,9 @@ void Config::load_db_query_config() {
     db.m_password = get_env_string("DB_POSTGRES_PASSWORD", "");
     db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", 1);
     db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", 5);
-    db.m_query_timeout_ms = m_db_query_default_timeout_ms;
-    db.m_max_rows = m_db_query_default_max_rows;
-    m_databases.push_back(db);
+    db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
+    db.m_max_rows = m_db_query.m_default_max_rows;
+    m_db_query.m_databases.push_back(db);
     Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
                  "db={})",
                  db.m_name, db.m_driver, db.m_host, db.m_port, db.m_database);

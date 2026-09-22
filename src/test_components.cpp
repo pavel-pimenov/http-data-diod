@@ -587,21 +587,21 @@ TEST_CASE("Config: zero tracing flush interval fails validation", "[config]") {
 
 TEST_CASE("Config: DB empty subject fails validation", "[config]") {
   Config config;
-  config.m_db_query_enabled = true;
-  config.m_db_query_nats_subject = "";
+  config.m_db_query.m_enabled = true;
+  config.m_db_query.m_subject = "";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: DB zero timeout fails validation", "[config]") {
   Config config;
-  config.m_db_query_enabled = true;
-  config.m_db_query_default_timeout_ms = 0;
+  config.m_db_query.m_enabled = true;
+  config.m_db_query.m_default_timeout_ms = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: DB unknown driver fails validation", "[config]") {
   Config config;
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig db;
   db.m_name = "mysql";
   db.m_driver = "mysql";
@@ -609,14 +609,14 @@ TEST_CASE("Config: DB unknown driver fails validation", "[config]") {
   db.m_port = 3306;
   db.m_user = "u";
   db.m_database = "d";
-  config.m_databases.push_back(db);
+  config.m_db_query.m_databases.push_back(db);
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
   Config config;
   config.m_mode = "worker"; // connection checks apply only to the worker
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig db;
   db.m_name = "oracle";
   db.m_driver = "oracle";
@@ -624,14 +624,14 @@ TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
   db.m_port = 1521;
   db.m_user = "u";
   db.m_service = "";
-  config.m_databases.push_back(db);
+  config.m_db_query.m_databases.push_back(db);
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   Config config;
   config.m_mode = "worker"; // connection checks apply only to the worker
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig db;
   db.m_name = "postgres";
   db.m_driver = "postgres";
@@ -641,7 +641,7 @@ TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   db.m_database = "d";
   db.m_pool_min = 5;
   db.m_pool_max = 1;
-  config.m_databases.push_back(db);
+  config.m_db_query.m_databases.push_back(db);
   REQUIRE(config.validate(false) == false);
 }
 
@@ -860,9 +860,9 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
   EnvVarGuard pass("DB_POSTGRES_PASSWORD", "secret");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_db_query_enabled == true);
-  REQUIRE(config.m_databases.size() == 1);
-  const auto &dbcfg = config.m_databases[0];
+  REQUIRE(config.m_db_query.m_enabled == true);
+  REQUIRE(config.m_db_query.m_databases.size() == 1);
+  const auto &dbcfg = config.m_db_query.m_databases[0];
   REQUIRE(dbcfg.m_name == "postgres");
   REQUIRE(dbcfg.m_driver == "postgres");
   REQUIRE(dbcfg.m_host == "pg.example");
@@ -870,8 +870,8 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
   REQUIRE(dbcfg.m_database == "mydb");
   REQUIRE(dbcfg.m_user == "alice");
   REQUIRE(dbcfg.m_password == "secret");
-  REQUIRE(dbcfg.m_query_timeout_ms == config.m_db_query_default_timeout_ms);
-  REQUIRE(dbcfg.m_max_rows == config.m_db_query_default_max_rows);
+  REQUIRE(dbcfg.m_query_timeout_ms == config.m_db_query.m_default_timeout_ms);
+  REQUIRE(dbcfg.m_max_rows == config.m_db_query.m_default_max_rows);
   REQUIRE(config.validate(false) == true);
 }
 
@@ -883,9 +883,9 @@ TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
   EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_databases.size() == 2);
-  REQUIRE(config.m_databases[0].m_name == "oracle");
-  REQUIRE(config.m_databases[1].m_name == "postgres");
+  REQUIRE(config.m_db_query.m_databases.size() == 2);
+  REQUIRE(config.m_db_query.m_databases[0].m_name == "oracle");
+  REQUIRE(config.m_db_query.m_databases[1].m_name == "postgres");
 }
 
 TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
@@ -897,8 +897,8 @@ TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
   EnvVarGuard user("DB_POSTGRES_USER", "alice");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_databases.size() == 1);
-  const auto &dbcfg = config.m_databases[0];
+  REQUIRE(config.m_db_query.m_databases.size() == 1);
+  const auto &dbcfg = config.m_db_query.m_databases[0];
   REQUIRE(dbcfg.m_name == "postgres");
   REQUIRE(dbcfg.m_driver == "postgres");
   // Connection fields are NOT populated in proxy mode.
@@ -912,8 +912,8 @@ TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
   EnvVarGuard qe("DB_QUERY_ENABLED", "true");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_db_query_enabled == true);
-  REQUIRE(config.m_databases.empty());
+  REQUIRE(config.m_db_query.m_enabled == true);
+  REQUIRE(config.m_db_query.m_databases.empty());
 }
 
 TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
@@ -993,39 +993,39 @@ TEST_CASE("Config: NATS TLS requires CA cert", "[config]") {
 
 TEST_CASE("Config: db query with bad subject and limits fails", "[config]") {
   Config config;
-  config.m_db_query_enabled = true;
-  config.m_db_query_nats_subject = "";
-  config.m_db_query_nats_timeout_ms = 0;
-  config.m_db_query_default_timeout_ms = -1;
-  config.m_db_query_default_max_rows = 0;
+  config.m_db_query.m_enabled = true;
+  config.m_db_query.m_subject = "";
+  config.m_db_query.m_timeout_ms = 0;
+  config.m_db_query.m_default_timeout_ms = -1;
+  config.m_db_query.m_default_max_rows = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: worker with malformed database entries fails", "[config]") {
   Config config;
   config.m_mode = "worker";
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig bad_driver;
   bad_driver.m_name = "mongo";
   bad_driver.m_driver = "mongodb";
-  config.m_databases.push_back(bad_driver);
+  config.m_db_query.m_databases.push_back(bad_driver);
   DbConfig empty_host;
   empty_host.m_name = "oracle2";
   empty_host.m_driver = "oracle";
-  config.m_databases.push_back(empty_host);
+  config.m_db_query.m_databases.push_back(empty_host);
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: oracle/postgres rows missing required fields", "[config]") {
   Config config;
   config.m_mode = "worker";
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig oracle;
   oracle.m_name = "ora";
   oracle.m_driver = "oracle";
   oracle.m_host = "ora-host";
   oracle.m_port = 70000;
-  config.m_databases.push_back(oracle);
+  config.m_db_query.m_databases.push_back(oracle);
   DbConfig pg;
   pg.m_name = "pg";
   pg.m_driver = "postgres";
@@ -1033,17 +1033,17 @@ TEST_CASE("Config: oracle/postgres rows missing required fields", "[config]") {
   pg.m_port = 5432;
   pg.m_user = "alice";
   pg.m_pool_min = 0;
-  config.m_databases.push_back(pg);
+  config.m_db_query.m_databases.push_back(pg);
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: proxy skips per-database connection fields", "[config]") {
   Config config;
-  config.m_db_query_enabled = true;
+  config.m_db_query.m_enabled = true;
   DbConfig oracle;
   oracle.m_name = "ora";
   oracle.m_driver = "oracle";
-  config.m_databases.push_back(oracle);
+  config.m_db_query.m_databases.push_back(oracle);
   REQUIRE(config.validate(false) == true);
 }
 

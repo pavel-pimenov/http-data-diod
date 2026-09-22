@@ -92,10 +92,32 @@ public:
     int m_timeout_ms{3000};
   };
 
+  // HTTP DB Gateway (/v1/sql/{db}/...): the worker subscribes to a NATS
+  // channel, executes statements against the configured databases and replies;
+  // the proxy only registers names/drivers for routing and validation.
+  struct DbQuery {
+    std::string m_subject{"service.db.query"};
+    std::string m_queue_group{"db_workers"};
+    // Databases exposed through the HTTP DB Gateway (/v1/sql/{db}/...).
+    std::vector<DbConfig> m_databases;
+    // Master switch (DB_QUERY_ENABLED). When false the /v1/sql/** endpoints
+    // answer 404 and the worker skips the DB subscription.
+    bool m_enabled = false;
+    // Request timeout (how long the proxy waits for a worker reply) in ms.
+    int m_timeout_ms{30000};
+    // Default statement execution timeout in ms applied to every DB query
+    // unless the request overrides it.
+    int m_default_timeout_ms{5000};
+    // Default row limit applied to every DB query unless the request
+    // overrides it.
+    int m_default_max_rows{1000};
+  };
+
   Ssl m_ssl;
   Nats m_nats;
   Tracing m_tracing;
   Sentry m_sentry;
+  DbQuery m_db_query;
 
   // ========================================================================
   // Group 1: std::string fields (32 bytes each on libstdc++)
@@ -106,15 +128,11 @@ public:
   std::string m_l2_server_protocol{"http"};
   std::string m_proxy_protocol{"http"};
   std::string m_thread_pool_type{"none"};
-  std::string m_db_query_nats_subject{"service.db.query"};
-  std::string m_db_query_nats_queue_group{"db_workers"};
 
   // ========================================================================
   // Group 2: std::vector fields (24 bytes each on libstdc++)
   // ========================================================================
   std::vector<std::string> m_l2_server_urls{{"http://l2-server:8088"}};
-  // Databases exposed through the HTTP DB Gateway (/v1/sql/{db}/...).
-  std::vector<DbConfig> m_databases;
 
   // ========================================================================
   // Group 5: int fields (4 bytes each) — sorted by logical group
@@ -143,14 +161,6 @@ public:
   int m_duplicate_log_threshold{5};
   int m_duplicate_detection_max_clients{1000};
   int m_duplicate_detection_client_ttl_ms{1800000};
-  // DB Gateway NATS request timeout (how long the proxy waits for a worker
-  // reply) in ms.
-  int m_db_query_nats_timeout_ms{30000};
-  // Default statement execution timeout in ms applied to every DB query unless
-  // the request overrides it.
-  int m_db_query_default_timeout_ms{5000};
-  // Default row limit applied to every DB query unless the request overrides it.
-  int m_db_query_default_max_rows{1000};
   // Test-only: random response delay in ms on the l2-server (0 = disabled).
   // Used to desynchronize response order from request order for the
   // response-to-request correlation test.
@@ -163,9 +173,6 @@ public:
   bool m_enable_global_rate_limiting{true};
   bool m_dedup_enabled{false};
   bool m_duplicate_detection_enabled{true};
-  // Master switch of the HTTP DB Gateway (DB_QUERY_ENABLED). When false the
-  // /v1/sql/** endpoints answer 404 and the worker skips the DB subscription.
-  bool m_db_query_enabled{false};
   // When true the proxy rejects (HTTP 409) a POST whose body hash was already
   // seen within the detector TTL instead of forwarding it to the worker.
   // Off by default: only counting/logging happens (see /debug/duplicates).
