@@ -300,33 +300,33 @@ void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
 
 void validate_tracing(const Config &cfg, ConfigChecker &check) {
   // Tracing settings
-  check(cfg.m_tracing_batch_size > 0,
+  check(cfg.m_tracing.m_batch_size > 0,
         std::format("Invalid tracing batch size: {} (must be > 0)",
-                    cfg.m_tracing_batch_size));
-  check(positive(cfg.m_tracing_flush_interval_ms),
+                    cfg.m_tracing.m_batch_size));
+  check(positive(cfg.m_tracing.m_flush_interval_ms),
         std::format("Invalid tracing flush interval: {} (must be > 0)",
-                    cfg.m_tracing_flush_interval_ms));
-  check(cfg.m_tracing_sample_rate >= 0.0 && cfg.m_tracing_sample_rate <= 1.0,
+                    cfg.m_tracing.m_flush_interval_ms));
+  check(cfg.m_tracing.m_sample_rate >= 0.0 && cfg.m_tracing.m_sample_rate <= 1.0,
         std::format("Invalid tracing sample rate: {} (must be 0.0-1.0)",
-                    cfg.m_tracing_sample_rate));
-  check(cfg.m_sentry_sample_rate >= 0.0 && cfg.m_sentry_sample_rate <= 1.0,
+                    cfg.m_tracing.m_sample_rate));
+  check(cfg.m_sentry.m_sample_rate >= 0.0 && cfg.m_sentry.m_sample_rate <= 1.0,
         std::format("Invalid sentry sample rate: {} (must be 0.0-1.0)",
-                    cfg.m_sentry_sample_rate));
+                    cfg.m_sentry.m_sample_rate));
   // Tracing outage circuit-breaker: threshold must trip at least after one
   // failure, cooldown must stay within [base, max].
-  check(positive(cfg.m_tracing_outage_failure_threshold),
+  check(positive(cfg.m_tracing.m_outage_failure_threshold),
         std::format("Invalid tracing outage failure threshold: {} "
                     "(must be > 0)",
-                    cfg.m_tracing_outage_failure_threshold));
-  check(positive(cfg.m_tracing_outage_cooldown_base_ms),
+                    cfg.m_tracing.m_outage_failure_threshold));
+  check(positive(cfg.m_tracing.m_outage_cooldown_base_ms),
         std::format("Invalid tracing outage cooldown base: {} (must be > 0)",
-                    cfg.m_tracing_outage_cooldown_base_ms));
-  check(cfg.m_tracing_outage_cooldown_max_ms >=
-            cfg.m_tracing_outage_cooldown_base_ms,
+                    cfg.m_tracing.m_outage_cooldown_base_ms));
+  check(cfg.m_tracing.m_outage_cooldown_max_ms >=
+            cfg.m_tracing.m_outage_cooldown_base_ms,
         std::format("Invalid tracing outage cooldown max: {} (must be >= "
                     "base {})",
-                    cfg.m_tracing_outage_cooldown_max_ms,
-                    cfg.m_tracing_outage_cooldown_base_ms));
+                    cfg.m_tracing.m_outage_cooldown_max_ms,
+                    cfg.m_tracing.m_outage_cooldown_base_ms));
 }
 } // namespace
 
@@ -397,26 +397,26 @@ void Config::load_l2_server_config() {
 }
 
 void Config::load_server_timeout_config() {
-  m_jaeger_url = get_env_string("JAEGER_URL", m_jaeger_url);
-  m_sentry_dsn = get_env_string("SENTRY_DSN", m_sentry_dsn);
-  m_sentry_environment = get_env_string("SENTRY_ENVIRONMENT", m_sentry_environment);
-  m_sentry_release = get_env_string("SENTRY_RELEASE", m_sentry_release);
+  m_tracing.m_url = get_env_string("JAEGER_URL", m_tracing.m_url);
+  m_sentry.m_dsn = get_env_string("SENTRY_DSN", m_sentry.m_dsn);
+  m_sentry.m_environment = get_env_string("SENTRY_ENVIRONMENT", m_sentry.m_environment);
+  m_sentry.m_release = get_env_string("SENTRY_RELEASE", m_sentry.m_release);
   // Without an explicit SENTRY_RELEASE the running build version becomes the
   // release, so GlitchTip events are attributable to a code revision.
-  if (m_sentry_release.empty()) {
-    m_sentry_release = g_l2_proxy_version;
+  if (m_sentry.m_release.empty()) {
+    m_sentry.m_release = g_l2_proxy_version;
   }
-  m_sentry_sample_rate =
-      get_env_double("SENTRY_SAMPLE_RATE", m_sentry_sample_rate);
-  m_sentry_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry_timeout_ms);
-  m_sentry_max_queue_size =
+  m_sentry.m_sample_rate =
+      get_env_double("SENTRY_SAMPLE_RATE", m_sentry.m_sample_rate);
+  m_sentry.m_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry.m_timeout_ms);
+  m_sentry.m_max_queue_size =
       get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);
-  if (!m_sentry_dsn.empty()) {
+  if (!m_sentry.m_dsn.empty()) {
     Logger::info(
         "Sentry DSN configured: project={} release={} environment={} "
         "queue_limit={}",
-        m_sentry_dsn.substr(m_sentry_dsn.find_last_of('/') + 1),
-        m_sentry_release, m_sentry_environment, m_sentry_max_queue_size);
+        m_sentry.m_dsn.substr(m_sentry.m_dsn.find_last_of('/') + 1),
+        m_sentry.m_release, m_sentry.m_environment, m_sentry.m_max_queue_size);
   }
   m_request_timeout_seconds =
       get_env_int("REQUEST_TIMEOUT_SECONDS", m_request_timeout_seconds);
@@ -424,7 +424,7 @@ void Config::load_server_timeout_config() {
       get_env_int("HTTP_TIMEOUT_SECONDS", m_http_timeout_seconds);
   m_test_response_delay_ms =
       get_env_int("L2_TEST_RESPONSE_DELAY_MS", m_test_response_delay_ms);
-  m_enable_tracing = get_env_bool("ENABLE_TRACING", m_enable_tracing);
+  m_tracing.m_enable = get_env_bool("ENABLE_TRACING", m_tracing.m_enable);
   m_log_level = get_env_string("LOG_LEVEL", m_log_level);
   m_proxy_port = get_env_int("PROXY_PORT", m_proxy_port);
   m_proxy_protocol = get_env_protocol("PROXY_PROTOCOL", m_proxy_protocol);
@@ -460,26 +460,26 @@ void Config::load_server_timeout_config() {
 }
 
 void Config::load_feature_config() {
-  m_tracing_batch_size = get_env_int("TRACING_BATCH_SIZE", m_tracing_batch_size);
-  m_tracing_flush_interval_ms =
-      get_env_int("TRACING_FLUSH_INTERVAL_MS", m_tracing_flush_interval_ms);
-  m_tracing_sample_rate =
-      get_env_double("TRACING_SAMPLE_RATE", m_tracing_sample_rate);
+  m_tracing.m_batch_size = get_env_int("TRACING_BATCH_SIZE", m_tracing.m_batch_size);
+  m_tracing.m_flush_interval_ms =
+      get_env_int("TRACING_FLUSH_INTERVAL_MS", m_tracing.m_flush_interval_ms);
+  m_tracing.m_sample_rate =
+      get_env_double("TRACING_SAMPLE_RATE", m_tracing.m_sample_rate);
   // Tracing outage circuit-breaker: after TRACING_OUTAGE_FAILURE_THRESHOLD
   // consecutive delivery failures a tracing sink is shed for an exponential
   // cooldown window (base, doubled per opening, clamped by the max).
-  m_tracing_outage_failure_threshold = get_env_int(
-      "TRACING_OUTAGE_FAILURE_THRESHOLD", m_tracing_outage_failure_threshold);
-  m_tracing_outage_cooldown_base_ms = get_env_int(
-      "TRACING_OUTAGE_COOLDOWN_BASE_MS", m_tracing_outage_cooldown_base_ms);
-  m_tracing_outage_cooldown_max_ms = get_env_int(
-      "TRACING_OUTAGE_COOLDOWN_MAX_MS", m_tracing_outage_cooldown_max_ms);
+  m_tracing.m_outage_failure_threshold = get_env_int(
+      "TRACING_OUTAGE_FAILURE_THRESHOLD", m_tracing.m_outage_failure_threshold);
+  m_tracing.m_outage_cooldown_base_ms = get_env_int(
+      "TRACING_OUTAGE_COOLDOWN_BASE_MS", m_tracing.m_outage_cooldown_base_ms);
+  m_tracing.m_outage_cooldown_max_ms = get_env_int(
+      "TRACING_OUTAGE_COOLDOWN_MAX_MS", m_tracing.m_outage_cooldown_max_ms);
   Logger::info(
       "Tracing config: batch_size={} flush_interval={}ms sample_rate={} "
       "outage_breaker(failures={}, cooldown={}/{}/{}ms)",
-      m_tracing_batch_size, m_tracing_flush_interval_ms, m_tracing_sample_rate,
-      m_tracing_outage_failure_threshold, m_tracing_outage_cooldown_base_ms,
-      m_tracing_outage_cooldown_base_ms, m_tracing_outage_cooldown_max_ms);
+      m_tracing.m_batch_size, m_tracing.m_flush_interval_ms, m_tracing.m_sample_rate,
+      m_tracing.m_outage_failure_threshold, m_tracing.m_outage_cooldown_base_ms,
+      m_tracing.m_outage_cooldown_base_ms, m_tracing.m_outage_cooldown_max_ms);
 
   m_enable_per_ip_rate_limiting =
       get_env_bool("ENABLE_PER_IP_RATE_LIMITING", m_enable_per_ip_rate_limiting);

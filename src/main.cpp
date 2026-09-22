@@ -358,38 +358,38 @@ void run_l2_server(AppContext &app_ctx) {
 
 void init_tracer(AppContext &app_ctx) {
   Logger::info("init_tracer called: enable_tracing={} jaeger_url='{}'",
-               app_ctx.m_config.m_enable_tracing,
-               app_ctx.m_config.m_jaeger_url);
+               app_ctx.m_config.m_tracing.m_enable,
+               app_ctx.m_config.m_tracing.m_url);
 
-  if (app_ctx.m_config.m_enable_tracing &&
-      !app_ctx.m_config.m_jaeger_url.empty()) {
+  if (app_ctx.m_config.m_tracing.m_enable &&
+      !app_ctx.m_config.m_tracing.m_url.empty()) {
     Logger::info("Creating JaegerLogger with config: batch_size={} "
                  "flush_interval={}ms sample_rate={}",
-                 app_ctx.m_config.m_tracing_batch_size,
-                 app_ctx.m_config.m_tracing_flush_interval_ms,
-                 app_ctx.m_config.m_tracing_sample_rate);
+                 app_ctx.m_config.m_tracing.m_batch_size,
+                 app_ctx.m_config.m_tracing.m_flush_interval_ms,
+                 app_ctx.m_config.m_tracing.m_sample_rate);
     app_ctx.m_tracer = std::make_unique<JaegerLogger>(
-        app_ctx.m_config.m_jaeger_url, app_ctx.m_tracing_metrics->m_spans_sent,
+        app_ctx.m_config.m_tracing.m_url, app_ctx.m_tracing_metrics->m_spans_sent,
         app_ctx.m_tracing_metrics->m_spans_failed,
         app_ctx.m_tracing_metrics->m_queue_size,
         app_ctx.m_tracing_metrics->m_last_send_duration,
         app_ctx.m_tracing_metrics->m_send_latency,
         app_ctx.m_tracing_metrics->m_queue_time,
-        app_ctx.m_config.m_tracing_batch_size,
-        app_ctx.m_config.m_tracing_flush_interval_ms,
-        app_ctx.m_config.m_tracing_sample_rate,
-        app_ctx.m_config.m_sentry_dsn, app_ctx.m_config.m_mode,
-        app_ctx.m_config.m_sentry_environment,
-        app_ctx.m_config.m_sentry_release,
+        app_ctx.m_config.m_tracing.m_batch_size,
+        app_ctx.m_config.m_tracing.m_flush_interval_ms,
+        app_ctx.m_config.m_tracing.m_sample_rate,
+        app_ctx.m_config.m_sentry.m_dsn, app_ctx.m_config.m_mode,
+        app_ctx.m_config.m_sentry.m_environment,
+        app_ctx.m_config.m_sentry.m_release,
         &app_ctx.m_tracing_metrics->m_sentry_transactions_sent,
         &app_ctx.m_tracing_metrics->m_sentry_transactions_failed,
-        app_ctx.m_config.m_sentry_sample_rate,
+        app_ctx.m_config.m_sentry.m_sample_rate,
         TracingBreakerSettings{
-            app_ctx.m_config.m_tracing_outage_failure_threshold,
-            app_ctx.m_config.m_tracing_outage_cooldown_base_ms,
-            app_ctx.m_config.m_tracing_outage_cooldown_max_ms});
+            app_ctx.m_config.m_tracing.m_outage_failure_threshold,
+            app_ctx.m_config.m_tracing.m_outage_cooldown_base_ms,
+            app_ctx.m_config.m_tracing.m_outage_cooldown_max_ms});
     Logger::info("JAEGER_URL set, tracing enabled: {}",
-                 app_ctx.m_config.m_jaeger_url);
+                 app_ctx.m_config.m_tracing.m_url);
   } else {
     Logger::info("Tracing disabled");
   }
@@ -434,7 +434,7 @@ int main() { // NOLINT(bugprone-exception-escape)
     const char *crash_dump_dir = std::getenv("CRASH_DUMP_DIR");
     CrashHandler::install(crash_dump_dir ? crash_dump_dir
                                          : g_default_crash_dump_dir,
-                          app_ctx.m_config.m_sentry_dsn);
+                          app_ctx.m_config.m_sentry.m_dsn);
 
     // Crash test mode: raise SIGSEGV to test crash handler
     if (app_ctx.m_config.m_crash_test) {

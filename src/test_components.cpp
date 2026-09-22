@@ -283,7 +283,7 @@ TEST_CASE("Config: Missing NATS host fails validation", "[config]") {
 
 TEST_CASE("Config: Invalid tracing sample rate fails validation", "[config]") {
   Config config;
-  config.m_tracing_sample_rate = -0.1;
+  config.m_tracing.m_sample_rate = -0.1;
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
@@ -291,7 +291,7 @@ TEST_CASE("Config: Invalid tracing sample rate fails validation", "[config]") {
 TEST_CASE("Config: Invalid tracing outage failure threshold fails validation",
           "[config]") {
   Config config;
-  config.m_tracing_outage_failure_threshold = 0;
+  config.m_tracing.m_outage_failure_threshold = 0;
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
@@ -299,7 +299,7 @@ TEST_CASE("Config: Invalid tracing outage failure threshold fails validation",
 TEST_CASE("Config: Invalid tracing outage cooldown base fails validation",
           "[config]") {
   Config config;
-  config.m_tracing_outage_cooldown_base_ms = -5;
+  config.m_tracing.m_outage_cooldown_base_ms = -5;
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
@@ -307,17 +307,17 @@ TEST_CASE("Config: Invalid tracing outage cooldown base fails validation",
 TEST_CASE("Config: Tracing outage cooldown max below base fails validation",
           "[config]") {
   Config config;
-  config.m_tracing_outage_cooldown_max_ms = 100;
-  config.m_tracing_outage_cooldown_base_ms = 5000;
+  config.m_tracing.m_outage_cooldown_max_ms = 100;
+  config.m_tracing.m_outage_cooldown_base_ms = 5000;
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Tracing outage breaker defaults validate", "[config]") {
   Config config;
-  REQUIRE(config.m_tracing_outage_failure_threshold == 3);
-  REQUIRE(config.m_tracing_outage_cooldown_base_ms == 1000);
-  REQUIRE(config.m_tracing_outage_cooldown_max_ms == 30000);
+  REQUIRE(config.m_tracing.m_outage_failure_threshold == 3);
+  REQUIRE(config.m_tracing.m_outage_cooldown_base_ms == 1000);
+  REQUIRE(config.m_tracing.m_outage_cooldown_max_ms == 30000);
   REQUIRE(config.validate(false) == true);
 }
 
@@ -575,13 +575,13 @@ TEST_CASE("Config: negative duplicate client TTL fails validation",
 
 TEST_CASE("Config: zero tracing batch size fails validation", "[config]") {
   Config config;
-  config.m_tracing_batch_size = 0;
+  config.m_tracing.m_batch_size = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: zero tracing flush interval fails validation", "[config]") {
   Config config;
-  config.m_tracing_flush_interval_ms = 0;
+  config.m_tracing.m_flush_interval_ms = 0;
   REQUIRE(config.validate(false) == false);
 }
 
@@ -686,11 +686,11 @@ TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
   EnvVarGuard qsize("SENTRY_MAX_QUEUE_SIZE", "512");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_sentry_dsn == "https://key@host/42");
-  REQUIRE(config.m_sentry_release == "v1.0");
-  REQUIRE(config.m_sentry_environment == "prod");
-  REQUIRE(config.m_sentry_timeout_ms == 5000);
-  REQUIRE(config.m_sentry_max_queue_size == 512);
+  REQUIRE(config.m_sentry.m_dsn == "https://key@host/42");
+  REQUIRE(config.m_sentry.m_release == "v1.0");
+  REQUIRE(config.m_sentry.m_environment == "prod");
+  REQUIRE(config.m_sentry.m_timeout_ms == 5000);
+  REQUIRE(config.m_sentry.m_max_queue_size == 512);
 }
 
 TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
@@ -1083,9 +1083,9 @@ TEST_CASE("Config: duplicate detection values must be positive", "[config]") {
 
 TEST_CASE("Config: tracing batch/flush/sample bounds reject", "[config]") {
   Config config;
-  config.m_tracing_batch_size = 0;
-  config.m_tracing_flush_interval_ms = -1;
-  config.m_tracing_sample_rate = 1.5;
+  config.m_tracing.m_batch_size = 0;
+  config.m_tracing.m_flush_interval_ms = -1;
+  config.m_tracing.m_sample_rate = 1.5;
   REQUIRE(config.validate(false) == false);
 }
 

@@ -66,19 +66,42 @@ public:
     int m_timeout_ms{30000};
   };
 
+  // Distributed-tracing to Jaeger (OTLP/HTTP spans) with the outage
+  // circuit-breaker: after m_outage_failure_threshold consecutive delivery
+  // failures a tracing sink is shed for an exponential cooldown window
+  // (base, doubled per opening, clamped by the max).
+  struct Tracing {
+    bool m_enable = false;
+    std::string m_url;
+    double m_sample_rate{1.0}; // Sampling rate (0.0-1.0, 1.0 = 100%)
+    size_t m_batch_size{50};   // Batch size for sending spans to Jaeger
+    int m_flush_interval_ms{1000};
+    int m_outage_failure_threshold{3};
+    int m_outage_cooldown_base_ms{1000};
+    int m_outage_cooldown_max_ms{30000};
+  };
+
+  // Sentry/GlitchTip error- and performance-transaction delivery.
+  struct Sentry {
+    std::string m_dsn;
+    std::string m_environment;
+    std::string m_release;
+    double m_sample_rate{1.0}; // Sentry trace sampling 0.0-1.0 (1.0 = 100%)
+    // Max Sentry events kept in the async queue before the oldest is dropped.
+    size_t m_max_queue_size{256};
+    int m_timeout_ms{3000};
+  };
+
   Ssl m_ssl;
   Nats m_nats;
+  Tracing m_tracing;
+  Sentry m_sentry;
 
   // ========================================================================
   // Group 1: std::string fields (32 bytes each on libstdc++)
   // ========================================================================
   std::string m_mode{"proxy"};
   std::string m_l2_server_url{"http://l2-server:8088"};
-  std::string m_jaeger_url;
-  std::string m_sentry_dsn;
-  std::string m_sentry_environment;
-  std::string m_sentry_release;
-  double m_sentry_sample_rate{1.0}; // Sentry trace sampling 0.0-1.0 (1.0 = 100%)
   std::string m_log_level{"INFO"};
   std::string m_l2_server_protocol{"http"};
   std::string m_proxy_protocol{"http"};
@@ -94,18 +117,6 @@ public:
   std::vector<DbConfig> m_databases;
 
   // ========================================================================
-  // Group 3: double (8 bytes)
-  // ========================================================================
-  double m_tracing_sample_rate{1.0}; // Sampling rate (0.0-1.0, 1.0 = 100%)
-
-  // ========================================================================
-  // Group 4: size_t (8 bytes)
-  // ========================================================================
-  size_t m_tracing_batch_size{50}; // Batch size for sending spans to Jaeger
-  // Max Sentry events kept in the async queue before the oldest is dropped.
-  size_t m_sentry_max_queue_size{256};
-
-  // ========================================================================
   // Group 5: int fields (4 bytes each) — sorted by logical group
   // ========================================================================
   int m_request_timeout_seconds{30};
@@ -117,13 +128,6 @@ public:
   int m_http_pool_size{400};
   int m_http_pool_idle_timeout_seconds{300};
   int m_max_retries{1};
-  int m_tracing_flush_interval_ms{1000};
-  int m_sentry_timeout_ms{3000};
-  // Tracing outage circuit-breaker tuning (fires when a tracing sink keeps
-  // failing delivery; sheds batches during the exponential cooldown window).
-  int m_tracing_outage_failure_threshold{3};
-  int m_tracing_outage_cooldown_base_ms{1000};
-  int m_tracing_outage_cooldown_max_ms{30000};
   int m_per_ip_max_tokens{100};
   int m_per_ip_refill_rate{10};
   int m_per_ip_max_ips{10000};
@@ -155,7 +159,6 @@ public:
   // ========================================================================
   // Group 6: bool fields (1 byte each) — packed together at the end
   // ========================================================================
-  bool m_enable_tracing{false};
   bool m_enable_per_ip_rate_limiting{true};
   bool m_enable_global_rate_limiting{true};
   bool m_dedup_enabled{false};

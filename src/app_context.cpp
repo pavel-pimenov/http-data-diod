@@ -17,10 +17,10 @@ AppContext::AppContext() {
   init_server_metrics();
 
   m_sentry = std::make_unique<SentryClient>(
-      m_config.m_sentry_dsn, m_sentry_metrics->m_events_sent,
+      m_config.m_sentry.m_dsn, m_sentry_metrics->m_events_sent,
       m_sentry_metrics->m_events_failed, m_sentry_metrics->m_queue_size,
-      m_config.m_mode, m_config.m_sentry_environment, m_config.m_sentry_release,
-      m_config.m_sentry_timeout_ms, m_config.m_sentry_max_queue_size);
+      m_config.m_mode, m_config.m_sentry.m_environment, m_config.m_sentry.m_release,
+      m_config.m_sentry.m_timeout_ms, m_config.m_sentry.m_max_queue_size);
 }
 
 AppContext::~AppContext() {
