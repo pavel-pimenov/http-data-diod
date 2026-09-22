@@ -269,14 +269,14 @@ TEST_CASE("Config: Invalid mode fails validation", "[config]") {
 
 TEST_CASE("Config: Invalid NATS port fails validation", "[config]") {
   Config config;
-  config.m_nats_port = 99999;
+  config.m_nats.m_port = 99999;
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Missing NATS host fails validation", "[config]") {
   Config config;
-  config.m_nats_host = "";
+  config.m_nats.m_host = "";
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
@@ -404,8 +404,8 @@ TEST_CASE("Config: https proxy protocol requires SSL files", "[config]") {
   Config config;
   config.m_proxy_protocol = "https";
   REQUIRE(config.validate(false) == false);
-  config.m_ssl_server_cert_file = "/cert.pem";
-  config.m_ssl_server_key_file = "/key.pem";
+  config.m_ssl.m_server_cert_file = "/cert.pem";
+  config.m_ssl.m_server_key_file = "/key.pem";
   REQUIRE(config.validate(false) == true);
 }
 
@@ -484,31 +484,31 @@ TEST_CASE("Config: duplicate detection disabled skips validation",
 
 TEST_CASE("Config: zero NATS timeout fails validation", "[config]") {
   Config config;
-  config.m_nats_timeout_ms = 0;
+  config.m_nats.m_timeout_ms = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: empty NATS subject fails validation", "[config]") {
   Config config;
-  config.m_nats_subject = "";
+  config.m_nats.m_subject = "";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: NATS TLS requires CA file", "[config]") {
   Config config;
-  config.m_nats_enable_tls = true;
+  config.m_nats.m_enable_tls = true;
   REQUIRE(config.validate(false) == false);
-  config.m_nats_tls_ca_cert_file = "/ca.pem";
+  config.m_nats.m_tls_ca_cert_file = "/ca.pem";
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: NATS TLS cert without key fails validation", "[config]") {
   Config config;
-  config.m_nats_enable_tls = true;
-  config.m_nats_tls_ca_cert_file = "/ca.pem";
-  config.m_nats_tls_cert_file = "/cert.pem";
+  config.m_nats.m_enable_tls = true;
+  config.m_nats.m_tls_ca_cert_file = "/ca.pem";
+  config.m_nats.m_tls_cert_file = "/cert.pem";
   REQUIRE(config.validate(false) == false);
-  config.m_nats_tls_key_file = "/key.pem";
+  config.m_nats.m_tls_key_file = "/key.pem";
   REQUIRE(config.validate(false) == true);
 }
 
@@ -737,7 +737,7 @@ TEST_CASE("Config: worker mode loads NATS config", "[config]") {
   Config config;
   config.load_from_env();
   REQUIRE(config.m_mode == "worker");
-  REQUIRE(config.m_nats_subject == "svc.worker");
+  REQUIRE(config.m_nats.m_subject == "svc.worker");
   REQUIRE(config.validate(false) == true);
 }
 
@@ -924,8 +924,8 @@ TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
   Config config;
   config.load_from_env();
   REQUIRE(config.m_proxy_protocol == "https");
-  REQUIRE(config.m_ssl_server_cert_file == "/cert.pem");
-  REQUIRE(config.m_ssl_server_key_file == "/key.pem");
+  REQUIRE(config.m_ssl.m_server_cert_file == "/cert.pem");
+  REQUIRE(config.m_ssl.m_server_key_file == "/key.pem");
 }
 
 TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
@@ -945,8 +945,8 @@ TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
   Config config;
   config.load_from_env();
   REQUIRE(config.m_l2_server_protocol == "https");
-  REQUIRE(config.m_ssl_server_cert_file == "/l2cert.pem");
-  REQUIRE(config.m_ssl_server_key_file == "/l2key.pem");
+  REQUIRE(config.m_ssl.m_server_cert_file == "/l2cert.pem");
+  REQUIRE(config.m_ssl.m_server_key_file == "/l2key.pem");
   REQUIRE(config.validate(false) == true);
 }
 
@@ -975,19 +975,19 @@ TEST_CASE("Config: empty L2 URL set and empty single URL fail", "[config]") {
 
 TEST_CASE("Config: invalid NATS subject and TLS pairing fail", "[config]") {
   Config config;
-  config.m_nats_subject = "";
-  config.m_nats_enable_tls = true;
-  config.m_nats_tls_ca_cert_file = "/ca.pem";
-  config.m_nats_tls_cert_file = "/cert.pem";
-  config.m_nats_tls_key_file = "";
+  config.m_nats.m_subject = "";
+  config.m_nats.m_enable_tls = true;
+  config.m_nats.m_tls_ca_cert_file = "/ca.pem";
+  config.m_nats.m_tls_cert_file = "/cert.pem";
+  config.m_nats.m_tls_key_file = "";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: NATS TLS requires CA cert", "[config]") {
   Config config;
-  config.m_nats_enable_tls = true;
-  config.m_nats_tls_cert_file = "/cert.pem";
-  config.m_nats_tls_key_file = "/key.pem";
+  config.m_nats.m_enable_tls = true;
+  config.m_nats.m_tls_cert_file = "/cert.pem";
+  config.m_nats.m_tls_key_file = "/key.pem";
   REQUIRE(config.validate(false) == false);
 }
 

@@ -81,7 +81,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
 
       std::tie(reply, consume_span_id) =
           m_ctx.m_nats_client->request_with_consume_span_id(
-              m_ctx.m_config.m_nats_subject, request_json,
+              m_ctx.m_config.m_nats.m_subject, request_json,
               static_cast<int>(remaining_ms));
 
       if (!reply.m_data.empty()) {

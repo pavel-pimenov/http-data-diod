@@ -120,17 +120,17 @@ void validate_protocols_and_ssl(const Config &cfg, ConfigChecker &check) {
 
   // SSL for proxy
   if (cfg.m_proxy_protocol == "https") {
-    check(!cfg.m_ssl_server_cert_file.empty(),
+    check(!cfg.m_ssl.m_server_cert_file.empty(),
           "SSL_SERVER_CERT_FILE is required when PROXY_PROTOCOL=https");
-    check(!cfg.m_ssl_server_key_file.empty(),
+    check(!cfg.m_ssl.m_server_key_file.empty(),
           "SSL_SERVER_KEY_FILE is required when PROXY_PROTOCOL=https");
   }
 
   // SSL for L2 server
   if (cfg.m_l2_server_protocol == "https") {
-    check(!cfg.m_ssl_server_cert_file.empty(),
+    check(!cfg.m_ssl.m_server_cert_file.empty(),
           "SSL_SERVER_CERT_FILE is required when L2_SERVER_PROTOCOL=https");
-    check(!cfg.m_ssl_server_key_file.empty(),
+    check(!cfg.m_ssl.m_server_key_file.empty(),
           "SSL_SERVER_KEY_FILE is required when L2_SERVER_PROTOCOL=https");
   }
 }
@@ -165,20 +165,20 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
 void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
   // NATS (used only in proxy/worker modes)
   if (cfg.m_mode == "proxy" || cfg.m_mode == "worker") {
-    check(in_range(cfg.m_nats_port, 1, 65535),
+    check(in_range(cfg.m_nats.m_port, 1, 65535),
           std::format("Invalid NATS port: {} (must be 1-65535)",
-                      cfg.m_nats_port));
-    check(!cfg.m_nats_host.empty(), "NATS host cannot be empty");
-    check(!cfg.m_nats_subject.empty(), "NATS subject cannot be empty");
-    check(positive(cfg.m_nats_timeout_ms),
+                      cfg.m_nats.m_port));
+    check(!cfg.m_nats.m_host.empty(), "NATS host cannot be empty");
+    check(!cfg.m_nats.m_subject.empty(), "NATS subject cannot be empty");
+    check(positive(cfg.m_nats.m_timeout_ms),
           std::format("Invalid NATS timeout: {} (must be > 0)",
-                      cfg.m_nats_timeout_ms));
+                      cfg.m_nats.m_timeout_ms));
 
     // NATS TLS
-    if (cfg.m_nats_enable_tls) {
-      check(!cfg.m_nats_tls_ca_cert_file.empty(),
+    if (cfg.m_nats.m_enable_tls) {
+      check(!cfg.m_nats.m_tls_ca_cert_file.empty(),
             "NATS_TLS_CA_CERT_FILE is required when NATS_ENABLE_TLS=true");
-      check(cfg.m_nats_tls_cert_file.empty() == cfg.m_nats_tls_key_file.empty(),
+      check(cfg.m_nats.m_tls_cert_file.empty() == cfg.m_nats.m_tls_key_file.empty(),
             "NATS_TLS_CERT_FILE and NATS_TLS_KEY_FILE must be set together");
     }
 
@@ -436,25 +436,25 @@ void Config::load_server_timeout_config() {
   m_l2_worker_queue_size =
       get_env_int("L2_WORKER_QUEUE_SIZE", m_l2_worker_queue_size);
   m_max_retries = get_env_int("MAX_RETRIES", m_max_retries);
-  m_enable_ssl_server_certificate_verification =
+  m_ssl.m_enable_server_certificate_verification =
       get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION",
-                   m_enable_ssl_server_certificate_verification);
-  m_enable_ssl_server_hostname_verification =
+                   m_ssl.m_enable_server_certificate_verification);
+  m_ssl.m_enable_server_hostname_verification =
       get_env_bool("ENABLE_SSL_SERVER_HOSTNAME_VERIFICATION",
-                   m_enable_ssl_server_hostname_verification);
-  m_ssl_ca_cert_path = get_env_string("SSL_CA_CERT_PATH", m_ssl_ca_cert_path);
+                   m_ssl.m_enable_server_hostname_verification);
+  m_ssl.m_ca_cert_path = get_env_string("SSL_CA_CERT_PATH", m_ssl.m_ca_cert_path);
 
-  m_ssl_server_cert_file =
-      get_env_string("SSL_SERVER_CERT_FILE", m_ssl_server_cert_file);
-  m_ssl_server_key_file =
-      get_env_string("SSL_SERVER_KEY_FILE", m_ssl_server_key_file);
+  m_ssl.m_server_cert_file =
+      get_env_string("SSL_SERVER_CERT_FILE", m_ssl.m_server_cert_file);
+  m_ssl.m_server_key_file =
+      get_env_string("SSL_SERVER_KEY_FILE", m_ssl.m_server_key_file);
   if (m_proxy_protocol == "https" || m_l2_server_protocol == "https") {
-    if (m_ssl_server_cert_file.empty() || m_ssl_server_key_file.empty()) {
+    if (m_ssl.m_server_cert_file.empty() || m_ssl.m_server_key_file.empty()) {
       Logger::warn("HTTPS protocol specified but SSL_SERVER_CERT_FILE or "
                    "SSL_SERVER_KEY_FILE not set");
     } else {
       Logger::info("HTTPS server SSL configured: cert={}, key={}",
-                   m_ssl_server_cert_file, m_ssl_server_key_file);
+                   m_ssl.m_server_cert_file, m_ssl.m_server_key_file);
     }
   }
 }
@@ -545,38 +545,38 @@ void Config::load_feature_config() {
 }
 
 void Config::load_nats_config() {
-  m_nats_host = get_env_string("NATS_HOST", m_nats_host);
-  m_nats_port = get_env_int("NATS_PORT", m_nats_port);
-  m_nats_subject = get_env_string("NATS_SUBJECT", m_nats_subject);
-  m_nats_queue_group = get_env_string("NATS_QUEUE_GROUP", m_nats_queue_group);
-  m_nats_timeout_ms = get_env_int("NATS_TIMEOUT_MS", m_nats_timeout_ms);
+  m_nats.m_host = get_env_string("NATS_HOST", m_nats.m_host);
+  m_nats.m_port = get_env_int("NATS_PORT", m_nats.m_port);
+  m_nats.m_subject = get_env_string("NATS_SUBJECT", m_nats.m_subject);
+  m_nats.m_queue_group = get_env_string("NATS_QUEUE_GROUP", m_nats.m_queue_group);
+  m_nats.m_timeout_ms = get_env_int("NATS_TIMEOUT_MS", m_nats.m_timeout_ms);
 
-  m_nats_username = get_env_string("NATS_USERNAME", m_nats_username);
-  m_nats_password = get_env_string("NATS_PASSWORD", m_nats_password);
-  m_nats_token = get_env_string("NATS_TOKEN", m_nats_token);
-  m_nats_credentials_file =
-      get_env_string("NATS_CREDENTIALS_FILE", m_nats_credentials_file);
-  m_nats_enable_tls = get_env_bool("NATS_ENABLE_TLS", m_nats_enable_tls);
-  m_nats_tls_cert_file =
-      get_env_string("NATS_TLS_CERT_FILE", m_nats_tls_cert_file);
-  m_nats_tls_key_file =
-      get_env_string("NATS_TLS_KEY_FILE", m_nats_tls_key_file);
-  m_nats_tls_ca_cert_file =
-      get_env_string("NATS_TLS_CA_CERT_FILE", m_nats_tls_ca_cert_file);
+  m_nats.m_username = get_env_string("NATS_USERNAME", m_nats.m_username);
+  m_nats.m_password = get_env_string("NATS_PASSWORD", m_nats.m_password);
+  m_nats.m_token = get_env_string("NATS_TOKEN", m_nats.m_token);
+  m_nats.m_credentials_file =
+      get_env_string("NATS_CREDENTIALS_FILE", m_nats.m_credentials_file);
+  m_nats.m_enable_tls = get_env_bool("NATS_ENABLE_TLS", m_nats.m_enable_tls);
+  m_nats.m_tls_cert_file =
+      get_env_string("NATS_TLS_CERT_FILE", m_nats.m_tls_cert_file);
+  m_nats.m_tls_key_file =
+      get_env_string("NATS_TLS_KEY_FILE", m_nats.m_tls_key_file);
+  m_nats.m_tls_ca_cert_file =
+      get_env_string("NATS_TLS_CA_CERT_FILE", m_nats.m_tls_ca_cert_file);
 
-  if (!m_nats_username.empty() || !m_nats_token.empty() ||
-      !m_nats_credentials_file.empty()) {
+  if (!m_nats.m_username.empty() || !m_nats.m_token.empty() ||
+      !m_nats.m_credentials_file.empty()) {
     Logger::info("NATS authentication: enabled");
   }
-  if (m_nats_enable_tls) {
+  if (m_nats.m_enable_tls) {
     Logger::info("NATS TLS: enabled");
   }
 
   Logger::info("NATS is the only messaging backend");
-  Logger::info("NATS host: {}:{}", m_nats_host, m_nats_port);
-  Logger::info("NATS subject: {}", m_nats_subject);
-  Logger::info("NATS queue group: {}", m_nats_queue_group);
-  Logger::info("NATS timeout: {}ms", m_nats_timeout_ms);
+  Logger::info("NATS host: {}:{}", m_nats.m_host, m_nats.m_port);
+  Logger::info("NATS subject: {}", m_nats.m_subject);
+  Logger::info("NATS queue group: {}", m_nats.m_queue_group);
+  Logger::info("NATS timeout: {}ms", m_nats.m_timeout_ms);
 }
 
 void Config::load_db_query_config() {
@@ -781,18 +781,18 @@ bool Config::validate(bool log_issues) const {
 
 NatsConfig Config::create_nats_config() const {
   NatsConfig cfg;
-  cfg.m_host = m_nats_host;
-  cfg.m_port = m_nats_port;
-  cfg.m_subject = m_nats_subject;
-  cfg.m_queue_group = m_nats_queue_group;
-  cfg.m_timeout_ms = m_nats_timeout_ms;
-  cfg.m_username = m_nats_username;
-  cfg.m_password = m_nats_password;
-  cfg.m_token = m_nats_token;
-  cfg.m_credentials_file = m_nats_credentials_file;
-  cfg.m_enable_tls = m_nats_enable_tls;
-  cfg.m_tls_cert_file = m_nats_tls_cert_file;
-  cfg.m_tls_key_file = m_nats_tls_key_file;
-  cfg.m_tls_ca_cert_file = m_nats_tls_ca_cert_file;
+  cfg.m_host = m_nats.m_host;
+  cfg.m_port = m_nats.m_port;
+  cfg.m_subject = m_nats.m_subject;
+  cfg.m_queue_group = m_nats.m_queue_group;
+  cfg.m_timeout_ms = m_nats.m_timeout_ms;
+  cfg.m_username = m_nats.m_username;
+  cfg.m_password = m_nats.m_password;
+  cfg.m_token = m_nats.m_token;
+  cfg.m_credentials_file = m_nats.m_credentials_file;
+  cfg.m_enable_tls = m_nats.m_enable_tls;
+  cfg.m_tls_cert_file = m_nats.m_tls_cert_file;
+  cfg.m_tls_key_file = m_nats.m_tls_key_file;
+  cfg.m_tls_ca_cert_file = m_nats.m_tls_ca_cert_file;
   return cfg;
 }

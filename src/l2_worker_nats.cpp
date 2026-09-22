@@ -113,8 +113,8 @@ inline constexpr int kDbInitRetryEveryPasses = 50;
 void L2Worker::run_with_nats() {
   Logger::info("Starting NATS worker mode. Subscribing to subject: {} with "
                "queue group: {}",
-               m_ctx.m_config.m_nats_subject,
-               m_ctx.m_config.m_nats_queue_group);
+               m_ctx.m_config.m_nats.m_subject,
+               m_ctx.m_config.m_nats.m_queue_group);
 
   if (m_ctx.m_config.m_db_query_enabled) {
     m_db_query_handler = std::make_unique<DbQueryHandler>();
@@ -231,17 +231,17 @@ void L2Worker::run_with_nats() {
 
 bool L2Worker::subscribe_worker_subject() {
   Logger::info("Subscribing worker to NATS subject: {} queue group: {}",
-               m_ctx.m_config.m_nats_subject, m_ctx.m_config.m_nats_queue_group);
+               m_ctx.m_config.m_nats.m_subject, m_ctx.m_config.m_nats.m_queue_group);
   const bool subscribed =
-      subscribe_nats_subject(m_ctx.m_config.m_nats_subject,
-                             m_ctx.m_config.m_nats_queue_group,
+      subscribe_nats_subject(m_ctx.m_config.m_nats.m_subject,
+                             m_ctx.m_config.m_nats.m_queue_group,
                              "NATS request", [this](const std::string &data,
                                                     const std::string &reply_to) {
                                process_request_from_nats(data, reply_to);
                              });
   if (!subscribed) {
     Logger::error("Failed to subscribe worker to NATS subject: {}",
-                  m_ctx.m_config.m_nats_subject);
+                  m_ctx.m_config.m_nats.m_subject);
     return false;
   }
   Logger::info("Worker subscribed to NATS successfully");
@@ -399,7 +399,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
         m_ctx.m_tracer.get(), metadata.m_request_id,
         metadata.m_trace_ctx.m_trace_id, start_us, nats_consume_span_id,
         metadata.m_proxy_span_id, proxy_service_name(m_ctx.m_config.m_mode),
-        m_ctx.m_config.m_nats_subject, reply_to);
+        m_ctx.m_config.m_nats.m_subject, reply_to);
 
     const auto &worker_parent_span_id = nats_consume_span_id;
 

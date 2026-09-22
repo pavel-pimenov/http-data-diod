@@ -41,9 +41,9 @@ L2Worker::L2Worker(AppContext &context)
                     context.m_config.m_http_timeout_seconds, // request timeout
                     30,   // acquire timeout (30 seconds)
                     true, // enable connection reuse (keep-alive)
-                    context.m_config.m_enable_ssl_server_certificate_verification,
-                    context.m_config.m_enable_ssl_server_hostname_verification,
-                    context.m_config.m_ssl_ca_cert_path,
+                    context.m_config.m_ssl.m_enable_server_certificate_verification,
+                    context.m_config.m_ssl.m_enable_server_hostname_verification,
+                    context.m_config.m_ssl.m_ca_cert_path,
                     context.m_config.m_http_pool_idle_timeout_seconds)},
       m_ctx(context), m_l2_server_urls(context.m_config.m_l2_server_urls),
       m_dedup_cache(context.m_config.m_dedup_enabled,
@@ -62,8 +62,8 @@ L2Worker::L2Worker(AppContext &context)
   }
 
   Logger::info("Initializing NATS client for subject: {}, queue group: {}",
-               context.m_config.m_nats_subject,
-               context.m_config.m_nats_queue_group);
+               context.m_config.m_nats.m_subject,
+               context.m_config.m_nats.m_queue_group);
 
   m_clients.m_nats_client =
       std::make_unique<NatsClient>(context.m_config.create_nats_config());

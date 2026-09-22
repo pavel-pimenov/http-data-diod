@@ -161,8 +161,8 @@ void run_httplib_server(
         &on_response = {}) {
   if (protocol == "https") {
     // HTTPS mode
-    httplib::SSLServer server(app_ctx.m_config.m_ssl_server_cert_file.c_str(),
-                              app_ctx.m_config.m_ssl_server_key_file.c_str());
+    httplib::SSLServer server(app_ctx.m_config.m_ssl.m_server_cert_file.c_str(),
+                              app_ctx.m_config.m_ssl.m_server_key_file.c_str());
     configure_httplib_server(server, app_ctx.m_config);
     run_server(server, app_ctx, handler, port, https_server_name,
                use_in_flight_tracker, on_request_start, on_response);

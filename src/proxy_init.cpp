@@ -14,8 +14,8 @@ void init_proxy_components(AppContext &app_ctx) {
     return;
   }
   Logger::info("Using NATS for messaging (host={}:{}, subject={})",
-               app_ctx.m_config.m_nats_host, app_ctx.m_config.m_nats_port,
-               app_ctx.m_config.m_nats_subject);
+               app_ctx.m_config.m_nats.m_host, app_ctx.m_config.m_nats.m_port,
+               app_ctx.m_config.m_nats.m_subject);
 
   app_ctx.m_nats_client =
       std::make_shared<NatsClient>(app_ctx.m_config.create_nats_config());

@@ -32,6 +32,44 @@ struct DbConfig {
 class Config {
 public:
   // ========================================================================
+  // Nested configuration groups (each member keeps its m_ prefix, the group
+  // instance is accessed as m_<group>.m_<member>).
+  // ========================================================================
+
+  // SSL/TLS tuning shared by the HTTP(S) endpoints and TLS-secured transports.
+  // The server cert/key are consumed where the httplib server binds
+  // (main.cpp), the CA bundle + verification toggles by the HTTP client pool,
+  // and the NATS TLS files live in m_nats.
+  struct Ssl {
+    bool m_enable_server_certificate_verification = false;
+    bool m_enable_server_hostname_verification = false;
+    std::string m_ca_cert_path;
+    std::string m_server_cert_file;
+    std::string m_server_key_file;
+  };
+
+  // NATS messaging connection settings (the only supported backend; the redis
+  // backend is disabled in this project).
+  struct Nats {
+    std::string m_host{"nats-server"};
+    int m_port{4222};
+    std::string m_subject{"service.proxy"};
+    std::string m_queue_group{"proxy_workers"};
+    std::string m_username;
+    std::string m_password;
+    std::string m_token;
+    std::string m_credentials_file;
+    std::string m_tls_cert_file;
+    std::string m_tls_key_file;
+    std::string m_tls_ca_cert_file;
+    bool m_enable_tls = false;
+    int m_timeout_ms{30000};
+  };
+
+  Ssl m_ssl;
+  Nats m_nats;
+
+  // ========================================================================
   // Group 1: std::string fields (32 bytes each on libstdc++)
   // ========================================================================
   std::string m_mode{"proxy"};
@@ -45,19 +83,6 @@ public:
   std::string m_l2_server_protocol{"http"};
   std::string m_proxy_protocol{"http"};
   std::string m_thread_pool_type{"none"};
-  std::string m_ssl_ca_cert_path;
-  std::string m_ssl_server_cert_file;
-  std::string m_ssl_server_key_file;
-  std::string m_nats_host{"nats-server"};
-  std::string m_nats_subject{"service.proxy"};
-  std::string m_nats_queue_group{"proxy_workers"};
-  std::string m_nats_username;
-  std::string m_nats_password;
-  std::string m_nats_token;
-  std::string m_nats_credentials_file;
-  std::string m_nats_tls_cert_file;
-  std::string m_nats_tls_key_file;
-  std::string m_nats_tls_ca_cert_file;
   std::string m_db_query_nats_subject{"service.db.query"};
   std::string m_db_query_nats_queue_group{"db_workers"};
 
@@ -114,8 +139,6 @@ public:
   int m_duplicate_log_threshold{5};
   int m_duplicate_detection_max_clients{1000};
   int m_duplicate_detection_client_ttl_ms{1800000};
-  int m_nats_port{4222};
-  int m_nats_timeout_ms{30000};
   // DB Gateway NATS request timeout (how long the proxy waits for a worker
   // reply) in ms.
   int m_db_query_nats_timeout_ms{30000};
@@ -133,11 +156,8 @@ public:
   // Group 6: bool fields (1 byte each) — packed together at the end
   // ========================================================================
   bool m_enable_tracing{false};
-  bool m_enable_ssl_server_certificate_verification{false};
-  bool m_enable_ssl_server_hostname_verification{false};
   bool m_enable_per_ip_rate_limiting{true};
   bool m_enable_global_rate_limiting{true};
-  bool m_nats_enable_tls{false};
   bool m_dedup_enabled{false};
   bool m_duplicate_detection_enabled{true};
   // Master switch of the HTTP DB Gateway (DB_QUERY_ENABLED). When false the
