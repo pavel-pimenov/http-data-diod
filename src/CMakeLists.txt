@@ -53,6 +53,11 @@ set(L2_PROXY_COMMON_COMPILE_OPTIONS
 # Options for tracing backends
 option(BUILD_TESTS "Build unit tests with Catch2" OFF)
 option(L2_PROXY_TEST_PCH "Precompile common headers for unit test targets (nlohmann/json, prometheus, Catch2, httplib)" ON)
+# The l2-proxy binary precompiles the heavy headers (nlohmann/json ~27k lines,
+# httplib single-header, prometheus, spdlog) once for all its TUs: unity batches,
+# main.cpp, httplib.cc and version.cpp all reuse the same .gch. Off in the
+# clang-tidy/lint configurations (clang cannot reuse a GCC-built .gch).
+option(L2_PROXY_APP_PCH "Precompile common headers for the l2-proxy target (nlohmann/json, httplib, prometheus, spdlog)" ON)
 option(ENABLE_ASAN "Enable AddressSanitizer + LeakSanitizer" OFF)
 option(ENABLE_PROFILER "Enable gperftools heap profiling (links tcmalloc + profiler)" OFF)
 
@@ -437,6 +442,25 @@ endif()
 
 # Export symbols for backtrace() symbol resolution in crash dumps
 target_link_options(l2-proxy PRIVATE -rdynamic)
+
+# Precompile the heavy headers once for every l2-proxy TU (unity batches,
+# main.cpp, httplib.cc, version.cpp). target_compile_definitions above
+# (CPPHTTPLIB_OPENSSL_SUPPORT, ...) are propagated into the .gch build, so the
+# forced include matches what the TUs compile with. Disabled (L2_PROXY_APP_PCH
+# = OFF) by the clang-tidy/lint configurations that need per-file
+# compile_commands.json without forced includes.
+if(L2_PROXY_APP_PCH)
+    target_precompile_headers(l2-proxy PRIVATE
+        <nlohmann/json.hpp>
+        <httplib/httplib.h>
+        <prometheus/registry.h>
+        <spdlog/spdlog.h>
+    )
+    # dpi.c is the only C source in l2-proxy. Without this, CMake also builds a
+    # C-precompiled-header that tries to parse nlohmann/json.hpp in C mode
+    # (fatal error: 'algorithm': No such file or directory).
+    set_source_files_properties(odpi/embed/dpi.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
 
 if(ENABLE_PROFILER)
     target_link_options(l2-proxy PRIVATE -no-pie)

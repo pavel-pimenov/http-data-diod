@@ -101,6 +101,7 @@ ensure_compile_commands() {
                -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                -DCMAKE_UNITY_BUILD=OFF \
                -DL2_PROXY_TEST_PCH=OFF \
+               -DL2_PROXY_APP_PCH=OFF \
                -S . -B build-lint >/dev/null"
 }
 

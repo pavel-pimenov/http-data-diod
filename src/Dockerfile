@@ -34,6 +34,7 @@ RUN set -eux; \
 # (spdlog is used header-only, so libspdlog is NOT a runtime dep), libssl3t64
 # and libpq5 (plus their transitive deps libzstd1/zlib1g/libstdc++6).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libfmt10 \
@@ -41,8 +42,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libpq5 \
     ca-certificates \
     curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
 # Main build stage: apt deps + NATS C client + application.
 # NATS is built here (no separate deps-builder stage) so the pipeline runs
@@ -59,6 +59,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # the application or either CMake build (zstd comes at link time from the
 # libzstd1 runtime lib, pulled in by libssl3t64).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -75,8 +76,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     catch2 \
     libcli11-dev \
     libpq-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
 # ccache tuning: on 4-core hosts the 5 GiB default evicts unity batches between
 # Dockerfile tweaks; raise the cap and compress so hits survive longer. The
@@ -165,12 +165,12 @@ RUN --mount=type=cache,target=/root/.ccache \
 # clean build's compile progress, and the test gate becomes a separate cachable
 # step that re-runs only when the sources (parent layers) actually changed.
 RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
-    cd /app/build && \
-    _T4=$(date +%s) && \
-    ./test_components && \
-    ./test_proxy_core && \
+    cd /app/build && _T4=$(date +%s); \
+    ./test_components & _P1=$!; \
+    ./test_proxy_core & _P2=$!; \
+    wait $_P1 && wait $_P2 && \
     _T5=$(date +%s) && \
-    echo "=== unit tests: $((_T5 - _T4))s, all passed ==="
+    echo "=== unit tests (parallel): $((_T5 - _T4))s, all passed ==="
 
 # Keep debug info (DWARF) for crash handler stack trace resolution
 
@@ -184,9 +184,11 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 # Note: the gcovr --filter must stay as a single backslash here. A doubled one
 # (`\\.`) is passed literally to the regex and matches nothing (0% report).
 FROM builder AS coverage
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends gcovr \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 RUN rm -rf build-cov && mkdir build-cov && cd build-cov && \
     cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON \
           -DCMAKE_UNITY_BUILD=OFF \
@@ -217,6 +219,7 @@ RUN rm -rf build-lint && mkdir build-lint && cd build-lint && \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
           -DCMAKE_UNITY_BUILD=OFF \
           -DL2_PROXY_TEST_PCH=OFF \
+          -DL2_PROXY_APP_PCH=OFF \
           .. && \
     find /app -name '*.cpp' ! -path '*/httplib/*' ! -path '*/base64/*' | \
     xargs clang-tidy -p . \
@@ -229,11 +232,11 @@ FROM ubuntu-base AS runtime-base
 # addr2line (binutils) is needed at runtime: the crash handler resolves stack
 # frames to src file:line in-place (crash_handler.hpp => annotate_exe_frames).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     binutils \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
 # Runtime libraries come from the ubuntu-base stage; here only the image
 # layout is prepared (no apt, no network).
@@ -267,12 +270,13 @@ FROM runtime-base AS runtime
 FROM runtime-base AS runtime-asan
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libasan8 \
     libubsan1 \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /tmp/*
 
 ENV ASAN_OPTIONS=detect_leaks=1:halt_on_error=0:log_path=/memory-logs/asan
 ENV LSAN_OPTIONS=report_objects=1
@@ -305,12 +309,13 @@ COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/oracore/zoneinfo /opt/o
 COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/nls /opt/oracle/instantclient_21_13/nls
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libaio1t64 \
     libnsl2 \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /tmp/*
 
 # The Oracle Home of Oracle XE 21c ships a full (non-Instant-Client) OCI
 # implementation which locates NLS/timezone data via $ORACLE_HOME. Point it at
@@ -336,11 +341,12 @@ RUN set -eux; \
 FROM runtime-base AS runtime-profiler
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libgoogle-perftools4t64 \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /tmp/*
 
 RUN ln -sf $(find /usr/lib -name 'libtcmalloc_and_profiler.so*' | head -1) /usr/lib/libtcmalloc_and_profiler.so 2>/dev/null || true
 ENV LD_LIBRARY_PATH=/usr/lib:${LD_LIBRARY_PATH:-}
@@ -356,8 +362,9 @@ ENV HEAP_PROFILE_INUSE_INTERVAL=1073741824
 FROM runtime-base AS runtime-valgrind
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     valgrind \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /tmp/*
