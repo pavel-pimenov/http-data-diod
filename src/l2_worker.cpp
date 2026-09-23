@@ -4,6 +4,7 @@
 #include "json_utils.hpp"
 #include "l2_routing.hpp"
 #include "time_utils.hpp"
+#include "worker_request_parser.hpp"
 #include <base64.hpp>
 #include <cstring>
 #include <format>
@@ -121,18 +122,6 @@ L2Worker::~L2Worker() {
     Logger::info("L2Worker shutdown complete");
     // NOLINTNEXTLINE(bugprone-empty-catch) — destructor must not throw
   } catch (...) {
-  }
-}
-
-void L2Worker::extract_forwarded_headers(const json &request_data,
-                                         httplib::Headers &forwarded_headers) {
-  if (request_data.contains(NatsContract::kHeaders)) {
-    Logger::debug(
-        "Worker extracting forwarded headers from backend request: {} headers",
-        request_data[NatsContract::kHeaders].size());
-    HeaderUtils::filter_headers_from_json(
-        request_data[NatsContract::kHeaders], forwarded_headers,
-        HeaderUtils::get_default_skip_headers(), "Worker");
   }
 }
 
@@ -498,32 +487,21 @@ bool L2Worker::parse_request_data(const std::string &request_json,
 
 L2Worker::RequestData
 L2Worker::extract_request_metadata(const json &request_data) {
+  const worker_request_parser::WorkerRequestData decoded =
+      worker_request_parser::decode_nats_request(request_data);
+
   RequestData metadata;
-
-  // Use explicit .get<std::string>() for clarity and potential move
-  // optimization
-  metadata.m_request_id =
-      request_data[NatsContract::kRequestId].get<std::string>();
-  metadata.m_path = request_data[NatsContract::kPath].get<std::string>();
-  metadata.m_query = request_data.value(NatsContract::kQuery, std::string{});
-  metadata.m_method = request_data[NatsContract::kMethod].get<std::string>();
-
-  // Extract body as-is
-  metadata.m_body = request_data[NatsContract::kBody].get<std::string>();
-
-  // Extract optional fields with defaults
-  metadata.m_client_ip =
-      request_data.value(NatsContract::kClientIp, std::string("unknown"));
-  metadata.m_proxy_ip =
-      request_data.value(NatsContract::kProxyIp, std::string("unknown"));
-  metadata.m_proxy_traceparent =
-      request_data.value(NatsContract::kProxyTraceparent, std::string{});
-  metadata.m_proxy_span_id =
-      request_data.value(NatsContract::kProxySpanId, std::string{});
-
-  // Extract traceparent if present
-  metadata.m_traceparent =
-      request_data.value(NatsContract::kTraceparent, std::string{});
+  metadata.m_request_id = decoded.m_request_id;
+  metadata.m_path = decoded.m_path;
+  metadata.m_query = decoded.m_query;
+  metadata.m_method = decoded.m_method;
+  metadata.m_body = decoded.m_body;
+  metadata.m_client_ip = decoded.m_client_ip;
+  metadata.m_proxy_ip = decoded.m_proxy_ip;
+  metadata.m_traceparent = decoded.m_traceparent;
+  metadata.m_proxy_traceparent = decoded.m_proxy_traceparent;
+  metadata.m_proxy_span_id = decoded.m_proxy_span_id;
+  metadata.m_forwarded_headers = decoded.m_forwarded_headers;
 
   const auto effective_traceparent =
       !metadata.m_proxy_traceparent.empty() ? metadata.m_proxy_traceparent
@@ -531,7 +509,11 @@ L2Worker::extract_request_metadata(const json &request_data) {
   metadata.m_trace_ctx =
       handle_trace_context(effective_traceparent, m_ctx.m_tracer.get());
 
-  extract_forwarded_headers(request_data, metadata.m_forwarded_headers);
+  if (request_data.contains(NatsContract::kHeaders)) {
+    Logger::debug(
+        "Worker extracting forwarded headers from backend request: {} headers",
+        request_data[NatsContract::kHeaders].size());
+  }
 
   return metadata;
 }

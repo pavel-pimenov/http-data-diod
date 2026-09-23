@@ -21,6 +21,7 @@
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
+#include "worker_request_parser.hpp"
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -2079,6 +2080,16 @@ TEST_CASE("DuplicateDetector: body sample is capped by max_body_bytes",
   REQUIRE(report["top"][0]["body"] == "");
 }
 
+TEST_CASE("DuplicateDetector: default-constructed uses default options",
+          "[duplicate-detector]") {
+  DuplicateDetector detector;
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})")
+              .first == true);
+  REQUIRE(detector.duplicate_bodies() == 1);
+}
+
 TEST_CASE("DuplicateDetector: expired bodies stop being duplicates after TTL",
           "[duplicate-detector]") {
   DuplicateDetector::Options options;
@@ -3376,6 +3387,82 @@ TEST_CASE("RequestIdGenerator: counter increments per call", "[request-id]") {
     return std::stoll(s.substr(a + 1, b - a - 1));
   };
   REQUIRE(middle(second) == middle(first) + 1);
+}
+
+TEST_CASE("WorkerRequestParser: decodes required NATS contract fields",
+          "[worker-nats]") {
+  const json request_data = json::parse(R"({
+    "request_id": "req-1",
+    "method": "POST",
+    "path": "/v1/foo",
+    "query": "a=1&b=2",
+    "body": "hello",
+    "client_ip": "10.1.2.3",
+    "proxy_ip": "10.9.8.7"
+  })");
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_request_id == "req-1");
+  REQUIRE(metadata.m_method == "POST");
+  REQUIRE(metadata.m_path == "/v1/foo");
+  REQUIRE(metadata.m_query == "a=1&b=2");
+  REQUIRE(metadata.m_body == "hello");
+  REQUIRE(metadata.m_client_ip == "10.1.2.3");
+  REQUIRE(metadata.m_proxy_ip == "10.9.8.7");
+}
+
+TEST_CASE("WorkerRequestParser: optional fields fall back to defaults",
+          "[worker-nats]") {
+  const json request_data = json::parse(R"({
+    "request_id": "req-2",
+    "method": "GET",
+    "path": "/v1/bar",
+    "body": ""
+  })");
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_query.empty());
+  REQUIRE(metadata.m_client_ip == "unknown");
+  REQUIRE(metadata.m_proxy_ip == "unknown");
+  REQUIRE(metadata.m_proxy_traceparent.empty());
+  REQUIRE(metadata.m_proxy_span_id.empty());
+  REQUIRE(metadata.m_traceparent.empty());
+  REQUIRE(metadata.m_forwarded_headers.empty());
+}
+
+TEST_CASE("WorkerRequestParser: forwarded headers are filtered with defaults",
+          "[worker-nats]") {
+  const json request_data = json::parse(R"({
+    "request_id": "req-3",
+    "method": "POST",
+    "path": "/v1/baz",
+    "body": "x",
+    "headers": {
+      "x-custom-hdr": "v1",
+      "host": "example.org",
+      "content-length": "100"
+    }
+  })");
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_forwarded_headers.count("x-custom-hdr") == 1);
+  REQUIRE(metadata.m_forwarded_headers.find("x-custom-hdr")->second == "v1");
+  REQUIRE(metadata.m_forwarded_headers.count("host") == 0);
+  REQUIRE(metadata.m_forwarded_headers.count("content-length") == 0);
+}
+
+TEST_CASE("WorkerRequestParser: non-object headers are ignored",
+          "[worker-nats]") {
+  const json request_data = json::parse(R"({
+    "request_id": "req-4",
+    "method": "POST",
+    "path": "/v1/baz",
+    "body": "x",
+    "headers": ["not", "an", "object"]
+  })");
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_forwarded_headers.empty());
 }
 
 TEST_CASE("RequestIdGenerator: random suffix is 6 zero-padded digits",

@@ -67,8 +67,6 @@ public:
   bool is_nats_connected() const;
 
 private:
-  void extract_forwarded_headers(const json &request_data,
-                                 httplib::Headers &forwarded_headers);
   std::string extract_l2_server_span_id(const std::string &l2_response);
   json prepare_response_headers(const HttpResponse &l2_http_response);
   // NATS mode methods
