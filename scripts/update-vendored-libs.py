@@ -101,8 +101,8 @@ REFS = {
     "nlohmann-json": "v3.12.0",
     "prometheus-cpp": "00c13295d53cf900c1e8614e4e63b53df52d6cc5",
     "civetweb": "v1.16",
-    "nats.c": "9cae3733d3d90427ef748d63706e1cc766588466",
-    "cpp-httplib": "v0.56.0",
+    "nats.c": "v3.14.0",
+    "cpp-httplib": "v0.58.0",
     "base64": "master",
     "odpi": "v26.0.0",
 }
