@@ -1,3 +1,22 @@
+# round 55: e2e reconnect worker, dedup-replay, error-contract, CI wiring
+
+## Date: 2026-09-23
+
+### Что сделано
+- **Новый e2e-тест `scripts/e2e-worker-reconnect-test.py`** (aiohttp + nats-py + docker), три фазы:
+  1. **outage**: `docker stop nats-server` → worker `/health/ready` отдаёт 503 `{"status":"not_ready","error":"NATS not connected"}`, реальный запрос через proxy при упавшем NATS не обслуживается (наблюдается либо таймаут — proxy висит до своего poll-таймаута ~30s, либо 5xx JSON; 200 запрещён). Это заодно валидирует **контракт ошибок worker→proxy**: `request_handler.cpp` отдаёт 500 `queue_failed` / 504 `empty_response` / 503 `DB_UNAVAILABLE` — тест принимает 5xx-семейство и JSON-тело с ключом `error`, фиксируя «не обслуживаем, не молчаливо».
+  2. **recovery**: `docker start nats-server` → nats принимает авторизованные соединения, worker автоматически реконнектится (`/health/ready` → 200), echo round-trip через proxy снова 200.
+  3. **dedup-replay**: прямой NATS-publish (subject `service.proxy`) одного `request_id` дважды с разными reply-inbox'ами → второй ответ байт-в-байт равен первому (отдан из `m_dedup_cache`, второй вызов L2 не выполняется); в логах worker появляется маркер `Duplicate NATS request detected, returning cached response: request_id=...`.
+- **nats-py + auth**: токен берётся из `.env` (`NATS_TOKEN=...`), подключение `nats://TOKEN@localhost:4222`; когда токена нет (CI/свежий клон) — обычный URL без auth, NATS-server в этом случае запускается без `--auth`.
+- **Доработки по ходу**: proxy не отвечает 5xx мгновенно при недоступном NATS — тест трактует и 5xx, и timeout как «отказ» (не 200). nats-py требует coroutine-callbacks (`async def` в `subscribe`). `str(asyncio.TimeoutError())` пустой — в отчёте об ошибках теперь `repr`.
+- **CI `.github/workflows/ci.yml`**: `pip install aiohttp nats-py`; новая шага `NATS reconnect + dedup e2e test` между golden-metrics и teardown (стек до этого уже пересобран `rebuild-and-run.sh`, все сервисы healthy).
+- **Локальный `.env` (gitignored)**: `DEDUP_ENABLED` выправлено на композный дефолт `true` (раньше было `false` — с ним dedup-фаза не тестируема: `m_dedup_cache` выключен, второй delivery шёл в L2 с новым timestamp). L2-breaker e2e осознанно не включён: требует вывода из строя l2-server, что уже покрыто `e2e-graceful-shutdown-test.py` (scope теста — worker-side outage/replay).
+
+### Проверка
+- `python3 scripts/e2e-worker-reconnect-test.py`: все фазы прошли, rc=0.
+- `./health-check.sh all` + `python3 message_counter.py --iterations 1 --concurrent 1`: rc=0.
+- Изменений в C++ нет (только test-скрипт + ci.yml) — coverage/clang-tidy/контейнерный билд не затронуты; сборка образа и юнит-тесты перепроверены через `./rebuild-and-run.sh`.
+
 # round 54: юнит-тесты для worker/NATS-контракта, добивка покрытия
 
 ## Date: 2026-09-23
