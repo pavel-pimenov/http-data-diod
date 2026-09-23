@@ -141,7 +141,7 @@ void ServerHandler::handle_favicon(httplib::Response &res) const {
 }
 
 void ServerHandler::apply_test_delay() const {
-  const int max_delay_ms = m_ctx.m_config.m_test_response_delay_ms;
+  const int max_delay_ms = m_ctx.m_config.m_server.m_test_response_delay_ms;
   if (max_delay_ms <= 0) {
     return;
   }

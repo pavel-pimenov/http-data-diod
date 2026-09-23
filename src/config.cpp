@@ -73,53 +73,53 @@ bool one_of(const std::string &val,
 
 void validate_ports_and_timeouts(const Config &cfg, ConfigChecker &check) {
   // Ports
-  check(in_range(cfg.m_proxy_port, 1, 65535),
+  check(in_range(cfg.m_proxy.m_port, 1, 65535),
         std::format("Invalid proxy port: {} (must be 1-65535)",
-                    cfg.m_proxy_port));
-  check(in_range(cfg.m_l2_server_port, 1, 65535),
+                    cfg.m_proxy.m_port));
+  check(in_range(cfg.m_server.m_port, 1, 65535),
         std::format("Invalid L2 server port: {} (must be 1-65535)",
-                    cfg.m_l2_server_port));
+                    cfg.m_server.m_port));
 
   // Timeouts
-  check(positive(cfg.m_request_timeout_seconds),
+  check(positive(cfg.m_proxy.m_request_timeout_seconds),
         std::format("Invalid request timeout: {} (must be > 0)",
-                    cfg.m_request_timeout_seconds));
-  check(positive(cfg.m_http_timeout_seconds),
+                    cfg.m_proxy.m_request_timeout_seconds));
+  check(positive(cfg.m_proxy.m_http_timeout_seconds),
         std::format("Invalid HTTP timeout: {} (must be > 0)",
-                    cfg.m_http_timeout_seconds));
+                    cfg.m_proxy.m_http_timeout_seconds));
 }
 
 void validate_mode_and_urls(const Config &cfg, ConfigChecker &check) {
   // Mode & log level
-  check(one_of(cfg.m_mode, {"proxy", "worker", "l2-server"}),
+  check(one_of(cfg.m_app.m_mode, {"proxy", "worker", "l2-server"}),
         std::format(
             "Invalid mode: {} (must be 'proxy', 'worker', or 'l2-server')",
-            cfg.m_mode));
+            cfg.m_app.m_mode));
   check(
-      one_of(cfg.m_log_level, {"DEBUG", "INFO", "WARN", "ERROR"}),
+      one_of(cfg.m_app.m_log_level, {"DEBUG", "INFO", "WARN", "ERROR"}),
       std::format(
           "Invalid log level: {} (must be 'DEBUG', 'INFO', 'WARN', or 'ERROR')",
-          cfg.m_log_level));
+          cfg.m_app.m_log_level));
 
   // URLs (only proxy/worker build a real URL; l2-server leaves them empty)
-  if (cfg.m_mode != "l2-server") {
-    check(!cfg.m_l2_server_url.empty(), "L2 server URL cannot be empty");
-    check(!cfg.m_l2_server_urls.empty(), "L2 server URLs cannot be empty");
+  if (cfg.m_app.m_mode != "l2-server") {
+    check(!cfg.m_server.m_url.empty(), "L2 server URL cannot be empty");
+    check(!cfg.m_server.m_urls.empty(), "L2 server URLs cannot be empty");
   }
 }
 
 void validate_protocols_and_ssl(const Config &cfg, ConfigChecker &check) {
   // Protocols
   check(
-      one_of(cfg.m_l2_server_protocol, {"http", "https"}),
+      one_of(cfg.m_server.m_protocol, {"http", "https"}),
       std::format("Invalid L2 server protocol: {} (must be 'http' or 'https')",
-                  cfg.m_l2_server_protocol));
-  check(one_of(cfg.m_proxy_protocol, {"http", "https"}),
+                  cfg.m_server.m_protocol));
+  check(one_of(cfg.m_proxy.m_protocol, {"http", "https"}),
         std::format("Invalid proxy protocol: {} (must be 'http' or 'https')",
-                    cfg.m_proxy_protocol));
+                    cfg.m_proxy.m_protocol));
 
   // SSL for proxy
-  if (cfg.m_proxy_protocol == "https") {
+  if (cfg.m_proxy.m_protocol == "https") {
     check(!cfg.m_ssl.m_server_cert_file.empty(),
           "SSL_SERVER_CERT_FILE is required when PROXY_PROTOCOL=https");
     check(!cfg.m_ssl.m_server_key_file.empty(),
@@ -127,7 +127,7 @@ void validate_protocols_and_ssl(const Config &cfg, ConfigChecker &check) {
   }
 
   // SSL for L2 server
-  if (cfg.m_l2_server_protocol == "https") {
+  if (cfg.m_server.m_protocol == "https") {
     check(!cfg.m_ssl.m_server_cert_file.empty(),
           "SSL_SERVER_CERT_FILE is required when L2_SERVER_PROTOCOL=https");
     check(!cfg.m_ssl.m_server_key_file.empty(),
@@ -137,34 +137,34 @@ void validate_protocols_and_ssl(const Config &cfg, ConfigChecker &check) {
 
 void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
   // Server threads, timeout, pool type, worker threads, retries, HTTP pool
-  check(one_of(cfg.m_thread_pool_type, {"custom", "none"}),
+  check(one_of(cfg.m_app.m_thread_pool_type, {"custom", "none"}),
         std::format("Invalid thread pool type: {} (must be 'custom' or 'none')",
-                    cfg.m_thread_pool_type));
-  check(positive(cfg.m_l2_worker_threads),
+                    cfg.m_app.m_thread_pool_type));
+  check(positive(cfg.m_worker.m_threads),
         std::format("Invalid L2 worker threads: {} (must be > 0)",
-                    cfg.m_l2_worker_threads));
-  check(non_negative(cfg.m_l2_worker_queue_size),
+                    cfg.m_worker.m_threads));
+  check(non_negative(cfg.m_worker.m_queue_size),
         std::format("Invalid L2 worker queue size: {} (must be >= 0, "
                     "0 = auto)",
-                    cfg.m_l2_worker_queue_size));
-  check(non_negative(cfg.m_max_retries),
+                    cfg.m_worker.m_queue_size));
+  check(non_negative(cfg.m_proxy.m_max_retries),
         std::format("Invalid max retries: {} (must be >= 0)",
-                    cfg.m_max_retries));
-  check(positive(cfg.m_http_pool_size),
+                    cfg.m_proxy.m_max_retries));
+  check(positive(cfg.m_proxy.m_http_pool_size),
         std::format("Invalid HTTP pool size: {} (must be > 0)",
-                    cfg.m_http_pool_size));
-  check(cfg.m_http_pool_size <= 1000,
+                    cfg.m_proxy.m_http_pool_size));
+  check(cfg.m_proxy.m_http_pool_size <= 1000,
         std::format("Very large HTTP pool size: {} (recommended: < 1000)",
-                    cfg.m_http_pool_size),
+                    cfg.m_proxy.m_http_pool_size),
         false);
-  check(positive(cfg.m_http_pool_idle_timeout_seconds),
+  check(positive(cfg.m_proxy.m_http_pool_idle_timeout_seconds),
         std::format("Invalid HTTP_POOL_IDLE_TIMEOUT_SECONDS: {} (must be > 0)",
-                    cfg.m_http_pool_idle_timeout_seconds));
+                    cfg.m_proxy.m_http_pool_idle_timeout_seconds));
 }
 
 void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
   // NATS (used only in proxy/worker modes)
-  if (cfg.m_mode == "proxy" || cfg.m_mode == "worker") {
+  if (cfg.m_app.m_mode == "proxy" || cfg.m_app.m_mode == "worker") {
     check(in_range(cfg.m_nats.m_port, 1, 65535),
           std::format("Invalid NATS port: {} (must be 1-65535)",
                       cfg.m_nats.m_port));
@@ -201,7 +201,7 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
                           db.m_driver));
         // Proxy mode registers DBs for routing/validation only; the connection
         // fields are checked by the worker (which owns the pools).
-        if (cfg.m_mode == "proxy") {
+        if (cfg.m_app.m_mode == "proxy") {
           continue;
         }
         check(!db.m_host.empty(),
@@ -338,61 +338,61 @@ void Config::load_from_env() {
     load_nats_config();
     load_db_query_config();
   }
-  m_crash_test = get_env_bool("CRASH_TEST", m_crash_test);
-  m_enable_crash_test_endpoint =
-      get_env_bool("ENABLE_CRASH_TEST_ENDPOINT", m_enable_crash_test_endpoint);
-  m_health_ready_allow_connect =
-      get_env_bool("HEALTH_READY_ALLOW_CONNECT", m_health_ready_allow_connect);
+  m_app.m_crash_test = get_env_bool("CRASH_TEST", m_app.m_crash_test);
+  m_app.m_enable_crash_test_endpoint =
+      get_env_bool("ENABLE_CRASH_TEST_ENDPOINT", m_app.m_enable_crash_test_endpoint);
+  m_app.m_health_ready_allow_connect =
+      get_env_bool("HEALTH_READY_ALLOW_CONNECT", m_app.m_health_ready_allow_connect);
 }
 
 void Config::load_l2_server_config() {
-  m_mode = get_env_string("MODE", m_mode);
+  m_app.m_mode = get_env_string("MODE", m_app.m_mode);
   const auto l2_server_host = get_env_string("L2_SERVER_HOST", "l2-server");
-  m_l2_server_port = get_env_int("L2_SERVER_PORT", m_l2_server_port);
-  m_l2_server_protocol =
-      get_env_protocol("L2_SERVER_PROTOCOL", m_l2_server_protocol);
+  m_server.m_port = get_env_int("L2_SERVER_PORT", m_server.m_port);
+  m_server.m_protocol =
+      get_env_protocol("L2_SERVER_PROTOCOL", m_server.m_protocol);
 
-  if (m_mode == "l2-server") {
-    // The l2-server binds on m_l2_server_port / m_l2_server_protocol but never
+  if (m_app.m_mode == "l2-server") {
+    // The l2-server binds on m_server.m_port / m_server.m_protocol but never
     // calls itself. L2_SERVER_* only tell proxy/worker how to reach this
     // service, so leave the URL fields empty instead of pointing at itself.
-    m_l2_server_url.clear();
-    m_l2_server_urls.clear();
+    m_server.m_url.clear();
+    m_server.m_urls.clear();
     Logger::info(
         "Mode l2-server: L2_SERVER_* only configure how proxy/worker reach "
         "this service; URL fields left empty");
     return;
   }
 
-  m_l2_server_url = std::format("{}://{}:{}", m_l2_server_protocol,
-                                l2_server_host, m_l2_server_port);
+  m_server.m_url = std::format("{}://{}:{}", m_server.m_protocol,
+                                l2_server_host, m_server.m_port);
 
   const auto l2_urls_env = get_env_string("L2_SERVER_URLS", "");
   if (!l2_urls_env.empty()) {
     try {
       const auto urls_result = JsonUtils::try_parse(l2_urls_env);
       if (urls_result && JsonUtils::is_array(*urls_result)) {
-        m_l2_server_urls.clear();
+        m_server.m_urls.clear();
         for (const auto &url : *urls_result) {
           if (url.is_string()) {
-            m_l2_server_urls.push_back(url);
+            m_server.m_urls.push_back(url);
           }
         }
-        Logger::info("L2_SERVER_URLS loaded: {} URLs", m_l2_server_urls.size());
+        Logger::info("L2_SERVER_URLS loaded: {} URLs", m_server.m_urls.size());
       } else {
         Logger::warn(
             "L2_SERVER_URLS is not a valid JSON array, using fallback");
-        m_l2_server_urls = {m_l2_server_url};
+        m_server.m_urls = {m_server.m_url};
       }
     } catch (const std::exception &e) {
       Logger::warn("Failed to parse L2_SERVER_URLS: {}, using fallback",
                    e.what());
-      m_l2_server_urls = {m_l2_server_url};
+      m_server.m_urls = {m_server.m_url};
     }
   } else {
-    m_l2_server_urls = {m_l2_server_url};
+    m_server.m_urls = {m_server.m_url};
     Logger::info("L2_SERVER_URLS not set, using single URL: {}",
-                 m_l2_server_url);
+                 m_server.m_url);
   }
 }
 
@@ -418,24 +418,24 @@ void Config::load_server_timeout_config() {
         m_sentry.m_dsn.substr(m_sentry.m_dsn.find_last_of('/') + 1),
         m_sentry.m_release, m_sentry.m_environment, m_sentry.m_max_queue_size);
   }
-  m_request_timeout_seconds =
-      get_env_int("REQUEST_TIMEOUT_SECONDS", m_request_timeout_seconds);
-  m_http_timeout_seconds =
-      get_env_int("HTTP_TIMEOUT_SECONDS", m_http_timeout_seconds);
-  m_test_response_delay_ms =
-      get_env_int("L2_TEST_RESPONSE_DELAY_MS", m_test_response_delay_ms);
+  m_proxy.m_request_timeout_seconds =
+      get_env_int("REQUEST_TIMEOUT_SECONDS", m_proxy.m_request_timeout_seconds);
+  m_proxy.m_http_timeout_seconds =
+      get_env_int("HTTP_TIMEOUT_SECONDS", m_proxy.m_http_timeout_seconds);
+  m_server.m_test_response_delay_ms =
+      get_env_int("L2_TEST_RESPONSE_DELAY_MS", m_server.m_test_response_delay_ms);
   m_tracing.m_enable = get_env_bool("ENABLE_TRACING", m_tracing.m_enable);
-  m_log_level = get_env_string("LOG_LEVEL", m_log_level);
-  m_proxy_port = get_env_int("PROXY_PORT", m_proxy_port);
-  m_proxy_protocol = get_env_protocol("PROXY_PROTOCOL", m_proxy_protocol);
-  m_thread_pool_type = get_env_string("THREAD_POOL_TYPE", m_thread_pool_type);
-  m_http_pool_size = get_env_int("HTTP_POOL_SIZE", m_http_pool_size);
-  m_http_pool_idle_timeout_seconds = get_env_int(
-      "HTTP_POOL_IDLE_TIMEOUT_SECONDS", m_http_pool_idle_timeout_seconds);
-  m_l2_worker_threads = get_env_int("L2_WORKER_THREADS", m_l2_worker_threads);
-  m_l2_worker_queue_size =
-      get_env_int("L2_WORKER_QUEUE_SIZE", m_l2_worker_queue_size);
-  m_max_retries = get_env_int("MAX_RETRIES", m_max_retries);
+  m_app.m_log_level = get_env_string("LOG_LEVEL", m_app.m_log_level);
+  m_proxy.m_port = get_env_int("PROXY_PORT", m_proxy.m_port);
+  m_proxy.m_protocol = get_env_protocol("PROXY_PROTOCOL", m_proxy.m_protocol);
+  m_app.m_thread_pool_type = get_env_string("THREAD_POOL_TYPE", m_app.m_thread_pool_type);
+  m_proxy.m_http_pool_size = get_env_int("HTTP_POOL_SIZE", m_proxy.m_http_pool_size);
+  m_proxy.m_http_pool_idle_timeout_seconds = get_env_int(
+      "HTTP_POOL_IDLE_TIMEOUT_SECONDS", m_proxy.m_http_pool_idle_timeout_seconds);
+  m_worker.m_threads = get_env_int("L2_WORKER_THREADS", m_worker.m_threads);
+  m_worker.m_queue_size =
+      get_env_int("L2_WORKER_QUEUE_SIZE", m_worker.m_queue_size);
+  m_proxy.m_max_retries = get_env_int("MAX_RETRIES", m_proxy.m_max_retries);
   m_ssl.m_enable_server_certificate_verification =
       get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION",
                    m_ssl.m_enable_server_certificate_verification);
@@ -448,7 +448,7 @@ void Config::load_server_timeout_config() {
       get_env_string("SSL_SERVER_CERT_FILE", m_ssl.m_server_cert_file);
   m_ssl.m_server_key_file =
       get_env_string("SSL_SERVER_KEY_FILE", m_ssl.m_server_key_file);
-  if (m_proxy_protocol == "https" || m_l2_server_protocol == "https") {
+  if (m_proxy.m_protocol == "https" || m_server.m_protocol == "https") {
     if (m_ssl.m_server_cert_file.empty() || m_ssl.m_server_key_file.empty()) {
       Logger::warn("HTTPS protocol specified but SSL_SERVER_CERT_FILE or "
                    "SSL_SERVER_KEY_FILE not set");
@@ -607,7 +607,7 @@ void Config::load_db_query_config() {
   // it needs for the /v1/sql/* listing and route validation. The driver
   // connection config (host/port/credentials/pool) is owned solely by the
   // worker, so it is not read here.
-  if (m_mode == "proxy") {
+  if (m_app.m_mode == "proxy") {
     auto add_routing_db = [&](const std::string &name, bool enabled) {
       if (!enabled) {
         return;

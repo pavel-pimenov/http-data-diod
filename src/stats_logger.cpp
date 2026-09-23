@@ -50,7 +50,7 @@ void StatsLogger::start_periodic_logging() {
       uint64_t max = m_counters.m_max_clients.load();
       uint64_t current_requests_for_rate = s.m_client_requests;
 
-      if (m_app_ctx.m_config.m_mode == "proxy") {
+      if (m_app_ctx.m_config.m_app.m_mode == "proxy") {
         current_requests_for_rate = s.m_nats_requests;
       }
 
@@ -82,7 +82,7 @@ void StatsLogger::start_periodic_logging() {
                      s.m_client_errors);
       }
 
-      if (m_app_ctx.m_config.m_mode == "proxy") {
+      if (m_app_ctx.m_config.m_app.m_mode == "proxy") {
         if (m_app_ctx.m_proxy.m_duplicate_detector) {
           m_app_ctx.m_proxy.m_metrics->m_duplicate_tracked_clients.Set(
               static_cast<double>(
@@ -103,7 +103,7 @@ void StatsLogger::start_periodic_logging() {
 
 StatsLogger::ModeStats StatsLogger::collect_mode_stats() const {
   ModeStats s;
-  if (m_app_ctx.m_config.m_mode == "proxy") {
+  if (m_app_ctx.m_config.m_app.m_mode == "proxy") {
     const auto &m = *m_app_ctx.m_proxy.m_metrics;
     s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
     s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
@@ -111,14 +111,14 @@ StatsLogger::ModeStats StatsLogger::collect_mode_stats() const {
     s.m_client_errors = static_cast<uint64_t>(m.m_client_errors.Value());
     s.m_nats_requests = static_cast<uint64_t>(m.m_nats_requests.Value());
     s.m_nats_errors = static_cast<uint64_t>(m.m_nats_errors.Value());
-  } else if (m_app_ctx.m_config.m_mode == "worker") {
+  } else if (m_app_ctx.m_config.m_app.m_mode == "worker") {
     const auto &m = *m_app_ctx.m_worker.m_metrics;
     s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
     s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
     s.m_client_requests =
         static_cast<uint64_t>(m.m_requests_processed.Value());
     s.m_client_errors = static_cast<uint64_t>(m.m_l2_errors.Value());
-  } else if (m_app_ctx.m_config.m_mode == "l2-server") {
+  } else if (m_app_ctx.m_config.m_app.m_mode == "l2-server") {
     const auto &m = *m_app_ctx.m_server.m_metrics;
     s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
     s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());

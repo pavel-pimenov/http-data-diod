@@ -65,5 +65,5 @@ void set_response_content(httplib::Response &res,
   const auto span_end_us = get_current_timestamp_us();
   JaegerSpanLogger::log_proxy_response(
       ctx.m_tracer.get(), method, path, status_code, start_us, span_end_us,
-      trace_ctx, ctx.m_config.m_mode, request_id);
+      trace_ctx, ctx.m_config.m_app.m_mode, request_id);
 }

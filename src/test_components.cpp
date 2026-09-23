@@ -262,7 +262,7 @@ TEST_CASE("Config: Default config validates successfully", "[config]") {
 
 TEST_CASE("Config: Invalid mode fails validation", "[config]") {
   Config config;
-  config.m_mode = "invalid_mode";
+  config.m_app.m_mode = "invalid_mode";
   bool valid = config.validate(false);
   REQUIRE(valid == false);
 }
@@ -323,86 +323,86 @@ TEST_CASE("Config: Tracing outage breaker defaults validate", "[config]") {
 
 TEST_CASE("Config: HTTP pool idle timeout default validates", "[config]") {
   Config config;
-  REQUIRE(config.m_http_pool_idle_timeout_seconds == 300);
+  REQUIRE(config.m_proxy.m_http_pool_idle_timeout_seconds == 300);
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: HTTP pool idle timeout zero fails validation", "[config]") {
   Config config;
-  config.m_http_pool_idle_timeout_seconds = 0;
+  config.m_proxy.m_http_pool_idle_timeout_seconds = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: HTTP pool idle timeout negative fails validation",
           "[config]") {
   Config config;
-  config.m_http_pool_idle_timeout_seconds = -1;
+  config.m_proxy.m_http_pool_idle_timeout_seconds = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: Worker mode validates", "[config]") {
   Config config;
-  config.m_mode = "worker";
+  config.m_app.m_mode = "worker";
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: L2-server mode validates", "[config]") {
   Config config;
-  config.m_mode = "l2-server";
+  config.m_app.m_mode = "l2-server";
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: Invalid log level fails validation", "[config]") {
   Config config;
-  config.m_log_level = "TRACE";
+  config.m_app.m_log_level = "TRACE";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: Invalid proxy protocol fails validation", "[config]") {
   Config config;
-  config.m_proxy_protocol = "ftp";
+  config.m_proxy.m_protocol = "ftp";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: HTTP pool size zero fails validation", "[config]") {
   Config config;
-  config.m_http_pool_size = 0;
+  config.m_proxy.m_http_pool_size = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: Max retries negative fails validation", "[config]") {
   Config config;
-  config.m_max_retries = -1;
+  config.m_proxy.m_max_retries = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: Worker threads zero fails validation", "[config]") {
   Config config;
-  config.m_l2_worker_threads = 0;
+  config.m_worker.m_threads = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: request timeout zero fails validation", "[config]") {
   Config config;
-  config.m_request_timeout_seconds = 0;
+  config.m_proxy.m_request_timeout_seconds = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: HTTP timeout zero fails validation", "[config]") {
   Config config;
-  config.m_http_timeout_seconds = 0;
+  config.m_proxy.m_http_timeout_seconds = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: invalid L2 server protocol fails validation", "[config]") {
   Config config;
-  config.m_l2_server_protocol = "ftp";
+  config.m_server.m_protocol = "ftp";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: https proxy protocol requires SSL files", "[config]") {
   Config config;
-  config.m_proxy_protocol = "https";
+  config.m_proxy.m_protocol = "https";
   REQUIRE(config.validate(false) == false);
   config.m_ssl.m_server_cert_file = "/cert.pem";
   config.m_ssl.m_server_key_file = "/key.pem";
@@ -411,32 +411,32 @@ TEST_CASE("Config: https proxy protocol requires SSL files", "[config]") {
 
 TEST_CASE("Config: https L2 server protocol requires SSL files", "[config]") {
   Config config;
-  config.m_mode = "l2-server";
-  config.m_l2_server_protocol = "https";
+  config.m_app.m_mode = "l2-server";
+  config.m_server.m_protocol = "https";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: invalid thread pool type fails validation", "[config]") {
   Config config;
-  config.m_thread_pool_type = "bogus";
+  config.m_app.m_thread_pool_type = "bogus";
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: negative worker queue size fails validation", "[config]") {
   Config config;
-  config.m_l2_worker_queue_size = -1;
+  config.m_worker.m_queue_size = -1;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: oversized HTTP pool warns but stays valid", "[config]") {
   Config config;
-  config.m_http_pool_size = 5000;
+  config.m_proxy.m_http_pool_size = 5000;
   REQUIRE(config.validate(false) == true);
 }
 
 TEST_CASE("Config: validate with logging warns on oversized pool", "[config]") {
   Config config;
-  config.m_http_pool_size = 5000;
+  config.m_proxy.m_http_pool_size = 5000;
   REQUIRE(config.validate(true) == true);
 }
 
@@ -615,7 +615,7 @@ TEST_CASE("Config: DB unknown driver fails validation", "[config]") {
 
 TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
   Config config;
-  config.m_mode = "worker"; // connection checks apply only to the worker
+  config.m_app.m_mode = "worker"; // connection checks apply only to the worker
   config.m_db_query.m_enabled = true;
   DbConfig db;
   db.m_name = "oracle";
@@ -630,7 +630,7 @@ TEST_CASE("Config: DB oracle missing service fails validation", "[config]") {
 
 TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   Config config;
-  config.m_mode = "worker"; // connection checks apply only to the worker
+  config.m_app.m_mode = "worker"; // connection checks apply only to the worker
   config.m_db_query.m_enabled = true;
   DbConfig db;
   db.m_name = "postgres";
@@ -671,11 +671,11 @@ TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
   EnvVarGuard proto("L2_SERVER_PROTOCOL", "http");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_mode == "proxy");
-  REQUIRE(config.m_l2_server_port == 9090);
-  REQUIRE(config.m_l2_server_url == "http://10.0.0.5:9090");
-  REQUIRE(config.m_l2_server_urls.size() == 1);
-  REQUIRE(config.m_l2_server_urls[0] == "http://10.0.0.5:9090");
+  REQUIRE(config.m_app.m_mode == "proxy");
+  REQUIRE(config.m_server.m_port == 9090);
+  REQUIRE(config.m_server.m_url == "http://10.0.0.5:9090");
+  REQUIRE(config.m_server.m_urls.size() == 1);
+  REQUIRE(config.m_server.m_urls[0] == "http://10.0.0.5:9090");
 }
 
 TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
@@ -698,9 +698,9 @@ TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
                    R"(["http://host1:8088","http://host2:8089"])");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_l2_server_urls.size() == 2);
-  REQUIRE(config.m_l2_server_urls[0] == "http://host1:8088");
-  REQUIRE(config.m_l2_server_urls[1] == "http://host2:8089");
+  REQUIRE(config.m_server.m_urls.size() == 2);
+  REQUIRE(config.m_server.m_urls[0] == "http://host1:8088");
+  REQUIRE(config.m_server.m_urls[1] == "http://host2:8089");
 }
 
 TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
@@ -708,8 +708,8 @@ TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
   EnvVarGuard urls("L2_SERVER_URLS", "not-json");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_l2_server_urls.size() == 1);
-  REQUIRE(config.m_l2_server_urls[0] == config.m_l2_server_url);
+  REQUIRE(config.m_server.m_urls.size() == 1);
+  REQUIRE(config.m_server.m_urls[0] == config.m_server.m_url);
 }
 
 TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
@@ -717,17 +717,17 @@ TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
   EnvVarGuard urls("L2_SERVER_URLS", R"("just-a-string")");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_l2_server_urls.size() == 1);
-  REQUIRE(config.m_l2_server_urls[0] == config.m_l2_server_url);
+  REQUIRE(config.m_server.m_urls.size() == 1);
+  REQUIRE(config.m_server.m_urls[0] == config.m_server.m_url);
 }
 
 TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
   EnvVarGuard mode("MODE", "l2-server");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_mode == "l2-server");
-  REQUIRE(config.m_l2_server_url.empty());
-  REQUIRE(config.m_l2_server_urls.empty());
+  REQUIRE(config.m_app.m_mode == "l2-server");
+  REQUIRE(config.m_server.m_url.empty());
+  REQUIRE(config.m_server.m_urls.empty());
   REQUIRE(config.validate(false) == true);
 }
 
@@ -736,7 +736,7 @@ TEST_CASE("Config: worker mode loads NATS config", "[config]") {
   EnvVarGuard subj("NATS_SUBJECT", "svc.worker");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_mode == "worker");
+  REQUIRE(config.m_app.m_mode == "worker");
   REQUIRE(config.m_nats.m_subject == "svc.worker");
   REQUIRE(config.validate(false) == true);
 }
@@ -923,7 +923,7 @@ TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
   EnvVarGuard key("SSL_SERVER_KEY_FILE", "/key.pem");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_proxy_protocol == "https");
+  REQUIRE(config.m_proxy.m_protocol == "https");
   REQUIRE(config.m_ssl.m_server_cert_file == "/cert.pem");
   REQUIRE(config.m_ssl.m_server_key_file == "/key.pem");
 }
@@ -933,7 +933,7 @@ TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
   EnvVarGuard cert("SSL_SERVER_CERT_FILE", "");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_proxy_protocol == "https");
+  REQUIRE(config.m_proxy.m_protocol == "https");
   REQUIRE(config.validate(false) == false);
 }
 
@@ -944,7 +944,7 @@ TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
   EnvVarGuard key("SSL_SERVER_KEY_FILE", "/l2key.pem");
   Config config;
   config.load_from_env();
-  REQUIRE(config.m_l2_server_protocol == "https");
+  REQUIRE(config.m_server.m_protocol == "https");
   REQUIRE(config.m_ssl.m_server_cert_file == "/l2cert.pem");
   REQUIRE(config.m_ssl.m_server_key_file == "/l2key.pem");
   REQUIRE(config.validate(false) == true);
@@ -952,24 +952,24 @@ TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
 
 TEST_CASE("Config: validate with logging enabled reports issues", "[config]") {
   Config config;
-  config.m_mode = "bogus";
-  config.m_log_level = "TRACE";
+  config.m_app.m_mode = "bogus";
+  config.m_app.m_log_level = "TRACE";
   REQUIRE(config.validate(true) == false);
 }
 
 TEST_CASE("Config: ports and timeouts fail together", "[config]") {
   Config config;
-  config.m_proxy_port = 0;
-  config.m_l2_server_port = 70000;
-  config.m_request_timeout_seconds = -5;
-  config.m_http_timeout_seconds = 0;
+  config.m_proxy.m_port = 0;
+  config.m_server.m_port = 70000;
+  config.m_proxy.m_request_timeout_seconds = -5;
+  config.m_proxy.m_http_timeout_seconds = 0;
   REQUIRE(config.validate(false) == false);
 }
 
 TEST_CASE("Config: empty L2 URL set and empty single URL fail", "[config]") {
   Config config;
-  config.m_l2_server_url = "";
-  config.m_l2_server_urls = {};
+  config.m_server.m_url = "";
+  config.m_server.m_urls = {};
   REQUIRE(config.validate(false) == false);
 }
 
@@ -1003,7 +1003,7 @@ TEST_CASE("Config: db query with bad subject and limits fails", "[config]") {
 
 TEST_CASE("Config: worker with malformed database entries fails", "[config]") {
   Config config;
-  config.m_mode = "worker";
+  config.m_app.m_mode = "worker";
   config.m_db_query.m_enabled = true;
   DbConfig bad_driver;
   bad_driver.m_name = "mongo";
@@ -1018,7 +1018,7 @@ TEST_CASE("Config: worker with malformed database entries fails", "[config]") {
 
 TEST_CASE("Config: oracle/postgres rows missing required fields", "[config]") {
   Config config;
-  config.m_mode = "worker";
+  config.m_app.m_mode = "worker";
   config.m_db_query.m_enabled = true;
   DbConfig oracle;
   oracle.m_name = "ora";

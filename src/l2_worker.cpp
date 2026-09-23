@@ -37,15 +37,15 @@ L2Worker::L2Worker(AppContext &context)
     // Parameters: max_pool_size, timeout_seconds, acquire_timeout_seconds,
     // enable_connection_reuse
     : m_clients{.m_http_client_pool = std::make_unique<HttpClientPool>(
-                    context.m_config.m_http_pool_size,       // max connections
-                    context.m_config.m_http_timeout_seconds, // request timeout
+                    context.m_config.m_proxy.m_http_pool_size,       // max connections
+                    context.m_config.m_proxy.m_http_timeout_seconds, // request timeout
                     30,   // acquire timeout (30 seconds)
                     true, // enable connection reuse (keep-alive)
                     context.m_config.m_ssl.m_enable_server_certificate_verification,
                     context.m_config.m_ssl.m_enable_server_hostname_verification,
                     context.m_config.m_ssl.m_ca_cert_path,
-                    context.m_config.m_http_pool_idle_timeout_seconds)},
-      m_ctx(context), m_l2_server_urls(context.m_config.m_l2_server_urls),
+                    context.m_config.m_proxy.m_http_pool_idle_timeout_seconds)},
+      m_ctx(context), m_l2_server_urls(context.m_config.m_server.m_urls),
 m_dedup_cache(context.m_config.m_dedup.m_enabled,
                   context.m_config.m_dedup.m_max_entries,
                   context.m_config.m_dedup.m_ttl_ms) {
@@ -80,13 +80,13 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
   // blocking L2 HTTP calls - on the NATS delivery thread and stall the broker.
   // Force CUSTOM for worker/NATS mode even if config requests NONE.
   ThreadPoolWrapper::Type pool_type;
-  if (m_ctx.m_config.m_thread_pool_type == "none") {
-    if (m_ctx.m_config.m_mode == "worker") {
+  if (m_ctx.m_config.m_app.m_thread_pool_type == "none") {
+    if (m_ctx.m_config.m_app.m_mode == "worker") {
       Logger::warn(
           "THREAD_POOL_TYPE=none is unsafe for NATS worker (blocks delivery "
           "thread); forcing custom pool (threads={}, queue={})",
-          m_ctx.m_config.m_l2_worker_threads,
-          m_ctx.m_config.m_l2_worker_queue_size);
+          m_ctx.m_config.m_worker.m_threads,
+          m_ctx.m_config.m_worker.m_queue_size);
       pool_type = ThreadPoolWrapper::Type::CUSTOM;
     } else {
       pool_type = ThreadPoolWrapper::Type::NONE;
@@ -95,8 +95,8 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
     pool_type = ThreadPoolWrapper::Type::CUSTOM;
   }
   m_clients.m_thread_pool = std::make_unique<ThreadPoolWrapper>(
-      pool_type, m_ctx.m_config.m_l2_worker_threads,
-      static_cast<size_t>(m_ctx.m_config.m_l2_worker_queue_size));
+      pool_type, m_ctx.m_config.m_worker.m_threads,
+      static_cast<size_t>(m_ctx.m_config.m_worker.m_queue_size));
 
   m_circuit_breaker.set_gauge(m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
 
@@ -246,7 +246,7 @@ HttpResponse L2Worker::call_l2_server(
     }
     JaegerSpanLogger::log_l2_call(
         m_ctx.m_tracer.get(), method, url, span_status, start_us, end_us,
-        l2_trace_ctx, m_ctx.m_config.m_mode, actual_l2_call_span_id,
+        l2_trace_ctx, m_ctx.m_config.m_app.m_mode, actual_l2_call_span_id,
         resolve_parent_id(parent_span_id, l2_trace_ctx.m_parent_id), "", attrs);
   }
 
@@ -342,7 +342,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         503, "L2 server circuit breaker open, service temporarily unavailable");
   }
 
-  const int max_retries = m_ctx.m_config.m_max_retries;
+  const int max_retries = m_ctx.m_config.m_proxy.m_max_retries;
   std::runtime_error last_error("Initial error");
 
 #if __has_include(<generator>)

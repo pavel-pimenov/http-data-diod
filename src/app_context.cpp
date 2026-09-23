@@ -19,7 +19,7 @@ AppContext::AppContext() {
   m_sentry = std::make_unique<SentryClient>(
       m_config.m_sentry.m_dsn, m_sentry_metrics->m_events_sent,
       m_sentry_metrics->m_events_failed, m_sentry_metrics->m_queue_size,
-      m_config.m_mode, m_config.m_sentry.m_environment, m_config.m_sentry.m_release,
+      m_config.m_app.m_mode, m_config.m_sentry.m_environment, m_config.m_sentry.m_release,
       m_config.m_sentry.m_timeout_ms, m_config.m_sentry.m_max_queue_size);
 }
 
@@ -50,7 +50,7 @@ void AppContext::init_common() {
     Logger::error("Configuration validation failed, exiting");
     std::exit(1);
   }
-  Logger::set_level_from_string(m_config.m_log_level);
+  Logger::set_level_from_string(m_config.m_app.m_log_level);
   m_proxy_registry = std::make_shared<prometheus::Registry>();
   m_worker_registry = std::make_shared<prometheus::Registry>();
   m_server_registry = std::make_shared<prometheus::Registry>();

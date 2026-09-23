@@ -386,7 +386,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
       log_worker_response_span(
           m_ctx.m_tracer.get(), metadata.m_method, metadata.m_path, 200,
-          start_us, m_ctx.m_config.m_mode, metadata.m_request_id,
+          start_us, m_ctx.m_config.m_app.m_mode, metadata.m_request_id,
           metadata.m_trace_ctx, nats_consume_span_id,
           metadata.m_proxy_span_id, {{"dedup.cached", true}});
       task.m_activity.m_status = 200;
@@ -398,7 +398,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     log_nats_consume_span(
         m_ctx.m_tracer.get(), metadata.m_request_id,
         metadata.m_trace_ctx.m_trace_id, start_us, nats_consume_span_id,
-        metadata.m_proxy_span_id, proxy_service_name(m_ctx.m_config.m_mode),
+        metadata.m_proxy_span_id, proxy_service_name(m_ctx.m_config.m_app.m_mode),
         m_ctx.m_config.m_nats.m_subject, reply_to);
 
     const auto &worker_parent_span_id = nats_consume_span_id;
@@ -459,7 +459,7 @@ int L2Worker::send_l2_response(const RequestData &metadata,
 
   log_worker_response_span(m_ctx.m_tracer.get(), metadata.m_method,
                          metadata.m_path, l2_response.m_status_code, start_us,
-                         m_ctx.m_config.m_mode, metadata.m_request_id,
+                         m_ctx.m_config.m_app.m_mode, metadata.m_request_id,
                          metadata.m_trace_ctx,
                          spans.m_worker_process_span_id, nats_consume_span_id);
 
@@ -555,7 +555,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
       log_nats_consume_span(
           m_ctx.m_tracer.get(), request_id, trace_ctx.m_trace_id, start_us,
           consume_span_id, proxy_span_id,
-          proxy_service_name(m_ctx.m_config.m_mode),
+          proxy_service_name(m_ctx.m_config.m_app.m_mode),
           m_ctx.m_config.m_db_query.m_subject, reply_to);
 
       if (!m_db_query_handler) {
@@ -638,7 +638,7 @@ void L2Worker::observe_db_query_outcome(const json &request_data, int status,
                        std::format("{}/{}", db_gateway_routing::kDbGatewayPath,
                                    db_name),
                        status, db_start_us, db_end_us,
-                       proxy_service_name(m_ctx.m_config.m_mode), request_id,
+                       proxy_service_name(m_ctx.m_config.m_app.m_mode), request_id,
                        trace_ctx.m_trace_id, db_span_id, consume_span_id, attrs);
   }
 }

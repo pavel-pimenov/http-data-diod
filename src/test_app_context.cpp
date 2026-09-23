@@ -90,7 +90,7 @@ TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
   REQUIRE(ctx.m_common_stats_history != nullptr);
   require_common_registry_only_on_common(ctx);
 
-  REQUIRE(ctx.m_config.m_mode == "worker");
+  REQUIRE(ctx.m_config.m_app.m_mode == "worker");
 }
 
 TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
@@ -102,5 +102,5 @@ TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
   REQUIRE(ctx.m_common_registry != nullptr);
   require_common_registry_only_on_common(ctx);
   REQUIRE(ctx.m_server.m_metrics != nullptr);
-  REQUIRE(ctx.m_config.m_mode == "l2-server");
+  REQUIRE(ctx.m_config.m_app.m_mode == "l2-server");
 }

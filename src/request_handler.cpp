@@ -45,7 +45,7 @@ void send_db_error(httplib::Response &res, int status, const std::string &code,
 RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
     : m_ctx(ctx), m_stats_logger(stats_logger),
       m_config{.m_request_timeout_seconds =
-                   ctx.m_config.m_request_timeout_seconds},
+                   ctx.m_config.m_proxy.m_request_timeout_seconds},
       m_services(ctx) {}
 
 void RequestHandler::handle_get(const httplib::Request &req,
@@ -102,7 +102,7 @@ void RequestHandler::handle_crash_test(const httplib::Request &req,
   // Intentionally crashes the process to test the crash handler. Guarded
   // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
   // not remotely SIGSEGV the proxy.
-  if (!m_ctx.m_config.m_enable_crash_test_endpoint) {
+  if (!m_ctx.m_config.m_app.m_enable_crash_test_endpoint) {
     res.status = 404;
     res.set_content(
         R"json({"error": "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)"})json",
@@ -148,7 +148,7 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
 
   try {
     if (m_ctx.m_nats_client) {
-      if (m_ctx.m_config.m_health_ready_allow_connect) {
+      if (m_ctx.m_config.m_app.m_health_ready_allow_connect) {
         // Opt-in legacy path: ping() may attempt a (potentially blocking)
         // reconnect when the connection was lost between the state read and
         // the ping — enables readiness to recover connectivity on its own.
@@ -346,7 +346,7 @@ bool RequestHandler::fail_backend_request(
     const std::string &request_id) {
   BackendErrorSpanLogger::log_backend_error(
       m_ctx.m_tracer.get(), method, path, status, start_us, trace_ctx,
-      m_ctx.m_config.m_mode, request_id, category, detail);
+      m_ctx.m_config.m_app.m_mode, request_id, category, detail);
   if (m_ctx.m_sentry) {
     m_ctx.m_sentry->capture_message(
         std::format("Backend request failed: category={} message={} detail={} "
@@ -737,7 +737,7 @@ void RequestHandler::send_db_gateway_error(
   if (m_ctx.m_tracer) {
     JaegerSpanLogger::log_proxy_response(
         m_ctx.m_tracer.get(), method, path, status, start_us,
-        get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_mode,
+        get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_app.m_mode,
         request_id);
   }
   send_db_error(res, status, code, message);
@@ -881,6 +881,6 @@ void RequestHandler::route_db_request(
 
   JaegerSpanLogger::log_proxy_response(
       m_ctx.m_tracer.get(), method, path, status, start_us,
-      get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_mode,
+      get_current_timestamp_us(), trace_ctx, m_ctx.m_config.m_app.m_mode,
       request_id);
 }

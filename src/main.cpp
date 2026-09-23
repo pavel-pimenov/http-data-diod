@@ -43,9 +43,9 @@ void configure_httplib_server(httplib::Server &server, const Config &config) {
   // settings
   server.set_keep_alive_max_count(100); // Allow more keep-alive connections
   server.set_keep_alive_timeout(5);     // Keep connections alive for 5 seconds
-  server.set_read_timeout(config.m_request_timeout_seconds,
-                          0); // Match m_request_timeout_seconds from config
-  server.set_write_timeout(config.m_http_timeout_seconds,
+  server.set_read_timeout(config.m_proxy.m_request_timeout_seconds,
+                          0); // Match m_proxy.m_request_timeout_seconds from config
+  server.set_write_timeout(config.m_proxy.m_http_timeout_seconds,
                            0);  // Match http_timeout_seconds from config
   server.set_tcp_nodelay(true); // Disable Nagle's algorithm for lower latency
   server.set_payload_max_length(
@@ -228,8 +228,8 @@ void run_proxy(AppContext &app_ctx) {
   }
 
   Logger::info("C++ DMZ Proxy listening on {}://0.0.0.0:{}",
-               app_ctx.m_config.m_proxy_protocol,
-               app_ctx.m_config.m_proxy_port);
+               app_ctx.m_config.m_proxy.m_protocol,
+               app_ctx.m_config.m_proxy.m_port);
   Logger::info("Prometheus metrics available at http://0.0.0.0:19090/metrics");
 
   auto on_proxy_request_start = [&app_ctx]() {
@@ -248,8 +248,8 @@ void run_proxy(AppContext &app_ctx) {
             .Increment();
       };
 
-  run_httplib_server(app_ctx, request_handler, app_ctx.m_config.m_proxy_port,
-                     app_ctx.m_config.m_proxy_protocol, "httplib proxy",
+  run_httplib_server(app_ctx, request_handler, app_ctx.m_config.m_proxy.m_port,
+                     app_ctx.m_config.m_proxy.m_protocol, "httplib proxy",
                      "httplib", true, on_proxy_request_start,
                      on_proxy_response);
 }
@@ -326,8 +326,8 @@ void run_l2_server(AppContext &app_ctx) {
                                           app_ctx.m_common_registry);
 
   Logger::info("C++ L2 Server listening on {}://0.0.0.0:{}",
-               app_ctx.m_config.m_l2_server_protocol,
-               app_ctx.m_config.m_l2_server_port);
+               app_ctx.m_config.m_server.m_protocol,
+               app_ctx.m_config.m_server.m_port);
   Logger::info("C++ L2 Server Prometheus metrics available at "
                "http://0.0.0.0:19092/metrics");
 
@@ -351,8 +351,8 @@ void run_l2_server(AppContext &app_ctx) {
   app_ctx.m_server.m_metrics->m_health_ready.Set(1.0);
 
   run_httplib_server(app_ctx, server_handler,
-                     app_ctx.m_config.m_l2_server_port,
-                     app_ctx.m_config.m_l2_server_protocol, "cpp-httplib SSL",
+                     app_ctx.m_config.m_server.m_port,
+                     app_ctx.m_config.m_server.m_protocol, "cpp-httplib SSL",
                      "cpp-httplib", false, {}, on_server_response);
 }
 
@@ -378,7 +378,7 @@ void init_tracer(AppContext &app_ctx) {
         app_ctx.m_config.m_tracing.m_batch_size,
         app_ctx.m_config.m_tracing.m_flush_interval_ms,
         app_ctx.m_config.m_tracing.m_sample_rate,
-        app_ctx.m_config.m_sentry.m_dsn, app_ctx.m_config.m_mode,
+        app_ctx.m_config.m_sentry.m_dsn, app_ctx.m_config.m_app.m_mode,
         app_ctx.m_config.m_sentry.m_environment,
         app_ctx.m_config.m_sentry.m_release,
         &app_ctx.m_tracing_metrics->m_sentry_transactions_sent,
@@ -437,7 +437,7 @@ int main() { // NOLINT(bugprone-exception-escape)
                           app_ctx.m_config.m_sentry.m_dsn);
 
     // Crash test mode: raise SIGSEGV to test crash handler
-    if (app_ctx.m_config.m_crash_test) {
+    if (app_ctx.m_config.m_app.m_crash_test) {
       Logger::info(
           "CRASH_TEST mode enabled - raising SIGSEGV to test crash handler");
       spdlog::default_logger()->flush();
@@ -462,19 +462,19 @@ int main() { // NOLINT(bugprone-exception-escape)
       *bad_ptr = 42; // NOLINT //-V522 intentional crash for testing
     }
 
-    if (app_ctx.m_config.m_mode == "proxy") {
+    if (app_ctx.m_config.m_app.m_mode == "proxy") {
       Logger::info("Starting in proxy mode");
       run_proxy(app_ctx);
-    } else if (app_ctx.m_config.m_mode == "worker") {
+    } else if (app_ctx.m_config.m_app.m_mode == "worker") {
       Logger::info("Starting in worker mode");
       run_worker(app_ctx);
-    } else if (app_ctx.m_config.m_mode == "l2-server") {
+    } else if (app_ctx.m_config.m_app.m_mode == "l2-server") {
       Logger::info("Starting in l2-server mode");
       run_l2_server(app_ctx);
     } else {
       handle_error(
           std::format("Invalid mode: {}. Use proxy, worker, or l2-server",
-                      app_ctx.m_config.m_mode));
+                      app_ctx.m_config.m_app.m_mode));
       return 1;
     }
   } catch (const std::exception &e) {

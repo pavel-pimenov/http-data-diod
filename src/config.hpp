@@ -153,6 +153,57 @@ public:
     int m_client_ttl_ms{1800000};
   };
 
+  // App-wide mode/behavior switches shared by all binaries.
+  struct App {
+    std::string m_mode{"proxy"};
+    std::string m_log_level{"INFO"};
+    std::string m_thread_pool_type{"none"};
+    // CRASH_TEST=true crashes the process at startup (used to exercise the
+    // supervisor restart path).
+    bool m_crash_test{false};
+    // Gates the /crash-test HTTP endpoint (default off). Deliberately separate
+    // from m_crash_test: CRASH_TEST=true crashes at startup, while this flag
+    // only arms the endpoint so test-crash-handler.py can trigger it remotely.
+    bool m_enable_crash_test_endpoint{false};
+    // When false (default) /health/ready never initiates a NATS reconnect and
+    // only reports the current connection state — guaranteed non-blocking so
+    // the load balancer gets a fast answer. Set true to allow the legacy ping
+    // path (which may attempt a blocking connect() when the connection is
+    // lost).
+    bool m_health_ready_allow_connect{false};
+  };
+
+  // HTTP reverse-proxy (proxy binary): listen config and the outbound HTTP
+  // pool used to forward requests to the worker/l2-server upstream.
+  struct Proxy {
+    std::string m_protocol{"http"};
+    int m_port{8888};
+    int m_http_pool_size{400};
+    int m_http_pool_idle_timeout_seconds{300};
+    int m_request_timeout_seconds{30};
+    int m_http_timeout_seconds{30};
+    int m_max_retries{1};
+  };
+
+  // Upstream l2-server HTTP endpoint(s) that the proxy (and the worker when
+  // forwarding to a remote l2-server) connects to.
+  struct Server {
+    std::string m_url{"http://l2-server:8088"};
+    std::vector<std::string> m_urls{{"http://l2-server:8088"}};
+    std::string m_protocol{"http"};
+    int m_port{8088};
+    // Test-only: random response delay in ms on the l2-server (0 = disabled).
+    // Used to desynchronize response order from request order for the
+    // response-to-request correlation test.
+    int m_test_response_delay_ms{0};
+  };
+
+  // NATS worker thread pool (worker/l2-server binary).
+  struct Worker {
+    int m_threads{128};
+    int m_queue_size{0};
+  };
+
   Ssl m_ssl;
   Nats m_nats;
   Tracing m_tracing;
@@ -161,52 +212,10 @@ public:
   RateLimit m_rate_limit;
   Dedup m_dedup;
   Duplicate m_duplicate;
-
-  // ========================================================================
-  // Group 1: std::string fields (32 bytes each on libstdc++)
-  // ========================================================================
-  std::string m_mode{"proxy"};
-  std::string m_l2_server_url{"http://l2-server:8088"};
-  std::string m_log_level{"INFO"};
-  std::string m_l2_server_protocol{"http"};
-  std::string m_proxy_protocol{"http"};
-  std::string m_thread_pool_type{"none"};
-
-  // ========================================================================
-  // Group 2: std::vector fields (24 bytes each on libstdc++)
-  // ========================================================================
-  std::vector<std::string> m_l2_server_urls{{"http://l2-server:8088"}};
-
-  // ========================================================================
-  // Group 5: int fields (4 bytes each) — sorted by logical group
-  // ========================================================================
-  int m_request_timeout_seconds{30};
-  int m_http_timeout_seconds{30};
-  int m_l2_worker_threads{128};
-  int m_l2_worker_queue_size{0};
-  int m_proxy_port{8888};
-  int m_l2_server_port{8088};
-  int m_http_pool_size{400};
-  int m_http_pool_idle_timeout_seconds{300};
-  int m_max_retries{1};
-  // Test-only: random response delay in ms on the l2-server (0 = disabled).
-  // Used to desynchronize response order from request order for the
-  // response-to-request correlation test.
-  int m_test_response_delay_ms{0};
-
-  // ========================================================================
-  // Group 6: bool fields (1 byte each) — packed together at the end
-  // ========================================================================
-  bool m_crash_test{false};
-  // Gates the /crash-test HTTP endpoint (default off). Deliberately separate
-  // from m_crash_test: CRASH_TEST=true crashes at startup, while this flag
-  // only arms the endpoint so test-crash-handler.py can trigger it remotely.
-  bool m_enable_crash_test_endpoint{false};
-  // When false (default) /health/ready never initiates a NATS reconnect and
-  // only reports the current connection state — guaranteed non-blocking so the
-  // load balancer gets a fast answer. Set true to allow the legacy ping path
-  // (which may attempt a blocking connect() when the connection is lost).
-  bool m_health_ready_allow_connect{false};
+  App m_app;
+  Proxy m_proxy;
+  Server m_server;
+  Worker m_worker;
 
   Config() = default;
   void load_from_env();
@@ -238,7 +247,7 @@ private:
 
   // True only for modes that talk to NATS (proxy/worker); l2-server does not.
   [[nodiscard]] bool uses_nats() const {
-    return m_mode == "proxy" || m_mode == "worker";
+    return m_app.m_mode == "proxy" || m_app.m_mode == "worker";
   }
 };
 
