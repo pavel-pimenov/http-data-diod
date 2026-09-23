@@ -278,19 +278,6 @@ std::string JaegerLogger::sentry_auth_header(const sentry::DsnData &dsn) {
 }
 
 std::string JaegerLogger::build_sentry_transaction_envelope(
-    const std::string &trace_id, const std::string &span_id,
-    const std::string &parent_id, const std::string &name,
-    const std::string &service_name, uint64_t start_us, uint64_t end_us,
-    const sentry::DsnData &dsn, const std::string &environment,
-    const nlohmann::json &attributes, const std::string &release,
-    const std::string &product) {
-  const nlohmann::json event_json = build_sentry_transaction_json(
-      trace_id, span_id, parent_id, name, service_name, start_us, end_us,
-      environment, attributes, release, product);
-  return build_sentry_transaction_envelope(event_json);
-}
-
-std::string JaegerLogger::build_sentry_transaction_envelope(
     const nlohmann::json &event_json) {
   const std::string event_id = event_json.value("event_id", "");
   const nlohmann::json header = {
@@ -336,7 +323,7 @@ void JaegerLogger::deliver_sentry_transactions(
           std::chrono::steady_clock::now().time_since_epoch())
           .count();
   const uint64_t cooldown_until =
-      m_breaker.m_sentry.cooldown_until_steady_ms.load();
+      m_breaker.m_sentry.m_cooldown_until_steady_ms.load();
   if (cooldown_until != 0 && now_steady_ms < cooldown_until) {
     m_jaeger_metrics.m_spans_failed.Increment(batch.size());
     if (m_sentry_metrics.m_spans_failed) {
@@ -382,25 +369,25 @@ void JaegerLogger::deliver_sentry_transactions(
         httplib::Headers{{"X-Sentry-Auth", auth}},
         "application/x-sentry-envelope");
     m_pools.m_sentry_client_pool->release_connection(std::move(client));
-    m_breaker.m_sentry.consecutive_failures = 0;
-    m_breaker.m_sentry.cooldown_until_steady_ms = 0;
+    m_breaker.m_sentry.m_consecutive_failures = 0;
+    m_breaker.m_sentry.m_cooldown_until_steady_ms = 0;
     if (m_sentry_metrics.m_spans_sent) {
       m_sentry_metrics.m_spans_sent->Increment(event_count);
     }
   } catch (const std::exception &e) {
     Logger::error(
         "Sentry transaction delivery failed (non-critical): {}", e.what());
-    m_breaker.m_sentry.consecutive_failures++;
-    if (m_breaker.m_sentry.consecutive_failures >=
+    m_breaker.m_sentry.m_consecutive_failures++;
+    if (m_breaker.m_sentry.m_consecutive_failures >=
         m_breaker.m_settings.m_failure_threshold) {
       uint64_t cooldown_ms =
           std::min<uint64_t>(
               (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.consecutive_failures.load(),
+                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
                                20) -
                       1),
               (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.cooldown_until_steady_ms =
+      m_breaker.m_sentry.m_cooldown_until_steady_ms =
           now_steady_ms + cooldown_ms;
       Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
     }
@@ -411,17 +398,17 @@ void JaegerLogger::deliver_sentry_transactions(
     Logger::error(
         "Sentry transaction delivery failed with unknown error "
         "(non-critical)");
-    m_breaker.m_sentry.consecutive_failures++;
-    if (m_breaker.m_sentry.consecutive_failures >=
+    m_breaker.m_sentry.m_consecutive_failures++;
+    if (m_breaker.m_sentry.m_consecutive_failures >=
         m_breaker.m_settings.m_failure_threshold) {
       uint64_t cooldown_ms =
           std::min<uint64_t>(
               (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.consecutive_failures.load(),
+                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
                                20) -
                       1),
               (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.cooldown_until_steady_ms =
+      m_breaker.m_sentry.m_cooldown_until_steady_ms =
           now_steady_ms + cooldown_ms;
       Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
     }
@@ -601,7 +588,7 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   // of retries every flush interval forever. Closing the breaker resets the
   // consecutive-failure counter.
   const auto now_ms = TimeUtils::steady_ms();
-  if (now_ms < m_breaker.m_jaeger.cooldown_until_steady_ms.load()) {
+  if (now_ms < m_breaker.m_jaeger.m_cooldown_until_steady_ms.load()) {
     m_jaeger_metrics.m_spans_failed.Increment(batch.size());
     Logger::debug(
         "Jaeger breaker open, shed batch of {} spans during cooldown", 
@@ -618,23 +605,23 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   while (!success && retries < g_tracing_max_retries && !st.stop_requested()) {
     if (send_batch(batch)) {
       success = true;
-      m_breaker.m_jaeger.consecutive_failures = 0;
-      m_breaker.m_jaeger.cooldown_until_steady_ms = 0;
+      m_breaker.m_jaeger.m_consecutive_failures = 0;
+      m_breaker.m_jaeger.m_cooldown_until_steady_ms = 0;
     } else {
       retries++;
-      m_breaker.m_jaeger.consecutive_failures++;
+      m_breaker.m_jaeger.m_consecutive_failures++;
       Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
                    g_tracing_max_retries, delay_ms);
-      if (m_breaker.m_jaeger.consecutive_failures >=
+      if (m_breaker.m_jaeger.m_consecutive_failures >=
           m_breaker.m_settings.m_failure_threshold) {
         uint64_t cooldown_ms =
             std::min<uint64_t>(
                 (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                    << (std::min(m_breaker.m_jaeger.consecutive_failures.load(),
+                    << (std::min(m_breaker.m_jaeger.m_consecutive_failures.load(),
                                  20) -
                         1),
                 (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-        m_breaker.m_jaeger.cooldown_until_steady_ms =
+        m_breaker.m_jaeger.m_cooldown_until_steady_ms =
             now_ms + cooldown_ms;
         Logger::warn("Jaeger breaker opened, shedding for {}ms", cooldown_ms);
       }
@@ -697,9 +684,9 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
     client->post_no_response(m_jaeger.m_url, payload_str, "");
     m_pools.m_http_client_pool->release_connection(std::move(client));
 
-    if (m_breaker.m_jaeger.consecutive_failures.load() > 0) {
+    if (m_breaker.m_jaeger.m_consecutive_failures.load() > 0) {
       Logger::debug("Jaeger send recovered after {} failures",
-                    m_breaker.m_jaeger.consecutive_failures.load());
+                    m_breaker.m_jaeger.m_consecutive_failures.load());
     }
     return true;
   } catch (const std::exception &e) {

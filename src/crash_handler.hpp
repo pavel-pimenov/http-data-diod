@@ -320,7 +320,9 @@ private:
           frame["filename"] = loc.substr(0, colon);
           try {
             frame["lineno"] = std::stoi(loc.substr(colon + 1));
-          } catch (...) {
+          } catch (const std::exception &e) {
+            Logger::debug("crash addr2line lineno parse failed for '{}': {}",
+                          loc, e.what());
           }
         }
       }
@@ -467,7 +469,7 @@ private:
     // before the container restart kills the whole cgroup (the parent is
     // PID 1). waitpid/nanosleep are async-signal-safe; bounded ~4s worst case.
     struct timespec wait_ts {};
-    wait_ts.tv_nsec = 50 * 1000 * 1000;
+    wait_ts.tv_nsec = 50LL * 1000 * 1000;
     for (int i = 0; i < 80; ++i) {
       int wstatus = 0;
       const pid_t r = waitpid(child, &wstatus, WNOHANG);

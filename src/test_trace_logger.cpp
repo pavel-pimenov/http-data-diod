@@ -578,16 +578,24 @@ TEST_CASE("TraceLogger: validate_traceparent first-char and is_hex below '0'",
 TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
   TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 1000, 0.5);
   std::vector<std::thread> threads;
-  for (int i = 0; i < 4; ++i) {
-    threads.emplace_back([&env] {
-      for (int j = 0; j < 100; ++j) {
+  std::atomic<int> ok{0};
+  constexpr int kThreads = 4;
+  constexpr int kEach = 100;
+  for (int i = 0; i < kThreads; ++i) {
+    threads.emplace_back([&env, &ok] {
+      for (int j = 0; j < kEach; ++j) {
+        // Catch2 forbids REQUIRE/CHECK from non-main threads (its output
+        // redirect would race); assert via atomic counter, REQUIRE after join.
         const bool r = env.m_logger->should_sample();
-        REQUIRE((r == true || r == false));
+        if (r == true || r == false) {
+          ok.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
   for (auto &t : threads)
     t.join();
+  REQUIRE(ok.load() == kThreads * kEach);
 }
 
 TEST_CASE("TraceLogger: sender loop idle-timeout resumes on enqueue",

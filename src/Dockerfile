@@ -117,6 +117,12 @@ RUN ldconfig
 # Application sources last: changes here never invalidate the NATS layers.
 COPY . .
 
+# l2-proxy-version.h is build-generated and not tracked (rebuild-and-run.sh and
+# CI regenerate it before the build). This fallback keeps a bare
+# `docker compose build` on a fresh clone working (git SHA unavailable in the
+# container -> generate_version.sh falls back to "unknown").
+RUN if [ ! -f ./l2-proxy-version.h ]; then ./generate_version.sh > ./l2-proxy-version.h; fi
+
 # Build application. For ASan builds use Debug + ENABLE_ASAN=ON.
 # For profiler builds use ENABLE_PROFILER=ON (links tcmalloc + profiler).
 # Use BuildKit cache for CMake and object files

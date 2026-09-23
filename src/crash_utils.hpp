@@ -3,6 +3,7 @@
 
 #include <cxxabi.h>
 #include <cstdlib>
+#include <memory>
 #include <signal.h>
 #include <string>
 #include <unistd.h>
@@ -35,11 +36,10 @@ inline std::string trim_line(std::string s) {
 
 inline std::string demangle_symbol(const char *mangled) {
   int status = 0;
-  char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &status);
-  if (status == 0 && demangled != nullptr) {
-    std::string res(demangled);
-    std::free(demangled);
-    return res;
+  std::unique_ptr<char, decltype(&std::free)> demangled(
+      abi::__cxa_demangle(mangled, nullptr, nullptr, &status), &std::free);
+  if (status == 0 && demangled) {
+    return std::string(demangled.get());
   }
   return mangled != nullptr ? mangled : "";
 }

@@ -131,8 +131,8 @@ private:
   // by m_cooldown_max_ms) instead of bombarding the dead target. Closing the
   // breaker resets the consecutive-failure counter.
   struct ExponentialBreaker {
-    std::atomic<int> consecutive_failures{0};
-    std::atomic<uint64_t> cooldown_until_steady_ms{0};
+    std::atomic<int> m_consecutive_failures{0};
+    std::atomic<uint64_t> m_cooldown_until_steady_ms{0};
   };
   // Per-sink breaker state plus its threshold/cooldown tuning.
   struct BreakerState {
@@ -221,20 +221,6 @@ public:
 
   // X-Sentry-Auth header value for a DSN.
   static std::string sentry_auth_header(const sentry::DsnData &dsn);
-
-  // Full Sentry envelope (header + transaction item + JSON body) for one span.
-  static std::string
-  build_sentry_transaction_envelope(const std::string &trace_id,
-                                    const std::string &span_id,
-                                    const std::string &parent_id,
-                                    const std::string &name,
-                                    const std::string &service_name,
-                                    uint64_t start_us, uint64_t end_us,
-                                    const sentry::DsnData &dsn,
-                                    const std::string &environment,
-                                    const nlohmann::json &attributes,
-                                    const std::string &release = "",
-                                    const std::string &product = "");
 
   // Full Sentry envelope for an already-built transaction event JSON.
   static std::string
