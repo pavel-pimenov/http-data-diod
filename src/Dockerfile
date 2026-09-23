@@ -259,6 +259,18 @@ WORKDIR /root/
 # image layer (/app/out) so it survives for COPY --from=builder.
 COPY --from=builder /app/out/l2-proxy .
 
+# Unprivileged runtime: every entry drops to the 'app' user (uid 10001) via
+# docker-entrypoint.sh (chown of host-mounted writable dirs happens at start).
+# Host dirs and ports are all above 1024, so no capabilities are required for
+# the payload; docker-compose additionally drops all caps (see cap_drop).
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && chown -R app:app /root /memory-logs /profiles /crash-dumps
+
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod 755 /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
 EXPOSE 8888 19090 19091 19092 8088
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \

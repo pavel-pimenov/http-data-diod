@@ -156,6 +156,21 @@ services:
     image: http-data-diod-l2-proxy:latest
     restart: unless-stopped
     mem_limit: ${L2_SERVER_MEM_LIMIT:-1g}
+    # Non-root hardening: the image entrypoint drops to uid 10001 (see
+    # src/docker-entrypoint.sh). The payload needs no Linux caps, only CHOWN/
+    # FOWNER/DAC_OVERRIDE (host-mounted writable dirs + root-owned TLS certs)
+    # and SETUID/SETGID which setpriv consumes while dropping to uid 10001
+    # (effective caps are cleared on the setresuid, so the payload runs without
+    # any capabilities). no-new-privileges is deliberately NOT set — it breaks
+    # exec of shebang-script entrypoints in this setup.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
     ports:
       - "3333:8088"
       - "19092:19092"
@@ -407,6 +422,15 @@ services:
     # (measured 1-19s) so docker never SIGKILLs mid-drain on rolling deploys.
     stop_grace_period: 40s
     mem_limit: ${L2_PROXY_MEM_LIMIT:-1g}
+    # Non-root hardening: same as l2-server (see src/docker-entrypoint.sh).
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
     ports:
       - "8888:8888"
       - "19090:19090"
@@ -576,6 +600,15 @@ services:
     # Same rationale as l2-proxy: in-flight drain (30s) + NATS teardown (1-19s).
     stop_grace_period: 40s
     mem_limit: ${L2_WORKER_MEM_LIMIT:-1g}
+    # Non-root hardening: same as l2-server (see src/docker-entrypoint.sh).
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
     ports:
       - "19091:19091"
       - "19093:19093"
