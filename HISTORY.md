@@ -16,13 +16,20 @@
 - **Гейты**: `scripts/pre-commit.sh` (новая функция `run_metrics_check`, offline всегда + runtime при поднятом стеке, пропуск `SKIP_METRICS_CHECK=1`) и `.github/workflows/ci.yml` (шаг после golden-metrics/smoke).
 - **Документация**: новый раздел README «Сверка имён метрик между источниками» + правило в `AGENTS.md`.
 
+### Попутно исправлено в генераторе дашбордов
+- `_collect_cpp_metrics()` больше не читает только `app_context.cpp`: разбор делегирован парсеру из `metrics-consistency-check.py` (охватывает `proxy_init.cpp`, отбрасывает не-метрические литералы вроде `l2_server_call_error`). Ложные 11 предупреждений исчезли, `--check` видит все 84 метрики.
+- **Наложение панелей**: панели round 59 (NATS poll / task queue, id 50/25/26/27/28) попали в `nats-dashboard` и перекрывали панель id=22 «NATS события подключения во времени». Перенесены в `l2-proxy` (их правильное место) как новая секция «NATS poll и очередь задач» (row id=80, панели 81–86), раскладка 6×8 с последующим сдвигом `y` — перекрытий нет.
+- Попутно устранены два доставшихся с прошлых раундов наложения: в `l2-server` row id=90 и панели 200/201 вставали прямо на панель 21 «Длительность запроса» (добавлен пропущенный `y += 8`), в `l2-slo-tracking` панели 43/44 стояли на 41/42 (добавлен `y += 6`). Проверено попарным расчётом прямоугольников: во всех 8 дашбордах 0 наложений и 0 дубликатов id.
+
 ### Стоимость
 - Offline — regex по ~10 файлам, 0.3–0.6 с. Runtime — 3 HTTP-запроса к локальным портам, <1 с. Оба укладываются в pre-commit без заметного замедления; проверка ловит рассинхрон (проверено временной инъекцией `l2_proxy_drift_probe_total` в `app_context.cpp` — offline-режим упал на всех трёх источниках сразу).
 
 ### Проверка
 - `python3 scripts/metrics-consistency-check.py --offline`: rc=0, `registered=84 dashboards=84 readme=84 golden=84`.
 - `python3 scripts/metrics-consistency-check.py --runtime`: rc=0 — proxy 45 метрик, worker 31, l2-server 18; lazy — только label-зависимые семейства.
-- `python3 scripts/generate-grafana-dashboards.py --check`: rc=0. `python3 scripts/metrics-golden-check.py`: rc=0 (75/75).
+- `python3 scripts/generate-grafana-dashboards.py --check`: rc=0, `l2-proxy` 55 панелей / 44 метрики, `nats-dashboard` 21 / 5. `python3 scripts/metrics-golden-check.py`: rc=0 (75/75).
+- Раскладка всех 8 дашбордов проверена попарно: 0 наложений, 0 дубликатов id.
+- `SKIP_CLANG_TIDY=1 ./scripts/pre-commit.sh`: rc=0 (включая новый metrics-гейт).
 - Изменений в коде приложения нет (только скрипты/документация/CI) — пересборка контейнеров не потребовалась.
 
 # round 59: микро-метрики round 57 в дашбордах и golden-check
@@ -30,7 +37,7 @@
 ## Date: 2026-10-05
 
 ### Что сделано
-- 6 метрик round 57 (`l2_proxy_task_queue_*`, `l2_proxy_nats_poll_*`) добавлены в панели `l2-proxy` генератора дашбордов и в `CATALOG` golden-check. Панели: «NATS poll attempts / запрос», «NATS poll attempt duration» (p50/p95/p99), «NATS poll retry wait», «Task queue wait (proxy)» (p50/p95/p99), «Task queue (enqueued/rejected)».
+- 6 метрик round 57 (`l2_proxy_task_queue_*`, `l2_proxy_nats_poll_*`) добавлены в панели генератора дашбордов и в `CATALOG` golden-check. Панели: «NATS poll attempts / запрос», «NATS poll attempt duration» (p50/p95/p99), «NATS poll retry wait», «Task queue wait (proxy)» (p50/p95/p99), «Task queue (enqueued/rejected)». Правка round 60: панели ошибочно попали в `nats-dashboard` и перекрывали панель id=22 — перенесены в `l2-proxy`.
 - `generate-grafana-dashboards.py --check` теперь rc=0 (`All C++ metrics covered by dashboards`), `metrics-golden-check.py` — 75/75 семейств.
 - Коммит `820fc99`.
 

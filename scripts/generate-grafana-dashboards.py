@@ -24,6 +24,7 @@ import os
 import sys
 import json
 import argparse
+import importlib.util
 import time
 import re
 import pathlib
@@ -37,6 +38,8 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+_CPP_METRICS_CACHE: Optional[Set[str]] = None
 
 # ============================================================================
 # Configuration Management
@@ -432,73 +435,7 @@ def create_nats_dashboard() -> Dict:
     ))
 
 
-    # Panel 20a: NATS poll attempts per request
-    panels.append(create_timeseries_panel(
-        title="NATS poll attempts / запрос",
-        id=50,
-        x=0, y=y+8, w=6, h=4,
-        unit="rps",
-        thresholds=green_only,
-        targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_poll_attempts_total{vm=~"${vm:regex}"}[5m])) / sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m]))', "legendFormat": "attempts/req", "refId": "A"}
-        ]
-    ))
-
-    # Panel 20b: NATS poll attempt duration
-    panels.append(create_timeseries_panel(
-        title="NATS poll attempt duration",
-        id=25,
-        x=6, y=y+8, w=6, h=4,
-        unit="s",
-        custom=ts_custom,
-        targets=[
-            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
-        ]
-    ))
-
-    # Panel 20c: NATS poll retry wait
-    panels.append(create_timeseries_panel(
-        title="NATS poll retry wait",
-        id=26,
-        x=0, y=y+12, w=6, h=4,
-        unit="s",
-        custom=ts_custom,
-        targets=[
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
-        ]
-    ))
-
-    # Panel 20d: Task queue wait
-    panels.append(create_timeseries_panel(
-        title="Task queue wait (proxy)",
-        id=27,
-        x=6, y=y+12, w=6, h=4,
-        unit="s",
-        custom=ts_custom,
-        targets=[
-            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
-        ]
-    ))
-
-    # Panel 20e: Task queue counters
-    panels.append(create_timeseries_panel(
-        title="Task queue (enqueued/rejected)",
-        id=28,
-        x=12, y=y+12, w=6, h=4,
-        unit="reqps",
-        custom=ts_custom,
-        targets=[
-            {"expr": 'sum(rate(l2_proxy_task_queue_enqueued_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "enqueued/s", "refId": "A"},
-            {"expr": 'sum(rate(l2_proxy_task_queue_rejected_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "rejected/s", "refId": "B"}
-        ]
-    ))
-
-        # Panel 21: NATS requests and errors
+    # Panel 21: NATS requests and errors
     panels.append(create_timeseries_panel(
         title="NATS запросы и ошибки",
         id=21,
@@ -1247,6 +1184,8 @@ def create_slo_dashboard() -> Dict:
             {"expr": "0.05", "legendFormat": "Цель SLO (50мс)", "refId": "B"}
         ]
     ))
+
+    y += 6
 
     # Panel 43: SLO Compliance - Error Rate
     panels.append(create_timeseries_panel(
@@ -2027,6 +1966,85 @@ def create_proxy_dashboard() -> Dict:
             {"expr": "histogram_quantile(0.50, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
             {"expr": "histogram_quantile(0.95, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
             {"expr": "histogram_quantile(0.99, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+    y += 8
+
+    # Row: NATS poll/queue micro-metrics (round 57)
+    panels.append(create_row_panel("NATS poll и очередь задач", 80, y))
+    y += 1
+
+    # Panel 81: NATS poll attempts per request
+    panels.append(create_timeseries_panel(
+        title="NATS poll attempts / запрос",
+        id=81,
+        x=0, y=y, w=6, h=8,
+        unit="short",
+        targets=[
+            {"expr": 'sum(rate(l2_proxy_nats_poll_attempts_total{vm=~"${vm:regex}"}[5m])) / clamp_min(sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m])), 0.0001)', "legendFormat": "attempts/req", "refId": "A"}
+        ]
+    ))
+
+    # Panel 82: NATS poll attempt duration
+    panels.append(create_timeseries_panel(
+        title="NATS poll attempt duration",
+        id=82,
+        x=6, y=y, w=6, h=8,
+        unit="s",
+        targets=[
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+
+    # Panel 83: NATS poll retry wait
+    panels.append(create_timeseries_panel(
+        title="NATS poll retry wait",
+        id=83,
+        x=12, y=y, w=6, h=8,
+        unit="s",
+        targets=[
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+
+    # Panel 84: Task queue wait
+    panels.append(create_timeseries_panel(
+        title="Task queue wait (proxy)",
+        id=84,
+        x=18, y=y, w=6, h=8,
+        unit="s",
+        targets=[
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+    y += 8
+
+    # Panel 85: Task queue counters
+    panels.append(create_timeseries_panel(
+        title="Task queue (enqueued/rejected)",
+        id=85,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": 'sum(rate(l2_proxy_task_queue_enqueued_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "enqueued/s", "refId": "A"},
+            {"expr": 'sum(rate(l2_proxy_task_queue_rejected_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "rejected/s", "refId": "B"}
+        ]
+    ))
+
+    # Panel 86: Task queue depth
+    panels.append(create_timeseries_panel(
+        title="Task queue: ожидание vs обработка",
+        id=86,
+        x=12, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "wait p99", "refId": "A"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "poll p99", "refId": "B"}
         ]
     ))
     y += 8
@@ -2826,6 +2844,8 @@ def create_server_dashboard() -> Dict:
         ]
     ))
 
+    y += 8
+
     # Row 4: Статус-коды и доступность (обогащение метрикости)
     panels.append(create_row_panel("Статус-коды и доступность", 90, y))
     y += 1
@@ -2925,12 +2945,23 @@ def _normalize_metric(name: str) -> str:
     return name
 
 def _collect_cpp_metrics() -> Set[str]:
-    """Собирает l2_* метрики из src/app_context.cpp (источник истины)."""
-    cpp_path = pathlib.Path(__file__).parent.parent / "src" / "app_context.cpp"
-    if not cpp_path.exists():
-        return set()
-    txt = cpp_path.read_text(encoding="utf-8", errors="ignore")
-    return set(re.findall(r'"(l2_[a-z0-9_]+)"', txt))
+    """Собирает зарегистрированные в C++ l2_* метрики (источник истины).
+
+    Разбор делегирован metrics-consistency-check.py: помимо
+    MetricsManager::create_* он охватывает src/proxy_init.cpp (DynamicLabeledFamily
+    и rate limiter) и отбрасывает не-метрические литералы вроде Sentry
+    fingerprint'ов l2_server_call_error.
+    """
+    global _CPP_METRICS_CACHE
+    if _CPP_METRICS_CACHE is None:
+        checker_path = pathlib.Path(__file__).parent / "metrics-consistency-check.py"
+        spec = importlib.util.spec_from_file_location("metrics_consistency_check", checker_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {checker_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _CPP_METRICS_CACHE = module.cpp_registered_metrics()[0]
+    return _CPP_METRICS_CACHE
 
 def _collect_dashboard_metrics(dashboard: Dict) -> Set[str]:
     out: Set[str] = set()
@@ -2961,7 +2992,7 @@ Examples:
     parser.add_argument('--correct-dashboards', action='store_true', help='Correct existing dashboards if they differ from generated versions')
     parser.add_argument('--dry-run', action='store_true', help='Не писать в Grafana, только показать diff/валидацию')
     parser.add_argument('--output-dir', type=str, help='Записать JSON дашбордов в директорию (GitOps без Grafana)')
-    parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs app_context.cpp + валидация id/vm/y, exit 1 при ошибках')
+    parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs регистрации метрик в C++ + валидация id/vm/y, exit 1 при ошибках')
     parser.add_argument('--grafana-timeout', type=float, default=10.0, help='HTTP timeout к Grafana/Prometheus в секундах (default: 10)')
     parser.add_argument('--grafana-retries', type=int, default=3, help='Ретраи к Grafana при сбое (default: 3)')
 
@@ -2984,9 +3015,9 @@ Examples:
 
     # --check: offline валидация без Grafana
     if args.check:
-        logger.info("Running --check (offline validation + cross-check vs app_context.cpp)...")
+        logger.info("Running --check (offline validation + cross-check vs C++ metric registration)...")
         cpp_metrics = _collect_cpp_metrics()
-        logger.info(f"C++ metrics in app_context.cpp: {len(cpp_metrics)}")
+        logger.info(f"C++ metrics registered in src/: {len(cpp_metrics)}")
         all_ok = True
         all_dash_metrics: Set[str] = set()
         for func, uid in dashboard_definitions:
