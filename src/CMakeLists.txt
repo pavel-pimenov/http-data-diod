@@ -195,12 +195,48 @@ target_include_directories(proj_prometheus_util INTERFACE
 # (libcivetweb-cpp) and neither matches the API the vendored prometheus-cpp pull
 # expects. SSL and Lua are NOT compiled in: only the plain HTTP /metrics path is
 # needed by the proxy/worker/server exposers.
+#
+# With NO_FILESYSTEMS civetweb has no fallback for log_access and
+# mg_cry_internal_impl and fails with "Must either enable filesystems or provide
+# a custom mg_cry_internal_impl implementation", so the embedder must supply
+# them via MG_EXTERNAL_FUNCTION_*. Both are no-ops for our metrics-only
+# exposers, and upstream ships neither file (they are the embedder's), so the
+# stubs are generated into the build dir instead of being carried inside the
+# vendored tree.
+set(CIVETWEB_STUB_DIR ${CMAKE_CURRENT_BINARY_DIR}/civetweb-stubs)
+file(WRITE ${CIVETWEB_STUB_DIR}/external_log_access.inl
+"/* No-op: access log is not written for metrics-only server */
+static void
+log_access(const struct mg_connection *conn)
+{
+	(void)conn;
+}
+")
+file(WRITE ${CIVETWEB_STUB_DIR}/external_mg_cry_internal_impl.inl
+"/* No-op: errors are not logged to disk for metrics-only server */
+static void
+mg_cry_internal_impl(const struct mg_connection *conn,
+                     const char *func,
+                     unsigned line,
+                     const char *fmt,
+                     va_list ap)
+{
+	(void)conn;
+	(void)func;
+	(void)line;
+	(void)fmt;
+	(void)ap;
+}
+")
 add_library(proj_civetweb STATIC
     ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/civetweb.c
     ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/CivetServer.cpp
 )
 target_include_directories(proj_civetweb PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/prometheus-cpp/3rdparty/civetweb/include
+)
+target_include_directories(proj_civetweb PRIVATE
+    ${CIVETWEB_STUB_DIR}
 )
 target_compile_definitions(proj_civetweb PRIVATE
     NO_SSL

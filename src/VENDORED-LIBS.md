@@ -15,7 +15,7 @@
 |---|---|---|---|
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | single-header `json/nlohmann/json.hpp` | пин `v3.12.0` (@ 55f9368); локальная правка `json.hpp`/`json_fwd.hpp`: NOLINT-комментарии + GCC C++20 modules workaround; пакет `nlohmann-json3-dev` убран из apt |
 | [prometheus-cpp](https://github.com/jupp0r/prometheus-cpp) | master @ 66b6159 | source tree `prometheus-cpp/` (core/pull/push/util) | пин — коммит 66b6159 (ветка master, после v1.3.0: в `CMakeLists` уже `VERSION 1.3.0`); вендорено — apt-пакет 1.0.x без `Family::Remove/Has`; `core_export.h` генерируется апстримным CMake, в git-дереве его нет |
-| [civetweb](https://github.com/civetweb/civetweb) | ~1.16 (релизный tarball) | `prometheus-cpp/3rdparty/civetweb/` | нужен pull-экспозеру prometheus-cpp (в дерево prometheus-cpp не входит, подтягивается при сборке); снимок = релизный tarball v1.16 (последний тег), из `civetweb.c` убран `#include "handle_form.inl"`; файлы `external_log_access.inl`/`external_mg_cry_internal_impl.inl` в git-теге v1.16 отсутствуют (есть только в tarball), но `civetweb.c` их включает |
+| [civetweb](https://github.com/civetweb/civetweb) | ~1.16 (релизный tarball) | `prometheus-cpp/3rdparty/civetweb/` | нужен pull-экспозеру prometheus-cpp (в дерево prometheus-cpp не входит, подтягивается при сборке); снимок = релизный tarball v1.16 (последний тег), из `civetweb.c` убран `#include "handle_form.inl"`; при `NO_FILESYSTEMS` civetweb требует от встраивающей стороны `log_access`/`mg_cry_internal_impl` (своих файлов не поставляет, `#error` без них) — заглушки генерируются `src/CMakeLists.txt` в build-каталог |
 | [nats.c (cnats)](https://github.com/nats-io/nats.c) | 3.14.0 | source tree `nats/` (src/) | пин `v3.14.0` (@ 6cb096a7); проект использует только классическое publish/subscribe без JetStream; локальная правка `CMakeLists.txt`: examples/test отключены опциями `NATS_BUILD_EXAMPLES`/`BUILD_TESTING` |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | 0.59.0 | `httplib/httplib.h` + `httplib.cc` | пин `v0.59.0` (@ cf3693c); пара заголовок+реализация собирается из single-header штатным `split.py` этого же тега; реализация не правится (сторонняя либа) |
 | [base64](https://github.com/tobiaslocker/base64) | master @ 8d96a2a | single-header `base64/base64.hpp` | репозиторий без тегов; пин — коммит ветки master (версии в коде нет) |
@@ -51,10 +51,11 @@ ref явно переопределён через `--ref`; локальные �
   `prometheus-cpp/3rdparty/civetweb/src/civetweb.c` (убран
   `#include "handle_form.inl"`).
 - Файлы, которых нет в git-дереве апстрима, поэтому `--prune` их удаляет —
-  перечислены в `PATCHED` скрипта (там же причина): `civetweb.c` включает
-  `external_log_access.inl` и `external_mg_cry_internal_impl.inl`, которых нет
-  в теге v1.16 (есть только в релизном tarball), а `core_export.h` в
-  prometheus-cpp генерируется его CMake.
+  перечислены в `PATCHED` скрипта (там же причина): `core_export.h` в
+  prometheus-cpp генерируется его CMake. Заглушки civetweb
+  (`external_log_access.inl`, `external_mg_cry_internal_impl.inl`) в вендоренном
+  дереве не лежат — их пишет `file(WRITE)` в `src/CMakeLists.txt` в build-каталог,
+  потому что апстрим их не поставляет вовсе.
 - Либы без свежих релизов (`nlohmann/json`, `nats.c`, `odpi`, `civetweb`)
   обновляются только при появлении нового тега; `prometheus-cpp` и `base64`
   пинятся на коммит ветки master, поэтому сверяются с `git ls-remote`.

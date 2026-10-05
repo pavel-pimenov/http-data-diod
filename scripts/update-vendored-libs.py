@@ -121,8 +121,8 @@ LIB_NAMES = list(GIT_REPOS)
 
 # Локально пропатченные файлы: отличаются от апстрима намеренными правками и
 # при апгрейде не перезаписываются, пока не задан --force. Сюда же попадают
-# файлы, которых нет в git-дереве апстрима (генерируются его CMake или
-# приходят из релизного tarball) — их нельзя удалять при --prune.
+# файлы, которых нет в git-дереве апстрима (генерируются его CMake) — их
+# нельзя удалять при --prune.
 PATCHED = {
     "json/nlohmann/json.hpp":
         "NOLINT-комментарии, GCC C++20 modules workaround, SPDX-хедер",
@@ -131,12 +131,6 @@ PATCHED = {
     "prometheus-cpp/3rdparty/civetweb/src/civetweb.c":
         "из civetweb.c v1.16 убран #include \"handle_form.inl\" (файл не "
         "вендорится — нужен только для legacy mg_upload)",
-    "prometheus-cpp/3rdparty/civetweb/src/external_log_access.inl":
-        "в git-теге v1.16 файла нет (есть только в релизном tarball), но "
-        "civetweb.c его включает — не удалять при --prune",
-    "prometheus-cpp/3rdparty/civetweb/src/external_mg_cry_internal_impl.inl":
-        "в git-теге v1.16 файла нет (есть только в релизном tarball), но "
-        "civetweb.c его включает — не удалять при --prune",
     "prometheus-cpp/core/include/prometheus/detail/core_export.h":
         "генерируется апстримным CMake (generate_export_header), в git-дереве "
         "его нет — не удалять при --prune",

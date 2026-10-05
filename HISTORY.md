@@ -1,3 +1,22 @@
+# round 58: civetweb-заглушки убраны из вендоренного дерева (генерируются CMake), поправка round 56
+
+## Date: 2026-10-05
+
+### Что было не так
+- Round 56 записал в `PATCHED`, `src/VENDORED-LIBS.md` и сюда утверждение, что `external_log_access.inl` и `external_mg_cry_internal_impl.inl` «есть только в релизном tarball v1.16». Это неверно: скачанный `v1.16.tar.gz` их тоже не содержит (как и git-тег). Файлы — **наши собственные no-op заглушки**, написанные проектом для сборки metrics-only экспозеров.
+- Проверено, что при `NO_FILESYSTEMS` они обязательны: civetweb не имеет своих реализаций и без заглушек падает — `#error Must either enable filesystems or provide a custom mg_cry_internal_impl implementation` плюс `call to undeclared function 'mg_cry_internal_impl'`. Проверено и обратное — с `-DMG_EXTERNAL_FUNCTION_log_access -DMG_EXTERNAL_FUNCTION_mg_cry_internal_impl` (как в `src/CMakeLists.txt`) компиляция чистая.
+
+### Что сделано
+- `git rm` заглушек из `src/prometheus-cpp/3rdparty/civetweb/src/` — вендоренное дерево теперь ровно апстрим (слепок tarball v1.16 минус одна строка `#include "handle_form.inl"`), никаких проектных файлов внутри.
+- `src/CMakeLists.txt`: перед `add_library(proj_civetweb ...)` добавлен `file(WRITE)` обеих заглушек в `${CMAKE_CURRENT_BINARY_DIR}/civetweb-stubs` + этот каталог в `target_include_directories(proj_civetweb PRIVATE ...)`. Смысл не изменилась (no-op лог доступа и no-op запись ошибок), но проектные файлы больше не лежат среди вендоренных и не могут быть приняты за апстримные при проверке вендоринга.
+- `scripts/update-vendored-libs.py`: обе записи удалены из `PATCHED` (иначе `--prune` ждал бы их в дереве), комментарий над `PATCHED` уточнён — там остаётся только про локальные патчи и `core_export.h`, который генерирует апстримный CMake.
+- `src/VENDORED-LIBS.md`: обещание civetweb описано через `#error`-требование `NO_FILESYSTEMS` + генерацию заглушек в build-каталог.
+- Поправлена неверная формулировка в записи round 56.
+
+### Проверка
+- `./rebuild-and-run.sh`: rc=0 (обе заглушки генерируются, `proj_civetweb` собирается, юнит-тесты зелёные), все сервисы `healthy`.
+- `./health-check.sh all`: rc=0. `python3 message_counter.py --iterations 1 --concurrent 1`: rc=0 (проверен и `/metrics`-путь, он отдаётся тем же civetweb).
+
 # round 57: микро-метрики proxy (task queue vs NATS poll) — локализация роста p99
 
 ## Date: 2026-10-05
@@ -45,7 +64,7 @@
 
 ### Скрипт и документация вендоринга
 - `scripts/update-vendored-libs.py`: пины `REFS` обновлены (`prometheus-cpp` → `66b6155…`, `cpp-httplib` → `v0.59.0`).
-- В `PATCHED` добавлены файлы, которых **нет в git-дереве апстрима** (раньше они попадали в `missing-upstream` и удалялись бы при `--prune`): `prometheus-cpp/3rdparty/civetweb/src/external_log_access.inl` и `external_mg_cry_internal_impl.inl` (в теге v1.16 их нет — есть только в релизном tarball, но `civetweb.c` их `#include`-ит) и `prometheus-cpp/core/include/prometheus/detail/core_export.h` (генерируется апстримным CMake через `generate_export_header`). Комментарий над `PATCHED` переписан под две роли: локальные патчи (не перезаписывать без `--force`) + файлы вне git-дерева (не удалять при `--prune`).
+- В `PATCHED` добавлен файл, которого **нет в git-дереве апстрима** (раньше он попадал в `missing-upstream` и удалялся бы при `--prune`): `prometheus-cpp/core/include/prometheus/detail/core_export.h` (генерируется апстримным CMake через `generate_export_header`). Комментарий над `PATCHED` переписан под две роли: локальные патчи (не перезаписывать без `--force`) + файлы вне git-дерева (не удалять при `--prune`). **Поправка round 58**: сюда же были внесены `civetweb/src/external_log_access.inl` и `external_mg_cry_internal_impl.inl` с неверной формулировкой «в git-теге v1.16 их нет — есть только в релизном tarball»; на деле их нет ни в теге, ни в `v1.16.tar.gz` — это наши собственные no-op заглушки (см. round 58, в round 58 они убраны из дерева и генерируются CMake).
 - Уточнена запись про civetweb в `PATCHED`: снимок — это **релизный tarball v1.16** (проверено побайтово против `v1.16.tar.gz`), из `civetweb.c` убран ровно `#include "handle_form.inl"` (4 строки, файл не вендорится — нужен только для legacy `mg_upload`). Прежняя формулировка «не совпадает ни с одним тегом» была неточной.
 - `src/VENDORED-LIBS.md`: таблица версий и правила обновления приведены в соответствие (новые пины, перечень файлов, отсутствующих в git-дереве апстрима, и явное правило — либы без свежих релизов не трогаем, `prometheus-cpp`/`base64` сверяем с `git ls-remote`).
 
