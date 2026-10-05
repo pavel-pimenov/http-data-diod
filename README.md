@@ -305,11 +305,41 @@ python3 rate_limit_test.py --expect-zero
   проверяется presence-частью).
 - `--all` — дополнительно проверяет лениво эмитируемые семейства:
   `l2_proxy_per_client_id_duplicate_*` (появляются после дубликатного
-  трафика с заголовком `X-DataHub-Client-Id`) и `l2_proxy_per_ip_*`
-  (регистрируются только при `ENABLE_PER_IP_RATE_LIMITING=true`).
+  трафика с заголовком `X-DataHub-Client-Id`), `l2_proxy_per_ip_*`
+  (регистрируются только при `ENABLE_PER_IP_RATE_LIMITING=true`) и
+  семейства DB Gateway (`l2_proxy_db_*`, `l2_worker_db_*` — метрики с
+  метками `db`/`type`/`status` эмитируются prometheus-cpp только после
+  первой комбинации меток, то есть после реального DB-трафика).
 
 Вызов с `--traffic` включён в CI после smoke-теста; presence-проверка без
 флагов выполняется в конце `./rebuild-and-run.sh`.
+
+### Сверка имён метрик между источниками
+
+Имена метрик описаны в четырёх местах, и раньше они расходились молча:
+регистрация в C++, PromQL в дашбордах, каталог в этом README и список в
+`metrics-golden-check.py`. Скрипт `scripts/metrics-consistency-check.py`
+сверяет все четыре набора попарно и падает на любой асимметрии:
+
+```bash
+python3 scripts/metrics-consistency-check.py --offline   # только исходники, <1 с
+python3 scripts/metrics-consistency-check.py --runtime   # + сверка живым /metrics
+```
+
+- `--offline` (по умолчанию) — разбирает `MetricsManager::create_*` и списки
+  `DynamicLabeledFamily<...>::Series` в `src/*.cpp|hpp`, импортирует панели из
+  `generate-grafana-dashboards.py`, таблицы каталога из этого README и
+  `CATALOG`/`CONDITIONAL` из `metrics-golden-check.py`. Контейнеры и сеть не
+  нужны.
+- `--runtime` — дополнительно скрапит `/metrics` каждого сервиса (proxy `:19090`,
+  worker `:19091`, l2-server `:19092`) и сверяет экспортируемые имена с
+  регистрациями в C++. Семейства, чьи метки заполняются только под нагрузкой
+  (`l2_proxy_per_client_id_*`, `l2_proxy_per_ip_*`, `l2_*_db_*`), попадают в
+  отчёт как `lazy`, а не `missing`.
+
+Offline-режим (без контейнеров) запускается в pre-commit, `--runtime` — в
+pre-commit при поднятом стеке и в CI после smoke-теста. Пропуск:
+`SKIP_METRICS_CHECK=1`.
 
 ### Поведение при простое NATS (потери / reconnect)
 

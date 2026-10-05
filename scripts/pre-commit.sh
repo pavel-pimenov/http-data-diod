@@ -83,6 +83,32 @@ run_message_test() {
     return 0
 }
 
+# Cross-check metric names between C++ registrations, Grafana dashboards, the
+# README catalogue and metrics-golden-check.py. Cheap: the offline pass is a
+# regex sweep over the sources, the runtime pass is three /metrics scrapes.
+# SKIP_METRICS_CHECK=1 skips it (offline mode still runs when the stack is down).
+run_metrics_check() {
+    if [ "${SKIP_METRICS_CHECK:-0}" = "1" ]; then
+        log_warn "SKIP_METRICS_CHECK=1 — проверка метрик пропущена"
+        return 0
+    fi
+    log_info "Running metric-name consistency check..."
+    if ! python3 scripts/metrics-consistency-check.py --offline; then
+        log_error "Metric names disagree between C++, dashboards, README and golden check!"
+        return 1
+    fi
+    if docker compose ps 2>/dev/null | grep -q "Up"; then
+        if ! python3 scripts/metrics-consistency-check.py --runtime; then
+            log_error "Exported metrics do not match the C++ registrations!"
+            return 1
+        fi
+    else
+        log_warn "Stack is down — only the offline metric check ran"
+    fi
+    log_info "✓ Metric consistency check passed"
+    return 0
+}
+
 # Run clang-tidy on changed C++ files (in the builder container).
 # SKIP_CLANG_TIDY=1 skips the check (clang-tidy is expensive; run it manually:
 # ./scripts/run-clang-tidy.sh after refactoring rounds).
@@ -145,6 +171,12 @@ main() {
     # Run message test
     if ! run_message_test; then
         log_error "Pre-commit tests failed!"
+        exit 1
+    fi
+
+    # Run metric-name consistency check (offline + runtime)
+    if ! run_metrics_check; then
+        log_error "Pre-commit metric consistency check failed!"
         exit 1
     fi
 

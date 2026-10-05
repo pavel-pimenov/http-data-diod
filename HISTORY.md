@@ -1,3 +1,39 @@
+# round 60: гейт сверки имён метрик (C++ ↔ дашборды ↔ README ↔ golden-check)
+
+## Date: 2026-10-05
+
+### Проблема
+- Round 57 добавил 6 метрик в C++, а в дашбордах и `metrics-golden-check.py` они не появились — расхождение обнаружилось только вручную. Round 59 закрыл конкретный случай, но механизма не было: причина в том, что `_collect_cpp_metrics()` в генераторе дашбордов читал **только** `src/app_context.cpp` (73 метрики), тогда как 11 метрик регистрируются в `src/proxy_init.cpp` (`DynamicLabeledFamily` + rate limiter). Из-за этого `--check` выдавал 11 ложных предупреждений «в дашбордах, но не в C++», и реальные расхождения тонули в шуме.
+
+### Что сделано
+- **Новый `scripts/metrics-consistency-check.py`** — сверяет четыре источника попарно и падает на любой асимметрии:
+  1. регистрация в C++: `MetricsManager::create_*(\s*<registry>,\s*"l2_...")` + литералы внутри блоков `DynamicLabeledFamily<...>::Series>` (скобочный парсер, а не плоский regex), файлы `src/*.cpp|hpp` без `test_*`;
+  2. PromQL в дашбордах: импортируется `generate-grafana-dashboards.py`, обходятся все `create_*_dashboard()`;
+  3. каталог в README: строки таблиц с `` `l2_...` ``;
+  4. `CATALOG` + `CONDITIONAL` из `metrics-golden-check.py`.
+- **Два режима**: `--offline` (по умолчанию) — только разбор исходников, <1 с, без контейнеров и сети; `--runtime` — плюс скрап `/metrics` каждого сервиса (proxy `:19090`, worker `:19091`, l2-server `:19092`) и сверка экспортируемых имён с регистрациями. Семейства, чьи метки заполняются только под нагрузкой (`l2_proxy_per_client_id_*`, `l2_proxy_per_ip_*`, `l2_*_db_*`), попадают в отчёт как `lazy`, а не `missing`; имена из `l2_common` (tracing/sentry) лежат на всех экспозерах и учитываются через `SHARED_PREFIXES`.
+- **Найдено и исправлено реальное расхождение**: 5 семейств DB Gateway (`l2_proxy_db_requests_total`, `l2_proxy_db_request_duration_seconds`, `l2_proxy_db_nats_request_duration_seconds`, `l2_worker_db_requests_total`, `l2_worker_db_query_duration_seconds`) были зарегистрированы в C++, попали в дашборды и README, но отсутствовали в golden-check. Добавлены в `CONDITIONAL` (метки `db`/`type`/`status` — prometheus-cpp не эмитит ничего до первой комбинации меток, плюс нужен живой DB).
+- **Гейты**: `scripts/pre-commit.sh` (новая функция `run_metrics_check`, offline всегда + runtime при поднятом стеке, пропуск `SKIP_METRICS_CHECK=1`) и `.github/workflows/ci.yml` (шаг после golden-metrics/smoke).
+- **Документация**: новый раздел README «Сверка имён метрик между источниками» + правило в `AGENTS.md`.
+
+### Стоимость
+- Offline — regex по ~10 файлам, 0.3–0.6 с. Runtime — 3 HTTP-запроса к локальным портам, <1 с. Оба укладываются в pre-commit без заметного замедления; проверка ловит рассинхрон (проверено временной инъекцией `l2_proxy_drift_probe_total` в `app_context.cpp` — offline-режим упал на всех трёх источниках сразу).
+
+### Проверка
+- `python3 scripts/metrics-consistency-check.py --offline`: rc=0, `registered=84 dashboards=84 readme=84 golden=84`.
+- `python3 scripts/metrics-consistency-check.py --runtime`: rc=0 — proxy 45 метрик, worker 31, l2-server 18; lazy — только label-зависимые семейства.
+- `python3 scripts/generate-grafana-dashboards.py --check`: rc=0. `python3 scripts/metrics-golden-check.py`: rc=0 (75/75).
+- Изменений в коде приложения нет (только скрипты/документация/CI) — пересборка контейнеров не потребовалась.
+
+# round 59: микро-метрики round 57 в дашбордах и golden-check
+
+## Date: 2026-10-05
+
+### Что сделано
+- 6 метрик round 57 (`l2_proxy_task_queue_*`, `l2_proxy_nats_poll_*`) добавлены в панели `l2-proxy` генератора дашбордов и в `CATALOG` golden-check. Панели: «NATS poll attempts / запрос», «NATS poll attempt duration» (p50/p95/p99), «NATS poll retry wait», «Task queue wait (proxy)» (p50/p95/p99), «Task queue (enqueued/rejected)».
+- `generate-grafana-dashboards.py --check` теперь rc=0 (`All C++ metrics covered by dashboards`), `metrics-golden-check.py` — 75/75 семейств.
+- Коммит `820fc99`.
+
 # round 58: civetweb-заглушки убраны из вендоренного дерева (генерируются CMake), поправка round 56
 
 ## Date: 2026-10-05

@@ -48,6 +48,9 @@ jobs:
       - name: Golden metrics check (full catalogue + traffic counters)
         run: python3 scripts/metrics-golden-check.py --traffic
 
+      - name: Metric-name consistency (C++ vs dashboards vs README vs golden)
+        run: python3 scripts/metrics-consistency-check.py --runtime
+
       - name: NATS reconnect + dedup e2e test
         run: python3 scripts/e2e-worker-reconnect-test.py
 

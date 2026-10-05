@@ -121,6 +121,14 @@ CONDITIONAL = [
     # are required exclusively under --all (feature + traffic dependent).
     "l2_proxy_per_ip_requests_total",
     "l2_proxy_per_ip_rejected_total",
+    # Labeled families (status/db/type): prometheus-cpp emits nothing until the
+    # first label combination is observed, and DB Gateway traffic needs a live
+    # DB, so they are required exclusively under --all.
+    "l2_proxy_db_requests_total",
+    "l2_proxy_db_request_duration_seconds",
+    "l2_proxy_db_nats_request_duration_seconds",
+    "l2_worker_db_requests_total",
+    "l2_worker_db_query_duration_seconds",
 ]
 
 # Core happy-path counters asserted to be non-zero over the traffic window.
