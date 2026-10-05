@@ -20,12 +20,17 @@ struct Buckets {
   std::array<double, 12> m_latency_ms_to_10s;
   std::array<double, 11> m_latency_5ms_to_10s;
   std::array<double, 10> m_size_100b_to_5mb;
+  // Sub-millisecond resolution for micro-latencies (task-queue wait, single
+  // NATS round-trip): starts at 100us so "instant" and "queued" are separable.
+  std::array<double, 13> m_latency_100us_to_1s;
 };
 inline constexpr Buckets g_buckets = {
     {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0}},
     {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
     {{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
-    {{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000}}};
+    {{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000}},
+    {{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1,
+      0.25, 0.5, 1.0}}};
 } // namespace histogram_buckets
 
 // Histogram families need the bucket bounds on every Family::Add call (the

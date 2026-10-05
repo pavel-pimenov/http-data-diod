@@ -79,10 +79,16 @@ std::string NatsPollService::poll_response(const std::string &request_id,
 
       poll_notify_resend(request_id, first_attempt, resend_logged);
 
+      m_ctx.m_proxy.m_metrics->m_nats_poll_attempts_total.Increment();
+      const auto attempt_start = std::chrono::steady_clock::now();
       std::tie(reply, consume_span_id) =
           m_ctx.m_nats_client->request_with_consume_span_id(
               m_ctx.m_config.m_nats.m_subject, request_json,
               static_cast<int>(remaining_ms));
+      m_ctx.m_proxy.m_metrics->m_nats_poll_attempt_duration_seconds.Observe(
+          std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                        attempt_start)
+              .count());
 
       if (!reply.m_data.empty()) {
         break;
@@ -216,11 +222,17 @@ void NatsPollService::poll_delay_for_empty_reply(
                    request_id);
       no_responders_logged = true;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    poll_sleep_backoff(1000);
   } else {
     Logger::warn("NATS request returned empty response for request_id={}, "
                  "will retry while timeout budget remains. Last error: {}",
                  request_id, last_error);
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    poll_sleep_backoff(250);
   }
+}
+
+void NatsPollService::poll_sleep_backoff(int delay_ms) {
+  m_ctx.m_proxy.m_metrics->m_nats_poll_retry_wait_seconds.Observe(
+      static_cast<double>(delay_ms) / 1000.0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 }

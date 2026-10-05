@@ -20,6 +20,10 @@ private:
   void poll_delay_for_empty_reply(const std::string &request_id,
                                   const std::string &last_error,
                                   bool &no_responders_logged);
+  // Backoff sleep between poll attempts; records the delay in
+  // l2_proxy_nats_poll_retry_wait_seconds so retry cost is visible next to
+  // the pure NATS attempt latency.
+  void poll_sleep_backoff(int delay_ms);
 
 public:
   explicit NatsPollService(AppContext &ctx);

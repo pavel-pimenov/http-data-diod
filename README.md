@@ -455,7 +455,13 @@ HTTP-эндпоинт.
 | `l2_proxy_nats_errors_total` | counter | — | Ошибки операций NATS |
 | `l2_proxy_nats_connection_creates_total` | counter | — | Созданные NATS-соединения |
 | `l2_proxy_nats_connection_errors_total` | counter | — | Ошибки создания NATS-соединений |
-| `l2_proxy_nats_request_duration_seconds` | histogram | — | Длительность NATS request/reply |
+| `l2_proxy_nats_request_duration_seconds` | histogram | — | Длительность NATS request/reply (весь poll-цикл) |
+| `l2_proxy_nats_poll_attempts_total` | counter | — | Число request/reply-попыток poll-цикла (1 на запрос = чистый round-trip, >1 = ретраи после пустого/потерянного ответа) |
+| `l2_proxy_nats_poll_attempt_duration_seconds` | histogram | — | Длительность одной NATS-попытки внутри poll-цикла (без backoff-пауз) |
+| `l2_proxy_nats_poll_retry_wait_seconds` | histogram | — | Backoff-пауза между попытками poll-цикла (ненулевая только при ретраях) |
+| `l2_proxy_task_queue_wait_seconds` | histogram | — | Ожидание HTTP-запроса в очереди задач прокси до старта воркер-треда |
+| `l2_proxy_task_queue_enqueued_total` | counter | — | Принято задач пулом прокси |
+| `l2_proxy_task_queue_rejected_total` | counter | — | Отклонено задач пулом прокси (лимит очереди) |
 | `l2_proxy_bytes_received_total` | counter | — | Байт, получено от клиентов |
 | `l2_proxy_bytes_sent_total` | counter | — | Байт, отправлено клиентам |
 | `l2_proxy_request_duration_seconds` | histogram | — | Длительность обработки запроса |

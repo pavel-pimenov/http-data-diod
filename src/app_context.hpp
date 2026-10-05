@@ -24,6 +24,20 @@ struct ProxyMetrics {
   prometheus::Counter &m_nats_connection_creates;
   prometheus::Counter &m_nats_connection_errors;
   prometheus::Histogram &m_nats_request_duration_seconds;
+  // NATS poll breakdown: how many request/reply attempts a single poll needed
+  // (1 = plain round-trip, >1 = retries with backoff sleeps in between), how
+  // long one attempt took, and how long the proxy slept between attempts.
+  // Splits l2_proxy_nats_request_duration_seconds into "real NATS latency"
+  // vs "retry backoff", which is what grows the tail under load.
+  prometheus::Counter &m_nats_poll_attempts_total;
+  prometheus::Histogram &m_nats_poll_attempt_duration_seconds;
+  prometheus::Histogram &m_nats_poll_retry_wait_seconds;
+  // Time an accepted HTTP request spent waiting in the proxy task queue before
+  // a worker thread picked it up. Separates thread-pool saturation from the
+  // NATS round-trip when p99 grows with concurrency.
+  prometheus::Histogram &m_task_queue_wait_seconds;
+  prometheus::Counter &m_task_queue_enqueued_total;
+  prometheus::Counter &m_task_queue_rejected_total;
   prometheus::Counter &m_bytes_received;
   prometheus::Counter &m_bytes_sent;
   prometheus::Histogram &m_request_duration_seconds;

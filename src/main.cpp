@@ -27,6 +27,7 @@
 #include "request_handler.hpp"
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
+#include "timed_task_queue.hpp"
 
 extern const char *g_l2_proxy_version;
 
@@ -158,18 +159,26 @@ void run_httplib_server(
     const std::string &http_server_name, bool use_in_flight_tracker,
     const std::function<void()> &on_request_start = {},
     const std::function<void(const httplib::Request &, const httplib::Response &)>
-        &on_response = {}) {
+        &on_response = {},
+    const std::function<httplib::TaskQueue *()> &task_queue_factory = {}) {
+  const auto install_task_queue = [&task_queue_factory](auto &server) {
+    if (task_queue_factory) {
+      server.new_task_queue = task_queue_factory;
+    }
+  };
   if (protocol == "https") {
     // HTTPS mode
     httplib::SSLServer server(app_ctx.m_config.m_ssl.m_server_cert_file.c_str(),
                               app_ctx.m_config.m_ssl.m_server_key_file.c_str());
     configure_httplib_server(server, app_ctx.m_config);
+    install_task_queue(server);
     run_server(server, app_ctx, handler, port, https_server_name,
                use_in_flight_tracker, on_request_start, on_response);
   } else {
     // HTTP mode
     httplib::Server server;
     configure_httplib_server(server, app_ctx.m_config);
+    install_task_queue(server);
     run_server(server, app_ctx, handler, port, http_server_name,
                use_in_flight_tracker, on_request_start, on_response);
   }
@@ -248,10 +257,20 @@ void run_proxy(AppContext &app_ctx) {
             .Increment();
       };
 
+  // Proxy-only: measures how long each accepted request waits in the task
+  // queue before a worker thread starts it (see timed_task_queue.hpp).
+  auto timed_task_queue_factory = [&app_ctx]() -> httplib::TaskQueue * {
+    auto &metrics = *app_ctx.m_proxy.m_metrics;
+    return new TimedTaskQueue(metrics.m_task_queue_enqueued_total,
+                              metrics.m_task_queue_rejected_total,
+                              metrics.m_task_queue_wait_seconds,
+                              CPPHTTPLIB_THREAD_POOL_COUNT);
+  };
+
   run_httplib_server(app_ctx, request_handler, app_ctx.m_config.m_proxy.m_port,
                      app_ctx.m_config.m_proxy.m_protocol, "httplib proxy",
-                     "httplib", true, on_proxy_request_start,
-                     on_proxy_response);
+                     "httplib", true, on_proxy_request_start, on_proxy_response,
+                     timed_task_queue_factory);
 }
 
 void run_worker(AppContext &app_ctx) {

@@ -132,6 +132,33 @@ void AppContext::init_proxy_metrics() {
           "Histogram of NATS request duration in seconds",
           histogram_buckets::g_buckets.m_latency_ms_to_10s),
       MetricsManager::create_counter(
+          m_proxy_registry, "l2_proxy_nats_poll_attempts_total",
+          "Total number of NATS request/reply attempts made by the proxy "
+          "poll loop (1 per request means a plain round-trip, more means "
+          "retries after an empty/lost reply)"),
+      MetricsManager::create_histogram(
+          m_proxy_registry, "l2_proxy_nats_poll_attempt_duration_seconds",
+          "Histogram of a single NATS request/reply attempt duration in "
+          "seconds inside the proxy poll loop",
+          histogram_buckets::g_buckets.m_latency_100us_to_1s),
+      MetricsManager::create_histogram(
+          m_proxy_registry, "l2_proxy_nats_poll_retry_wait_seconds",
+          "Histogram of the backoff sleep between NATS poll attempts in "
+          "seconds (non-zero only when a reply was lost or empty)",
+          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+      MetricsManager::create_histogram(
+          m_proxy_registry, "l2_proxy_task_queue_wait_seconds",
+          "Histogram of the time an HTTP request spent waiting in the proxy "
+          "task queue before a worker thread started processing it",
+          histogram_buckets::g_buckets.m_latency_100us_to_1s),
+      MetricsManager::create_counter(
+          m_proxy_registry, "l2_proxy_task_queue_enqueued_total",
+          "Total number of tasks accepted by the proxy task queue"),
+      MetricsManager::create_counter(
+          m_proxy_registry, "l2_proxy_task_queue_rejected_total",
+          "Total number of tasks rejected by the proxy task queue "
+          "(queue limit reached, request served with an error)"),
+      MetricsManager::create_counter(
           m_proxy_registry, "l2_proxy_bytes_received_total",
           "Total number of bytes received from clients"),
       MetricsManager::create_counter(m_proxy_registry,

@@ -25,13 +25,18 @@
 #include "stats_page.hpp"
 #include "string_utils.hpp"
 #include "thread_pool_wrapper.hpp"
+#include "timed_task_queue.hpp"
 #include "trace_context_extractor.hpp"
 #include "tracing_helpers.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -1619,4 +1624,111 @@ TEST_CASE("format_http_error: other error (no suffix)",
   REQUIRE(msg.find("failed:") != std::string::npos);
   REQUIRE(msg.find("timeout") == std::string::npos);
   REQUIRE(msg.find("connection failed") == std::string::npos);
+}
+
+// ============================================================================
+// timed_task_queue.hpp
+// ============================================================================
+
+namespace {
+
+struct TaskQueueFixture {
+  std::shared_ptr<prometheus::Registry> m_registry =
+      std::make_shared<prometheus::Registry>();
+  prometheus::Counter &m_enqueued =
+      MetricsManager::create_counter(m_registry, "queue_enqueued_total",
+                                     "accepted tasks");
+  prometheus::Counter &m_rejected =
+      MetricsManager::create_counter(m_registry, "queue_rejected_total",
+                                     "rejected tasks");
+  prometheus::Histogram &m_wait =
+      MetricsManager::create_histogram(m_registry, "queue_wait_seconds",
+                                       "queue wait", latency_buckets_ms_to_10s());
+};
+
+bool wait_for_tasks(const std::atomic<int> &done, int expected,
+                    std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (done.load() >= expected) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return done.load() >= expected;
+}
+
+bool wait_for_flag(std::mutex &mutex, bool &flag,
+                   std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (std::lock_guard lock(mutex); flag) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  std::lock_guard lock(mutex);
+  return flag;
+}
+
+} // namespace
+
+TEST_CASE("TimedTaskQueue: counts accepted tasks and observes their wait",
+          "[timed-task-queue]") {
+  TaskQueueFixture fixture;
+  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait, 2);
+
+  std::atomic<int> done{0};
+  constexpr int kTasks = 6;
+  for (int i = 0; i < kTasks; ++i) {
+    REQUIRE(queue.enqueue([&done]() { done.fetch_add(1); }));
+  }
+  REQUIRE(wait_for_tasks(done, kTasks, std::chrono::seconds(5)));
+  queue.on_idle();
+  queue.shutdown();
+
+  REQUIRE(fixture.m_enqueued.Value() == static_cast<double>(kTasks));
+  REQUIRE(fixture.m_rejected.Value() == 0.0);
+  const auto collected = fixture.m_wait.Collect();
+  REQUIRE(collected.histogram.sample_count == static_cast<std::uint64_t>(kTasks));
+  REQUIRE(collected.histogram.sample_sum >= 0.0);
+}
+
+TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
+          "[timed-task-queue]") {
+  TaskQueueFixture fixture;
+  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait, 1,
+                       1, 1);
+
+  std::mutex gate;
+  std::condition_variable gate_cv;
+  bool started = false;
+  bool release = false;
+  std::atomic<int> done{0};
+
+  REQUIRE(queue.enqueue([&]() {
+    {
+      std::lock_guard lock(gate);
+      started = true;
+    }
+    gate_cv.notify_all();
+    std::unique_lock lock(gate);
+    gate_cv.wait(lock, [&release]() { return release; });
+    done.fetch_add(1);
+  }));
+  REQUIRE(wait_for_flag(gate, started, std::chrono::seconds(5)));
+  REQUIRE(queue.enqueue([&done]() { done.fetch_add(1); }));
+  REQUIRE_FALSE(queue.enqueue([&done]() { done.fetch_add(1); }));
+
+  {
+    std::lock_guard lock(gate);
+    release = true;
+  }
+  gate_cv.notify_all();
+  REQUIRE(wait_for_tasks(done, 2, std::chrono::seconds(5)));
+  queue.shutdown();
+
+  REQUIRE(fixture.m_enqueued.Value() == 2.0);
+  REQUIRE(fixture.m_rejected.Value() == 1.0);
+  REQUIRE(fixture.m_wait.Collect().histogram.sample_count == 2);
 }
