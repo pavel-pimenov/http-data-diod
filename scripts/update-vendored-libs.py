@@ -99,10 +99,10 @@ KEEP = {
 # Пины по умолчанию = тому, что сейчас лежит в дереве.
 REFS = {
     "nlohmann-json": "v3.12.0",
-    "prometheus-cpp": "00c13295d53cf900c1e8614e4e63b53df52d6cc5",
+    "prometheus-cpp": "66b615591d17808437fc1ed8a6b6624fdc34b77e",
     "civetweb": "v1.16",
     "nats.c": "v3.14.0",
-    "cpp-httplib": "v0.58.0",
+    "cpp-httplib": "v0.59.0",
     "base64": "master",
     "odpi": "v26.0.0",
 }
@@ -120,15 +120,26 @@ GIT_REPOS = {
 LIB_NAMES = list(GIT_REPOS)
 
 # Локально пропатченные файлы: отличаются от апстрима намеренными правками и
-# при апгрейде не перезаписываются, пока не задан --force.
+# при апгрейде не перезаписываются, пока не задан --force. Сюда же попадают
+# файлы, которых нет в git-дереве апстрима (генерируются его CMake или
+# приходят из релизного tarball) — их нельзя удалять при --prune.
 PATCHED = {
     "json/nlohmann/json.hpp":
         "NOLINT-комментарии, GCC C++20 modules workaround, SPDX-хедер",
     "json/nlohmann/json_fwd.hpp": "точечные правки, как у json.hpp",
     "nats/CMakeLists.txt": "examples/test за опциями (каталоги не вендорены)",
     "prometheus-cpp/3rdparty/civetweb/src/civetweb.c":
-        "локальный снимок civetweb: не совпадает ни с одним тегом (макрос "
-        "версии 1.16, но часть файлов из более новых коммитов)",
+        "из civetweb.c v1.16 убран #include \"handle_form.inl\" (файл не "
+        "вендорится — нужен только для legacy mg_upload)",
+    "prometheus-cpp/3rdparty/civetweb/src/external_log_access.inl":
+        "в git-теге v1.16 файла нет (есть только в релизном tarball), но "
+        "civetweb.c его включает — не удалять при --prune",
+    "prometheus-cpp/3rdparty/civetweb/src/external_mg_cry_internal_impl.inl":
+        "в git-теге v1.16 файла нет (есть только в релизном tarball), но "
+        "civetweb.c его включает — не удалять при --prune",
+    "prometheus-cpp/core/include/prometheus/detail/core_export.h":
+        "генерируется апстримным CMake (generate_export_header), в git-дереве "
+        "его нет — не удалять при --prune",
 }
 
 

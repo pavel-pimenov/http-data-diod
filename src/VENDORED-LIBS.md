@@ -14,10 +14,10 @@
 | Библиотека | Версия | Источник | Комментарий |
 |---|---|---|---|
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | single-header `json/nlohmann/json.hpp` | пин `v3.12.0` (@ 55f9368); локальная правка `json.hpp`/`json_fwd.hpp`: NOLINT-комментарии + GCC C++20 modules workaround; пакет `nlohmann-json3-dev` убран из apt |
-| [prometheus-cpp](https://github.com/jupp0r/prometheus-cpp) | master @ 00c1329 | source tree `prometheus-cpp/` (core/pull/push/util) | пин — коммит 00c1329 (ветка master, 29.08.2026); тегам v1.2.x не соответствует; вендорено — apt-пакет 1.0.x без `Family::Remove/Has` |
-| [civetweb](https://github.com/civetweb/civetweb) | ~1.16 (снимок) | `prometheus-cpp/3rdparty/civetweb/` | нужен pull-экспозеру prometheus-cpp (в дерево prometheus-cpp не входит, подтягивается при сборке); локальный снимок не совпадает ни с одним тегом (макрос версии 1.16, часть файлов из более новых коммитов) |
+| [prometheus-cpp](https://github.com/jupp0r/prometheus-cpp) | master @ 66b6159 | source tree `prometheus-cpp/` (core/pull/push/util) | пин — коммит 66b6159 (ветка master, после v1.3.0: в `CMakeLists` уже `VERSION 1.3.0`); вендорено — apt-пакет 1.0.x без `Family::Remove/Has`; `core_export.h` генерируется апстримным CMake, в git-дереве его нет |
+| [civetweb](https://github.com/civetweb/civetweb) | ~1.16 (релизный tarball) | `prometheus-cpp/3rdparty/civetweb/` | нужен pull-экспозеру prometheus-cpp (в дерево prometheus-cpp не входит, подтягивается при сборке); снимок = релизный tarball v1.16 (последний тег), из `civetweb.c` убран `#include "handle_form.inl"`; файлы `external_log_access.inl`/`external_mg_cry_internal_impl.inl` в git-теге v1.16 отсутствуют (есть только в tarball), но `civetweb.c` их включает |
 | [nats.c (cnats)](https://github.com/nats-io/nats.c) | 3.14.0 | source tree `nats/` (src/) | пин `v3.14.0` (@ 6cb096a7); проект использует только классическое publish/subscribe без JetStream; локальная правка `CMakeLists.txt`: examples/test отключены опциями `NATS_BUILD_EXAMPLES`/`BUILD_TESTING` |
-| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | 0.58.0 | `httplib/httplib.h` + `httplib.cc` | пин `v0.58.0` (@ 4f3f9ef); пара заголовок+реализация собирается из single-header штатным `split.py` этого же тега; реализация не правится (сторонняя либа) |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | 0.59.0 | `httplib/httplib.h` + `httplib.cc` | пин `v0.59.0` (@ cf3693c); пара заголовок+реализация собирается из single-header штатным `split.py` этого же тега; реализация не правится (сторонняя либа) |
 | [base64](https://github.com/tobiaslocker/base64) | master @ 8d96a2a | single-header `base64/base64.hpp` | репозиторий без тегов; пин — коммит ветки master (версии в коде нет) |
 | [OPI-C (odpi)](https://github.com/oracle/odpi) | 26.0.0 | source tree `odpi/` | пин `v26.0.0`; `DPI_MAJOR_VERSION 26`, `DPI_VERSION_SUFFIX` пуст |
 
@@ -47,7 +47,17 @@ ref явно переопределён через `--ref`; локальные �
   сначала убедиться, что он не пришёл в свежем апстриме.
 - Локально пропатчены (правки эти нужно сохранить при апгрейде):
   `json/nlohmann/json.hpp`, `json/nlohmann/json_fwd.hpp` (NOLINT, GCC modules
-  workaround), `nats/CMakeLists.txt` (примеры/тесты за опциями).
+  workaround), `nats/CMakeLists.txt` (примеры/тесты за опциями),
+  `prometheus-cpp/3rdparty/civetweb/src/civetweb.c` (убран
+  `#include "handle_form.inl"`).
+- Файлы, которых нет в git-дереве апстрима, поэтому `--prune` их удаляет —
+  перечислены в `PATCHED` скрипта (там же причина): `civetweb.c` включает
+  `external_log_access.inl` и `external_mg_cry_internal_impl.inl`, которых нет
+  в теге v1.16 (есть только в релизном tarball), а `core_export.h` в
+  prometheus-cpp генерируется его CMake.
+- Либы без свежих релизов (`nlohmann/json`, `nats.c`, `odpi`, `civetweb`)
+  обновляются только при появлении нового тега; `prometheus-cpp` и `base64`
+  пинятся на коммит ветки master, поэтому сверяются с `git ls-remote`.
 - odpi компилируется через `odpi/embed/dpi.c` (amalgamation — просто `#include`
   всех `src/*.c`), поэтому обновление файлов в `src/` не требует перегенерации.
 - Пакеты из `apt` (если перестают нуждаться или, наоборот, теперь нужны) —
