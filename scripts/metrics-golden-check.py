@@ -49,6 +49,12 @@ CATALOG = [
     "l2_proxy_in_flight_requests",
     "l2_proxy_nats_connected",
     "l2_proxy_health_ready",
+    "l2_proxy_nats_poll_attempts_total",
+    "l2_proxy_nats_poll_attempt_duration_seconds",
+    "l2_proxy_nats_poll_retry_wait_seconds",
+    "l2_proxy_task_queue_wait_seconds",
+    "l2_proxy_task_queue_enqueued_total",
+    "l2_proxy_task_queue_rejected_total",
     # HTTP client pool (proxy registry)
     "l2_http_pool_active_clients",
     "l2_http_pool_available_clients",

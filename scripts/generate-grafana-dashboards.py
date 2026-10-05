@@ -431,7 +431,74 @@ def create_nats_dashboard() -> Dict:
         ]
     ))
 
-    # Panel 21: NATS requests and errors
+
+    # Panel 20a: NATS poll attempts per request
+    panels.append(create_timeseries_panel(
+        title="NATS poll attempts / запрос",
+        id=50,
+        x=0, y=y+8, w=6, h=4,
+        unit="rps",
+        thresholds=green_only,
+        targets=[
+            {"expr": 'sum(rate(l2_proxy_nats_poll_attempts_total{vm=~"${vm:regex}"}[5m])) / sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m]))', "legendFormat": "attempts/req", "refId": "A"}
+        ]
+    ))
+
+    # Panel 20b: NATS poll attempt duration
+    panels.append(create_timeseries_panel(
+        title="NATS poll attempt duration",
+        id=25,
+        x=6, y=y+8, w=6, h=4,
+        unit="s",
+        custom=ts_custom,
+        targets=[
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+
+    # Panel 20c: NATS poll retry wait
+    panels.append(create_timeseries_panel(
+        title="NATS poll retry wait",
+        id=26,
+        x=0, y=y+12, w=6, h=4,
+        unit="s",
+        custom=ts_custom,
+        targets=[
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+
+    # Panel 20d: Task queue wait
+    panels.append(create_timeseries_panel(
+        title="Task queue wait (proxy)",
+        id=27,
+        x=6, y=y+12, w=6, h=4,
+        unit="s",
+        custom=ts_custom,
+        targets=[
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+        ]
+    ))
+
+    # Panel 20e: Task queue counters
+    panels.append(create_timeseries_panel(
+        title="Task queue (enqueued/rejected)",
+        id=28,
+        x=12, y=y+12, w=6, h=4,
+        unit="reqps",
+        custom=ts_custom,
+        targets=[
+            {"expr": 'sum(rate(l2_proxy_task_queue_enqueued_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "enqueued/s", "refId": "A"},
+            {"expr": 'sum(rate(l2_proxy_task_queue_rejected_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "rejected/s", "refId": "B"}
+        ]
+    ))
+
+        # Panel 21: NATS requests and errors
     panels.append(create_timeseries_panel(
         title="NATS запросы и ошибки",
         id=21,
