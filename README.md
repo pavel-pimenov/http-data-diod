@@ -310,9 +310,15 @@ python3 rate_limit_test.py --expect-zero
   семейства DB Gateway (`l2_proxy_db_*`, `l2_worker_db_*` — метрики с
   метками `db`/`type`/`status` эмитируются prometheus-cpp только после
   первой комбинации меток, то есть после реального DB-трафика).
+- `--db` — проверка именно DB Gateway семейств (подмножество `--all`):
+  требует, чтобы `l2_proxy_db_*`, `l2_worker_db_*` реально эмитились.
+  Перед этим надо сгенерировать DB-трафик: `python3 scripts/db-gateway-e2e-test.py`
+  (postgres входит в дефолтный стек; oracle стартует по `--profile oracle`).
 
-Вызов с `--traffic` включён в CI после smoke-теста; presence-проверка без
-флагов выполняется в конце `./rebuild-and-run.sh`.
+В CI после smoke-теста дополнительно гоняется
+`scripts/db-gateway-e2e-test.py`, затем `--traffic --db`; presence-проверка
+без флагов выполняется в конце `./rebuild-and-run.sh`. Локально pre-commit
+прогоняет DB e2e + `--db` при живом postgres.
 
 ### Сверка имён метрик между источниками
 

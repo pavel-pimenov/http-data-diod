@@ -352,5 +352,44 @@ class RuntimeCheckTest(unittest.TestCase):
                              for p in problems))
 
 
+GOLDEN_PATH = REPO_ROOT / "scripts" / "metrics-golden-check.py"
+
+
+def load_golden():
+    spec = importlib.util.spec_from_file_location("metrics_golden_check",
+                                                  GOLDEN_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+golden = load_golden()
+
+
+class GoldenRequiredTest(unittest.TestCase):
+    DB_FAMILIES = {
+        "l2_proxy_db_requests_total",
+        "l2_proxy_db_request_duration_seconds",
+        "l2_proxy_db_nats_request_duration_seconds",
+        "l2_worker_db_requests_total",
+        "l2_worker_db_query_duration_seconds",
+    }
+
+    def test_default_requires_full_catalogue(self):
+        self.assertEqual(golden.build_required(False, False), golden.CATALOG)
+
+    def test_db_adds_exactly_the_db_gateway_families(self):
+        db_only = set(golden.build_required(False, True)) - set(golden.CATALOG)
+        self.assertEqual(db_only, self.DB_FAMILIES)
+
+    def test_db_families_are_a_subset_of_conditional(self):
+        self.assertEqual(self.DB_FAMILIES, set(golden.CONDITIONAL) & self.DB_FAMILIES)
+
+    def test_db_and_all_do_not_duplicate_families(self):
+        both = golden.build_required(True, True)
+        self.assertEqual(len(both), len(set(both)))
+        self.assertEqual(self.DB_FAMILIES, self.DB_FAMILIES & set(both))
+
+
 if __name__ == "__main__":
     unittest.main()

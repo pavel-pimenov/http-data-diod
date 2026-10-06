@@ -156,6 +156,24 @@ TRAFFIC_WINDOW = "5m"
 TRAFFIC_TIMEOUT_S = 120
 
 CATALOGUE_POLL_S = 2
+
+
+def build_required(full_conditional: bool, db: bool) -> list:
+    """Assemble the family-list required for the given flags.
+
+    ``--all`` adds every lazy family; ``--db`` adds only the DB Gateway
+    families (l2_proxy_db_*, l2_worker_db_*).  ``--all --db`` must not
+    double-listen the DB families in the failure report.
+    """
+    traffic_dependent = []
+    if full_conditional:
+        traffic_dependent.extend(CONDITIONAL)
+    if db:
+        traffic_dependent.extend(
+            f for f in CONDITIONAL if "_db_" in f)
+    return CATALOG + list(dict.fromkeys(traffic_dependent))
+
+
 # New families appear only after the first scrape that follows the action that
 # created them (e.g. smoke test): a single label-values snapshot taken right
 # after message_counter can race the next vmagent scrape and report them missing.
@@ -236,11 +254,16 @@ def main() -> int:
                         help="also require the core happy-path counters to be non-zero")
     parser.add_argument("--all", action="store_true",
                         help="also require lazily-emitted families (per-client-id duplicate detectors)")
+    parser.add_argument("--db", action="store_true",
+                        help="also require the DB Gateway traffic families "
+                             "(l2_proxy_db_*, l2_worker_db_*); run the DB traffic "
+                             "first with scripts/db-gateway-e2e-test.py")
     args = parser.parse_args()
+
+    required = build_required(args.all, args.db)
 
     failures = []
     try:
-        required = CATALOG + (CONDITIONAL if args.all else [])
         missing, names = poll_catalogue_families(args.url, required)
     except Exception as exc:
         print(f"ERROR: cannot query VictoriaMetrics {args.url}: {exc}")

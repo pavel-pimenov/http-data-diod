@@ -45,8 +45,11 @@ jobs:
       - name: Smoke test (NATS, 1 iteration)
         run: python3 message_counter.py --iterations 1 --concurrent 1 --dup-check
 
-      - name: Golden metrics check (full catalogue + traffic counters)
-        run: python3 scripts/metrics-golden-check.py --traffic
+      - name: DB Gateway e2e (query/ping/gates over postgres)
+        run: python3 scripts/db-gateway-e2e-test.py
+
+      - name: Golden metrics check (full catalogue + traffic counters + DB gateway)
+        run: python3 scripts/metrics-golden-check.py --traffic --db
 
       - name: Metric-name consistency (C++ vs dashboards vs README vs golden)
         run: python3 scripts/metrics-consistency-check.py --runtime

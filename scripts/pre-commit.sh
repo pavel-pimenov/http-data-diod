@@ -110,6 +110,21 @@ run_metrics_check() {
         return 1
     fi
     if docker compose ps 2>/dev/null | grep -q "Up"; then
+        # DB Gateway traffic families (l2_proxy_db_*, l2_worker_db_*) are only
+        # emitted after real DB queries: reproduce them so the runtime check
+        # sees the gateway working, not just tolerating it as `lazy`.
+        if docker compose ps postgres 2>/dev/null | grep -q "Up"; then
+            if ! python3 scripts/db-gateway-e2e-test.py 2>&1; then
+                log_error "DB Gateway e2e test FAILED!"
+                return 1
+            fi
+            if ! python3 scripts/metrics-golden-check.py --db 2>&1; then
+                log_error "DB Gateway metric families missing from VictoriaMetrics!"
+                return 1
+            fi
+        else
+            log_warn "postgres is down — DB Gateway metric check skipped"
+        fi
         if ! python3 scripts/metrics-consistency-check.py --runtime; then
             log_error "Exported metrics do not match the C++ registrations!"
             return 1
