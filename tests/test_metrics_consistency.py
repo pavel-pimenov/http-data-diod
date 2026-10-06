@@ -391,5 +391,48 @@ class GoldenRequiredTest(unittest.TestCase):
         self.assertEqual(self.DB_FAMILIES, self.DB_FAMILIES & set(both))
 
 
+class GoldenCatalogConsistencyTest(unittest.TestCase):
+    """Pure invariants of the golden-check catalog.
+
+    These keep the *internal* model coherent so that the --traffic/--db/--all
+    combinations declared in CI stay meaningful: every family we assert to be
+    non-zero must also be required by the default gate, lazy families must not
+    shadow a catalog entry, and neither list may contain duplicates.
+    """
+
+    def test_traffic_queries_are_a_subset_of_catalog(self):
+        missing = [q for q in golden.TRAFFIC_QUERIES
+                   if q not in golden.CATALOG]
+        self.assertEqual(missing, [])
+
+    def test_conditional_does_not_shadow_catalog(self):
+        overlap = set(golden.CONDITIONAL) & set(golden.CATALOG)
+        self.assertEqual(overlap, set(),
+                         "lazy family also listed in CATALOG: %r" % overlap)
+
+    def test_catalog_has_no_duplicates(self):
+        self.assertEqual(len(golden.CATALOG), len(set(golden.CATALOG)))
+
+    def test_conditional_has_no_duplicates(self):
+        self.assertEqual(len(golden.CONDITIONAL), len(set(golden.CONDITIONAL)))
+
+    def test_traffic_queries_have_no_histogram_suffixes(self):
+        for q in golden.TRAFFIC_QUERIES:
+            self.assertEqual(mc.normalize(q), q)
+
+    def test_traffic_queries_have_no_duplicates(self):
+        self.assertEqual(len(golden.TRAFFIC_QUERIES),
+                         len(set(golden.TRAFFIC_QUERIES)))
+
+    def test_db_families_are_the_only_conditional_families_with_db_marker(self):
+        db_marked = [f for f in golden.CONDITIONAL if "_db_" in f]
+        self.assertEqual(set(db_marked), GoldenRequiredTest.DB_FAMILIES)
+
+    def test_all_ordered_after_catalog_and_non_duplicated(self):
+        required = golden.build_required(True, False)
+        self.assertEqual(required[:len(golden.CATALOG)], golden.CATALOG)
+        self.assertEqual(len(required), len(set(required)))
+
+
 if __name__ == "__main__":
     unittest.main()

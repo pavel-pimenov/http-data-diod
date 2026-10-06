@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 63 | CI-фиксы: clang-tidy версионного заголовка на хосте, dockerignore generate_version.sh | [round-63](docs/history/round-63-CI-фиксы-clang-tidy-dockerignore-версионный-заголовок.md) |
 | 62 | гейт метрик DB Gateway end-to-end, clang-tidy sweep, сжатие HISTORY.md | [round-62](docs/history/round-62-гейт-метрик-DB-Gateway-clang-tidy-и-сжатие-HISTORY.md) |
 | 61 | гейт метрик — обратное направление (дашборды ↔ живой /metrics) + юнит-тесты | [round-61](docs/history/round-61-гейт-метрик-обратное-направление-дашборды-живой-metrics-юнит.md) |
 | 60 | гейт сверки имён метрик (C++ ↔ дашборды ↔ README ↔ golden-check) | [round-60](docs/history/round-60-гейт-сверки-имён-метрик-C-дашборды-README-golden-check.md) |

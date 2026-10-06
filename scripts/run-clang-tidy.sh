@@ -87,6 +87,17 @@ ensure_builder_image() {
     fi
 }
 
+ensure_version_header() {
+    # l2-proxy-version.h is build-generated and not tracked in git. clang-tidy
+    # lints the host sources (mounted into the container), so on a fresh
+    # checkout (no cached header from rebuild-and-run.sh) the generated file
+    # must be produced on the host, not only inside the Docker image.
+    if [ ! -f "$L2_DIR/l2-proxy-version.h" ]; then
+        log_info "Generating $L2_DIR/l2-proxy-version.h (not tracked in git)"
+        "$L2_DIR/generate_version.sh" > "$L2_DIR/l2-proxy-version.h"
+    fi
+}
+
 ensure_compile_commands() {
     local compile_db="$BUILD_DIR/compile_commands.json"
     if [ -f "$compile_db" ] \
@@ -125,6 +136,7 @@ main() {
 
     log_info "Running clang-tidy on $(printf '%s ' "${files[@]}")"
     ensure_builder_image
+    ensure_version_header
     ensure_compile_commands
 
     local container_files=()
