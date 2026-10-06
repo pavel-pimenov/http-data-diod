@@ -20,3 +20,14 @@
 - `python3 scripts/metrics-consistency-check.py --runtime`: rc=0 (и offline тоже).
 - `CLANG_TIDY_JOBS=4 ./scripts/run-clang-tidy.sh --all`: rc=0.
 - `pytest/tests` и `python3 -m unittest discover -s tests`: rc=0.
+
+### Follow-up (после пуша 2714d82)
+- `scripts/pre-commit.sh run_metrics_check`: локальный golden-гейт усилен до
+  `--traffic --db` (совпадает с CI; message_counter выше уже сгенерировал
+  трафик, поэтому core happy-path счётчики обязаны быть ненулевыми).
+- `.env.example`: `ENABLE_PER_IP_RATE_LIMITING` приведён к дефолту стека
+  `true` (совпадает с docker-compose, README и C++-дефолтом `config.hpp`);
+  убран источник раскидывания per-IP метрик в runtime-сверке.
+- README: уточнено про локальный `--traffic --db` в pre-commit.
+- Проверка: `SKIP_CLANG_TIDY=1 ./scripts/pre-commit.sh` rc=0 (80/80 +
+  «core happy-path counters are non-zero (last 5m)»).

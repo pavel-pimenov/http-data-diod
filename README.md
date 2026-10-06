@@ -318,7 +318,7 @@ python3 rate_limit_test.py --expect-zero
 В CI после smoke-теста дополнительно гоняется
 `scripts/db-gateway-e2e-test.py`, затем `--traffic --db`; presence-проверка
 без флагов выполняется в конце `./rebuild-and-run.sh`. Локально pre-commit
-прогоняет DB e2e + `--db` при живом postgres.
+прогоняет DB e2e + `--traffic --db` при живом postgres.
 
 ### Сверка имён метрик между источниками
 

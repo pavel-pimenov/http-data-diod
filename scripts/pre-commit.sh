@@ -118,8 +118,11 @@ run_metrics_check() {
                 log_error "DB Gateway e2e test FAILED!"
                 return 1
             fi
-            if ! python3 scripts/metrics-golden-check.py --db 2>&1; then
-                log_error "DB Gateway metric families missing from VictoriaMetrics!"
+            # Traffic + DB families: message_counter already ran above, so the
+            # core happy-path counters must be non-zero; DB families are emitted
+            # by the e2e test just executed.
+            if ! python3 scripts/metrics-golden-check.py --traffic --db 2>&1; then
+                log_error "Traffic/DB metric families incomplete or zero in VictoriaMetrics!"
                 return 1
             fi
         else
