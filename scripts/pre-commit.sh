@@ -83,6 +83,18 @@ run_message_test() {
     return 0
 }
 
+# Unit tests for the pure Python helpers (message_counter, dashboard generator,
+# metric consistency checker). No containers needed, runs in milliseconds.
+run_unit_tests() {
+    log_info "Running Python unit tests (tests/)..."
+    if ! python3 -m unittest discover -s tests 2>&1; then
+        log_error "❌ Python unit tests FAILED!"
+        return 1
+    fi
+    log_info "✓ Python unit tests passed"
+    return 0
+}
+
 # Cross-check metric names between C++ registrations, Grafana dashboards, the
 # README catalogue and metrics-golden-check.py. Cheap: the offline pass is a
 # regex sweep over the sources, the runtime pass is three /metrics scrapes.
@@ -171,6 +183,12 @@ main() {
     # Run message test
     if ! run_message_test; then
         log_error "Pre-commit tests failed!"
+        exit 1
+    fi
+
+    # Run Python unit tests (fast, no containers)
+    if ! run_unit_tests; then
+        log_error "Pre-commit unit tests failed!"
         exit 1
     fi
 

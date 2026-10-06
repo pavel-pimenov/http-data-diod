@@ -16,18 +16,21 @@ ended up exported but invisible. This script fails on any asymmetric difference.
 
 Two modes:
   --offline (default)   parse sources only; no containers, no network
-  --runtime             additionally scrape each service's /metrics endpoint and
-                        compare the exported set with the C++ registration set
+  --runtime             additionally scrape each service's /metrics endpoint, check
+                        that each service exports what it registers (and nothing
+                        foreign), and that every dashboard metric is exported by
+                        somebody
 
 Runtime mode is deliberately tolerant: families whose labels only materialise
 after traffic (per-client-id, per-IP rate limiter, DB Gateway) are reported as
 `lazy` rather than `missing`, and the reverse direction (exported but never
 registered) is reported separately since that indicates dead registrations.
+A stack that is not running at all is reported as a single actionable error
+("run ./rebuild-and-run.sh") instead of three "cannot scrape" lines.
 """
 
 import argparse
 import importlib.util
-import json
 import pathlib
 import re
 import sys
@@ -111,12 +114,13 @@ def collect_series_block(text: str, start: int, window: int = 4000) -> str:
     return ""
 
 
-def cpp_registered_metrics() -> tuple:
+def cpp_registered_metrics(src_dir: pathlib.Path = None) -> tuple:
     """Metric names registered in C++ plus every l2_ literal found (the latter
     exposes non-registration literals such as Sentry fingerprints)."""
+    src = src_dir if src_dir is not None else SRC_DIR
     registered = set()
     literals = set()
-    for path in sorted(SRC_DIR.glob("*.cpp")) + sorted(SRC_DIR.glob("*.hpp")):
+    for path in sorted(src.glob("*.cpp")) + sorted(src.glob("*.hpp")):
         if path.name.startswith("test_"):
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -139,10 +143,11 @@ def dashboard_metrics(generator) -> set:
     return metrics
 
 
-def readme_metrics() -> set:
+def readme_metrics(readme_path: pathlib.Path = None) -> set:
+    path = readme_path if readme_path is not None else README_PATH
     metrics = set()
-    for line in README_PATH.read_text(encoding="utf-8",
-                                      errors="ignore").splitlines():
+    for line in path.read_text(encoding="utf-8",
+                               errors="ignore").splitlines():
         if line.startswith("|") and "`l2_" in line:
             metrics |= set(re.findall(r"`" + METRIC_LITERAL + r"`", line))
     return metrics
@@ -152,12 +157,10 @@ def golden_metrics(golden) -> set:
     return set(golden.CATALOG) | set(golden.CONDITIONAL)
 
 
-def scrape_metrics(url: str, timeout: float) -> set:
+def parse_exposition(body: str) -> set:
     """Family names from a Prometheus text exposition. Lines look like
     `name{labels} value`, `name_bucket{le="1"} value` or `name value`; the
     histogram suffixes are stripped so all three collapse to one family."""
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        body = response.read().decode("utf-8", errors="ignore")
     names = set()
     for line in body.splitlines():
         if not line or line.startswith("#"):
@@ -166,6 +169,12 @@ def scrape_metrics(url: str, timeout: float) -> set:
         if re.fullmatch(METRIC_LITERAL, name):
             names.add(normalize(name))
     return names
+
+
+def scrape_metrics(url: str, timeout: float) -> set:
+    """Family names exported by a live /metrics endpoint."""
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return parse_exposition(response.read().decode("utf-8", errors="ignore"))
 
 
 def compare(label_a: str, set_a: set, label_b: str, set_b: set,
@@ -182,35 +191,74 @@ def compare(label_a: str, set_a: set, label_b: str, set_b: set,
         notes.append(f"{label_a} == {label_b} ({len(set_a)} metrics)")
 
 
-def runtime_check(registered: set, timeout: float, problems: list,
-                  notes: list) -> None:
-    for role, (url, prefixes) in SERVICE_ENDPOINTS.items():
+def split_lazy(names, problems: list, notes: list, label: str,
+               prefix: str) -> None:
+    """Report `names` as `lazy` when their labels are traffic-dependent,
+    otherwise as a hard problem."""
+    lazy = sorted(name for name in names if name.startswith(LAZY_PREFIXES))
+    hard = sorted(name for name in names if not name.startswith(LAZY_PREFIXES))
+    if hard:
+        problems.append(f"{label}: " + ", ".join(hard))
+    if lazy:
+        notes.append(f"{prefix}lazy (label-dependent, not yet in /metrics): "
+                     + ", ".join(lazy))
+
+
+def runtime_check(registered: set, dashboards: set, timeout: float,
+                  problems: list, notes: list, endpoints: dict = None,
+                  scraper=None) -> None:
+    """Check both directions against live /metrics: every service exports what
+    it registers (plus shared l2_common families), and every dashboard metric is
+    exported by at least one service."""
+    endpoints = endpoints if endpoints is not None else SERVICE_ENDPOINTS
+    scraper = scraper if scraper is not None else scrape_metrics
+
+    exported_by_role = {}
+    unreachable = []
+    for role, (url, _) in endpoints.items():
         try:
-            exported = scrape_metrics(url, timeout)
+            exported_by_role[role] = scraper(url, timeout)
         except (urllib.error.URLError, OSError) as exc:
-            problems.append(f"{role}: cannot scrape {url}: {exc}")
+            unreachable.append(f"{role} ({url}: {exc})")
+
+    if unreachable and len(unreachable) == len(endpoints):
+        problems.append("no /metrics endpoint is reachable, so the runtime half "
+                        "of the check cannot run — start the stack first "
+                        "(./rebuild-and-run.sh) or use --offline: "
+                        + "; ".join(unreachable))
+        return
+    for item in unreachable:
+        problems.append(f"cannot scrape {item}")
+
+    for role, (_, prefixes) in endpoints.items():
+        exported = exported_by_role.get(role)
+        if not exported:
             continue
         if not exported:
-            problems.append(f"{role}: {url} exposed no l2_* metrics")
+            problems.append(f"{role}: exposed no l2_* metrics")
             continue
         expected = {name for name in registered
                     if name.startswith(tuple(prefixes) + SHARED_PREFIXES)}
-        missing = sorted(expected - exported)
-        lazy = [name for name in missing if name.startswith(LAZY_PREFIXES)]
-        hard = [name for name in missing if name not in lazy]
         foreign = sorted(exported - expected)
-        if hard:
-            problems.append(f"{role}: registered but not exported: "
-                            + ", ".join(hard))
-        if lazy:
-            notes.append(f"{role}: lazy (label-dependent, not yet in /metrics): "
-                         + ", ".join(lazy))
         if foreign:
             notes.append(f"{role}: exported but registered elsewhere: "
                          + ", ".join(foreign))
-        if not hard and not foreign:
+        missing = expected - exported
+        if missing:
+            split_lazy(missing, problems, notes,
+                       f"{role}: registered but not exported",
+                       f"{role}: ")
+        else:
             notes.append(f"{role}: /metrics matches registration "
                          f"({len(exported)} metrics)")
+
+    everywhere = set()
+    for exported in exported_by_role.values():
+        everywhere |= exported
+    notes.append(f"dashboards: every metric is exported by some service "
+                 f"({len(dashboards & everywhere)}/{len(dashboards)})")
+    split_lazy(dashboards - everywhere, problems, notes,
+               "dashboards: metric never exported by any service", "dashboards: ")
 
 
 def main() -> int:
@@ -252,7 +300,7 @@ def main() -> int:
             problems, notes)
 
     if args.runtime:
-        runtime_check(registered, args.timeout, problems, notes)
+        runtime_check(registered, dashboards, args.timeout, problems, notes)
 
     print("metric consistency check")
     print(f"  mode: {'offline+runtime' if args.runtime else 'offline'}")
