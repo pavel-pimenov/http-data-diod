@@ -222,6 +222,7 @@ struct SentryTracingEnv {
   double sentry_failed() const {
     return m_sentry_failed.Collect().counter.value;
   }
+  double failed() const { return m_spans_failed.Collect().counter.value; }
 };
 
 bool is_hex_string(const std::string &s) {
@@ -1309,6 +1310,56 @@ TEST_CASE("TraceLogger: sentry delivery failure is counted as failed",
   REQUIRE(wait_for_condition([&] { return env->sentry_failed() >= 1.0; },
                              8000));
   REQUIRE(env->sentry_sent() == 0.0);
+}
+
+TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead",
+          "[tracing][sentry]") {
+  // The Sentry performance delivery is independent of the Jaeger retry loop:
+  // a dead Jaeger endpoint must not suppress healthy Sentry transactions.
+  httplib::Server sentry_server;
+  std::mutex mu;
+  std::vector<std::string> sentry_bodies;
+  sentry_server.Post("/api/2/envelope/",
+                     [&](const httplib::Request &req, httplib::Response &res) {
+                       std::lock_guard lock(mu);
+                       sentry_bodies.push_back(req.body);
+                       res.status = 200;
+                     });
+  const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
+  std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
+
+  const auto jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
+                          std::to_string(sentry_port) + "/2";
+  auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,
+                                                4, 100, 1.0, 1.0);
+  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
+                              1000000, 3500000, "l2-proxy-worker",
+                              nlohmann::json{{"http.status_code", 200}});
+
+  REQUIRE(wait_for_condition(
+      [&] {
+        std::lock_guard lock(mu);
+        return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
+      },
+      8000));
+  REQUIRE(env->sentry_failed() == 0.0);
+  REQUIRE(env->failed() >= 1.0);
+
+  std::string envelope;
+  {
+    std::lock_guard lock(mu);
+    envelope = sentry_bodies.front();
+  }
+  REQUIRE(envelope.find("\"type\":\"transaction\"") != std::string::npos);
+  REQUIRE(envelope.find("test-service: HTTP POST /v1/report") !=
+          std::string::npos);
+
+  env.reset();
+  sentry_server.stop();
+  if (sentry_thread.joinable())
+    sentry_thread.join();
 }
 
 TEST_CASE("TraceLogger: sentry delivery with null counters is safe",

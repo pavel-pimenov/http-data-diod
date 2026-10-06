@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 64 | единый CI-гейт (ci-gate.sh), env-var ↔ compose гейт, docker build-context гейт, кэш docker-слоёв в CI | [round-64](docs/history/round-64-единый-CI-гейт-env-па-и-docker-build-context-гейты-кэш.md) |
 | 63 | CI-фиксы: clang-tidy версионного заголовка на хосте, dockerignore generate_version.sh | [round-63](docs/history/round-63-CI-фиксы-clang-tidy-dockerignore-версионный-заголовок.md) |
 | 62 | гейт метрик DB Gateway end-to-end, clang-tidy sweep, сжатие HISTORY.md | [round-62](docs/history/round-62-гейт-метрик-DB-Gateway-clang-tidy-и-сжатие-HISTORY.md) |
 | 61 | гейт метрик — обратное направление (дашборды ↔ живой /metrics) + юнит-тесты | [round-61](docs/history/round-61-гейт-метрик-обратное-направление-дашборды-живой-metrics-юнит.md) |

@@ -210,6 +210,8 @@ services:
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
       - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # Crash dump dir (matches the mounted ./crash-dumps volume)
+      - CRASH_DUMP_DIR=/crash-dumps
       # /health/ready may initiate a blocking NATS reconnect (default off)
       - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
       # HTTPS server SSL configuration (optional)
@@ -522,6 +524,8 @@ services:
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
       - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # Crash dump dir (matches the mounted ./crash-dumps volume)
+      - CRASH_DUMP_DIR=/crash-dumps
       # /health/ready may initiate a blocking NATS reconnect (default off)
       - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
       # HTTPS server SSL configuration (optional)
@@ -662,6 +666,8 @@ services:
       - CRASH_TEST=${CRASH_TEST:-false}
       # HTTP /crash-test endpoint (default off; only for test-crash-handler.py)
       - ENABLE_CRASH_TEST_ENDPOINT=${ENABLE_CRASH_TEST_ENDPOINT:-false}
+      # Crash dump dir (matches the mounted ./crash-dumps volume)
+      - CRASH_DUMP_DIR=/crash-dumps
       # /health/ready may initiate a blocking NATS reconnect (default off)
       - HEALTH_READY_ALLOW_CONNECT=${HEALTH_READY_ALLOW_CONNECT:-false}
       - ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION=false

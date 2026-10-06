@@ -163,13 +163,31 @@ BUILD_STEP_START=$(date +%s)
 # --profile is a compose up flag; docker compose build rejects it (profiles
 # select which services.up starts, they do not narrow the build). Keep
 # COMPOSE_ARGS for the up/down invocations below.
-if ! docker compose build --progress=plain; then
+# L2_BAKE_CACHE=gha (CI only, with setup-buildx-action) builds through
+# `docker buildx bake` so the build layers are cached between CI runs via the
+# GitHub Actions cache backend. Tags must be set explicitly: bake does not
+# derive the compose project image names automatically.
+L2_COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+build_images() {
+    local no_cache="${1:-}"
+    if [ "${L2_BAKE_CACHE:-}" = "gha" ] && docker buildx version >/dev/null 2>&1; then
+        docker buildx bake -f docker-compose.yml --progress=plain $no_cache \
+            --set '*.cache-from=type=gha,scope=l2' \
+            --set '*.cache-to=type=gha,mode=max,scope=l2' \
+            --set "l2-proxy.tags=${L2_COMPOSE_PROJECT}-l2-proxy:${L2_PROXY_TAG:-latest}" \
+            --set "l2-worker.tags=${L2_COMPOSE_PROJECT}-l2-worker:${L2_WORKER_TAG:-latest}"
+    else
+        docker compose build --progress=plain $no_cache
+    fi
+}
+
+if ! build_images; then
     # Remove failed containers, keep cached layers
     docker compose rm -f 2>/dev/null || true
 
     # Try building again without cache
     echo "Retrying build without cache..."
-    if ! docker compose build --no-cache --progress=plain; then
+    if ! build_images --no-cache; then
         echo "❌ Build failed."
         echo ""
         echo "=========================================="

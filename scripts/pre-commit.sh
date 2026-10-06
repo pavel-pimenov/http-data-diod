@@ -61,33 +61,11 @@ run_health_check() {
     return 0
 }
 
-# Run message counter test
-run_message_test() {
-    log_info "Running message consistency test (1 iteration, 1 concurrent)..."
-
-    if ! python3 message_counter.py --iterations 1 --concurrent 1 --dup-check 2>&1; then
-        log_error "❌ Message counter test FAILED!"
-        echo ""
-        echo "=========================================="
-        echo "Commit blocked due to test failure."
-        echo ""
-        echo "To debug:"
-        echo "  1. Check service logs: docker compose logs"
-        echo "  2. Run health check: ./health-check.sh"
-        echo "  3. Rebuild services: ./rebuild-and-run.sh"
-        echo "=========================================="
-        return 1
-    fi
-
-    log_info "✓ Message counter test passed"
-    return 0
-}
-
 # Unit tests for the pure Python helpers (message_counter, dashboard generator,
 # metric consistency checker). No containers needed, runs in milliseconds.
 run_unit_tests() {
     log_info "Running Python unit tests (tests/)..."
-    if ! python3 -m unittest discover -s tests 2>&1; then
+    if ! ./scripts/ci-gate.sh unit 2>&1; then
         log_error "❌ Python unit tests FAILED!"
         return 1
     fi
@@ -96,44 +74,24 @@ run_unit_tests() {
 }
 
 # Cross-check metric names between C++ registrations, Grafana dashboards, the
-# README catalogue and metrics-golden-check.py. Cheap: the offline pass is a
-# regex sweep over the sources, the runtime pass is three /metrics scrapes.
-# SKIP_METRICS_CHECK=1 skips it (offline mode still runs when the stack is down).
+# README catalogue and metrics-golden-check.py. Also runs the env-var/compose
+# and docker build-context gates. The offline pass is a regex sweep over the
+# sources; the runtime pass needs a live stack.
+# SKIP_METRICS_CHECK=1 skips the metric-name gates (offline still runs env/docker gates).
 run_metrics_check() {
     if [ "${SKIP_METRICS_CHECK:-0}" = "1" ]; then
-        log_warn "SKIP_METRICS_CHECK=1 — проверка метрик пропущена"
-        return 0
+        log_warn "SKIP_METRICS_CHECK=1 — metric gates skipped (env/docker gates still run in ci-gate offline)"
     fi
-    log_info "Running metric-name consistency check..."
-    if ! python3 scripts/metrics-consistency-check.py --offline; then
-        log_error "Metric names disagree between C++, dashboards, README and golden check!"
+    if ! ./scripts/ci-gate.sh offline 2>&1; then
+        log_error "Offline gates (metric-name/env-var/build-context) FAILED!"
         return 1
     fi
-    if docker compose ps 2>/dev/null | grep -q "Up"; then
-        # DB Gateway traffic families (l2_proxy_db_*, l2_worker_db_*) are only
-        # emitted after real DB queries: reproduce them so the runtime check
-        # sees the gateway working, not just tolerating it as `lazy`.
-        if docker compose ps postgres 2>/dev/null | grep -q "Up"; then
-            if ! python3 scripts/db-gateway-e2e-test.py 2>&1; then
-                log_error "DB Gateway e2e test FAILED!"
-                return 1
-            fi
-            # Traffic + DB families: message_counter already ran above, so the
-            # core happy-path counters must be non-zero; DB families are emitted
-            # by the e2e test just executed.
-            if ! python3 scripts/metrics-golden-check.py --traffic --db 2>&1; then
-                log_error "Traffic/DB metric families incomplete or zero in VictoriaMetrics!"
-                return 1
-            fi
-        else
-            log_warn "postgres is down — DB Gateway metric check skipped"
-        fi
-        if ! python3 scripts/metrics-consistency-check.py --runtime; then
-            log_error "Exported metrics do not match the C++ registrations!"
-            return 1
-        fi
-    else
-        log_warn "Stack is down — only the offline metric check ran"
+    # Runtime gates: message counter, DB Gateway e2e, golden metrics
+    # (--traffic --db) and /metrics consistency. Warns (rc=0) when the stack is
+    # down or postgres is unavailable.
+    if ! ./scripts/ci-gate.sh runtime 2>&1; then
+        log_error "Runtime gates FAILED!"
+        return 1
     fi
     log_info "✓ Metric consistency check passed"
     return 0
@@ -198,19 +156,14 @@ main() {
         exit 1
     fi
 
-    # Run message test
-    if ! run_message_test; then
-        log_error "Pre-commit tests failed!"
-        exit 1
-    fi
-
     # Run Python unit tests (fast, no containers)
     if ! run_unit_tests; then
         log_error "Pre-commit unit tests failed!"
         exit 1
     fi
 
-    # Run metric-name consistency check (offline + runtime)
+    # Run message test + metric-name gates (runtime includes message counter,
+    # DB gateway e2e, golden metrics and /metrics consistency)
     if ! run_metrics_check; then
         log_error "Pre-commit metric consistency check failed!"
         exit 1

@@ -28,7 +28,10 @@ jobs:
         run: pip install aiohttp nats-py
 
       - name: Python unit tests (no network)
-        run: python3 -m unittest discover -s tests -v
+        run: ./scripts/ci-gate.sh unit
+
+      - name: Offline gates (metric consistency, env-var <-> compose, docker build-context)
+        run: ./scripts/ci-gate.sh offline
 
       - name: Generate version header (as rebuild-and-run.sh)
         run: |
@@ -39,20 +42,22 @@ jobs:
 
       # GRAFANA_URL points to a dead port so rebuild-and-run.sh skips the
       # dashboard-update block and the build/health gates stay deterministic.
+      # buildx docker-container driver enables the GitHub Actions cache backend;
+      # rebuild-and-run.sh then builds via `docker buildx bake` (L2_BAKE_CACHE=gha)
+      # so layers produced on this run warm the next CI run.
+      - name: Set up Buildx with GitHub Actions cache
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          buildkitd-flags: --oci-worker-no-process-sandbox
+
       - name: Build images and start the stack
-        run: GRAFANA_URL=http://127.0.0.1:65530 ./rebuild-and-run.sh
+        run: GRAFANA_URL=http://127.0.0.1:65530 L2_BAKE_CACHE=gha ./rebuild-and-run.sh
 
-      - name: Smoke test (NATS, 1 iteration)
-        run: python3 message_counter.py --iterations 1 --concurrent 1 --dup-check
-
-      - name: DB Gateway e2e (query/ping/gates over postgres)
-        run: python3 scripts/db-gateway-e2e-test.py
-
-      - name: Golden metrics check (full catalogue + traffic counters + DB gateway)
-        run: python3 scripts/metrics-golden-check.py --traffic --db
-
-      - name: Metric-name consistency (C++ vs dashboards vs README vs golden)
-        run: python3 scripts/metrics-consistency-check.py --runtime
+      # Message counter, DB Gateway e2e, golden metrics (--traffic --db) and
+      # /metrics consistency — the same single source of truth as pre-commit.
+      - name: Runtime gates (smoke + DB e2e + golden + metrics consistency)
+        run: ./scripts/ci-gate.sh runtime
 
       - name: NATS reconnect + dedup e2e test
         run: python3 scripts/e2e-worker-reconnect-test.py
