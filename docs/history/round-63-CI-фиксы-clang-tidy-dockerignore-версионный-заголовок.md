@@ -14,4 +14,8 @@
 - Coverage-образ собирается, `./scripts/run-coverage.sh` EXIT=0 (total 97% = 10499/10726 строк, gate 90% проходит).
 
 ### Follow-up (после пуша)
-- Ожидается зелёный прогон CI на main после пуша фикса `run-clang-tidy.sh`.
+- **CI полностью зелёный** (прогон `4a87dca`, databaseId 37434673384): все три job — «Build + unit tests + NATS smoke», «Coverage gate (>= 90% lines)», «clang-tidy (full sweep)» — success. Последний красный job (clang-tidy) закрыт фиксом `ensure_version_header`; coverage-гейт держится на фиксе `.dockerignore`.
+- **Юнит-тесты инвариантов golden-каталога** (`tests/test_metrics_consistency.py`, класс `GoldenCatalogConsistencyTest`, 8 тестов): `TRAFFIC_QUERIES ⊆ CATALOG`, CONDITIONAL не пересекается с CATALOG, отсутствие дубликатов в CATALOG/CONDITIONAL/TRAFFIC, отсутствие histogram-суффиксов в TRAFFIC, `_db_`-семейства — ровно DB-набор, порядок/uniqueness `build_required(--all)`. Всего 53 теста зелёные.
+- Гейт подтверждён: `./rebuild-and-run.sh` (health 0, message_counter 0), pre-commit полный (DB e2e 7/7, golden `--traffic --db` 80/80 + happy-path non-zero, consistency offline+runtime, 53 unit-тестов).
+- **Артефакт измерения покрытия**: в `http_client_pool.cpp` все 11 «непокрытых» строк (21,55,65,85,119,133,139-141,157,170,176) — это ровно все `Logger::debug/warn/error` стейтменты файла; окружающий код исполняется (напр., 156/175 covered, конструктор исполняется 69 раз, acquire-timeout бросает через строку 65). Это атрибуция gcov для многострочных template-вызовов, а не реальный пробел логики — новые C++-тесты для них не нужны. `LOG_LEVEL=DEBUG` картину не меняет.
+- Coverage-буфер: TOTAL 97% (10500/10726 строк), гейт 90% проходит с запасом.
