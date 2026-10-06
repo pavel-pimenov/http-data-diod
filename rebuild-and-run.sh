@@ -172,6 +172,7 @@ build_images() {
     local no_cache="${1:-}"
     if [ "${L2_BAKE_CACHE:-}" = "gha" ] && docker buildx version >/dev/null 2>&1; then
         docker buildx bake -f docker-compose.yml --progress=plain $no_cache \
+            --load \
             --set '*.cache-from=type=gha,scope=l2' \
             --set '*.cache-to=type=gha,mode=max,scope=l2' \
             --set "l2-proxy.tags=${L2_COMPOSE_PROJECT}-l2-proxy:${L2_PROXY_TAG:-latest}" \
