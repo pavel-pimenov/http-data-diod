@@ -54,12 +54,15 @@
 ### 4. Кэш docker-слоёв между CI-прогонами
 
 - `rebuild-and-run.sh`: новая `build_images()` — при `L2_BAKE_CACHE=gha` (CI) сборка идёт через
-  `docker buildx bake -f docker-compose.yml` с `--set '*.cache-from/cache-to=type=gha'` и явными
-  тегами `<project>-l2-proxy|worker:latest` (bake сам не выводит compose-теги). Локальный путь
-  `docker compose build` не меняется. Retry-ветка `--no-cache` сохранена.
+  `docker buildx bake -f docker-compose.yml` с `--load` (образы выгружаются в docker-демон —
+  иначе `docker compose up` не находит тег и тянет их из registry), `--set '*.cache-from/cache-to=type=gha'`
+  и явными тегами `<project>-l2-proxy|worker:latest` (bake сам не выводит compose-теги). Локальный
+  путь `docker compose build` не меняется. Retry-ветка `--no-cache` сохранена.
 - `.github/workflows/ci.yml`: шаг `docker/setup-buildx-action@v3` (docker-container драйвер) перед
   сборкой; шаг «Build images» получает `L2_BAKE_CACHE=gha`. Слои, построенные в прогоне, греют
-  следующий.
+  следующий. Две итерации в прогоне CI: убран `buildkitd-flags: --oci-worker-no-process-sandbox`
+  (падает на buildkitd: «can't enable NoProcessSandbox without Rootless») и добавлен `--load`
+  (первая попытка строила только кэш — `docker compose up` падал с «pull access denied»).
 
 ### 5. trace_logger: покрытие реальной ветки «Jaeger мёртв, Sentry жив»
 
@@ -82,6 +85,8 @@ Sentry-доставка при мёртвом Jaeger-таргете: добав�
   consistency offline+runtime — rc=0.
 - `./scripts/pre-commit.sh` (рефакторенный) — health → unit → offline+runtime → clang-tidy, все шаги rc=0.
 - CI-прогон после push — все 3 job success (Build+unit+NATS smoke, Coverage gate, clang-tidy sweep).
+  В ходе прогона выявлены и исправлены два нюанса docker-buildx-пути (см. выше); финальный прогон
+  37447221182 на `d173053` — полностью зелёный, первым сборочным прогоном записан gha-кэш слоёв.
 
 ## Побочные эффекты
 
