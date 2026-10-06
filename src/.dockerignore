@@ -15,6 +15,7 @@ CMakeFiles
 *.md
 *.sh
 !docker-entrypoint.sh
+!generate_version.sh
 *.json
 *.txt
 !CMakeLists.txt
