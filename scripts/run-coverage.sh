@@ -27,6 +27,14 @@ trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
 mkdir -p "$OUT_DIR"
 docker cp "$CID:/app/out/coverage/." "$OUT_DIR/"
 
+# Per-file regression gate: no production file may lose line coverage compared
+# with the committed baseline (docs/coverage-baseline.json). Fails the script
+# (and the CI coverage job) on a regression or on a new file that is not in the
+# baseline yet -- accept it deliberately: scripts/coverage-regression-check.py --update
+echo ""
+echo "=== Coverage regression check (per-file vs docs/coverage-baseline.json) ==="
+python3 "$REPO_ROOT/scripts/coverage-regression-check.py" --report "$OUT_DIR/cov.json"
+
 echo ""
 echo "=== Coverage report: $OUT_DIR/coverage.html ==="
 echo "Open in a browser (line/branch coverage per source file)."

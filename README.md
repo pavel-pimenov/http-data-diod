@@ -828,17 +828,35 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
   --xml --gcov-ignore-errors=all > /tmp/cov.xml
 ```
 
-**Coverage gate:** стадия `coverage` в `src/Dockerfile` линкует
-`gcovr` с `--fail-under-line 90` — сборка coverage-образа завершится ошибкой
-(exit != 0), если общее покрытие строк по проекту опустится ниже **90%**.
-Текущее значение: **97.4%**. Гейт по **ветвям** не ставится (см. ниже).
+**Гейты покрытия** (стадия `coverage` в `src/Dockerfile`, один вызов `gcovr`;
+коды выхода гейтов складываются, поэтому падает сборка coverage-образа):
 
-**Ветвевое покрытие (branch, информационно):**
+| Гейт | Порог | Текущее значение |
+|---|---|---|
+| `--fail-under-line` — строки по проекту | 90% | **90.3%** (13092/14505) |
+| `--fail-under-branch` — ветви по проекту | 40% | **40.6%** (24987/61521) |
+| пер-файловый гейт регрессии (см. ниже) | без снижения | 76 production-файлов в baseline |
+
+**Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
+запускается из `scripts/run-coverage.sh` сразу после отчёта. Сверяет построчное
+покрытие каждого production-файла с закоммиченным `docs/coverage-baseline.json`
+и падает, если файл понизил свой процент (потерянные покрытые строки или новые
+непокрытые), либо если появился production-файл, которого нет в baseline.
+Тестовые TU (`test_*.cpp`) не сравниваются — их контролируют глобальные гейты.
+Принять изменения нужно осознанно, вместе с кодом:
+
+```bash
+python3 scripts/coverage-regression-check.py --update   # обновить baseline
+python3 scripts/coverage-regression-check.py            # только проверить
+python3 scripts/coverage-regression-check.py --max-drop 0.5   # допуск в п.п.
+```
+
+**Ветвевое покрытие (branch):**
 
 | Замер | Branch |
 |---|---|
-| Полный (включая инстанцирование шаблонов в тестовых файлах) | ~41% |
-| Только project-файлы (без `test_*.cpp`) | ~53% |
+| Полный (включая инстанцирование шаблонов в тестовых файлах) | 40.6% |
+| Только project-файлы (без `test_*.cpp`) | 47.0% |
 
 ```bash
 # ветвевой отчёт gcovr (внутри контейнера coverage; HTML-детали в coverage-report/branch.*)
@@ -850,11 +868,13 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 ```
 
 Ветвевой показатель сильно занижен тестовыми сборочными единицами
-(`test_*.cpp` дают 28.5k ветвей из-за инстанцирования шаблонных хедеров) и
+(`test_*.cpp` дают ~48k ветвей из-за инстанцирования шаблонных хедеров) и
 не покрывает эвристики, недостижимые модульными тестами (таймауты, сетевые
-ошибки, DB-экзекуторы). Слабейшие по ветвям: `logger.hpp` (~47% ветвей),
-`tracing_helpers.hpp` (~58%), `rate_limiter_per_ip.hpp` (~59%),
-`db_query_executor_base.cpp` (~42%). Рабочим гейтом остаётся построчный (90%).
+ошибки, DB-экзекуторы). Слабейшие по ветвям в production:
+`db_query_executor_oracle.cpp` (6.6%), `db_query_executor_postgres.cpp` (7.6%),
+`nats_client.cpp` (16.5%), `nats_poll_service.cpp` (23.5%),
+`db_query_handler.cpp` (29.6%) — всем им нужны живые сервисы/брокер.
+Гейт по ветвям стоит на общем числе ветвей (40%).
 
 **Текущие цифры** (раунды 11b–13e):
 
@@ -871,7 +891,7 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| **Общее по проекту** | **~97.4%** | Ключевые модули >88% |
+| **Общее по проекту** | **90.3%** | Гейт: строки ≥90%, ветви ≥40%, пер-файловая регрессия |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 

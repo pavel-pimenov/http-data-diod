@@ -190,6 +190,11 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 #
 # Note: the gcovr --filter must stay as a single backslash here. A doubled one
 # (`\\.`) is passed literally to the regex and matches nothing (0% report).
+#
+# Two gates in one invocation (gcovr ORs their exit codes): line coverage
+# >= 90% and branch coverage >= 40%. The second gcovr pass emits cov.json
+# (same filters, no gates) for scripts/coverage-regression-check.py, which
+# compares per-file coverage against docs/coverage-baseline.json.
 FROM builder AS coverage
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -212,7 +217,16 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/json/.*' \
           --html --html-details -o /app/out/coverage/coverage.html \
           --gcov-ignore-errors=all \
-          --fail-under-line 90 && \
+          --fail-under-line 90 \
+          --fail-under-branch 40 && \
+    gcovr --object-directory . --root /app \
+          --filter '/app/.*\.(cpp|hpp|h)$' \
+          --exclude '/app/prometheus-cpp/.*' \
+          --exclude '/app/httplib/.*' \
+          --exclude '/app/base64/.*' \
+          --exclude '/app/json/.*' \
+          --json -o /app/out/coverage/cov.json \
+          --gcov-ignore-errors=all && \
     echo "=== coverage report rendered ==="
 
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.

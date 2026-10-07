@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 70 | гейт ветвей 40% + пер-файловый гейт регрессии покрытия (coverage-regression-check.py ↔ docs/coverage-baseline.json) | [round-70](docs/history/round-70-гейт-ветвей-40-процентов-и-пер-файловая-регрессия-покрытия.md) |
 | 69 | покрытие юнит-тестами до 90% (тесты линкуют весь бинарник, новые test_l2_worker/test_proxy_handlers, StatsLogger с параметром периода) + гейт --fail-under-line 90 | [round-69](docs/history/round-69-покрытие-тестами-90-процентов-гейт-fail-under-line-90.md) |
 | 68 | живое сравнение Grafana ↔ Perses (новый runtime-гейт) + анализ покрытия юнит-тестами | [round-68](docs/history/round-68-живое-сравнение-Grafana-Perses-в-гейте-и-анализ-покрытия.md) |
 | 67 | Perses в гейтах: offline --check конвертера + metrics-consistency (Grafana == Perses), фикс SC2034, README-раздел | [round-67](docs/history/round-67-perses-в-offline-гейт-и-metrics-consistency-гигиена-и-README.md) |
