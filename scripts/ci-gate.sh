@@ -12,8 +12,9 @@
 #   ./scripts/ci-gate.sh runtime    Runtime gates against a live stack:
 #                                   message counter, DB gateway e2e, golden
 #                                   metrics (--traffic --db), /metrics
-#                                   consistency. Warns (rc=0) when the stack is
-#                                   down or postgres is unavailable.
+#                                   consistency, Grafana <-> Perses dashboard
+#                                   parity. Warns (rc=0) when the stack is down
+#                                   or postgres is unavailable.
 #   ./scripts/ci-gate.sh all        unit + offline + runtime
 #
 # SKIP_METRICS_CHECK=1 skips the metric-name gates (offline+runtime).
@@ -130,6 +131,13 @@ g_runtime() {
         fi
         log_info "✓ Metric consistency (runtime) passed"
     fi
+
+    log_info "Running Grafana <-> Perses dashboard parity check..."
+    if ! python3 scripts/compare-grafana-perses.py --allow-down 2>&1; then
+        log_error "Grafana and Perses dashboards disagree!"
+        return 1
+    fi
+    log_info "✓ Grafana <-> Perses parity passed"
 }
 
 g_all() {

@@ -702,7 +702,17 @@ URL datasource берётся с приоритетом: `--datasource-url` (CLI
 python3 scripts/generate-perses-dashboards.py              # нативный конвертер + синк на :8089
 python3 scripts/generate-perses-dashboards.py --check      # offline-проверка конвертера (без сети)
 python3 scripts/generate-perses-dashboards.py --output-dir ./monitoring/perses/generated  # GitOps-экспорт
+python3 scripts/compare-grafana-perses.py                  # живое сравнение Grafana ↔ Perses
+python3 scripts/compare-grafana-perses.py --no-live         # только структура (панели/PromQL/секции)
 ```
+
+`scripts/compare-grafana-perses.py` сверяет **запущенные** инстансы: набор дашбордов, число
+панелей, множество PromQL-запросов (после нормализации `${vm:regex}` ↔ `$vm`), заголовки
+row/grid-секций, а затем прогоняет выборку запросов каждой доски через оба API
+(Grafana `/api/ds/query`, Perses `/proxy/globaldatasources/prometheus/api/v1/query`) и
+сравнивает лейблы и значения (с допуском — запросы выполняются с интервалом в мс).
+Запускается в runtime-гейте `scripts/ci-gate.sh runtime` (с `--allow-down`: контейнеры
+упали — чек пропускается с предупреждением).
 
 Сервис `perses` в `docker-compose.yml` слушает `8089:8080` и использует named volume
 `perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-имидемпотентно).
