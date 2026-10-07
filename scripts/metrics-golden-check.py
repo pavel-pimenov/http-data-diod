@@ -248,12 +248,14 @@ def poll_catalogue_families(vm_url: str, required: list) -> list:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8428"),
-                        help="VictoriaMetrics URL (default http://localhost:8428)")
+    parser.add_argument(
+        "--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8428"),
+        help="VictoriaMetrics URL (default http://localhost:8428)")
     parser.add_argument("--traffic", action="store_true",
                         help="also require the core happy-path counters to be non-zero")
-    parser.add_argument("--all", action="store_true",
-                        help="also require lazily-emitted families (per-client-id duplicate detectors)")
+    parser.add_argument(
+        "--all", action="store_true",
+        help="also require lazily-emitted families (per-client-id duplicate detectors)")
     parser.add_argument("--db", action="store_true",
                         help="also require the DB Gateway traffic families "
                              "(l2_proxy_db_*, l2_worker_db_*); run the DB traffic "

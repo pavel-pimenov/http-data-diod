@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Run clang-tidy on changed C++ files inside a container.
 #
@@ -122,12 +122,12 @@ main() {
         mode="all"
     fi
 
-    local files
+    local files=()
     if [ "$mode" = "all" ]; then
-        mapfile -t files < <(all_cpp_files)
+        while IFS= read -r f; do files+=("$f"); done < <(all_cpp_files)
         log_info "Full sweep over all project C++ files ($(printf '%s ' "${files[@]}"))"
     else
-        mapfile -t files < <(changed_cpp_files)
+        while IFS= read -r f; do files+=("$f"); done < <(changed_cpp_files)
     fi
     if [ "${#files[@]}" -eq 0 ]; then
         log_info "No C++ files to lint, skipping clang-tidy"

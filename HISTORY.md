@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 65 | гигиена скриптов: chmod +x, NOEOL, shebang, set -euo pipefail, lint-python в offline-гейт, shellcheck-гейт | [round-65](docs/history/round-65-гигиена-скриптов-chmod-x-noeol-shebang-set-euo-pipefail-lint-python-shellcheck.md) |
 | 64 | единый CI-гейт (ci-gate.sh), env-var ↔ compose гейт, docker build-context гейт, кэш docker-слоёв в CI | [round-64](docs/history/round-64-единый-CI-гейт-env-па-и-docker-build-context-гейты-кэш.md) |
 | 63 | CI-фиксы: clang-tidy версионного заголовка на хосте, dockerignore generate_version.sh | [round-63](docs/history/round-63-CI-фиксы-clang-tidy-dockerignore-версионный-заголовок.md) |
 | 62 | гейт метрик DB Gateway end-to-end, clang-tidy sweep, сжатие HISTORY.md | [round-62](docs/history/round-62-гейт-метрик-DB-Gateway-clang-tidy-и-сжатие-HISTORY.md) |

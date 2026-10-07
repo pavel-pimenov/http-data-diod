@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Renders the unit-test coverage report for src.
 #
 # The report is built inside the Docker image (coverage stage): the project

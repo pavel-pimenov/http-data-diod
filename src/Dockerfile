@@ -73,6 +73,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libgoogle-perftools-dev \
     clang-tidy \
     clang-format \
+    shellcheck \
     catch2 \
     libcli11-dev \
     libpq-dev \

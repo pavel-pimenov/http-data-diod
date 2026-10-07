@@ -44,6 +44,13 @@ g_unit() {
 }
 
 g_offline() {
+    log_info "Running Python-style consistency check (lint-python.py)..."
+    if ! python3 scripts/lint-python.py 2>&1; then
+        log_error "Python style issues (long lines without # noqa: E501, NOEOL, CRLF, ...)!"
+        return 1
+    fi
+    log_info "✓ Python-style consistency passed"
+
     if [ "$SKIP_METRICS_CHECK" = "1" ]; then
         log_warn "SKIP_METRICS_CHECK=1 — metric-name gates skipped"
     else

@@ -30,7 +30,7 @@ jobs:
       - name: Python unit tests (no network)
         run: ./scripts/ci-gate.sh unit
 
-      - name: Offline gates (metric consistency, env-var <-> compose, docker build-context)
+      - name: Offline gates (python style, metric consistency, env-var <-> compose, docker build-context)
         run: ./scripts/ci-gate.sh offline
 
       - name: Generate version header (as rebuild-and-run.sh)
@@ -57,6 +57,11 @@ jobs:
       # /metrics consistency — the same single source of truth as pre-commit.
       - name: Runtime gates (smoke + DB e2e + golden + metrics consistency)
         run: ./scripts/ci-gate.sh runtime
+
+      # Shell hygiene over all .sh files (runs in the builder image, whose
+      # layers are already cached by the bake step above).
+      - name: Shellcheck all shell scripts
+        run: bash scripts/run-shellcheck.sh --all
 
       - name: NATS reconnect + dedup e2e test
         run: python3 scripts/e2e-worker-reconnect-test.py

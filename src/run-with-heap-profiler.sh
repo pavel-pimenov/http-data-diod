@@ -2,6 +2,8 @@
 
 # Script to run the l2-proxy with heap profiling using gperftools
 
+set -euo pipefail
+
 # Check if we're in the right directory
 if [ ! -f "CMakeLists.txt" ]; then
     echo "Error: CMakeLists.txt not found. Please run this script from the src directory."

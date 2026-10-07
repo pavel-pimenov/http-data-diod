@@ -72,7 +72,7 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
                         f.seek(0)
                         return yaml.safe_load(f)
                     except ImportError:
-                        logger.error("Cannot determine config format. Use .json or install PyYAML for .yaml")
+                        logger.error("Cannot determine config format. Use .json or install PyYAML for .yaml")  # noqa: E501
                         sys.exit(1)
     except Exception as e:
         logger.error(f"Failed to load config file: {e}")
@@ -252,7 +252,7 @@ def create_nats_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": 'gnatsd_subsz_num_subscriptions{server_id=~".+", vm=~"${vm:regex}"}', "refId": "A"}
+            {"expr": 'gnatsd_subsz_num_subscriptions{server_id=~".+", vm=~"${vm:regex}"}', "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -293,7 +293,7 @@ def create_nats_dashboard() -> Dict:
         unit="short",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_varz_connections{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Подключения", "refId": "A"}
+            {"expr": 'gnatsd_varz_connections{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Подключения", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -305,7 +305,7 @@ def create_nats_dashboard() -> Dict:
         unit="short",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_connz_limit{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Макс. подключения", "refId": "A"}
+            {"expr": 'gnatsd_connz_limit{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Макс. подключения", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -322,8 +322,8 @@ def create_nats_dashboard() -> Dict:
         unit="bytes",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_connz_in_bytes{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Вх", "refId": "A"},
-            {"expr": 'gnatsd_connz_out_bytes{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Исх", "refId": "B"}
+            {"expr": 'gnatsd_connz_in_bytes{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Вх", "refId": "A"},  # noqa: E501
+            {"expr": 'gnatsd_connz_out_bytes{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Исх", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -335,8 +335,8 @@ def create_nats_dashboard() -> Dict:
         unit="short",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_connz_in_msgs{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Вх", "refId": "A"},
-            {"expr": 'gnatsd_connz_out_msgs{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Исх", "refId": "B"}
+            {"expr": 'gnatsd_connz_in_msgs{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Вх", "refId": "A"},  # noqa: E501
+            {"expr": 'gnatsd_connz_out_msgs{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Исх", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -353,8 +353,8 @@ def create_nats_dashboard() -> Dict:
         unit="short",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_subsz_num_subscriptions{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Активные", "refId": "A"},
-            {"expr": 'gnatsd_subsz_total{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Всего", "refId": "B"}
+            {"expr": 'gnatsd_subsz_num_subscriptions{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Активные", "refId": "A"},  # noqa: E501
+            {"expr": 'gnatsd_subsz_total{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Всего", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -366,8 +366,8 @@ def create_nats_dashboard() -> Dict:
         unit="short",
         custom=ts_custom,
         targets=[
-            {"expr": 'gnatsd_subsz_num_cache{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Размер кэша", "refId": "A"},
-            {"expr": 'gnatsd_subsz_cache_hit_rate{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Доля попаданий", "refId": "B"}
+            {"expr": 'gnatsd_subsz_num_cache{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Размер кэша", "refId": "A"},  # noqa: E501
+            {"expr": 'gnatsd_subsz_cache_hit_rate{server_id=~".+", vm=~"${vm:regex}"}', "legendFormat": "Доля попаданий", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -384,7 +384,7 @@ def create_nats_dashboard() -> Dict:
         unit="reqps",
         thresholds=green_only,
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "запросов/с", "refId": "A"}
+            {"expr": 'sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "запросов/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -403,7 +403,7 @@ def create_nats_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_errors_total{vm=~"${vm:regex}"}[5m])) / sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m]))', "legendFormat": "Ошибок %", "refId": "A"}
+            {"expr": 'sum(rate(l2_proxy_nats_errors_total{vm=~"${vm:regex}"}[5m])) / sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m]))', "legendFormat": "Ошибок %", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -415,7 +415,7 @@ def create_nats_dashboard() -> Dict:
         unit="cps",
         thresholds=green_only,
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_connection_creates_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "созданий/с", "refId": "A"}
+            {"expr": 'sum(rate(l2_proxy_nats_connection_creates_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "созданий/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 4
@@ -428,9 +428,9 @@ def create_nats_dashboard() -> Dict:
         unit="s",
         custom=ts_custom,
         targets=[
-            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -443,8 +443,8 @@ def create_nats_dashboard() -> Dict:
         unit="reqps",
         custom=ts_custom,
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Запросы/с", "refId": "A"},
-            {"expr": 'sum(rate(l2_proxy_nats_errors_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Ошибки/с", "refId": "B"}
+            {"expr": 'sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Запросы/с", "refId": "A"},  # noqa: E501
+            {"expr": 'sum(rate(l2_proxy_nats_errors_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -457,8 +457,8 @@ def create_nats_dashboard() -> Dict:
         unit="cps",
         custom=ts_custom,
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_connection_creates_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Создания/с", "refId": "A"},
-            {"expr": 'sum(rate(l2_proxy_nats_connection_errors_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Ошибки/с", "refId": "B"}
+            {"expr": 'sum(rate(l2_proxy_nats_connection_creates_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Создания/с", "refId": "A"},  # noqa: E501
+            {"expr": 'sum(rate(l2_proxy_nats_connection_errors_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "Ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -507,8 +507,8 @@ def create_tracing_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_tracing_spans_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено спанов/с", "refId": "A"},
-            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"}
+            {"expr": "rate(l2_tracing_spans_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено спанов/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -527,7 +527,7 @@ def create_tracing_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_tracing_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "Размер очереди", "refId": "A"}
+            {"expr": "l2_tracing_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "Размер очереди", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -547,7 +547,7 @@ def create_tracing_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "A"}
+            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -558,7 +558,7 @@ def create_tracing_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "l2_tracing_last_send_duration_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "Длительность последней отправки", "refId": "A"}
+            {"expr": "l2_tracing_last_send_duration_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "Длительность последней отправки", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -574,9 +574,9 @@ def create_tracing_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_tracing_send_latency_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка отправки p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -587,9 +587,9 @@ def create_tracing_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_tracing_queue_time_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Время в очереди p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -612,8 +612,8 @@ def create_tracing_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_tracing_sentry_transactions_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено/с", "refId": "A"},
-            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "B"}
+            {"expr": "rate(l2_tracing_sentry_transactions_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -632,7 +632,7 @@ def create_tracing_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": "rate(l2_tracing_sentry_transactions_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -668,8 +668,8 @@ def create_sentry_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": 'rate(l2_worker_sentry_events_sent_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Отправлено/с", "refId": "A"},
-            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "B"}
+            {"expr": 'rate(l2_worker_sentry_events_sent_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Отправлено/с", "refId": "A"},  # noqa: E501
+            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -688,7 +688,7 @@ def create_sentry_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_sentry_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "Размер очереди", "refId": "A"}
+            {"expr": "l2_worker_sentry_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "Размер очереди", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -712,7 +712,7 @@ def create_sentry_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -744,7 +744,7 @@ def create_dashboard_base(title: str, uid: str, tags: List[str]) -> Dict:
                     {
                         "name": "vm",
                         "label": "Виртуальная машина",
-                        "description": "Имя узла, на котором развёрнут стек. Label 'vm' добавляет vmagent при скрейпе из env VM_NAME (по умолчанию — hostname узла, см. rebuild-and-run.sh). На всех досках метрики показываются только одной ВМ.",
+                        "description": "Имя узла, на котором развёрнут стек. Label 'vm' добавляет vmagent при скрейпе из env VM_NAME (по умолчанию — hostname узла, см. rebuild-and-run.sh). На всех досках метрики показываются только одной ВМ.",  # noqa: E501
                         "type": "query",
                         "datasource": {
                             "type": "prometheus",
@@ -1000,7 +1000,7 @@ def create_slo_dashboard() -> Dict:
         x=0, y=y, w=6, h=5,
         unit="percentunit",
         targets=[
-            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность 1ч", "refId": "A"}
+            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность 1ч", "refId": "A"}  # noqa: E501
         ],
         color_mode="value"
     ))
@@ -1012,7 +1012,7 @@ def create_slo_dashboard() -> Dict:
         x=6, y=y, w=6, h=5,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[30m]))", "legendFormat": "Задержка P95 30м", "refId": "A"}
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[30m]))", "legendFormat": "Задержка P95 30м", "refId": "A"}  # noqa: E501
         ],
         color_mode="value"
     ))
@@ -1024,7 +1024,7 @@ def create_slo_dashboard() -> Dict:
         x=12, y=y, w=6, h=5,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99 5м", "refId": "A"}
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99 5м", "refId": "A"}  # noqa: E501
         ],
         color_mode="value"
     ))
@@ -1036,7 +1036,7 @@ def create_slo_dashboard() -> Dict:
         x=18, y=y, w=6, h=5,
         unit="percentunit",
         targets=[
-            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Доля ошибок 5м", "refId": "A"}
+            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Доля ошибок 5м", "refId": "A"}  # noqa: E501
         ],
         color_mode="value"
     ))
@@ -1061,7 +1061,7 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "(0.001 - (1 - (1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[24h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[24h])))))) / 0.001", "legendFormat": "Оставшийся бюджет ошибок", "refId": "A"},
+            {"expr": "(0.001 - (1 - (1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[24h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[24h])))))) / 0.001", "legendFormat": "Оставшийся бюджет ошибок", "refId": "A"},  # noqa: E501
             {"expr": "0", "legendFormat": "Бюджет исчерпан", "refId": "B"}
         ]
     ))
@@ -1081,8 +1081,8 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "(sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))) / 0.001", "legendFormat": "Сгорание бюджета 5м", "refId": "A"},
-            {"expr": "(sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[30m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[30m]))) / 0.001", "legendFormat": "Сгорание бюджета 30м", "refId": "B"}
+            {"expr": "(sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))) / 0.001", "legendFormat": "Сгорание бюджета 5м", "refId": "A"},  # noqa: E501
+            {"expr": "(sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[30m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[30m]))) / 0.001", "legendFormat": "Сгорание бюджета 30м", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1106,9 +1106,9 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность 1ч", "refId": "A"},
-            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[6h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[6h])))", "legendFormat": "Доступность 6ч", "refId": "B"},
-            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[24h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[24h])))", "legendFormat": "Доступность 24ч", "refId": "C"}
+            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность 1ч", "refId": "A"},  # noqa: E501
+            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[6h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[6h])))", "legendFormat": "Доступность 6ч", "refId": "B"},  # noqa: E501
+            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[24h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[24h])))", "legendFormat": "Доступность 24ч", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1124,9 +1124,9 @@ def create_slo_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -1137,8 +1137,8 @@ def create_slo_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Всего запросов/с", "refId": "A"},
-            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Ошибок/с", "refId": "B"}
+            {"expr": "sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Всего запросов/с", "refId": "A"},  # noqa: E501
+            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Ошибок/с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1161,7 +1161,7 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность", "refId": "A"},
+            {"expr": "1 - (sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1h])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1h])))", "legendFormat": "Доступность", "refId": "A"},  # noqa: E501
             {"expr": "0.999", "legendFormat": "Цель SLO (99.9%)", "refId": "B"}
         ]
     ))
@@ -1180,7 +1180,7 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[30m]))", "legendFormat": "Задержка P95", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[30m]))", "legendFormat": "Задержка P95", "refId": "A"},  # noqa: E501
             {"expr": "0.05", "legendFormat": "Цель SLO (50мс)", "refId": "B"}
         ]
     ))
@@ -1201,7 +1201,7 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Доля ошибок", "refId": "A"},
+            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m])) / sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Доля ошибок", "refId": "A"},  # noqa: E501
             {"expr": "0.01", "legendFormat": "Цель SLO (1%)", "refId": "B"}
         ]
     ))
@@ -1220,7 +1220,7 @@ def create_slo_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99", "refId": "A"},
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Задержка P99", "refId": "A"},  # noqa: E501
             {"expr": "0.1", "legendFormat": "Цель SLO (100мс)", "refId": "B"}
         ]
     ))
@@ -1236,7 +1236,7 @@ def create_slo_dashboard() -> Dict:
 class GrafanaAPI:
     """Grafana API client — с таймаутом и ретраями (tenacity-free)"""
 
-    def __init__(self, base_url: str, api_key: str = "", user: str = "", password: str = "", timeout: float = 10.0, retries: int = 3):
+    def __init__(self, base_url: str, api_key: str = "", user: str = "", password: str = "", timeout: float = 10.0, retries: int = 3):  # noqa: E501
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
         self.retries = max(1, retries)
@@ -1258,7 +1258,7 @@ class GrafanaAPI:
                 last_exc = e
                 if attempt < self.retries:
                     sleep = min(2 ** attempt, 8)
-                    logger.warning(f"Grafana {method} {url} failed (attempt {attempt}/{self.retries}): {e}; retry in {sleep}s")
+                    logger.warning(f"Grafana {method} {url} failed (attempt {attempt}/{self.retries}): {e}; retry in {sleep}s")  # noqa: E501
                     time.sleep(sleep)
                 else:
                     raise last_exc
@@ -1278,7 +1278,7 @@ class GrafanaAPI:
         """Ensure the VictoriaMetrics (Prometheus-compatible) datasource exists,
         creating it via API if absent. Dashboards reference it by UID 'prometheus'."""
         try:
-            resp = self.session.get(f'{self.base_url}/api/datasources/uid/{PROMETHEUS_UID}', timeout=self.timeout)
+            resp = self.session.get(f'{self.base_url}/api/datasources/uid/{PROMETHEUS_UID}', timeout=self.timeout)  # noqa: E501
             if resp.status_code == 200:
                 logger.info(f"Datasource '{PROMETHEUS_UID}' (uid) already exists")
                 return True
@@ -1366,7 +1366,7 @@ class PrometheusAPI:
             return False
     def get_all_metrics(self) -> List[str]:
         try:
-            resp = self.session.get(f'{self.base_url}/api/v1/label/__name__/values', timeout=self.timeout)
+            resp = self.session.get(f'{self.base_url}/api/v1/label/__name__/values', timeout=self.timeout)  # noqa: E501
             resp.raise_for_status()
             return [m for m in resp.json().get('data', []) if m.startswith('l2_')]
         except Exception as e:
@@ -1374,7 +1374,7 @@ class PrometheusAPI:
             return []
     def get_metric_samples(self, metric_name: str, limit: int = 5) -> List[Dict]:
         try:
-            resp = self.session.get(f'{self.base_url}/api/v1/query', params={'query': metric_name, 'limit': limit}, timeout=self.timeout)
+            resp = self.session.get(f'{self.base_url}/api/v1/query', params={'query': metric_name, 'limit': limit}, timeout=self.timeout)  # noqa: E501
             resp.raise_for_status()
             return resp.json().get('data', {}).get('result', [])
         except Exception as e:
@@ -1425,7 +1425,7 @@ def get_existing_dashboard_metrics(dashboard: Dict) -> List[str]:
     return list(set(metrics))
 
 
-def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, y: int) -> Optional[Dict]:
+def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, y: int) -> Optional[Dict]:  # noqa: E501
     """Create a time series panel for a newly discovered metric"""
     category = categorize_metric(metric_name)
 
@@ -1439,15 +1439,15 @@ def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, 
         unit = "reqps"
 
     # Create legend format
-    legend_format = metric_name.replace('l2_proxy_', '').replace('l2_worker_', '').replace('l2_tracing_', '')
+    legend_format = metric_name.replace('l2_proxy_', '').replace('l2_worker_', '').replace('l2_tracing_', '')  # noqa: E501
 
     # Check if it's a histogram metric
     if '_bucket{' in metric_name or 'histogram_quantile' in metric_name:
         # Create percentile panels
         targets = [
-            {"expr": f"histogram_quantile(0.50, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p50", "refId": "A"},
-            {"expr": f"histogram_quantile(0.95, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p95", "refId": "B"},
-            {"expr": f"histogram_quantile(0.99, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p99", "refId": "C"}
+            {"expr": f"histogram_quantile(0.50, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p50", "refId": "A"},  # noqa: E501
+            {"expr": f"histogram_quantile(0.95, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p95", "refId": "B"},  # noqa: E501
+            {"expr": f"histogram_quantile(0.99, rate({metric_name}_bucket{{vm=~\"${{vm:regex}}\"}}[5m]))", "legendFormat": f"{legend_format} p99", "refId": "C"}  # noqa: E501
         ]
     else:
         # Simple rate or gauge
@@ -1470,7 +1470,7 @@ def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, 
 
 
 def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str) -> bool:
-    """Correct an existing dashboard by comparing with generated version with detailed diagnostics"""
+    """Correct an existing dashboard by comparing with generated version with detailed diagnostics"""  # noqa: E501
     try:
         import re
 
@@ -1510,12 +1510,12 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
         # Panel changes
         if len(existing_panels) != len(new_panels):
             print(f"\n📊 Panel Changes:")
-            print(f"   Total panels: {len(existing_panels)} -> {len(new_panels)} ({len(new_panels) - len(existing_panels):+d})")
+            print(f"   Total panels: {len(existing_panels)} -> {len(new_panels)} ({len(new_panels) - len(existing_panels):+d})")  # noqa: E501
             print(f"   Row panels: {existing_rows} -> {new_rows}")
             print(f"   Visualization panels: {existing_visual_panels} -> {new_visual_panels}")
 
             # Find added/removed panels by title
-            existing_titles = set(p.get('title', '') for p in existing_panels if p.get('type') != 'row')
+            existing_titles = set(p.get('title', '') for p in existing_panels if p.get('type') != 'row')  # noqa: E501
             new_titles = set(p.get('title', '') for p in new_panels if p.get('type') != 'row')
             added_panels = new_titles - existing_titles
             removed_panels = existing_titles - new_titles
@@ -1549,13 +1549,13 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
                 print(f"\n   ⚡ Unchanged metrics: {len(common_metrics)}")
         else:
             print(f"\n✅ Dashboard is up to date")
-            print(f"   Panels: {len(new_panels)} ({new_rows} rows + {new_visual_panels} visualizations)")
+            print(f"   Panels: {len(new_panels)} ({new_rows} rows + {new_visual_panels} visualizations)")  # noqa: E501
             print(f"   Metrics: {len(new_metrics)} total")
 
         print(f"{'='*60}\n")
 
         # Determine if update is needed
-        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics)
+        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics)  # noqa: E501
 
         if needs_update:
             if api.save_dashboard(new_dashboard):
@@ -1652,7 +1652,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(scalar(max(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))), 1e-6))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(scalar(max(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))), 1e-6))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 6
@@ -1665,7 +1665,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1684,7 +1684,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1704,7 +1704,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, histogram_quantile(0.95, sum(rate(l2_proxy_per_client_id_latency_seconds_bucket{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m])) by (le, client_id)))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, histogram_quantile(0.95, sum(rate(l2_proxy_per_client_id_latency_seconds_bucket{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m])) by (le, client_id)))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1723,7 +1723,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]), 0.0001))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]), 0.0001))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1744,7 +1744,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_duplicate_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_duplicate_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1765,7 +1765,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_duplicate_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_duplicate_rejected_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1786,7 +1786,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_proxy_duplicate_tracked_clients{vm=~\"${vm:regex}\"}", "legendFormat": "client-id", "refId": "A"}
+            {"expr": "l2_proxy_duplicate_tracked_clients{vm=~\"${vm:regex}\"}", "legendFormat": "client-id", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1802,7 +1802,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1821,7 +1821,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1832,8 +1832,8 @@ def create_proxy_dashboard() -> Dict:
         x=16, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_proxy_duplicate_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "NATS re-send/с", "refId": "A"},
-            {"expr": "rate(l2_proxy_duplicate_posts_detected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Дубл. POST-тела/с", "refId": "B"}
+            {"expr": "rate(l2_proxy_duplicate_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "NATS re-send/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_proxy_duplicate_posts_detected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Дубл. POST-тела/с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1849,7 +1849,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_proxy_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1860,7 +1860,7 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_proxy_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1876,9 +1876,9 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -1889,9 +1889,9 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=6, h=8,
         unit="bytes",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_request_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -1902,9 +1902,9 @@ def create_proxy_dashboard() -> Dict:
         x=18, y=y, w=6, h=8,
         unit="bytes",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1920,7 +1920,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_proxy_nats_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_nats_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1939,7 +1939,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_proxy_nats_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": "rate(l2_proxy_nats_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1950,8 +1950,8 @@ def create_proxy_dashboard() -> Dict:
         x=16, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_proxy_nats_connection_creates_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Создания/с", "refId": "A"},
-            {"expr": "rate(l2_proxy_nats_connection_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки подкл./с", "refId": "B"}
+            {"expr": "rate(l2_proxy_nats_connection_creates_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Создания/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_proxy_nats_connection_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки подкл./с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1963,9 +1963,9 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=24, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -1981,7 +1981,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=6, h=8,
         unit="short",
         targets=[
-            {"expr": 'sum(rate(l2_proxy_nats_poll_attempts_total{vm=~"${vm:regex}"}[5m])) / clamp_min(sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m])), 0.0001)', "legendFormat": "attempts/req", "refId": "A"}
+            {"expr": 'sum(rate(l2_proxy_nats_poll_attempts_total{vm=~"${vm:regex}"}[5m])) / clamp_min(sum(rate(l2_proxy_nats_requests_total{vm=~"${vm:regex}"}[5m])), 0.0001)', "legendFormat": "attempts/req", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -1992,9 +1992,9 @@ def create_proxy_dashboard() -> Dict:
         x=6, y=y, w=6, h=8,
         unit="s",
         targets=[
-            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -2005,8 +2005,8 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=6, h=8,
         unit="s",
         targets=[
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_retry_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -2017,9 +2017,9 @@ def create_proxy_dashboard() -> Dict:
         x=18, y=y, w=6, h=8,
         unit="s",
         targets=[
-            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},
-            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}
+            {"expr": 'histogram_quantile(0.50, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.95, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2031,8 +2031,8 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": 'sum(rate(l2_proxy_task_queue_enqueued_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "enqueued/s", "refId": "A"},
-            {"expr": 'sum(rate(l2_proxy_task_queue_rejected_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "rejected/s", "refId": "B"}
+            {"expr": 'sum(rate(l2_proxy_task_queue_enqueued_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "enqueued/s", "refId": "A"},  # noqa: E501
+            {"expr": 'sum(rate(l2_proxy_task_queue_rejected_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "rejected/s", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -2043,8 +2043,8 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "wait p99", "refId": "A"},
-            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "poll p99", "refId": "B"}
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_task_queue_wait_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "wait p99", "refId": "A"},  # noqa: E501
+            {"expr": 'histogram_quantile(0.99, sum(rate(l2_proxy_nats_poll_attempt_duration_seconds_bucket{vm=~"${vm:regex}"}[5m])) by (le))', "legendFormat": "poll p99", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2060,8 +2060,8 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_http_pool_active_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Активные", "refId": "A"},
-            {"expr": "l2_http_pool_available_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Доступные", "refId": "B"}
+            {"expr": "l2_http_pool_active_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Активные", "refId": "A"},  # noqa: E501
+            {"expr": "l2_http_pool_available_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Доступные", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -2072,8 +2072,8 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=6, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_http_pool_client_acquisitions_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получения/с", "refId": "A"},
-            {"expr": "rate(l2_http_pool_client_releases_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Возвраты/с", "refId": "B"}
+            {"expr": "rate(l2_http_pool_client_acquisitions_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получения/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_http_pool_client_releases_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Возвраты/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -2084,7 +2084,7 @@ def create_proxy_dashboard() -> Dict:
         x=18, y=y, w=6, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_http_pool_stale_evictions_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Вытеснения/с", "refId": "A"}
+            {"expr": "rate(l2_http_pool_stale_evictions_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Вытеснения/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2100,7 +2100,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=6, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_rate_limiter_tokens{vm=~\"${vm:regex}\"}", "legendFormat": "Токены", "refId": "A"}
+            {"expr": "l2_rate_limiter_tokens{vm=~\"${vm:regex}\"}", "legendFormat": "Токены", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2119,7 +2119,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}
+            {"expr": "rate(l2_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2138,7 +2138,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_per_ip_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}
+            {"expr": "rate(l2_per_ip_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2149,7 +2149,7 @@ def create_proxy_dashboard() -> Dict:
         x=18, y=y, w=6, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_proxy_per_ip_rate_limiter_ips_tracked{vm=~\"${vm:regex}\"}", "legendFormat": "Отслеживаемые IP", "refId": "A"}
+            {"expr": "l2_proxy_per_ip_rate_limiter_ips_tracked{vm=~\"${vm:regex}\"}", "legendFormat": "Отслеживаемые IP", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2161,7 +2161,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_ip_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{ip}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_ip_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{ip}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2180,7 +2180,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_ip_rejected_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{ip}}", "refId": "A"}
+            {"expr": "topk(10, rate(l2_proxy_per_ip_rejected_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{ip}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2196,7 +2196,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_proxy_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}
+            {"expr": "rate(l2_proxy_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2207,9 +2207,9 @@ def create_proxy_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2221,9 +2221,9 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_proxy_db_nats_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -2242,7 +2242,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_proxy_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}
+            {"expr": "sum(rate(l2_proxy_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2258,7 +2258,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum by (status) (rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+            {"expr": "sum by (status) (rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2277,7 +2277,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_proxy_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2289,7 +2289,7 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=8, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_proxy_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}
+            {"expr": "l2_proxy_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2307,7 +2307,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_proxy_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}
+            {"expr": "l2_proxy_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2325,7 +2325,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_proxy_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+            {"expr": "l2_proxy_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2337,8 +2337,8 @@ def create_proxy_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},
-            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},  # noqa: E501
+            {"expr": "sum(rate(l2_proxy_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2372,7 +2372,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_worker_requests_processed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
+            {"expr": "rate(l2_worker_requests_processed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2383,7 +2383,7 @@ def create_worker_dashboard() -> Dict:
         x=8, y=y, w=8, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_worker_l2_calls_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Вызовы/с", "refId": "A"}
+            {"expr": "rate(l2_worker_l2_calls_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Вызовы/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2402,7 +2402,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_worker_l2_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": "rate(l2_worker_l2_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2418,7 +2418,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_worker_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
+            {"expr": "rate(l2_worker_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2429,7 +2429,7 @@ def create_worker_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_worker_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}
+            {"expr": "rate(l2_worker_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2445,9 +2445,9 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_worker_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -2458,9 +2458,9 @@ def create_worker_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_worker_l2_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2476,9 +2476,9 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=24, h=8,
         unit="bytes",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_worker_l2_response_size_bytes_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2502,7 +2502,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_worker_processing_json_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки JSON/с", "refId": "A"}
+            {"expr": "rate(l2_worker_processing_json_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки JSON/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2521,7 +2521,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_worker_processing_validation_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки валидации/с", "refId": "A"}
+            {"expr": "rate(l2_worker_processing_validation_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки валидации/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2540,7 +2540,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_circuit_breaker_state{vm=~\"${vm:regex}\"}", "legendFormat": "0=закрыт 1=открыт 2=полуоткрыт", "refId": "A"}
+            {"expr": "l2_worker_circuit_breaker_state{vm=~\"${vm:regex}\"}", "legendFormat": "0=закрыт 1=открыт 2=полуоткрыт", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2556,7 +2556,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=24, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_worker_duplicate_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Дубликаты/с", "refId": "A"}
+            {"expr": "rate(l2_worker_duplicate_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Дубликаты/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2572,7 +2572,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_worker_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}
+            {"expr": "rate(l2_worker_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2583,9 +2583,9 @@ def create_worker_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_worker_db_query_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99 {{db}}", "refId": "C"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2597,7 +2597,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_worker_db_pool_connections{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}} {{state}}", "refId": "A"}
+            {"expr": "l2_worker_db_pool_connections{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}} {{state}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2616,7 +2616,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_worker_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}
+            {"expr": "sum(rate(l2_worker_db_requests_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m])) by (db)", "legendFormat": "{{db}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2635,7 +2635,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_db_gateway_ready{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}}", "refId": "A"}
+            {"expr": "l2_worker_db_gateway_ready{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}}", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2651,7 +2651,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum by (status) (rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+            {"expr": "sum by (status) (rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2670,7 +2670,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_worker_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+            {"expr": "sum(rate(l2_worker_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_worker_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2682,7 +2682,7 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=8, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_worker_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}
+            {"expr": "l2_worker_in_flight_requests{vm=~\"${vm:regex}\"}", "legendFormat": "in-flight", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2693,7 +2693,7 @@ def create_worker_dashboard() -> Dict:
         x=8, y=y, w=8, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"}
+            {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2711,7 +2711,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}
+            {"expr": "l2_worker_nats_connected{vm=~\"${vm:regex}\"}", "legendFormat": "подключено", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2730,7 +2730,7 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+            {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2742,7 +2742,7 @@ def create_worker_dashboard() -> Dict:
         x=8, y=y, w=8, h=8,
         unit="s",
         targets=[
-            {"expr": "l2_worker_graceful_shutdown_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "drain, c", "refId": "A"}
+            {"expr": "l2_worker_graceful_shutdown_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "drain, c", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2776,7 +2776,7 @@ def create_server_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_server_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}
+            {"expr": "rate(l2_server_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Запросы/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2795,7 +2795,7 @@ def create_server_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_server_request_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}
+            {"expr": "rate(l2_server_request_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2811,7 +2811,7 @@ def create_server_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_server_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}
+            {"expr": "rate(l2_server_bytes_received_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Получено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2822,7 +2822,7 @@ def create_server_dashboard() -> Dict:
         x=12, y=y, w=12, h=8,
         unit="Bps",
         targets=[
-            {"expr": "rate(l2_server_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}
+            {"expr": "rate(l2_server_bytes_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено Б/с", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2838,9 +2838,9 @@ def create_server_dashboard() -> Dict:
         x=0, y=y, w=24, h=8,
         unit="s",
         targets=[
-            {"expr": "histogram_quantile(0.50, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},
-            {"expr": "histogram_quantile(0.95, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},
-            {"expr": "histogram_quantile(0.99, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}
+            {"expr": "histogram_quantile(0.50, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95", "refId": "B"},  # noqa: E501
+            {"expr": "histogram_quantile(0.99, rate(l2_server_request_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p99", "refId": "C"}  # noqa: E501
         ]
     ))
 
@@ -2857,7 +2857,7 @@ def create_server_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum by (status) (rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}
+            {"expr": "sum by (status) (rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}  # noqa: E501
         ]
     ))
 
@@ -2876,7 +2876,7 @@ def create_server_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[5m])) / clamp_min(sum(rate(l2_server_responses_total{vm=~\"${vm:regex}\"}[5m])), 0.0001)", "legendFormat": "доля ошибок", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2888,8 +2888,8 @@ def create_server_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "sum(rate(l2_server_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},
-            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"2..|3..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "успешные/с", "refId": "A"},  # noqa: E501
+            {"expr": "sum(rate(l2_server_responses_total{status=~\"4..|5..\",vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "ошибки/с", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -2907,7 +2907,7 @@ def create_server_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_server_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}
+            {"expr": "l2_server_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}  # noqa: E501
         ]
     ))
     y += 8
@@ -2934,7 +2934,7 @@ def _validate_dashboard(dashboard: Dict) -> List[str]:
             expr = t.get("expr", "")
             if "l2_" in expr and "vm=" not in expr:
                 errors.append(f"panel {pid} expr без vm label: {expr[:80]}")
-    # y-перекрытия — только warning (Grafana row h=1 может давать ложные срабатывания), не блокируем check
+    # y-перекрытия — только warning (Grafana row h=1 может давать ложные срабатывания), не блокируем check  # noqa: E501
     # проверку оставляем как лог, но не как ошибку: собираем но не добавляем в errors
     return errors
 
@@ -2982,19 +2982,19 @@ Examples:
   python3 scripts/generate-grafana-dashboards.py --config grafana-config.json
   GRAFANA_API_KEY=xxx python3 scripts/generate-grafana-dashboards.py
   python3 scripts/generate-grafana-dashboards.py --dry-run --check
-  python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana/generated --correct-dashboards
+  python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana/generated --correct-dashboards  # noqa: E501
         """
     )
-    parser.add_argument('--config', type=str, help='Path to JSON/YAML config file with Grafana settings')
-    parser.add_argument('--prometheus-url', type=str, help='Prometheus URL for metric discovery (default: http://localhost:9090)')
-    parser.add_argument('--datasource-url', type=str, help='URL, по которому Grafana ходит за метриками (default: http://victoria-metrics:8428)')
-    parser.add_argument('--discover-metrics', action='store_true', help='Enable metric discovery from Prometheus to create/update dashboards')
-    parser.add_argument('--correct-dashboards', action='store_true', help='Correct existing dashboards if they differ from generated versions')
-    parser.add_argument('--dry-run', action='store_true', help='Не писать в Grafana, только показать diff/валидацию')
-    parser.add_argument('--output-dir', type=str, help='Записать JSON дашбордов в директорию (GitOps без Grafana)')
-    parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs регистрации метрик в C++ + валидация id/vm/y, exit 1 при ошибках')
-    parser.add_argument('--grafana-timeout', type=float, default=10.0, help='HTTP timeout к Grafana/Prometheus в секундах (default: 10)')
-    parser.add_argument('--grafana-retries', type=int, default=3, help='Ретраи к Grafana при сбое (default: 3)')
+    parser.add_argument('--config', type=str, help='Path to JSON/YAML config file with Grafana settings')  # noqa: E501
+    parser.add_argument('--prometheus-url', type=str, help='Prometheus URL for metric discovery (default: http://localhost:9090)')  # noqa: E501
+    parser.add_argument('--datasource-url', type=str, help='URL, по которому Grafana ходит за метриками (default: http://victoria-metrics:8428)')  # noqa: E501
+    parser.add_argument('--discover-metrics', action='store_true', help='Enable metric discovery from Prometheus to create/update dashboards')  # noqa: E501
+    parser.add_argument('--correct-dashboards', action='store_true', help='Correct existing dashboards if they differ from generated versions')  # noqa: E501
+    parser.add_argument('--dry-run', action='store_true', help='Не писать в Grafana, только показать diff/валидацию')  # noqa: E501
+    parser.add_argument('--output-dir', type=str, help='Записать JSON дашбордов в директорию (GitOps без Grafana)')  # noqa: E501
+    parser.add_argument('--check', action='store_true', help='Кросс-чек PromQL vs регистрации метрик в C++ + валидация id/vm/y, exit 1 при ошибках')  # noqa: E501
+    parser.add_argument('--grafana-timeout', type=float, default=10.0, help='HTTP timeout к Grafana/Prometheus в секундах (default: 10)')  # noqa: E501
+    parser.add_argument('--grafana-retries', type=int, default=3, help='Ретраи к Grafana при сбое (default: 3)')  # noqa: E501
 
     args = parser.parse_args()
 
@@ -3015,7 +3015,7 @@ Examples:
 
     # --check: offline валидация без Grafana
     if args.check:
-        logger.info("Running --check (offline validation + cross-check vs C++ metric registration)...")
+        logger.info("Running --check (offline validation + cross-check vs C++ metric registration)...")  # noqa: E501
         cpp_metrics = _collect_cpp_metrics()
         logger.info(f"C++ metrics registered in src/: {len(cpp_metrics)}")
         all_ok = True
@@ -3031,23 +3031,23 @@ Examples:
                 for e in errs:
                     logger.error(f"  - {e}")
             else:
-                logger.info(f"[{uid}] validation OK ({len(dash['dashboard']['panels'])} panels, {len(m)} metrics)")
+                logger.info(f"[{uid}] validation OK ({len(dash['dashboard']['panels'])} panels, {len(m)} metrics)")  # noqa: E501
         missing_in_dash = cpp_metrics - all_dash_metrics
         extra_in_dash = all_dash_metrics - cpp_metrics
         extra_l2 = {m for m in extra_in_dash if m.startswith("l2_")}
         if missing_in_dash:
             all_ok = False
-            logger.error(f"Metrics in C++ but missing in dashboards ({len(missing_in_dash)}): {sorted(missing_in_dash)}")
+            logger.error(f"Metrics in C++ but missing in dashboards ({len(missing_in_dash)}): {sorted(missing_in_dash)}")  # noqa: E501
         else:
             logger.info("All C++ metrics covered by dashboards")
         if extra_l2:
-            logger.warning(f"l2 metrics in dashboards but not in C++ ({len(extra_l2)}): {sorted(extra_l2)}")
+            logger.warning(f"l2 metrics in dashboards but not in C++ ({len(extra_l2)}): {sorted(extra_l2)}")  # noqa: E501
         if not all_ok:
             logger.error("--check failed")
             return 1
         logger.info("--check passed")
         # если --check был единственной задачей — выходим без Grafana
-        if not args.output_dir and not args.correct_dashboards and not args.discover_metrics and not args.dry_run:
+        if not args.output_dir and not args.correct_dashboards and not args.discover_metrics and not args.dry_run:  # noqa: E501
             return 0
         if args.dry_run and not args.output_dir and not args.correct_dashboards:
             return 0
@@ -3071,21 +3071,21 @@ Examples:
                 # если dry-run без correct — уже done; если output-dir без Grafana — done
                 if args.dry_run:
                     return 0
-                # если запросили и output-dir и обычный режим без correct — считаем экспортом выполненным
+                # если запросили и output-dir и обычный режим без correct — считаем экспортом выполненным  # noqa: E501
                 # но продолжим к Grafana если не dry-run
                 pass
         if args.dry_run:
             return 0
 
     # --dry-run без Grafana (offline)
-    if args.dry_run and not args.correct_dashboards and not args.output_dir and not args.discover_metrics:
+    if args.dry_run and not args.correct_dashboards and not args.output_dir and not args.discover_metrics:  # noqa: E501
         logger.info("DRY-RUN (offline): валидация + симуляция сохранения без Grafana")
         for func, uid in dashboard_definitions:
             dash = func()
             errs = _validate_dashboard(dash)
             if errs:
                 logger.warning(f"[{uid}] {errs}")
-            logger.info(f"DRY-RUN: would save {dash['dashboard']['title']} ({uid}) {len(dash['dashboard']['panels'])} panels")
+            logger.info(f"DRY-RUN: would save {dash['dashboard']['title']} ({uid}) {len(dash['dashboard']['panels'])} panels")  # noqa: E501
         return 0
 
     # Load configuration (нужен только если идём в Grafana)
@@ -3096,7 +3096,7 @@ Examples:
     if config['api_key']:
         api = GrafanaAPI(config['url'], api_key=config['api_key'], **api_kwargs)
     else:
-        api = GrafanaAPI(config['url'], user=config['user'], password=config['password'], **api_kwargs)
+        api = GrafanaAPI(config['url'], user=config['user'], password=config['password'], **api_kwargs)  # noqa: E501
 
     if not api.test_connection():
         logger.error("Cannot connect to Grafana. Exiting.")
@@ -3131,9 +3131,9 @@ Examples:
                 else:
                     # reuse correct logic but without save
                     existing_metrics = set(get_existing_dashboard_metrics(existing))
-                    new_metrics = set(get_existing_dashboard_metrics({"dashboard": new_dash["dashboard"]}))
-                    if existing_metrics != new_metrics or len(existing["dashboard"]["panels"]) != len(new_dash["dashboard"]["panels"]):
-                        logger.info(f"[{uid}] DRY-RUN: would update ({len(existing['dashboard']['panels'])}->{len(new_dash['dashboard']['panels'])} panels)")
+                    new_metrics = set(get_existing_dashboard_metrics({"dashboard": new_dash["dashboard"]}))  # noqa: E501
+                    if existing_metrics != new_metrics or len(existing["dashboard"]["panels"]) != len(new_dash["dashboard"]["panels"]):  # noqa: E501
+                        logger.info(f"[{uid}] DRY-RUN: would update ({len(existing['dashboard']['panels'])}->{len(new_dash['dashboard']['panels'])} panels)")  # noqa: E501
                     else:
                         logger.info(f"[{uid}] DRY-RUN: up to date")
             return 0
@@ -3143,7 +3143,7 @@ Examples:
             if correct_dashboard_panels(api, dashboard_func, uid):
                 success_count += 1
         logger.info("=" * 60)
-        logger.info(f"Dashboard correction complete: {success_count}/{len(dashboard_definitions)} successful")
+        logger.info(f"Dashboard correction complete: {success_count}/{len(dashboard_definitions)} successful")  # noqa: E501
         logger.info("=" * 60)
         return 0 if success_count == len(dashboard_definitions) else 1
 
@@ -3156,13 +3156,13 @@ Examples:
             logger.warning(f"[{uid}] validation warnings: {errs[:5]}")
         logger.info(f"Processing dashboard: {title} ({uid})")
         if args.dry_run:
-            logger.info(f"DRY-RUN: would save {title} ({len(dashboard['dashboard']['panels'])} panels)")
+            logger.info(f"DRY-RUN: would save {title} ({len(dashboard['dashboard']['panels'])} panels)")  # noqa: E501
             success_count += 1
         elif api.save_dashboard(dashboard):
             success_count += 1
 
     logger.info("=" * 60)
-    logger.info(f"Dashboard generation complete: {success_count}/{len(dashboard_definitions)} successful")
+    logger.info(f"Dashboard generation complete: {success_count}/{len(dashboard_definitions)} successful")  # noqa: E501
     logger.info("=" * 60)
 
     return 0 if success_count == len(dashboard_definitions) else 1

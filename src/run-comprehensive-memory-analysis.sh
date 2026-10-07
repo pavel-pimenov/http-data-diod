@@ -1,4 +1,4 @@
-ize#!/bin/bash
+#!/bin/bash
 
 # Comprehensive memory analysis script
 # Runs multiple memory analysis tools and generates reports

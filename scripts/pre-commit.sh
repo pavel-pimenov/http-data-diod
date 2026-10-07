@@ -97,6 +97,21 @@ run_metrics_check() {
     return 0
 }
 
+# Run shellcheck on changed shell scripts (in the builder container).
+# SKIP_SHELLCHECK=1 skips the check (mirrors SKIP_CLANG_TIDY).
+run_shellcheck() {
+    if [ "${SKIP_SHELLCHECK:-0}" = "1" ]; then
+        log_warn "SKIP_SHELLCHECK=1 — shellcheck skipped (run ./scripts/run-shellcheck.sh manually)"
+        return 0
+    fi
+    log_info "Running shellcheck on changed shell scripts..."
+    if ! ./scripts/run-shellcheck.sh; then
+        log_error "shellcheck found errors in changed shell scripts!"
+        return 1
+    fi
+    return 0
+}
+
 # Run clang-tidy on changed C++ files (in the builder container).
 # SKIP_CLANG_TIDY=1 skips the check (clang-tidy is expensive; run it manually:
 # ./scripts/run-clang-tidy.sh after refactoring rounds).
@@ -166,6 +181,12 @@ main() {
     # DB gateway e2e, golden metrics and /metrics consistency)
     if ! run_metrics_check; then
         log_error "Pre-commit metric consistency check failed!"
+        exit 1
+    fi
+
+    # Run shellcheck on changed shell scripts
+    if ! run_shellcheck; then
+        log_error "Pre-commit shellcheck failed!"
         exit 1
     fi
 

@@ -1,0 +1,38 @@
+# Normalize line endings: the repo is LF-only (dos2unix-recursive.py keeps it
+# that way). Explicit text marking also protects the executable-bit hygiene of
+# scripts from CRLF/checkout rehydration issues on Windows/macOS clients.
+*.sh text eol=lf
+*.bash text eol=lf
+*.py text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.hxx text eol=lf
+*.cc text eol=lf
+*.inl text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.sql text eol=lf
+*.supp text eol=lf
+*.toml text eol=lf
+*.pvsconfig text eol=lf
+.gitignore text eol=lf
+
+# Binary artifacts must never be treated as text.
+*.so binary
+*.a binary
+*.o binary
+*.gcno binary
+*.gcda binary
+*.prof binary
+*.hprof binary
+*.zip binary
+*.gz binary
+*.class binary

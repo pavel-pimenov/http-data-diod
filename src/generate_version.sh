@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Try to get git SHA, fallback to unknown if git is not available
 if command -v git >/dev/null 2>&1; then
     SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")

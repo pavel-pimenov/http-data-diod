@@ -88,7 +88,9 @@ DUPLICATE_CHECK_SENDS = DUPLICATE_LOG_THRESHOLD + 2
 DUPLICATE_LOG_PATTERN = r"Frequent duplicate POSTs from client_id=({}) .*total=(\d+)"
 
 # Default command line argument values (should match parse_args defaults)
-DEFAULT_URL = os.environ.get('TEST_BASE_URL', 'http://nginx' if os.path.exists('/.dockerenv') else 'http://localhost:7777')
+DEFAULT_URL = os.environ.get(
+    'TEST_BASE_URL',
+    'http://nginx' if os.path.exists('/.dockerenv') else 'http://localhost:7777')
 DEFAULT_ITERATIONS = 100
 DEFAULT_CONCURRENT = 20
 
@@ -118,11 +120,14 @@ def normalize_runtime_url(url: str) -> str:
 
 async def resolve_runtime_url(url: str) -> str:
     parsed_url = urlparse(url)
-    if parsed_url.scheme.lower() != 'http' or parsed_url.hostname != 'localhost' or parsed_url.port != 7777:
+    if (parsed_url.scheme.lower() != 'http'
+            or parsed_url.hostname != 'localhost'
+            or parsed_url.port != 7777):
         return normalize_runtime_url(url)
 
     try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection('127.0.0.1', 7777), timeout=1.0)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection('127.0.0.1', 7777), timeout=1.0)
         writer.write(b"GET /nginx-health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         await writer.drain()
         response = await asyncio.wait_for(reader.read(64), timeout=1.0)
@@ -232,7 +237,10 @@ async def make_request(session: aiohttp.ClientSession, url: str,
         expected_req_id = str(payload.get("req_id"))
         expected_hash = hashlib.sha256(payload_json.encode('utf-8')).hexdigest()
 
-        async with session.post(url, data=payload_json, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=use_ssl) as response:
+        async with session.post(
+                url, data=payload_json, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+                ssl=use_ssl) as response:
             if response.status == 200:
                 response_data = await response.json()
                 value_return = response_data.get("value_return")
@@ -459,7 +467,9 @@ async def run_test(url: str, iterations: int, concurrent: int, base_payload: dic
                 if deadline is not None and time.monotonic() >= deadline:
                     stop_launching = True
                 else:
-                    while len(tasks) < concurrent and (max_requests is None or total_sent < max_requests) and not g_shutdown:
+                    while (len(tasks) < concurrent
+                           and (max_requests is None or total_sent < max_requests)
+                           and not g_shutdown):
                         total_sent += 1
                         tasks.add(asyncio.create_task(
                             limited_request(session, semaphore, url, base_payload,
@@ -480,7 +490,8 @@ async def run_test(url: str, iterations: int, concurrent: int, base_payload: dic
                 latencies.append(latency_ms)
 
                 # Process the result
-                value_to_add, success_count, fail_count, mismatch_count = process_result(result, req_id)
+                (value_to_add, success_count, fail_count,
+                 mismatch_count) = process_result(result, req_id)
                 total_sum += value_to_add
                 successful_requests += success_count
                 failed_requests += fail_count
@@ -589,7 +600,8 @@ def parse_args():
     parser.add_argument("--concurrent", type=int, default=DEFAULT_CONCURRENT,
                         help="Maximum concurrent requests (default: {})".format(DEFAULT_CONCURRENT))
     parser.add_argument("--body-size", type=float, default=DEFAULT_BODY_SIZE_MB,
-                        help="Maximum body size in megabytes (default: {} MB)".format(DEFAULT_BODY_SIZE_MB))
+                        help=("Maximum body size in megabytes "
+                              "(default: {} MB)").format(DEFAULT_BODY_SIZE_MB))
     parser.add_argument("--body-sizes", type=str, default=None,
                         help="Comma-separated body sizes in KB to mix per request "
                              "(e.g. 1,10,30) — production-like mix of small/large payloads")
@@ -651,11 +663,15 @@ async def make_get_request(session: aiohttp.ClientSession, url: str, req_id: int
     """
     headers = {'X-DataHub-Client-Id': client_id or f"client-{random.randint(1, 10000)}"}
     try:
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT), ssl=should_use_ssl(url)) as response:
+        async with session.get(
+            url, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+            ssl=should_use_ssl(url)) as response:
             if response.status == 200:
                 # Check content type
                 content_type = response.headers.get('Content-Type', '')
-                if 'image/x-icon' not in content_type and 'image/vnd.microsoft.icon' not in content_type:
+                if ('image/x-icon' not in content_type
+                        and 'image/vnd.microsoft.icon' not in content_type):
                     logger.warning(f"Request {req_id}: Unexpected content type: {content_type}")
                     return req_id, False, f"Unexpected content type: {content_type}"
 
@@ -669,12 +685,15 @@ async def make_get_request(session: aiohttp.ClientSession, url: str, req_id: int
 
                 # Calculate hash for integrity check
                 data_hash = hashlib.sha256(binary_data).hexdigest()[:16]
-                logger.debug(f"Request {req_id}: Received {len(binary_data)} bytes, hash={data_hash}")
+                logger.debug(
+                    f"Request {req_id}: Received {len(binary_data)} bytes, hash={data_hash}")
 
                 return req_id, True, None
             else:
                 error_text = await response.text()
-                logger.warning(f"Request {req_id}: Received status code {response.status}: {error_text[:200]}...")
+                logger.warning(
+                    f"Request {req_id}: Received status code {response.status}: "
+                    f"{error_text[:200]}...")
                 return req_id, False, f"Status {response.status}"
     except asyncio.TimeoutError:
         logger.error(f"Request {req_id}: Timed out")
@@ -721,7 +740,9 @@ async def run_get_test(url: str, iterations: int, concurrent: int,
     Returns:
         Dictionary with test results
     """
-    logger.info(f"Starting {iterations} GET requests to {url} (favicon.ico) with concurrency {concurrent}")
+    logger.info(
+        f"Starting {iterations} GET requests to {url} (favicon.ico) "
+        f"with concurrency {concurrent}")
 
     start_time = time.time()
     semaphore = asyncio.Semaphore(concurrent)
@@ -796,7 +817,8 @@ def print_get_results(results: dict) -> bool:
             print(f"  ... and {len(results['errors']) - 10} more errors")
 
     if results['failed_requests'] == 0:
-        print(f"{Colors.GREEN}✅ Success: All GET requests returned valid binary favicon data.{Colors.NC}")
+        print(f"{Colors.GREEN}✅ Success: All GET requests returned "
+              f"valid binary favicon data.{Colors.NC}")
         return True
     else:
         print(f"{Colors.RED}❌ Error: {results['failed_requests']} GET requests failed.{Colors.NC}")
@@ -983,14 +1005,20 @@ async def main():
         payload_size_mb = len(payload_json.encode('utf-8')) / 1024 / 1024
 
         if payload_size_mb > MAX_JSON_SIZE_MB:  # Keep JSON under threshold
-            logger.warning(f"JSON payload size ({payload_size_mb:.2f} MB) is large and may cause issues")
+            logger.warning(
+                f"JSON payload size ({payload_size_mb:.2f} MB) is large "
+                f"and may cause issues")
             if payload_size_mb > CRITICAL_JSON_SIZE_MB:
-                logger.error(f"JSON payload too large ({payload_size_mb:.2f} MB). Reducing body size.")
+                logger.error(
+                    f"JSON payload too large ({payload_size_mb:.2f} MB). "
+                    f"Reducing body size.")
                 new_body_size = min(args.body_size, body_size)
                 payload = json.loads(generate_random_body(new_body_size))
                 payload_json = json.dumps(payload)
                 payload_size_mb = len(payload_json.encode('utf-8')) / 1024 / 1024
-                logger.info(f"Reduced body size to {new_body_size} MB. New JSON size: {payload_size_mb:.2f} MB")
+                logger.info(
+                    f"Reduced body size to {new_body_size} MB. "
+                    f"New JSON size: {payload_size_mb:.2f} MB")
 
         logger.info(f"Starting POST response-to-request correlation test")
         logger.info(f"URL: {args.url}")
@@ -1028,7 +1056,8 @@ async def main():
                 "failed_requests": results["failed_requests"],
                 "mismatched_requests": results["mismatched_requests"],
                 "total_time_seconds": results["total_time"],
-                "requests_per_second": results["iterations"] / results["total_time"] if results["total_time"] > 0 else 0,
+                "requests_per_second": (results["iterations"] / results["total_time"]
+                                    if results["total_time"] > 0 else 0),
                 "latency_p50_ms": results.get("latency_p50_ms", 0),
                 "latency_p95_ms": results.get("latency_p95_ms", 0),
                 "latency_p99_ms": results.get("latency_p99_ms", 0),

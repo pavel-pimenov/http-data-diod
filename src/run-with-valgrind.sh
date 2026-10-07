@@ -2,6 +2,8 @@
 
 # Script to run the l2-proxy with Valgrind for memory leak detection
 
+set -euo pipefail
+
 # Set default values
 MODE=${MODE:-proxy}
 LOG_LEVEL=${LOG_LEVEL:-INFO}

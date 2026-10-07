@@ -133,7 +133,8 @@ async def nats_server_up() -> bool:
 
 
 async def run_baseline(session: aiohttp.ClientSession) -> None:
-    status, body = await proxy_post(make_echo_payload(f"e2e-reconnect-{int(time.time())}", 1), session)
+    status, body = await proxy_post(
+        make_echo_payload(f"e2e-reconnect-{int(time.time())}", 1), session)
     if status != 200:
         raise AssertionError(f"baseline POST failed: status={status} body={body[:200]}")
     parsed = json.loads(body)

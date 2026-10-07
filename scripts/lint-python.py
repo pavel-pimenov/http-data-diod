@@ -4,6 +4,7 @@
 Needs no third-party packages (stdlib only), so it works without ruff.
 Checks: compile errors, trailing whitespace, CRLF, tabs, lines > 100,
 missing final newline, and (conservatively) unused imports.
+Long lines may opt out per-line with a trailing `# noqa: E501` comment.
 
 Usage: scripts/lint-python.py [paths...]   (default: all project *.py)
 Exit code 0 = clean, 1 = issues found.
@@ -55,7 +56,7 @@ def check_file(path):
         problems.append("NOEOL")
     lines = data.splitlines()
     for idx, line in enumerate(lines, 1):
-        if len(line) > LINE_LIMIT:
+        if len(line) > LINE_LIMIT and not line.rstrip().endswith("# noqa: E501"):
             problems.append(f"LONG{LINE_LIMIT} :{idx} ({len(line)} ch)")
     if "\t" in data:
         problems.append("TAB")

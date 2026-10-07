@@ -4,7 +4,8 @@ import os
 # File extensions to include
 SOURCE_EXTS = [
     '.c', '.cpp', '.cxx', '.cc',
-    '.h', '.hpp', '.hxx', '.hh', '.json', '.md', '.py', '.sh', '.txt', '.yaml', '.yml', '.inl', '.conf','.supp','.gitignore'
+    '.h', '.hpp', '.hxx', '.hh', '.json', '.md', '.py', '.sh', '.txt', '.yaml',
+    '.yml', '.inl', '.conf', '.supp', '.gitignore'
 ]
 
 def is_source_file(filename):
@@ -70,8 +71,10 @@ def find_missing_text_extensions(root, gitignore_exts, ignored_dirs):
                 extensions.add(ext.lower())
 
     missing_text = []
+    source_low = {e.lower() for e in SOURCE_EXTS}
+    gitignore_low = {e.lower() for e in gitignore_exts}
     for ext in extensions:
-        if ext.lower() in [e.lower() for e in SOURCE_EXTS] or ext.lower() in [e.lower() for e in gitignore_exts]:
+        if ext in source_low or ext in gitignore_low:
             continue
         # Find one file with this extension
         found_text = False
