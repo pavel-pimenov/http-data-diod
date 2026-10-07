@@ -67,6 +67,9 @@ public:
   bool is_nats_connected() const;
 
 private:
+  // White-box hook for test_l2_worker.cpp: the private pipeline stages and
+  // runtime state are driven through that accessor.
+  friend class L2WorkerTestAccess;
   std::string extract_l2_server_span_id(const std::string &l2_response);
   json prepare_response_headers(const HttpResponse &l2_http_response);
   // NATS mode methods

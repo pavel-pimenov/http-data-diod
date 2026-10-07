@@ -13,6 +13,7 @@ class StatsLogger {
 private:
   AppContext &m_app_ctx;
   std::atomic<bool> &m_shutdown_flag;
+  int m_log_interval_seconds;
 
   // Independent counters exposed for the periodic statistics log.
   struct Counters {
@@ -30,7 +31,10 @@ private:
   Runner m_runner;
 
 public:
-  StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag);
+  static constexpr int kDefaultLogIntervalSeconds = 600;
+
+  StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag,
+              int log_interval_seconds = kDefaultLogIntervalSeconds);
   ~StatsLogger();
 
   StatsLogger(const StatsLogger &) = delete;

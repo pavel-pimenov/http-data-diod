@@ -144,7 +144,10 @@ main() {
         container_files+=("/app/${f#$L2_DIR/}")
     done
 
-    local jobs="${CLANG_TIDY_JOBS:-$(nproc)}"
+    # nproc is GNU-only: on macOS it is missing, $jobs becomes empty and
+    # `xargs -P ''` inside the container lints nothing while the script still
+    # reports success (silent false-green). Fall back to sysctl, then to 4.
+    local jobs="${CLANG_TIDY_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
     log_info "Linting ${#files[@]} files in parallel (jobs=${jobs})..."
 
     local log

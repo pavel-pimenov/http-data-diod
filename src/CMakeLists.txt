@@ -330,6 +330,7 @@ message(STATUS "Found NATS C client: ${NATS_C_LIBRARY}")
 add_executable(l2-proxy
  main.cpp
  version.cpp
+ shutdown_flag.cpp
  app_context.cpp
  proxy_init.cpp
  common_utils.cpp
@@ -518,7 +519,10 @@ if(BUILD_TESTS)
         test_trace_logger.cpp
         test_crash_utils.cpp
         test_app_context.cpp
+        test_proxy_handlers.cpp
+        test_l2_worker.cpp
         version.cpp
+        shutdown_flag.cpp
         app_context.cpp
         config.cpp
         string_utils.cpp
@@ -536,12 +540,31 @@ if(BUILD_TESTS)
         db_query_executor_base.cpp
         sentry_client.cpp
         httplib/httplib.cc
+        # Full l2-proxy binary coverage: every production TU except main.cpp
+        # (keeps Catch2's main) so gcovr measures the whole binary, not only
+        # the parts the tests happened to link before.
+        proxy_init.cpp
+        request_handler.cpp
+        server_handler.cpp
+        l2_worker.cpp
+        l2_worker_nats.cpp
+        nats_client.cpp
+        nats_push_service.cpp
+        nats_poll_service.cpp
+        stats_logger.cpp
+        db_query_handler.cpp
+        db_query_executor_oracle.cpp
+        db_query_executor_postgres.cpp
+        db_query_executor_factory.cpp
+        odpi/embed/dpi.c
     )
     target_include_directories(test_components PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/httplib
         ${CMAKE_CURRENT_SOURCE_DIR}/base64
         ${CMAKE_CURRENT_SOURCE_DIR}/json
+        ${CMAKE_CURRENT_SOURCE_DIR}/odpi/include
+        ${NATS_C_INCLUDE_DIR}
     )
     target_compile_options(test_components PRIVATE
         ${L2_PROXY_COMMON_COMPILE_OPTIONS}
@@ -561,7 +584,19 @@ if(BUILD_TESTS)
         OpenSSL::SSL
         OpenSSL::Crypto
         ZLIB::ZLIB
+        PostgreSQL::PostgreSQL
+        ${NATS_C_LIBRARY}
     )
+    if(STDCXX_EXP_LIBRARY)
+        target_link_libraries(test_components PRIVATE ${STDCXX_EXP_LIBRARY})
+    else()
+        target_link_libraries(test_components PRIVATE -lstdc++exp)
+    endif()
+    # The tests compile the whole binary: sources come from several unity
+    # groups (proxy-core/proxy-nats) plus anonymous-namespace test TUs, so
+    # unity batches would collide. The coverage stage already builds with
+    # CMAKE_UNITY_BUILD=OFF; keep the tests unity-free in every configuration.
+    set_target_properties(test_components PROPERTIES UNITY_BUILD OFF)
     if(ENABLE_ASAN)
         target_compile_options(test_components PRIVATE
             -fsanitize=address

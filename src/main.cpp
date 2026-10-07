@@ -33,7 +33,7 @@ extern const char *g_l2_proxy_version;
 
 using json = nlohmann::json;
 
-std::atomic<bool> g_shutdown_flag{false};
+extern std::atomic<bool> g_shutdown_flag;
 std::atomic<int> g_signal_number{0};
 std::mutex g_shutdown_mutex;
 std::condition_variable g_shutdown_cv;
