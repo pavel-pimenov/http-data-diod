@@ -112,6 +112,7 @@ docker compose down --remove-orphans 2>/dev/null || true
 # Clean up any conflicting containers (e.g., Grafana)
 echo "Cleaning up conflicting containers..."
 docker rm -f grafana 2>/dev/null || true
+docker rm -f perses 2>/dev/null || true
 docker rm -f l2-proxy l2-worker l2-server nginx jaeger nginx-exporter 2>/dev/null || true
 sleep 1
 
@@ -382,5 +383,33 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
         echo "ℹ️  Grafana not detected at $GRAFANA_URL"
         echo "   To update dashboards later, run:"
         echo "   python3 scripts/generate-grafana-dashboards.py --correct-dashboards"
+    fi
+fi
+
+# Sync Perses dashboards (лёгкая альтернатива Grafana) пока Perses доступен
+echo ""
+if [ -f "scripts/generate-perses-dashboards.py" ]; then
+    PERSES_URL="${PERSES_URL:-http://localhost:8089}"
+
+    echo "⏳ Waiting for Perses to be fully ready..."
+    PERSES_READY=false
+    for i in $(seq 1 15); do
+        if curl -s --connect-timeout 2 --max-time 5 "$PERSES_URL/api/v1/projects" > /dev/null 2>&1; then
+            PERSES_READY=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$PERSES_READY" = true ]; then
+        echo "📊 Perses detected at $PERSES_URL"
+        PERSES_URL="$PERSES_URL" python3 scripts/generate-perses-dashboards.py
+        echo ""
+        echo "✅ Perses dashboard sync complete!"
+        echo "   View at: $PERSES_URL"
+    else
+        echo "ℹ️  Perses not detected at $PERSES_URL"
+        echo "   To sync dashboards later, run:"
+        echo "   python3 scripts/generate-perses-dashboards.py"
     fi
 fi

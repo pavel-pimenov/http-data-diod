@@ -768,6 +768,25 @@ services:
 #    profiles:
 #      - nostart
 
+  # Perses — лёгкая альтернатива Grafana для просмотра метрик (порт 8089/8080).
+  # Хост-порт 8080 занят сторонними процессами, поэтому наружу пробрасываем 8089.
+  # Дашборды и глобальный Prometheus-датасорс (proxy на VictoriaMetrics)
+  # накатываются скриптом scripts/generate-perses-dashboards.py по REST API.
+  # Docker-healthcheck не вешаем: базовый образ distroless (без curl/sh),
+  # готовность проверяем в rebuild-and-run.sh через host-curl.
+  perses:
+    container_name: perses
+    image: persesdev/perses:v0.54.0
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    volumes:
+      - perses-data:/perses
+    depends_on:
+      - l2-proxy
+    networks:
+      - l2_network
+
 networks:
   l2_network:
     driver: bridge
@@ -777,6 +796,8 @@ networks:
 
 volumes:
   grafana-storage:
+    driver: local
+  perses-data:
     driver: local
   victoria-metrics-data:
     driver: local

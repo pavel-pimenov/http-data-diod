@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 66 | Perses — лёгкая альтернатива Grafana: контейнер в стеке + нативный конвертер дашбордов (fallback — миграция через /api/migrate) | [round-66](docs/history/round-66-perses-лёгкая-альтернатива-grafana-контейнер-и-нативный-конвертер-дашбордов.md) |
 | 65 | гигиена скриптов: chmod +x, NOEOL, shebang, set -euo pipefail, lint-python в offline-гейт, shellcheck-гейт | [round-65](docs/history/round-65-гигиена-скриптов-chmod-x-noeol-shebang-set-euo-pipefail-lint-python-shellcheck.md) |
 | 64 | единый CI-гейт (ci-gate.sh), env-var ↔ compose гейт, docker build-context гейт, кэш docker-слоёв в CI | [round-64](docs/history/round-64-единый-CI-гейт-env-па-и-docker-build-context-гейты-кэш.md) |
 | 63 | CI-фиксы: clang-tidy версионного заголовка на хосте, dockerignore generate_version.sh | [round-63](docs/history/round-63-CI-фиксы-clang-tidy-dockerignore-версионный-заголовок.md) |
