@@ -393,11 +393,13 @@ if [ -f "scripts/generate-perses-dashboards.py" ]; then
 
     echo "⏳ Waiting for Perses to be fully ready..."
     PERSES_READY=false
-    for i in $(seq 1 15); do
+    PERSES_TRIES=0
+    while [ "$PERSES_TRIES" -lt 15 ]; do
         if curl -s --connect-timeout 2 --max-time 5 "$PERSES_URL/api/v1/projects" > /dev/null 2>&1; then
             PERSES_READY=true
             break
         fi
+        PERSES_TRIES=$((PERSES_TRIES + 1))
         sleep 1
     done
 

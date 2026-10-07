@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Cross-source consistency check for Prometheus metric names.
 
-Four sources describe the same metric catalogue and drift apart silently:
+Five sources describe the same metric catalogue and drift apart silently:
 
   1. C++ registration — `MetricsManager::create_*` calls and
      `DynamicLabeledFamily<...>::Series` literals in src/*.cpp|hpp
      (test_*.cpp excluded). This is the runtime truth.
   2. Grafana dashboards — PromQL in scripts/generate-grafana-dashboards.py
-  3. README catalogue — the "Метрики Prometheus (полный каталог)" tables
-  4. Golden check — CATALOG + CONDITIONAL in scripts/metrics-golden-check.py
+  3. Perses dashboards — the same PromQL after the native Perses conversion in
+     scripts/generate-perses-dashboards.py (must stay identical to Grafana)
+  4. README catalogue — the "Метрики Prometheus (полный каталог)" tables
+  5. Golden check — CATALOG + CONDITIONAL in scripts/metrics-golden-check.py
 
 Adding a metric without touching the other sources used to go unnoticed until
 a dashboard was eyeballed, which is exactly how the round-57 proxy micro-metrics
@@ -40,6 +42,7 @@ import urllib.request
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC_DIR = REPO_ROOT / "src"
 GENERATOR_PATH = REPO_ROOT / "scripts" / "generate-grafana-dashboards.py"
+PERSES_PATH = REPO_ROOT / "scripts" / "generate-perses-dashboards.py"
 GOLDEN_PATH = REPO_ROOT / "scripts" / "metrics-golden-check.py"
 README_PATH = REPO_ROOT / "README.md"
 
@@ -140,6 +143,21 @@ def dashboard_metrics(generator) -> set:
     for name in sorted(factories):
         dashboard = getattr(generator, name)()
         metrics |= generator._collect_dashboard_metrics(dashboard)
+    return metrics
+
+
+def perses_dashboard_metrics(perses, generator) -> set:
+    """Metrics referenced by the native Perses dashboards. Fallbacks to the
+    same Grafana definitions, so the set must match `dashboard_metrics`; this
+    guards against drift when the native conversion is tweaked."""
+    metrics = set()
+    for factory, _uid in perses.DASHBOARDS:
+        converted = perses.convert_dashboard_to_perses(factory())
+        for panel in (converted.get("spec") or {}).get("panels", {}).values():
+            for query in (panel.get("spec") or {}).get("queries", []):
+                expr = ((query.get("spec") or {}).get("plugin") or {}
+                        ).get("spec", {}).get("query", "")
+                metrics |= {normalize(m) for m in re.findall(METRIC_LITERAL, expr)}
     return metrics
 
 
@@ -279,6 +297,8 @@ def main() -> int:
         registered, literals = cpp_registered_metrics()
         generator = load_module(GENERATOR_PATH, "grafana_generator")
         dashboards = dashboard_metrics(generator)
+        perses = load_module(PERSES_PATH, "perses_generator")
+        perses_dashboards = perses_dashboard_metrics(perses, generator)
         golden = load_module(GOLDEN_PATH, "metrics_golden")
         catalogue = golden_metrics(golden)
         readme = readme_metrics()
@@ -294,6 +314,10 @@ def main() -> int:
 
     compare("C++ registration", registered, "dashboards", dashboards,
             problems, notes)
+    compare("C++ registration", registered, "Perses dashboards",
+            perses_dashboards, problems, notes)
+    compare("Grafana dashboards", dashboards, "Perses dashboards",
+            perses_dashboards, problems, notes)
     compare("C++ registration", registered, "README catalogue", readme,
             problems, notes)
     compare("C++ registration", registered, "golden check", catalogue,
@@ -305,7 +329,8 @@ def main() -> int:
     print("metric consistency check")
     print(f"  mode: {'offline+runtime' if args.runtime else 'offline'}")
     print(f"  registered={len(registered)} dashboards={len(dashboards)} "
-          f"readme={len(readme)} golden={len(catalogue)}")
+          f"perses={len(perses_dashboards)} readme={len(readme)} "
+          f"golden={len(catalogue)}")
     for note in notes:
         print(f"  - {note}")
 
@@ -314,7 +339,8 @@ def main() -> int:
         for item in problems:
             print(f"  - {item}")
         return 1
-    print("OK: metric names agree across C++, dashboards, README and golden check")
+    print("OK: metric names agree across C++, dashboards, Perses, README "
+          "and golden check")
     return 0
 
 

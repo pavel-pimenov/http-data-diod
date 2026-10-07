@@ -689,6 +689,30 @@ URL datasource берётся с приоритетом: `--datasource-url` (CLI
 
 Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка покрытия: `python3 scripts/test-grafana-generator.sh` (поднимает временный Grafana и прогоняет генератор).
 
+### Perses-дашборды (`http://localhost:8089`, лёгкая альтернатива Grafana)
+
+Помимо Grafana те же дашборды синкаются в **Perses** (статичный контейнер, файловая
+БД, без залогина): проект `l2`, глобальный Prometheus-датасорс `prometheus` (HTTP-прокси на
+`http://victoria-metrics:8428`). Дашборды строятся **нативно** — конвертер
+`scripts/generate-perses-dashboards.py` берёт те же определения, что и Grafana-генератор, поэтому
+панели, PromQL и метрики не расходятся (это проверяется в offline-гейте и в
+`scripts/metrics-consistency-check.py`):
+
+```bash
+python3 scripts/generate-perses-dashboards.py              # нативный конвертер + синк на :8089
+python3 scripts/generate-perses-dashboards.py --check      # offline-проверка конвертера (без сети)
+python3 scripts/generate-perses-dashboards.py --output-dir ./monitoring/perses/generated  # GitOps-экспорт
+```
+
+Сервис `perses` в `docker-compose.yml` слушает `8089:8080` и использует named volume
+`perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-имидемпотентно).
+Режим `--mode migrate` (через `POST /api/migrate`) оставлен как fallback.
+
+**Замечание про «пустые» панели.** Панели используют фиксированные окна `rate[1m]`/`rate[5m]`
+(как и в Grafana): если счётчик события не рос в окне (например, нет 4xx/5xx при здоровой
+нагрузке, нет дубликатов, NATS-ретраев или per-client трафика) — панель не рисует линию. Это не
+баг конвертера: при появлении соответствующего трафика панель заполняется.
+
 ### Мониторинг (VictoriaMetrics, без Prometheus/алертов)
 
 Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Алерты (`vmalert`/`prometheus/alerts.yml`/`8880`) удалены — в стеке нет Alertmanager, правила с `-notifier.blackhole` никто не видел. Для алертинга подключите внешний `vmalert`/`alertmanager` к VictoriaMetrics отдельно.

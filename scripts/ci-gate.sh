@@ -6,7 +6,8 @@
 #
 # Usage:
 #   ./scripts/ci-gate.sh unit       Python unit tests (no containers)
-#   ./scripts/ci-gate.sh offline    Offline gates: metric-name consistency,
+#   ./scripts/ci-gate.sh offline    Offline gates: lint-python, Perses dashboard
+#                                   converter --check, metric-name consistency,
 #                                   env-var <-> compose, docker build-context
 #   ./scripts/ci-gate.sh runtime    Runtime gates against a live stack:
 #                                   message counter, DB gateway e2e, golden
@@ -50,6 +51,13 @@ g_offline() {
         return 1
     fi
     log_info "✓ Python-style consistency passed"
+
+    log_info "Running Perses dashboard generator check (--check)..."
+    if ! python3 scripts/generate-perses-dashboards.py --check 2>&1; then
+        log_error "Perses native dashboard conversion validation failed!"
+        return 1
+    fi
+    log_info "✓ Perses dashboard generation passed"
 
     if [ "$SKIP_METRICS_CHECK" = "1" ]; then
         log_warn "SKIP_METRICS_CHECK=1 — metric-name gates skipped"
