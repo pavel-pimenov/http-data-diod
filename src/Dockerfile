@@ -79,6 +79,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libpq-dev \
     && apt-get clean
 
+# NATS server binary for unit tests that need a live broker
+# (src/test_nats_live.cpp). Same tag as the compose nats-server service.
+COPY --from=nats:2.14-alpine /usr/local/bin/nats-server /usr/local/bin/nats-server
+
 # ccache tuning: on 4-core hosts the 5 GiB default evicts unity batches between
 # Dockerfile tweaks; raise the cap and compress so hits survive longer. The
 # cache itself lives in the BuildKit cache mount at /root/.ccache and persists

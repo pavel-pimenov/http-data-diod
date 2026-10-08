@@ -521,6 +521,7 @@ if(BUILD_TESTS)
         test_app_context.cpp
         test_proxy_handlers.cpp
         test_l2_worker.cpp
+        test_nats_live.cpp
         version.cpp
         shutdown_flag.cpp
         app_context.cpp

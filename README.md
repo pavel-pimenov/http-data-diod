@@ -833,9 +833,9 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **90.3%** (13092/14505) |
-| `--fail-under-branch` — ветви по проекту | 40% | **40.6%** (24987/61521) |
-| пер-файловый гейт регрессии (см. ниже) | без снижения | 76 production-файлов в baseline |
+| `--fail-under-line` — строки по проекту | 90% | **92.3%** (13958/15124) |
+| `--fail-under-branch` — ветви по проекту | 40% | **41.1%** (26268/63908) |
+| пер-файловый гейт регрессии (см. ниже) | без снижения | 77 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
 запускается из `scripts/run-coverage.sh` сразу после отчёта. Сверяет построчное
@@ -855,8 +855,8 @@ python3 scripts/coverage-regression-check.py --max-drop 0.5   # допуск в 
 
 | Замер | Branch |
 |---|---|
-| Полный (включая инстанцирование шаблонов в тестовых файлах) | 40.6% |
-| Только project-файлы (без `test_*.cpp`) | 47.0% |
+| Полный (включая инстанцирование шаблонов в тестовых файлах) | 41.1% |
+| Только project-файлы (без `test_*.cpp`) | 49.5% |
 
 ```bash
 # ветвевой отчёт gcovr (внутри контейнера coverage; HTML-детали в coverage-report/branch.*)
@@ -870,10 +870,12 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 Ветвевой показатель сильно занижен тестовыми сборочными единицами
 (`test_*.cpp` дают ~48k ветвей из-за инстанцирования шаблонных хедеров) и
 не покрывает эвристики, недостижимые модульными тестами (таймауты, сетевые
-ошибки, DB-экзекуторы). Слабейшие по ветвям в production:
-`db_query_executor_oracle.cpp` (6.6%), `db_query_executor_postgres.cpp` (7.6%),
-`nats_client.cpp` (16.5%), `nats_poll_service.cpp` (23.5%),
-`db_query_handler.cpp` (29.6%) — всем им нужны живые сервисы/брокер.
+ошибки, DB-экзекуторы). Слабейшие по ветвям в production —
+буквальные БД-экзекуторы: `db_query_executor_oracle.cpp` (6.6%),
+`db_query_executor_postgres.cpp` (7.6%), `db_query_handler.cpp` (29.6%) — им всем
+нужны живые СУБД (территория e2e). NATS-часть уже доехана живым nats-server
+через `test_nats_live.cpp` (раунд 71): `nats_poll_service.cpp` 41.2%,
+`nats_client.cpp` 41.1% ветвей и по строкам 88.0%/80.7%.
 Гейт по ветвям стоит на общем числе ветвей (40%).
 
 **Текущие цифры** (раунды 11b–13e):
@@ -891,7 +893,11 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| **Общее по проекту** | **90.3%** | Гейт: строки ≥90%, ветви ≥40%, пер-файловая регрессия |
+| `nats_client.cpp` | 80.7% | live-брокер (test_nats_live.cpp): request/reply, headers, reconnect, fail-fast |
+| `l2_worker_nats.cpp` | 81.2% | live-брокер: run-loop, dedup, send_nats_response_impl |
+| `nats_poll_service.cpp` | 88.0% | live-брокер: round-trip, no-responders, пустой ответ, disconnected |
+| `nats_push_service.cpp` | 93.1% | сериализация запроса (остаток — continuation-строки) |
+| **Общее по проекту** | **92.3%** | Гейт: строки ≥90%, ветви ≥40%, пер-файловая регрессия |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 

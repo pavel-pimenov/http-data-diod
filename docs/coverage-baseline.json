@@ -151,6 +151,12 @@
       "branches": 214,
       "branches_covered": 131
     },
+    "http_client.cpp": {
+      "lines": 94,
+      "covered": 90,
+      "branches": 136,
+      "branches_covered": 79
+    },
     "http_client.hpp": {
       "lines": 14,
       "covered": 13,
@@ -207,9 +213,9 @@
     },
     "l2_worker.cpp": {
       "lines": 313,
-      "covered": 276,
+      "covered": 277,
       "branches": 496,
-      "branches_covered": 261
+      "branches_covered": 265
     },
     "l2_worker.hpp": {
       "lines": 5,
@@ -219,9 +225,9 @@
     },
     "l2_worker_nats.cpp": {
       "lines": 361,
-      "covered": 271,
+      "covered": 293,
       "branches": 826,
-      "branches_covered": 325
+      "branches_covered": 364
     },
     "logger.hpp": {
       "lines": 276,
@@ -249,9 +255,9 @@
     },
     "nats_client.cpp": {
       "lines": 457,
-      "covered": 162,
+      "covered": 369,
       "branches": 756,
-      "branches_covered": 125
+      "branches_covered": 311
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -261,9 +267,9 @@
     },
     "nats_poll_service.cpp": {
       "lines": 125,
-      "covered": 55,
+      "covered": 110,
       "branches": 272,
-      "branches_covered": 64
+      "branches_covered": 112
     },
     "nats_push_service.cpp": {
       "lines": 29,
@@ -279,9 +285,9 @@
     },
     "proxy_init.cpp": {
       "lines": 93,
-      "covered": 84,
+      "covered": 85,
       "branches": 196,
-      "branches_covered": 85
+      "branches_covered": 88
     },
     "random_utils.hpp": {
       "lines": 6,
@@ -309,9 +315,9 @@
     },
     "request_handler.cpp": {
       "lines": 449,
-      "covered": 381,
+      "covered": 405,
       "branches": 961,
-      "branches_covered": 441
+      "branches_covered": 483
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -389,7 +395,7 @@
       "lines": 206,
       "covered": 203,
       "branches": 387,
-      "branches_covered": 246
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -401,7 +407,7 @@
       "lines": 58,
       "covered": 57,
       "branches": 132,
-      "branches_covered": 82
+      "branches_covered": 81
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
