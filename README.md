@@ -796,6 +796,8 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 | `circuit_breaker.cpp` | `test_components.cpp` | set_gauge, state transitions |
 | `rate_limiter_per_ip.hpp` | `test_components.cpp` | per-IP burst, LRU-вытеснение, TTL-cleanup, get_per_ip_stats |
 | `config.cpp` | `test_components.cpp` | Env-parsing, validations |
+| `db_query_executor_postgres.cpp` | `test_db_live.cpp` | init/ping/select, DDL, типы, параметры, timeout, pool-exhaustion, broken-conn |
+| `db_query_handler.cpp` | `test_db_live.cpp` | live-роутинг query/ping/implicit-db, partial init, multi-executor 404 |
 
 Запуск clang-tidy (после изменений):
 
@@ -833,8 +835,8 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **92.3%** (13958/15124) |
-| `--fail-under-branch` — ветви по проекту | 40% | **41.1%** (26268/63908) |
+| `--fail-under-line` — строки по проекту | 90% | **93.43%** (14599/15625) |
+| `--fail-under-branch` — ветви по проекту | 40% | **41.16%** (27890/67760) |
 | пер-файловый гейт регрессии (см. ниже) | без снижения | 77 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
@@ -855,8 +857,8 @@ python3 scripts/coverage-regression-check.py --max-drop 0.5   # допуск в 
 
 | Замер | Branch |
 |---|---|
-| Полный (включая инстанцирование шаблонов в тестовых файлах) | 41.1% |
-| Только project-файлы (без `test_*.cpp`) | 49.5% |
+| Полный (включая инстанцирование шаблонов в тестовых файлах) | 41.2% |
+| Только project-файлы (без `test_*.cpp`) | 51.4% |
 
 ```bash
 # ветвевой отчёт gcovr (внутри контейнера coverage; HTML-детали в coverage-report/branch.*)
@@ -870,15 +872,17 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 Ветвевой показатель сильно занижен тестовыми сборочными единицами
 (`test_*.cpp` дают ~48k ветвей из-за инстанцирования шаблонных хедеров) и
 не покрывает эвристики, недостижимые модульными тестами (таймауты, сетевые
-ошибки, DB-экзекуторы). Слабейшие по ветвям в production —
-буквальные БД-экзекуторы: `db_query_executor_oracle.cpp` (6.6%),
-`db_query_executor_postgres.cpp` (7.6%), `db_query_handler.cpp` (29.6%) — им всем
-нужны живые СУБД (территория e2e). NATS-часть уже доехана живым nats-server
-через `test_nats_live.cpp` (раунд 71): `nats_poll_service.cpp` 41.2%,
-`nats_client.cpp` 41.1% ветвей и по строкам 88.0%/80.7%.
+ошибки). Буквальные БД-экзекуторы закрываются живыми СУБД: postgres-экзекутор
+и handler доехали живьём в раунде 72 (`test_db_live.cpp`, временный `initdb`
+кластер в builder-образе): `db_query_executor_postgres.cpp` 53.3% ветвей
+(88.5% строк), `db_query_handler.cpp` 55.6% ветвей (97.6% строк). Единственный
+не закрытый экзекутор — `db_query_executor_oracle.cpp` (6.6% ветвей, 14.9%
+строк): живого Oracle в alpine-образе нет, нужна территория e2e. NATS-часть
+уже доехана живым nats-server через `test_nats_live.cpp` (раунд 71):
+`nats_poll_service.cpp` 41.2%, `nats_client.cpp` 40.5% ветвей и 78.6% строк.
 Гейт по ветвям стоит на общем числе ветвей (40%).
 
-**Текущие цифры** (раунды 11b–13e):
+**Текущие цифры** (обновлено в раунде 72):
 
 | Модуль | Строк покрыто | Комментарий |
 |---|---|---|
@@ -888,16 +892,18 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `rate_limiter_per_ip.hpp` | 95% | пер-IP изоляция, LRU, TTL, max_ips=0 reject |
 | `trace_logger.cpp` | 88.3% | Включая sender_loop, queue-full, retry |
 | `sentry_client.cpp` | 94.3% | HTTP-доставка, DSN, все уровни |
-| `http_client.cpp` | 94.6% | HTTPS/SSL-ветка, connection pool |
+| `http_client.cpp` | 95.7% | HTTPS/SSL-ветка, connection pool |
 | `common_utils.cpp` | 96.2% | Error categorizer, trace context, MetricsHistory |
 | `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
-| `nats_client.cpp` | 80.7% | live-брокер (test_nats_live.cpp): request/reply, headers, reconnect, fail-fast |
+| `nats_client.cpp` | 78.6% | live-брокер (test_nats_live.cpp): request/reply, headers, reconnect, fail-fast; ±10 строк флакают из-за async-колбэков reconnect |
 | `l2_worker_nats.cpp` | 81.2% | live-брокер: run-loop, dedup, send_nats_response_impl |
 | `nats_poll_service.cpp` | 88.0% | live-брокер: round-trip, no-responders, пустой ответ, disconnected |
 | `nats_push_service.cpp` | 93.1% | сериализация запроса (остаток — continuation-строки) |
-| **Общее по проекту** | **92.3%** | Гейт: строки ≥90%, ветви ≥40%, пер-файловая регрессия |
+| `db_query_executor_postgres.cpp` | 88.5% | live-postgres (test_db_live.cpp): init/ping/select, типы, параметры, timeout, pool-exhaustion, broken-conn |
+| `db_query_handler.cpp` | 97.6% | live-роутинг query/ping/implicit-db, partial init, multi-executor 404 |
+| **Общее по проекту** | **93.43%** | Гейт: строки ≥90%, ветви ≥40%, пер-файловая регрессия |
 
 ### Валидация под AddressSanitizer / LeakSanitizer / UBSan
 

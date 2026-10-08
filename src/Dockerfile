@@ -77,7 +77,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     catch2 \
     libcli11-dev \
     libpq-dev \
+    postgresql \
     && apt-get clean
+
+# Drop the distro default cluster auto-created at package install time: the
+# live DB unit tests (src/test_db_live.cpp) run their own ephemeral cluster
+# per build. In a container without systemd the package's init script cannot
+# manage it anyway, and a stray postgres on 5432 would only waste disk.
+RUN set -eux; \
+    for v in /usr/lib/postgresql/*/; do \
+      v=${v%/}; v=${v##*/}; \
+      pg_dropcluster --stop "${v}" main >/dev/null 2>&1 || true; \
+    done; \
+    rm -rf /etc/postgresql /var/lib/postgresql/* /var/run/postgresql
 
 # NATS server binary for unit tests that need a live broker
 # (src/test_nats_live.cpp). Same tag as the compose nats-server service.
@@ -221,6 +233,7 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/json/.*' \
           --html --html-details -o /app/out/coverage/coverage.html \
           --gcov-ignore-errors=all \
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
           --fail-under-line 90 \
           --fail-under-branch 40 && \
     gcovr --object-directory . --root /app \
@@ -230,7 +243,8 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/base64/.*' \
           --exclude '/app/json/.*' \
           --json -o /app/out/coverage/cov.json \
-          --gcov-ignore-errors=all && \
+          --gcov-ignore-errors=all \
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file && \
     echo "=== coverage report rendered ==="
 
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.

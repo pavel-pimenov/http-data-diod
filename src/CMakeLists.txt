@@ -522,6 +522,7 @@ if(BUILD_TESTS)
         test_proxy_handlers.cpp
         test_l2_worker.cpp
         test_nats_live.cpp
+        test_db_live.cpp
         version.cpp
         shutdown_flag.cpp
         app_context.cpp

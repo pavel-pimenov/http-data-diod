@@ -93,21 +93,21 @@
     },
     "db_query_executor_postgres.cpp": {
       "lines": 304,
-      "covered": 59,
+      "covered": 269,
       "branches": 460,
-      "branches_covered": 35
+      "branches_covered": 245
     },
     "db_query_handler.cpp": {
       "lines": 83,
-      "covered": 55,
+      "covered": 81,
       "branches": 142,
-      "branches_covered": 42
+      "branches_covered": 79
     },
     "db_query_handler.hpp": {
       "lines": 11,
       "covered": 11,
       "branches": 8,
-      "branches_covered": 5
+      "branches_covered": 6
     },
     "db_query_utils.hpp": {
       "lines": 132,
@@ -255,9 +255,9 @@
     },
     "nats_client.cpp": {
       "lines": 457,
-      "covered": 369,
+      "covered": 359,
       "branches": 756,
-      "branches_covered": 311
+      "branches_covered": 306
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -395,7 +395,7 @@
       "lines": 206,
       "covered": 203,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 7,

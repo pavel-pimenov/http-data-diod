@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 72 | живой PostgreSQL в юнит-тестах (test_db_live.cpp: initdb-кластер в builder, PgServer) — db_query_executor_postgres 19.4%→88.5% строк/53.3% ветвей, db_query_handler 66.3%→97.6%; gcovr-фикс negative hits; зафиксирован флак nats_client ±10 строк; строки 93.37%, ветви 41.15% | [round-72](docs/history/round-72-живой-PostgreSQL-в-юнит-тестах-db-live.md) |
 | 71 | живой nats-server в юнит-тестах (test_nats_live.cpp: NatsClient pub/sub/reconnect, PollService, DB-gateway, L2Worker run-loop, fail-fast offline) — NATS-покрытие: nats_client 80.7%, poll 88%, строки 92.3%, ветви 41.1% | [round-71](docs/history/round-71-живой-NATS-брокер-в-юнит-тестах-nats-live.md) |
 | 70 | гейт ветвей 40% + пер-файловый гейт регрессии покрытия (coverage-regression-check.py ↔ docs/coverage-baseline.json) | [round-70](docs/history/round-70-гейт-ветвей-40-процентов-и-пер-файловая-регрессия-покрытия.md) |
 | 69 | покрытие юнит-тестами до 90% (тесты линкуют весь бинарник, новые test_l2_worker/test_proxy_handlers, StatsLogger с параметром периода) + гейт --fail-under-line 90 | [round-69](docs/history/round-69-покрытие-тестами-90-процентов-гейт-fail-under-line-90.md) |
