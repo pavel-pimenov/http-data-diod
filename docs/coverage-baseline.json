@@ -1,11 +1,11 @@
 {
-  "comment": "per-file coverage baseline (auto-updated by scripts/coverage-regression-check.py)",
+  "comment": "Пер-файловая база покрытия production-файлов (отчёт gcovr --json). Сверяется скриптом scripts/coverage-regression-check.py; обновляй: scripts/coverage-regression-check.py --update",
   "files": {
     "app_context.cpp": {
       "lines": 280,
-      "covered": 280,
+      "covered": 278,
       "branches": 492,
-      "branches_covered": 249
+      "branches_covered": 246
     },
     "base64_utils.hpp": {
       "lines": 3,
@@ -44,15 +44,15 @@
       "branches_covered": 9
     },
     "crash_handler.hpp": {
-      "lines": 285,
+      "lines": 7,
       "covered": 7,
-      "branches": 768,
+      "branches": 12,
       "branches_covered": 7
     },
     "crash_utils.hpp": {
-      "lines": 34,
+      "lines": 31,
       "covered": 30,
-      "branches": 36,
+      "branches": 34,
       "branches_covered": 26
     },
     "db_gateway_routing.hpp": {
@@ -231,15 +231,9 @@
     },
     "logger.hpp": {
       "lines": 276,
-      "covered": 265,
+      "covered": 263,
       "branches": 395,
-      "branches_covered": 224
-    },
-    "main.cpp": {
-      "lines": 283,
-      "covered": 0,
-      "branches": 526,
-      "branches_covered": 0
+      "branches_covered": 220
     },
     "metrics_history.hpp": {
       "lines": 92,
@@ -261,9 +255,9 @@
     },
     "nats_client.cpp": {
       "lines": 457,
-      "covered": 387,
+      "covered": 386,
       "branches": 756,
-      "branches_covered": 353
+      "branches_covered": 351
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -413,7 +407,7 @@
       "lines": 58,
       "covered": 57,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

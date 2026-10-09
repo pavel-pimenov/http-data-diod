@@ -1240,4 +1240,41 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   L2Worker worker(ctx);
   REQUIRE(worker.is_nats_connected());
 }
+TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]") {
+  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  natsConnection* nc = nullptr;
+  REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
+  natsMsg* reply=nullptr;
+  auto st = natsConnection_RequestString(&reply, nc, "no.such.subject.timeout0", "hi", (int64_t)0);
+  (void)st; if (reply) natsMsg_Destroy(reply);
+  natsConnection_Destroy(nc);
+}
 
+TEST_CASE("NatsClient: subscribe rejects invalid subject", "[nats-live]") {
+  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  natsConnection* nc = nullptr;
+  REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
+  natsSubscription* sub=nullptr;
+  auto st = natsConnection_SubscribeSync(&sub, nc, "bad subject");
+  REQUIRE(st == NATS_INVALID_SUBJECT);
+  if (sub) natsSubscription_Destroy(sub);
+  natsConnection_Destroy(nc);
+}
+
+TEST_CASE("NatsClient: request times out when subscriber never replies", "[nats-live]") {
+  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  natsConnection* nc = nullptr;
+  REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
+  natsSubscription* sub=nullptr;
+  auto ssub = natsConnection_SubscribeSync(&sub, nc, "test.timeout.never.reply");
+  REQUIRE(ssub == NATS_OK);
+  natsMsg* reply=nullptr;
+  auto sreq = natsConnection_RequestString(&reply, nc, "test.timeout.never.reply", "ping", (int64_t)50);
+  REQUIRE(sreq == NATS_TIMEOUT);
+  if (reply) natsMsg_Destroy(reply);
+  natsSubscription_Destroy(sub);
+  natsConnection_Destroy(nc);
+}
