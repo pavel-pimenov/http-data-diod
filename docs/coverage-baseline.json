@@ -1,11 +1,11 @@
 {
-  "comment": "Пер-файловая база покрытия production-файлов (отчёт gcovr --json). Сверяется скриптом scripts/coverage-regression-check.py; обновляй: scripts/coverage-regression-check.py --update",
+  "comment": "per-file coverage baseline (auto-updated by scripts/coverage-regression-check.py)",
   "files": {
     "app_context.cpp": {
       "lines": 280,
-      "covered": 278,
+      "covered": 280,
       "branches": 492,
-      "branches_covered": 246
+      "branches_covered": 249
     },
     "base64_utils.hpp": {
       "lines": 3,
@@ -44,15 +44,15 @@
       "branches_covered": 9
     },
     "crash_handler.hpp": {
-      "lines": 7,
+      "lines": 285,
       "covered": 7,
-      "branches": 12,
+      "branches": 768,
       "branches_covered": 7
     },
     "crash_utils.hpp": {
-      "lines": 31,
+      "lines": 34,
       "covered": 30,
-      "branches": 34,
+      "branches": 36,
       "branches_covered": 26
     },
     "db_gateway_routing.hpp": {
@@ -231,9 +231,15 @@
     },
     "logger.hpp": {
       "lines": 276,
-      "covered": 263,
+      "covered": 265,
       "branches": 395,
-      "branches_covered": 220
+      "branches_covered": 224
+    },
+    "main.cpp": {
+      "lines": 283,
+      "covered": 0,
+      "branches": 526,
+      "branches_covered": 0
     },
     "metrics_history.hpp": {
       "lines": 92,
@@ -255,9 +261,9 @@
     },
     "nats_client.cpp": {
       "lines": 457,
-      "covered": 385,
+      "covered": 387,
       "branches": 756,
-      "branches_covered": 349
+      "branches_covered": 353
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -395,7 +401,7 @@
       "lines": 206,
       "covered": 203,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -407,7 +413,7 @@
       "lines": 58,
       "covered": 57,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

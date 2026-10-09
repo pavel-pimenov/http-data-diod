@@ -65,8 +65,10 @@ public:
                               const std::string &query = "");
   void run();
   bool is_nats_connected() const;
+  bool db_handler_ready() const { return m_db_query_handler != nullptr && m_db_query_handler->is_enabled(); }
 
 private:
+  friend class L2WorkerDbTestHook; // for test access
   // White-box hook for test_l2_worker.cpp: the private pipeline stages and
   // runtime state are driven through that accessor.
   friend class L2WorkerTestAccess;
