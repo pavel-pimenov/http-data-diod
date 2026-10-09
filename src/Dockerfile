@@ -208,9 +208,13 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 # (`\\.`) is passed literally to the regex and matches nothing (0% report).
 #
 # Two gates in one invocation (gcovr ORs their exit codes): line coverage
-# >= 90% and branch coverage >= 40%. The second gcovr pass emits cov.json
-# (same filters, no gates) for scripts/coverage-regression-check.py, which
-# compares per-file coverage against docs/coverage-baseline.json.
+# >= 90% and branch coverage >= 40% (full scope, src only). The branches gate
+# is deliberately kept loose on the full scope; the stronger gate is the third
+# gcovr pass: branch coverage >= 45% on production-only sources (test_*.cpp
+# excluded) — unit tests must not hide gaps in the shipped code paths. The
+# second gcovr pass emits cov.json (same filters, no gates) for
+# scripts/coverage-regression-check.py, which compares per-file coverage
+# against docs/coverage-baseline.json.
 FROM builder AS coverage
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -245,6 +249,17 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --json -o /app/out/coverage/cov.json \
           --gcov-ignore-errors=all \
           --gcov-ignore-parse-errors=negative_hits.warn_once_per_file && \
+    gcovr --object-directory . --root /app \
+          --filter '/app/.*\.(cpp|hpp|h)$' \
+          --exclude '/app/prometheus-cpp/.*' \
+          --exclude '/app/httplib/.*' \
+          --exclude '/app/base64/.*' \
+          --exclude '/app/json/.*' \
+          --exclude '/app/.*test_[^/]*\.cpp$' \
+          --json -o /dev/null \
+          --gcov-ignore-errors=all \
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+          --fail-under-branch 45 && \
     echo "=== coverage report rendered ==="
 
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.

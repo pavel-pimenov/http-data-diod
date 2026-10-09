@@ -30,8 +30,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <netinet/in.h>
@@ -584,6 +586,8 @@ TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
 
   NatsClient client(live_nats_cfg(subject, server.port()));
   REQUIRE(client.connect());
+  // Reconnecting an already-connected client returns immediately (idempotent).
+  REQUIRE(client.connect());
 
   const std::optional<std::string> r1 = client.request(subject, "ping", 3000);
   REQUIRE(r1.has_value());
@@ -845,6 +849,199 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
       test_client.request(subject, "not-json", 3000);
   REQUIRE(r3.has_value());
   REQUIRE(json::parse(*r3)["error"] == "Invalid request format");
+
+  g_shutdown_flag = true;
+  REQUIRE(runner.joinable());
+  runner.join();
+}
+
+TEST_CASE("NatsClient: constructor logs configured auth and TLS flags",
+          "[nats-offline]") {
+  NatsConfig cfg = live_nats_cfg(unique_subject("nats.authcstr"), 4222);
+  cfg.m_username = "user-1";
+  cfg.m_password = "pass-1";
+  cfg.m_token = "token-1";
+  cfg.m_credentials_file = "/nonexistent-test-creds.pem";
+  cfg.m_enable_tls = true;
+  cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
+  NatsClient client(cfg);
+  // No connection is attempted from the constructor; the fixture must be
+  // usable by callers that only construct.
+  REQUIRE_FALSE(client.is_connected());
+}
+
+TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
+          "[nats-offline]") {
+  const std::string subject = unique_subject("nats.authfail");
+
+  // A garbage credentials file makes natsOptions_SetUserCredentialsFromFiles
+  // fail (misshapen JWT/NKey), but the load is lazy: the abort on a nonexistent
+  // path is NOT guaranteed, so every sub-case pins the bogus TLS CA as the
+  // guaranteed setup_options abort point (natsOptions_LoadCATrustedCertificates
+  // fails fast on a missing file). connect() with a broken options setup
+  // returns false instead of blocking on natsConnection_Connect.
+  const std::string creds_path = "/tmp/nats-garbage-creds.pem";
+  {
+    std::ofstream file(creds_path);
+    file << "this is not a NATS credential file\n";
+  }
+
+  {
+    // Token auth: natsOptions_SetToken succeeds, TLS abort follows.
+    NatsConfig cfg = live_nats_cfg(subject, 4222);
+    cfg.m_token = "token-1";
+    cfg.m_enable_tls = true;
+    cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
+    NatsClient client(cfg);
+    REQUIRE_FALSE(client.connect());
+    REQUIRE(client.get_last_error().has_value());
+  }
+
+  {
+    // Username/password branch (else-if of the token branch).
+    NatsConfig cfg = live_nats_cfg(subject, 4222);
+    cfg.m_username = "user-1";
+    cfg.m_password = "pass-1";
+    cfg.m_enable_tls = true;
+    cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
+    NatsClient client(cfg);
+    REQUIRE_FALSE(client.connect());
+    REQUIRE(client.get_last_error().has_value());
+  }
+
+  {
+    // Credentials file branch: garbage content fails the parse (or the TLS
+    // abort below catches the case where the load is deferred).
+    NatsConfig cfg = live_nats_cfg(subject, 4222);
+    cfg.m_credentials_file = creds_path;
+    cfg.m_enable_tls = true;
+    cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
+    NatsClient client(cfg);
+    REQUIRE_FALSE(client.connect());
+    REQUIRE(client.get_last_error().has_value());
+  }
+
+  {
+    // TLS without CA but with bogus client cert/key aborts at
+    // LoadCertificatesChain.
+    NatsConfig cfg = live_nats_cfg(subject, 4222);
+    cfg.m_enable_tls = true;
+    cfg.m_tls_cert_file = "/nonexistent-test-cert.pem";
+    cfg.m_tls_key_file = "/nonexistent-test-key.pem";
+    NatsClient client(cfg);
+    REQUIRE_FALSE(client.connect());
+    REQUIRE(client.get_last_error().has_value());
+  }
+
+  std::remove(creds_path.c_str());
+}
+
+TEST_CASE("NatsClient: connect to a down broker succeeds once it starts",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  const std::string subject = unique_subject("nats.bootstrap");
+
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  std::atomic<bool> connected{false};
+  std::thread runner([&client, &connected]() {
+    connected.store(client.connect());
+  });
+
+  // Let at least one connect attempt cycle fail before the broker appears.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  REQUIRE(wait_for_condition([&connected]() { return connected.load(); }, 15000));
+  REQUIRE(connected.load());
+  runner.join();
+  REQUIRE(client.is_connected());
+  // Idempotent reconnect on an established connection.
+  REQUIRE(client.connect());
+}
+
+TEST_CASE("NatsClient: request returns nullopt on an empty reply", "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  const std::string subject = unique_subject("nats.emptyreply");
+  NatsResponder responder(
+      live_nats_cfg(subject, server.port()), subject,
+      [](const std::string &, const std::string &) {
+        return NatsReply{""};
+      });
+
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  REQUIRE(client.connect());
+
+  const std::optional<std::string> r1 = client.request(subject, "ping", 3000);
+  REQUIRE_FALSE(r1.has_value());
+
+  const NatsReply r2 = client.request_with_headers(subject, "ping", {}, {}, 3000);
+  REQUIRE(r2.m_data.empty());
+  client.unsubscribe();
+  client.disconnect();
+}
+
+TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  L2BackendServer backend;
+  const json urls = json::array({backend.api_url()});
+  const std::string subject = unique_subject("l2w.restart");
+  const EnvGuard env(
+      live_worker_env(server.port(), subject, urls.dump()));
+  AppContext ctx;
+  attach_tracer(ctx);
+  L2Worker worker(ctx);
+  NatsClient test_client(live_nats_cfg(subject, server.port()));
+
+  struct RestoreShutdownFlag {
+    ~RestoreShutdownFlag() { g_shutdown_flag = false; }
+  } restore_shutdown;
+
+  REQUIRE(worker.is_nats_connected());
+  g_shutdown_flag = false;
+  std::thread runner([&worker] { worker.run(); });
+
+  REQUIRE(test_client.connect());
+
+  const auto make_sender = [&test_client, &subject](const std::string &id) {
+    const std::string payload =
+        make_worker_request(id, "/api/value").dump();
+    return [&test_client, &subject, payload]() -> bool {
+      const auto r = test_client.request(subject, payload, 1500);
+      return r.has_value() && !r->empty();
+    };
+  };
+
+  // First request: worker subscribes and serves it.
+  REQUIRE(wait_for_condition(make_sender("restart-req-1"), 12000));
+  REQUIRE(backend.m_posts.load() == 1);
+
+  // Restart the broker: the worker's connection drops, the run loop observes
+  // the loss, reconnects and forces a subscription refresh.
+  server.restart();
+  REQUIRE(wait_for_condition([&worker]() { return worker.is_nats_connected(); },
+                             15000));
+
+  // A fresh request id (avoids the dedup cache) must reach L2 again after the
+  // subscription refresh.
+  REQUIRE(wait_for_condition(make_sender("restart-req-2"), 12000));
+  REQUIRE(backend.m_posts.load() == 2);
 
   g_shutdown_flag = true;
   REQUIRE(runner.joinable());
