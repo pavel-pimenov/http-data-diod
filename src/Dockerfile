@@ -259,7 +259,7 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --json -o /dev/null \
           --gcov-ignore-errors=all \
           --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
-          --fail-under-branch 45 && \
+          --fail-under-branch 50 && \
     echo "=== coverage report rendered ==="
 
 # Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.
