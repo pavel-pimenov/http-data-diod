@@ -2,7 +2,7 @@
 
 Полный контур: **HTTP → l2-proxy → NATS (`service.db.query`) → l2-worker → СУБД (PostgreSQL libpq / Oracle ODPI-C pool) → обратно**.
 
-По умолчанию подключён **PostgreSQL** (`DB_POSTGRES_ENABLED=true`), Oracle — опционально через profile `oracle` (`DB_ORACLE_ENABLED=true`).
+По умолчанию подключён **PostgreSQL** (`DB_POSTGRES_ENABLED=true`), Oracle — опционально (`DB_ORACLE_ENABLED=true`). Обе СУБД в `docker-compose.yml` спрятаны за profile `databases` и по умолчанию не стартуют: обычно они живут на отдельном узле-БД, а воркер ходит к ним по `DB_POSTGRES_HOST` / `DB_ORACLE_HOST`. Если СУБД нужны прямо здесь — поднять их отдельно:
 
 Схема запроса `POST /v1/sql/oracle/query`:
 
@@ -23,10 +23,10 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 
 | Сервис | Роль | Что задействовано |
 |--------|------|-------------------|
-| `postgres` | БД | `postgres:17-alpine`, демо-схема из `sql/postgres.sql`. Включён по умолчанию (`DB_POSTGRES_ENABLED=true`) |
-| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/oracle.sql`. Запускается только через profile: `docker compose --profile oracle up -d` |
+| `postgres` | БД | `postgres:17-alpine`, демо-схема из `sql/postgres.sql`. Profile `databases` (`DB_POSTGRES_ENABLED=true`); при внешнем узле-БД работает `DB_POSTGRES_HOST` |
+| `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/oracle.sql`. Profile `databases`: `docker compose --profile databases up -d oracle` + `DB_ORACLE_ENABLED=true` |
 | `l2-proxy` | HTTP-вход | регистрирует БД из `DB_POSTGRES_*` / `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
-| `l2-worker` | Исполнитель | образ `runtime-db` (Oracle OCI из XE-образа + libpq), держит пулы сессий, отвечает на `service.db.query` |
+| `l2-worker` | Исполнитель | сборка по умолчанию `target=runtime` (libpq); для Oracle нужен `target=runtime-db` (OCI из XE-образа), держит пулы сессий, отвечает на `service.db.query` |
 | `nats-server` | Транспорт | subject `service.db.query`, queue group `db_workers` |
 
 ## Переменные окружения (docker-compose.yml)
@@ -34,7 +34,7 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 По умолчанию шлюз включён (`DB_QUERY_ENABLED=true`), PostgreSQL подключён, Oracle отключён (`DB_ORACLE_ENABLED=false`). Для запуска Oracle-контура поднимите сервис с профилем и включите Oracle:
 
 ```
-docker compose --profile oracle up -d
+docker compose --profile databases up -d
 DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
 ```
 
@@ -85,14 +85,14 @@ l2-worker ходит в Oracle через ODPI-C, которому нужны д
 L2_WORKER_DOCKER_TARGET=runtime-db DB_ORACLE_ENABLED=true docker compose up -d --build l2-worker
 ```
 
-вместе с profile `oracle`. По умолчанию сборка идёт с `target=runtime` и OCI-клиент **не**
+вместе с profile `databases`. По умолчанию сборка идёт с `target=runtime` и OCI-клиент **не**
 кладётся в образ — так локальные/тестовые сборки с PostgreSQL не тянут лишние ~200 МБ.
 
 Проверка, что клиент живой:
 
 ```
 docker compose logs l2-worker | grep -i "DB executor 'oracle'"   # ждать "pool ready"
-docker compose up -d --profile oracle                            # если oracle ещё не поднят
+docker compose up -d --profile databases                          # если СУБД ещё не подняты
 curl http://localhost:8888/v1/sql/oracle/ping                    # {"status":"ok",...}
 ```
 

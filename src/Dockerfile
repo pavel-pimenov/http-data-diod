@@ -187,13 +187,20 @@ RUN --mount=type=cache,target=/root/.ccache \
 # the results stay at the end of the build output instead of scrolling past a
 # clean build's compile progress, and the test gate becomes a separate cachable
 # step that re-runs only when the sources (parent layers) actually changed.
+# The two binaries run SEQUENTIALLY (not `&`/`wait`): the live NATS/PostgreSQL
+# tests spawn a real broker and ephemeral DB clusters, and on small hosts
+# (2 vCPU / 4 GiB) running both concurrently doubles the peak RSS and can
+# OOM-kill the test Postgres, failing the gate with "connection refused".
 RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
     cd /app/build && _T4=$(date +%s); \
-    ./test_components & _P1=$!; \
-    ./test_proxy_core & _P2=$!; \
-    wait $_P1 && wait $_P2 && \
+    ./test_components && \
     _T5=$(date +%s) && \
-    echo "=== unit tests (parallel): $((_T5 - _T4))s, all passed ==="
+    echo "=== unit tests (test_components): $((_T5 - _T4))s, all passed ==="
+RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
+    cd /app/build && _T4=$(date +%s); \
+    ./test_proxy_core && \
+    _T5=$(date +%s) && \
+    echo "=== unit tests (test_proxy_core): $((_T5 - _T4))s, all passed ==="
 
 # Keep debug info (DWARF) for crash handler stack trace resolution
 

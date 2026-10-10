@@ -169,5 +169,5 @@ Functions 95.2%, Branches 41.4%.
 ## Замечание по окружению
 
 NATS-ветка отключена — все изменения и тесты только для NATS-режима.
-Oracle-профиль запускается по demand: `docker compose --profile oracle up -d`.
+СУБД (postgres/oracle) запускаются по demand: `docker compose --profile databases up -d`.
 Sentry (glitchtip) запускается по demand: `docker compose --profile glitchtip up -d`.

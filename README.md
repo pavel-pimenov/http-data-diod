@@ -40,7 +40,7 @@ flowchart TD
 
     subgraph DBGATE ["HTTP DB Gateway (NATS subject service.db.query, queue group db_workers)"]
         worker -- "libpq 5432" --> postgres
-        worker -- "ODPI-C 1521 (profile oracle)" --> oracle
+        worker -- "ODPI-C 1521 (profile databases)" --> oracle
     end
 
     nginxExporter -- "metrics" --> nginx
@@ -143,10 +143,20 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 | Драйвер | Образ / протокол | Статус по умолчанию | Включение |
 |---|---|---|---|
-| PostgreSQL | `postgres:17-alpine`, libpq, порт 5432 | **включён** (`DB_POSTGRES_ENABLED=true`) | поднят в `docker-compose.yml` |
-| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `oracle` + `DB_ORACLE_ENABLED=true` |
+| PostgreSQL | `postgres:17-alpine`, libpq, порт 5432 | **включён** драйвер (`DB_POSTGRES_ENABLED=true`), сервис не стартует | profile `databases` или внешний `DB_POSTGRES_HOST` |
+| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `databases` + `DB_ORACLE_ENABLED=true` + worker `runtime-db` |
 
 Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
+
+СУБД (`postgres`, `oracle`) вынесены в compose-profile `databases` и по умолчанию не
+поднимаются вместе со стеком — они обычно живут на выделенном узле-БД. Там они
+стартуют через `docker compose --profile databases up -d`, а воркер на
+прикладном узле ходит к ним по адресам из `DB_POSTGRES_HOST` / `DB_ORACLE_HOST`
+(см. `.env.example`). Если СУБД нужны на том же хосте, достаточно добавить
+профиль при старте: `docker compose --profile databases up -d`.
+Обратите внимание: для Oracle worker должен собираться в `runtime-db`
+(`L2_WORKER_DOCKER_TARGET=runtime-db`), по умолчанию собирается `runtime`
+(Oracle OCI-клиент не кладётся в образ).
 
 Ключевые переменные окружения см. в `docker-compose.yml` (`DB_QUERY_*`, `DB_POSTGRES_*`, `DB_ORACLE_*`); метрики воркера по шлюзу эмитируются через `l2_worker_*` (см. дашборд `L2 Воркер`).
 
@@ -161,9 +171,9 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 | `DB_QUERY_DEFAULT_TIMEOUT_MS` | `5000` | worker | Дефолтный бюджет исполнения SQL |
 | `DB_QUERY_DEFAULT_MAX_ROWS` | `1000` | worker | Дефолтное ограничение строк ответа |
 | `DB_POSTGRES_ENABLED` | `true` | proxy, worker | Регистрация драйвера postgres |
-| `DB_POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` | `postgres`/`5432`/`app_db`/`app_user`/`app_password` | worker | Подключение к postgres (libpq) |
+| `DB_POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` | `postgres`/`5432`/`app_db`/`app_user`/`app_password` | worker | Подключение к postgres (libpq); `postgres` — имя compose-сервиса, для внешнего узла-БД задайте его адрес |
 | `DB_POSTGRES_POOL_MIN` / `DB_POSTGRES_POOL_MAX` | `1` / `5` | worker | Размер пула сессий postgres |
-| `DB_ORACLE_ENABLED` | `false` | proxy, worker | Регистрация драйвера oracle (profile `oracle`) |
+| `DB_ORACLE_ENABLED` | `false` | proxy, worker | Регистрация драйвера oracle (profile `databases`; worker `runtime-db`) |
 | `DB_ORACLE_HOST`/`PORT`/`SERVICE`/`USER`/`PASSWORD` | `oracle`/`1521`/`XEPDB1`/`app_user`/`app_password` | worker | Подключение к Oracle (ODPI-C) |
 | `DB_ORACLE_POOL_MIN` / `DB_ORACLE_POOL_MAX` | `1` / `5` | worker | Размер пула сессий Oracle |
 
@@ -313,7 +323,7 @@ python3 rate_limit_test.py --expect-zero
 - `--db` — проверка именно DB Gateway семейств (подмножество `--all`):
   требует, чтобы `l2_proxy_db_*`, `l2_worker_db_*` реально эмитились.
   Перед этим надо сгенерировать DB-трафик: `python3 scripts/db-gateway-e2e-test.py`
-  (postgres входит в дефолтный стек; oracle стартует по `--profile oracle`).
+  (СУБД поднимаются через profile: `docker compose --profile databases up -d`).
 
 В CI после smoke-теста дополнительно гоняется
 `scripts/db-gateway-e2e-test.py`, затем `--traffic --db`; presence-проверка

@@ -258,13 +258,16 @@ services:
   # First boot initializes the database (takes ~1-3 min); the worker retries
   # its DB subscription until the healthcheck turns green, so the rest of the
   # stack is unaffected while it starts up.
+  #
+  # Opt-in only (profile `databases`): databases normally live on a dedicated
+  # node. Start them here on demand with:
+  #   docker compose --profile databases up -d oracle
   oracle:
     container_name: oracle
     image: gvenzl/oracle-xe:21.3.0-slim
     restart: unless-stopped
-    # Started only on demand: `docker compose --profile oracle up -d`
     profiles:
-      - oracle
+      - databases
     mem_limit: ${ORACLE_MEM_LIMIT:-2g}
     ports:
       - "1521:1521"
@@ -355,8 +358,13 @@ services:
       retries: 3
       start_period: 60s
 
-  # PostgreSQL 16 for the HTTP DB gateway (l2-worker connects via libpq).
+  # PostgreSQL 17 for the HTTP DB gateway (l2-worker connects via libpq).
   # init scripts run on the first boot via /docker-entrypoint-initdb.d.
+  #
+  # Opt-in only (profile `databases`): the DB gateway also works with an
+  # external PostgreSQL by pointing DB_POSTGRES_HOST at the remote node, so the
+  # local stack does not need to run one. Start it here on demand with:
+  #   docker compose --profile databases up -d postgres
   postgres:
     container_name: postgres
     # Pinned to 17: postgres-data volume was re-initialized by PG17, and 16
@@ -364,6 +372,8 @@ services:
     # without pg_upgrade or wiping the volume (data loss).
     image: postgres:17-alpine
     restart: unless-stopped
+    profiles:
+      - databases
     mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     ports:
       - "5432:5432"
@@ -591,9 +601,11 @@ services:
     build:
       context: ./src
       dockerfile: Dockerfile
-      # Default build embeds the Oracle OCI client from the gvenzl/oracle-xe
-      # image so the Oracle DB gateway works in the local compose stack too.
-      target: ${L2_WORKER_DOCKER_TARGET:-runtime-db}
+      # Default target is the plain `runtime` (no Oracle OCI client, no
+      # gvenzl/oracle-xe image). Set `runtime-db` only when the worker must
+      # talk to Oracle (the image is then pulled just to extract the client):
+      #   L2_WORKER_DOCKER_TARGET=runtime-db ./rebuild-and-run.sh
+      target: ${L2_WORKER_DOCKER_TARGET:-runtime}
       args:
         BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
         APT_MIRROR: "${APT_MIRROR:-}"
@@ -689,10 +701,12 @@ services:
       - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
       - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
       # HTTP DB gateway: the worker owns the driver connection pools (Oracle
-      # ODPI-C + PostgreSQL libpq; runtime-db image, Oracle OCI client at
-      # /opt/oracle). DB_QUERY_ENABLED=false disables the whole gateway. The
-      # subscription is retried at startup until the databases are reachable,
-      # so the worker tolerates a slow cold start.
+      # ODPI-C + PostgreSQL libpq). The runtime image carries libpq; the Oracle
+      # OCI client lives only in the opt-in runtime-db target. Databases may be
+      # external: point DB_POSTGRES_HOST/DB_ORACLE_HOST at the DB node.
+      # DB_QUERY_ENABLED=false disables the whole gateway. The subscription is
+      # retried at startup until the databases are reachable, so the worker
+      # tolerates a slow cold start.
       - DB_QUERY_ENABLED=${DB_QUERY_ENABLED:-true}
       - DB_QUERY_NATS_SUBJECT=${DB_QUERY_NATS_SUBJECT:-service.db.query}
       - DB_QUERY_NATS_QUEUE_GROUP=${DB_QUERY_NATS_QUEUE_GROUP:-db_workers}
@@ -792,7 +806,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.22.0.0/16
+        - subnet: 172.24.0.0/16
 
 volumes:
   grafana-storage:

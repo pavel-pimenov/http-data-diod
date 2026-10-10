@@ -113,7 +113,7 @@ docker compose down --remove-orphans 2>/dev/null || true
 echo "Cleaning up conflicting containers..."
 docker rm -f grafana 2>/dev/null || true
 docker rm -f perses 2>/dev/null || true
-docker rm -f l2-proxy l2-worker l2-server nginx jaeger nginx-exporter 2>/dev/null || true
+docker rm -f l2-proxy l2-worker l2-server nginx jaeger nginx-exporter postgres oracle 2>/dev/null || true
 sleep 1
 
 export DOCKER_BUILDKIT=1
@@ -145,10 +145,10 @@ else
     # set to false (not unset): the `set -u` above trips on unbound vars
     export ENABLE_ASAN=false
     export L2_PROXY_DOCKER_TARGET=runtime
-    # Default worker build embeds the Oracle OCI client so the local compose
-    # stack can connect both to the built-in Oracle XE and to external Oracle
-    # databases without extra flags.
-    export L2_WORKER_DOCKER_TARGET="${L2_WORKER_DOCKER_TARGET:-runtime-db}"
+    # Default worker build is plain `runtime` (libpq only, no Oracle OCI
+    # client, no gvenzl/oracle-xe image). Set L2_WORKER_DOCKER_TARGET=runtime-db
+    # only on a node whose worker must talk to Oracle.
+    export L2_WORKER_DOCKER_TARGET="${L2_WORKER_DOCKER_TARGET:-runtime}"
     echo "Building Docker images (RelWithDebInfo, optimized, no sanitizers)..."
 fi
 

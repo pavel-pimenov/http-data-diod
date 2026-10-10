@@ -40,7 +40,7 @@
 
 namespace {
 
-constexpr int kServerWaitTimeoutMs = 10000;
+constexpr int kServerWaitTimeoutMs = 30000;
 
 [[nodiscard]] int reserve_loopback_port() {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -65,19 +65,28 @@ constexpr int kServerWaitTimeoutMs = 10000;
   return port;
 }
 
-[[nodiscard]] bool tcp_probe(int port) {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
+// A real libpq round-trip ('SELECT 1'), not just a TCP probe: postgres can
+// briefly refuse a connection in the last microseconds of startup even though
+// the listener socket is already bound, so the readiness check must confirm an
+// actual query succeeds.
+[[nodiscard]] bool pg_ready(int port) {
+  const std::string conninfo = std::format(
+      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=2",
+      port);
+  PGconn *conn = PQconnectdb(conninfo.c_str());
+  if (conn == nullptr) {
     return false;
   }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = htons(static_cast<uint16_t>(port));
-  const int rc = ::connect(fd, reinterpret_cast<const sockaddr *>(&addr),
-                           sizeof(addr));
-  ::close(fd);
-  return rc == 0;
+  bool ok = PQstatus(conn) == CONNECTION_OK;
+  if (ok) {
+    PGresult *res = PQexec(conn, "SELECT 1");
+    ok = res != nullptr && PQresultStatus(res) == PGRES_TUPLES_OK;
+    if (res != nullptr) {
+      PQclear(res);
+    }
+  }
+  PQfinish(conn);
+  return ok;
 }
 
 [[nodiscard]] bool wait_for_condition(const std::function<bool()> &predicate,
@@ -188,7 +197,14 @@ public:
 
   bool ensure_started() {
     if (m_pid > 0) {
-      return true;
+      if (alive()) {
+        return true;
+      }
+      // The server process died on its own (OOM/crash under load): the stale
+      // pid must not keep reporting "started", otherwise every later live test
+      // fails with "connection refused". Drop the dead pid and datadir and let
+      // start() spin up a fresh cluster below.
+      cleanup_datadir();
     }
     if (m_failed) {
       return false;
@@ -344,7 +360,7 @@ private:
     m_pid = server_pid;
 
     const bool ready = wait_for_condition(
-        [this] { return tcp_probe(m_port) && alive(); },
+        [this] { return alive() && pg_ready(m_port); },
         kServerWaitTimeoutMs);
     if (!ready) {
       Logger::warn("pg live test: server at {} never became ready", m_port);
