@@ -4,6 +4,11 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 81 | живой NATS+PostgreSQL combo-тест worker-а (process_db_query_from_nats 302→315 строк, ветви 377→391), poll-ветки (null client / timeout 0), чистка оснастки round 74 (void pg_redir, удалён L2WorkerDbTestHook) — production 89.47% строк / 51.85% ветвей | [round-81](docs/history/round-81-live-NATS-Postgres-комбо-и-poll-ветки.md) |
+| 80 | production-only гейт ветвей 45% → 50% (одна строка Dockerfile, запас 2 п.п. под флак) | [round-80](docs/history/round-80-гейт-production-ветвей-50.md) |
+| 74c | обновление baseline после coverage-прогона (nats_client флак 386→385 строк дрейфует в допуске) | [round-74](docs/history/round-74-live-nats-postgres-комбо-заготовка-и-baseline.md) |
+| 74b | маленькие NATS live-тесты: timeout 0 / invalid subject / subscriber never replies (NATS_TIMEOUT) | [round-74](docs/history/round-74-live-nats-postgres-комбо-заготовка-и-baseline.md) |
+| 74 | live-комбо заготовка NATS+Postgres: TLS у NatsServer, pgtest/PgSrv-оснастка, db_handler_ready+L2WorkerDbTestHook, stub-кейс [db-live-combo] | [round-74](docs/history/round-74-live-nats-postgres-комбо-заготовка-и-baseline.md) |
 | 73 | флак nats_client закрыт (baseline 359→385/457), production-only гейт ветвей ≥45% (третья gcovr-инвокация с исключением test_*.cpp), новые live-тесты auth/TLS/connect-bootstrap/пустой-reply и реконнект L2Worker после рестарта брокера — строки 93.62%, ветви 41.20% (полный) / 51.73% (production) | [round-73](docs/history/round-73-nats-покрытие-production-гейт-ветвей-45.md) |
 | 72 | живой PostgreSQL в юнит-тестах (test_db_live.cpp: initdb-кластер в builder, PgServer) — db_query_executor_postgres 19.4%→88.5% строк/53.3% ветвей, db_query_handler 66.3%→97.6%; gcovr-фикс negative hits; зафиксирован флак nats_client ±10 строк; строки 93.37%, ветви 41.15% | [round-72](docs/history/round-72-живой-PostgreSQL-в-юнит-тестах-db-live.md) |
 | 71 | живой nats-server в юнит-тестах (test_nats_live.cpp: NatsClient pub/sub/reconnect, PollService, DB-gateway, L2Worker run-loop, fail-fast offline) — NATS-покрытие: nats_client 80.7%, poll 88%, строки 92.3%, ветви 41.1% | [round-71](docs/history/round-71-живой-NATS-брокер-в-юнит-тестах-nats-live.md) |

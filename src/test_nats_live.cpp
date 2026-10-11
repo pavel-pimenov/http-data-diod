@@ -15,6 +15,7 @@
 // synchronisation is bounded — nothing may hang the docker build.
 
 #include "app_context.hpp"
+#include "db_query_utils.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
@@ -537,6 +538,21 @@ TEST_CASE("NatsPollService: retries while the client stays disconnected",
   REQUIRE(out.empty());
 }
 
+TEST_CASE("NatsPollService: returns empty when the NATS client is missing",
+          "[nats-offline]") {
+  TraceContext trace_ctx;
+  trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const EnvGuard env(live_proxy_env(4222, unique_subject("poll.null")));
+  AppContext ctx;
+  // init_proxy_components() is deliberately NOT called: the proxy service must
+  // tolerate a poll before the NATS client is created.
+  REQUIRE_FALSE(ctx.m_nats_client);
+  NatsPollService svc(ctx);
+  const std::string out =
+      svc.poll_response("req-null", R"({"q":1})", 1, trace_ctx);
+  REQUIRE(out.empty());
+}
+
 // ============================================================================
 // Track A: NatsClient against a live broker
 // ============================================================================
@@ -736,6 +752,67 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
         svc.poll_response("req-poll-3", R"({"q":1})", 1, trace_ctx);
     REQUIRE(out.empty());
   }
+}
+
+TEST_CASE("NatsPollService: zero timeout falls back to the config timeout",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+  TraceContext trace_ctx;
+  trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+  const std::string subject = unique_subject("poll.timeout0");
+  const EnvGuard env(live_proxy_env(server.port(), subject));
+  AppContext ctx;
+  init_proxy_components(ctx);
+  REQUIRE(ctx.m_nats_client->is_connected());
+
+  const auto reply_fn = [](const std::string &, const std::string &) {
+    return NatsReply{R"({"status":200,"body":"ok"})",
+                     NatsHeaders{{"X-Consume-Span-Id", "poll-span"}}};
+  };
+  NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
+                          reply_fn);
+
+  NatsPollService svc(ctx);
+  const std::string out =
+      svc.poll_response("req-poll-t0", R"({"q":1})", 0, trace_ctx);
+  REQUIRE(out == R"({"status":200,"body":"ok"})");
+}
+
+TEST_CASE("NatsPollService: reconnects a dropped client and still replies",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+  TraceContext trace_ctx;
+  trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+  const std::string subject = unique_subject("poll.reconnect");
+  const EnvGuard env(live_proxy_env(server.port(), subject));
+  AppContext ctx;
+  init_proxy_components(ctx);
+  REQUIRE(ctx.m_nats_client->is_connected());
+  ctx.m_nats_client->disconnect();
+  REQUIRE_FALSE(ctx.m_nats_client->is_connected());
+
+  const auto reply_fn = [](const std::string &, const std::string &) {
+    return NatsReply{R"({"status":200,"body":"ok"})", NatsHeaders{}};
+  };
+  NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
+                          reply_fn);
+
+  NatsPollService svc(ctx);
+  const std::string out =
+      svc.poll_response("req-poll-rec", R"({"q":1})", 2, trace_ctx);
+  REQUIRE(out == R"({"status":200,"body":"ok"})");
 }
 
 TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
@@ -1188,11 +1265,11 @@ public:
 private:
   bool alive() const { if (m_pid<=0) return false; int st=0; return ::waitpid(m_pid,&st,WNOHANG)==0; }
   bool run_wait(const std::string& exe,const std::vector<std::string>& args,const std::string& log,const PgTarget&t) const {
-    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
+    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); (void)pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
     if (p<0) return false; int st=0; while (::waitpid(p,&st,0)<0 && errno==EINTR){} return WIFEXITED(st)&&WEXITSTATUS(st)==0;
   }
   pid_t spawn(const std::string& exe,const std::vector<std::string>& args,const std::string& log,const PgTarget&t) const {
-    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
+    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); (void)pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
     return p;
   }
   bool start() {
@@ -1229,16 +1306,98 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   if (nats_binary_path().empty()) {
     SKIP("nats-server binary not available");
   }
+  pgtest::PgSrv &pg = pgtest::shared_pgn();
+  if (!pg.ensure()) {
+    SKIP("postgres not available");
+  }
+
   NatsServer server;
   REQUIRE(server.start());
   REQUIRE(server.wait_ready());
-  const std::string subject = unique_subject("l2w.dbq-skip");
-  EnvVars vars = live_worker_env(server.port(), subject, "[\"http://127.0.0.1:18088/api\"]");
+
+  const std::string subject = unique_subject("l2w.dbq-main");
+  const std::string db_subject = unique_subject("l2w.dbq-db");
+  EnvVars vars =
+      live_worker_env(server.port(), subject, "[\"http://127.0.0.1:18088/api\"]");
+  vars["DB_QUERY_ENABLED"] = "true";
+  vars["DB_POSTGRES_ENABLED"] = "true";
+  vars["DB_QUERY_NATS_SUBJECT"] = db_subject;
+  vars["DB_POSTGRES_HOST"] = "127.0.0.1";
+  vars["DB_POSTGRES_PORT"] = std::to_string(pg.port());
+  vars["DB_POSTGRES_DB"] = "postgres";
+  vars["DB_POSTGRES_USER"] = "postgres";
+  vars["DB_POSTGRES_PASSWORD"] = "";
+  vars["DB_QUERY_DEFAULT_TIMEOUT_MS"] = "2000";
   const EnvGuard env(vars);
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
-  REQUIRE(worker.is_nats_connected());
+
+  struct RestoreShutdownFlag {
+    ~RestoreShutdownFlag() { g_shutdown_flag = false; }
+  } restore_shutdown;
+  g_shutdown_flag = false;
+  std::thread runner([&worker] { worker.run(); });
+
+  NatsClient test_client(live_nats_cfg(subject, server.port()));
+  REQUIRE(test_client.connect());
+
+  // Query served end-to-end: NATS -> worker -> live PostgreSQL -> reply.
+  const json payload = {{DbQueryContract::kSql, "SELECT 42 AS answer"}};
+  const std::string request = build_db_query_request(
+      DbQueryContract::kTypeQuery, "db-live-req-1", "postgres", payload)
+                                  .dump();
+  std::string reply;
+  REQUIRE(wait_for_condition(
+      [&test_client, &db_subject, &request, &reply]() {
+        if (const auto r = test_client.request(db_subject, request, 1000)) {
+          if (!r->empty()) {
+            reply = *r;
+            return true;
+          }
+        }
+        return false;
+      },
+      20000));
+  // A reply implies the DB handler was initialized and subscribed.
+  REQUIRE(worker.db_handler_ready());
+
+  const json envelope = json::parse(reply);
+  REQUIRE(envelope[DbQueryContract::kStatus] == 200);
+  const json &body = envelope[DbQueryContract::kBody];
+  REQUIRE(body[DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+  REQUIRE(body[DbResponseContract::kColumns] ==
+          json::array({json{{DbResponseContract::kName, "answer"},
+                            {DbResponseContract::kType, "INTEGER"}}}));
+  REQUIRE(body[DbResponseContract::kRows] == json::array({json::array({42})}));
+  REQUIRE(body[DbResponseContract::kRowCount] == 1);
+
+  // Ping path over the same live subscription.
+  const std::string ping = build_db_query_request(DbQueryContract::kTypePing,
+                                                  "db-live-ping-1", "postgres")
+                               .dump();
+  std::string preply;
+  REQUIRE(wait_for_condition(
+      [&test_client, &db_subject, &ping, &preply]() {
+        if (const auto r = test_client.request(db_subject, ping, 1000)) {
+          if (!r->empty()) {
+            preply = *r;
+            return true;
+          }
+        }
+        return false;
+      },
+      10000));
+  const json penv = json::parse(preply);
+  REQUIRE(penv[DbQueryContract::kStatus] == 200);
+  REQUIRE(penv[DbQueryContract::kBody][DbResponseContract::kStatus] ==
+          DbResponseContract::kStatusOk);
+  REQUIRE(penv[DbQueryContract::kBody].contains(
+      DbResponseContract::kLatencyMs));
+
+  g_shutdown_flag = true;
+  REQUIRE(runner.joinable());
+  runner.join();
 }
 TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]") {
   if (nats_binary_path().empty()) SKIP("nats-server binary not available");

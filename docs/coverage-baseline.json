@@ -218,16 +218,16 @@
       "branches_covered": 265
     },
     "l2_worker.hpp": {
-      "lines": 5,
-      "covered": 5,
-      "branches": 78,
-      "branches_covered": 39
+      "lines": 6,
+      "covered": 6,
+      "branches": 82,
+      "branches_covered": 41
     },
     "l2_worker_nats.cpp": {
       "lines": 361,
-      "covered": 302,
+      "covered": 315,
       "branches": 826,
-      "branches_covered": 377
+      "branches_covered": 391
     },
     "logger.hpp": {
       "lines": 276,
@@ -267,9 +267,9 @@
     },
     "nats_poll_service.cpp": {
       "lines": 125,
-      "covered": 110,
+      "covered": 115,
       "branches": 272,
-      "branches_covered": 112
+      "branches_covered": 116
     },
     "nats_push_service.cpp": {
       "lines": 29,
@@ -407,7 +407,7 @@
       "lines": 58,
       "covered": 57,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
