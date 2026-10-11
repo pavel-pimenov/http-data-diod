@@ -816,3 +816,60 @@ TEST_CASE("DbQueryHandler: empty db with multiple executors is 404",
   REQUIRE(status == 200);
   REQUIRE(body[DbResponseContract::kDb] == "pg2");
 }
+
+TEST_CASE("DbQueryHandler: rejects malformed requests before dispatch",
+          "[db]") {
+  // No init()/live PG needed: parse_db_query_request fails before the executor
+  // lookup, so these cover the DbQueryContract validation branches offline.
+  DbQueryHandler handler;
+
+  const struct {
+    json request;
+    std::string expect;
+  } cases[] = {
+      {json::array({1}), "must be a JSON object"},
+      {json{{DbQueryContract::kType, "upsert"},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"}},
+       "type must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"}},
+       "sql must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "DELETE FROM t"}},
+       "only read-only"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kParams, json::array({1})}},
+       "params must be an object"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kParams, json{{"x", json::array({1})}}}},
+       "only scalar"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kTimeoutMs, 0}},
+       "timeout_ms must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kMaxRows, 0}},
+       "max_rows must be"},
+  };
+
+  for (const auto &c : cases) {
+    int status = 0;
+    json body;
+    handler.handle_request(c.request, status, body);
+    REQUIRE(status == 400);
+    REQUIRE(body[DbResponseContract::kStatus] ==
+            DbResponseContract::kStatusError);
+    const std::string message =
+        body[DbResponseContract::kError][DbResponseContract::kMessage];
+    CHECK(message.find(c.expect) != std::string::npos);
+  }
+}

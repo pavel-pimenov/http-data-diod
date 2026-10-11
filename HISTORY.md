@@ -4,7 +4,8 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
-| 81 | живой NATS+PostgreSQL combo-тест worker-а (process_db_query_from_nats 302→315 строк, ветви 377→391), poll-ветки (null client / timeout 0), чистка оснастки round 74 (void pg_redir, удалён L2WorkerDbTestHook) — production 89.47% строк / 51.85% ветвей | [round-81](docs/history/round-81-live-NATS-Postgres-комбо-и-poll-ветки.md) |
+| 82 | offline-таблица невалидных DbQueryContract-запросов (8 кейсов 400/BAD_REQUEST: не-объект, type, пустой sql, DELETE, params-массив/вложенный, timeout_ms/max_rows) — прод-ветви 51.85%→51.88% | [round-82](docs/history/round-82-валидационные-ветки-DbQueryContract.md) |
+| 81 | живой NATS+PostgreSQL combo-тест worker-а (process_db_query_from_nats 302→315 строк, ветви 377→391), poll-ветки (null client / timeout 0 / reconnect), чистка оснастки round 74 (void pg_redir, удалён L2WorkerDbTestHook) — production 89.54% строк / 51.88% ветвей | [round-81](docs/history/round-81-live-NATS-Postgres-комбо-и-poll-ветки.md) |
 | 80 | production-only гейт ветвей 45% → 50% (одна строка Dockerfile, запас 2 п.п. под флак) | [round-80](docs/history/round-80-гейт-production-ветвей-50.md) |
 | 74c | обновление baseline после coverage-прогона (nats_client флак 386→385 строк дрейфует в допуске) | [round-74](docs/history/round-74-live-nats-postgres-комбо-заготовка-и-baseline.md) |
 | 74b | маленькие NATS live-тесты: timeout 0 / invalid subject / subscriber never replies (NATS_TIMEOUT) | [round-74](docs/history/round-74-live-nats-postgres-комбо-заготовка-и-baseline.md) |
