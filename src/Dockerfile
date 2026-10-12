@@ -197,37 +197,67 @@ RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUS
 
 # Keep debug info (DWARF) for crash handler stack trace resolution
 
-# Coverage stage: build with --coverage (no Unity Build, no ccache so the
-# objects carry per-file .gcno), run the unit tests and render the HTML report
-# with gcovr inside the container. The report lands in /app/out/coverage/
-# (coverage.html + per-file details): `scripts/run-coverage.sh` copies it out
-# of the image. Covers only project sources (src), excluding bundled
-# third-party dirs (prometheus-cpp, httplib, base64, json).
+# Coverage stage: build with --coverage (no Unity Build), run the unit tests
+# and render the HTML report with gcovr inside the container. The report lands
+# in /app/out/coverage/ (coverage.html + per-file details): `scripts/
+# run-coverage.sh` copies it out of the image. Covers only project sources
+# (src), excluding bundled third-party dirs (prometheus-cpp, httplib, base64,
+# json).
 #
 # Note: the gcovr --filter must stay as a single backslash here. A doubled one
 # (`\\.`) is passed literally to the regex and matches nothing (0% report).
 #
-# Two gates in one invocation (gcovr ORs their exit codes): line coverage
-# >= 90% and branch coverage >= 40% (full scope, src only). The branches gate
-# is deliberately kept loose on the full scope; the stronger gate is the third
-# gcovr pass: branch coverage >= 45% on production-only sources (test_*.cpp
-# excluded) — unit tests must not hide gaps in the shipped code paths. The
-# second gcovr pass emits cov.json (same filters, no gates) for
-# scripts/coverage-regression-check.py, which compares per-file coverage
-# against docs/coverage-baseline.json.
+# First gcovr pass (gcovr ORs the exit codes): line >= 90% and branch >= 40%
+# over the full src scope; it renders coverage.html AND cov.json in one
+# invocation (JSON needs the `--json=FILE` form: a bare `--json` plus a
+# separate `-o` is silently skipped when two formats are requested). cov.json
+# feeds scripts/coverage-regression-check.py (per-file vs
+# docs/coverage-baseline.json). The stronger production gate is the second
+# pass: branch >= 50% on production-only sources (test_*.cpp excluded) — unit
+# tests must not hide gaps in the shipped code paths.
 FROM builder AS coverage
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends gcovr \
     && apt-get clean
-RUN rm -rf build-cov && mkdir build-cov && cd build-cov && \
+# ccache is enabled even for the --coverage build: ccache (>=4.x) stores the
+# coverage-note (.gcno) side file and re-emits it on a cache hit (validated on
+# ccache 4.12: a hit regenerates a byte-identical .gcno next to the object).
+# The cache lives in the /root/.ccache mount shared with the builder stage.
+#
+# Precompiled headers are disabled here (CMAKE_DISABLE_PRECOMPILE_HEADERS):
+# a compile that consumes a PCH via `-include .../cmake_pch.hxx` is NOT
+# cacheable by ccache, which dropped the cacheable share of the coverage TUs
+# to ~30% and left the compile at ~112s even with a warm cache. Without PCH
+# every TU is cacheable (141/141) and a warm run recompiles nothing
+# (~6s vs ~112s); only the touched TU is rebuilt. PCH speeds up a cold build
+# only, and the coverage build is repeated, so the trade is clearly worth it.
+# The build-cov dir is dropped every run: keep .gcda/.gcno deterministic.
+RUN --mount=type=cache,target=/root/.ccache \
+    echo "CACHE_BUST=1" && \
+    rm -rf build-cov && mkdir build-cov && cd build-cov && \
     cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON \
           -DCMAKE_UNITY_BUILD=OFF \
+          -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O0 -g --coverage" \
           -DCMAKE_EXE_LINKER_FLAGS="--coverage" .. && \
-    ninja -j$(nproc) test_components test_proxy_core
-RUN cd build-cov && ./test_components && ./test_proxy_core
+    _T1=$(date +%s) && \
+    ninja -j$(nproc) test_components test_proxy_core && \
+    _T2=$(date +%s) && \
+    echo "=== coverage build timing: $((_T2 - _T1))s ===" && \
+    echo "=== ccache stats ===" && ccache -s | grep -iE "cacheable|hits|misses"
+# The two unit-test binaries run sequentially. Parallel execution was measured
+# as a wash (~85s vs ~88s: test_components dominates and the two mostly
+# serialise on the shared CPU), and it made a fresh build drop a single
+# http_client line once (timing-sensitive network test), which the per-file
+# regression gate would flag. Sequential keeps the counters deterministic.
+RUN cd build-cov && _T1=$(date +%s); \
+    ./test_components && ./test_proxy_core && \
+    _T2=$(date +%s) && \
+    echo "=== coverage unit tests: $((_T2 - _T1))s, all passed ==="
 RUN mkdir -p /app/out/coverage && cd build-cov && \
     gcovr --object-directory . --root /app \
           --filter '/app/.*\.(cpp|hpp|h)$' \
@@ -236,19 +266,11 @@ RUN mkdir -p /app/out/coverage && cd build-cov && \
           --exclude '/app/base64/.*' \
           --exclude '/app/json/.*' \
           --html --html-details -o /app/out/coverage/coverage.html \
+          --json=/app/out/coverage/cov.json \
           --gcov-ignore-errors=all \
           --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
           --fail-under-line 90 \
           --fail-under-branch 40 && \
-    gcovr --object-directory . --root /app \
-          --filter '/app/.*\.(cpp|hpp|h)$' \
-          --exclude '/app/prometheus-cpp/.*' \
-          --exclude '/app/httplib/.*' \
-          --exclude '/app/base64/.*' \
-          --exclude '/app/json/.*' \
-          --json -o /app/out/coverage/cov.json \
-          --gcov-ignore-errors=all \
-          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file && \
     gcovr --object-directory . --root /app \
           --filter '/app/.*\.(cpp|hpp|h)$' \
           --exclude '/app/prometheus-cpp/.*' \
