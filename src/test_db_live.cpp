@@ -450,7 +450,7 @@ void create_types_table(PqConn &conn) {
   conn.exec("INSERT INTO pg_types VALUES ("
             "true, 1, 2, 3, 4, 1.5, 2.5, 12345.6789, "
             "'hello', 'vc', 'bp'::bpchar, 'c'::\"char\", 'myname', "
-            "'\\x0102'::bytea, '{\"a\":1}'::json, '{\"b\":2}'::jsonb, "
+            "'\\x01ab'::bytea, '{\"a\":1}'::json, '{\"b\":2}'::jsonb, "
             "'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, "
             "'2024-05-06', '10:11:12', '2024-05-06 10:11:12', "
             "'2024-05-06 10:11:12+03', '10:11:12+03')");
@@ -545,7 +545,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(full[7] == 12345.6789);
   REQUIRE(full[8] == "hello");
   REQUIRE(full[9] == "vc");
-  REQUIRE(full[13] == "AQI=");
+  REQUIRE(full[13] == "Aas=");
   REQUIRE(full[16] == "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
   REQUIRE(full[17] == "2024-05-06");
   REQUIRE(full[18] == "10:11:12");
@@ -722,6 +722,29 @@ TEST_CASE("DbQueryHandler: routes live postgres query and ping", "[db-live]") {
   REQUIRE(status == 400);
   REQUIRE(body[DbResponseContract::kError][DbResponseContract::kCode] ==
           "BAD_REQUEST");
+}
+
+TEST_CASE("DbQueryHandler: re-init keeps already ready executors", "[db-live]") {
+  REQUIRE_PG();
+  DbQueryHandler handler;
+  REQUIRE(handler.init({make_pg_cfg(shared_pg())}));
+  REQUIRE(handler.all_configured());
+  REQUIRE(handler.ready_databases() == std::vector<std::string>{"pg"});
+
+  // Second init with the same database name: the existing executor is kept
+  // (the loop skips it) instead of being rebuilt.
+  REQUIRE(handler.init({make_pg_cfg(shared_pg())}));
+  REQUIRE(handler.ready_databases() == std::vector<std::string>{"pg"});
+
+  const json query{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                   {DbQueryContract::kRequestId, "req-reinit"},
+                   {DbQueryContract::kDb, "pg"},
+                   {DbQueryContract::kSql, "SELECT 9 AS x"}};
+  int status = 0;
+  json body;
+  handler.handle_request(query, status, body);
+  REQUIRE(status == 200);
+  REQUIRE(body[DbResponseContract::kRows] == json::array({json::array({9})}));
 }
 
 TEST_CASE("DbQueryHandler: partial init leaves the reachable database ready",

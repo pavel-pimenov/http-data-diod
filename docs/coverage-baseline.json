@@ -93,15 +93,15 @@
     },
     "db_query_executor_postgres.cpp": {
       "lines": 304,
-      "covered": 269,
+      "covered": 271,
       "branches": 460,
-      "branches_covered": 245
+      "branches_covered": 248
     },
     "db_query_handler.cpp": {
       "lines": 83,
-      "covered": 81,
+      "covered": 82,
       "branches": 142,
-      "branches_covered": 79
+      "branches_covered": 81
     },
     "db_query_handler.hpp": {
       "lines": 11,
@@ -202,8 +202,8 @@
     "json_utils.hpp": {
       "lines": 58,
       "covered": 57,
-      "branches": 177,
-      "branches_covered": 109
+      "branches": 181,
+      "branches_covered": 112
     },
     "l2_routing.hpp": {
       "lines": 79,
@@ -407,7 +407,7 @@
       "lines": 58,
       "covered": 57,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 84 | достижимые ветви DB-слоя: фикстурный bytea `\x01ab` включает строчные буквы → ветви `nibble` 103–104 (postgres 269→271), новый тест идемпотентного `init()` → строка 21 обработчика (81→82) — production 6372/7113 = 89.58% | [round-84](docs/history/round-84-достижимые-ветви-DB-слоя.md) |
 | 83 | ускорение coverage-сборки: ccache для `--coverage` (+ отключён PCH — компиляции с `-include cmake_pch.hxx` ccache не кэширует: cacheable 30%→100%), объединённый gcovr HTML+JSON (`--json=FILE`, иначе JSON молча скипается), тесты оставлены последовательными (параллель давала wash и один флак http_client) — прогретая компиляция 112s→6s | [round-83](docs/history/round-83-ускорение-coverage-сборки.md) |
 | 82 | offline-таблица невалидных DbQueryContract-запросов (8 кейсов 400/BAD_REQUEST: не-объект, type, пустой sql, DELETE, params-массив/вложенный, timeout_ms/max_rows) — прод-ветви 51.85%→51.88% | [round-82](docs/history/round-82-валидационные-ветки-DbQueryContract.md) |
 | 81 | живой NATS+PostgreSQL combo-тест worker-а (process_db_query_from_nats 302→315 строк, ветви 377→391), poll-ветки (null client / timeout 0 / reconnect), чистка оснастки round 74 (void pg_redir, удалён L2WorkerDbTestHook) — production 89.54% строк / 51.88% ветвей | [round-81](docs/history/round-81-live-NATS-Postgres-комбо-и-poll-ветки.md) |
