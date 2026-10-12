@@ -161,7 +161,13 @@ TEST_CASE("HttpClient: invalid URLs are rejected", "[http-client]") {
     return client.post(url, body);
   };
   REQUIRE_THROWS_AS(acquire("", "{}"), std::runtime_error);
+  // Both out-of-range boundaries must be rejected in setup_client: the low
+  // side (port <= 0) and the high side (port > 65535).
+  REQUIRE_THROWS_AS(acquire("http://127.0.0.1:0/path", "{}"),
+                    std::runtime_error);
   REQUIRE_THROWS_AS(acquire("http://127.0.0.1:70000/path", "{}"),
+                    std::runtime_error);
+  REQUIRE_THROWS_AS(acquire("http://127.0.0.1:65536/path", "{}"),
                     std::runtime_error);
 }
 

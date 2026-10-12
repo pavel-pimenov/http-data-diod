@@ -155,7 +155,7 @@
       "lines": 94,
       "covered": 90,
       "branches": 136,
-      "branches_covered": 79
+      "branches_covered": 80
     },
     "http_client.hpp": {
       "lines": 14,
