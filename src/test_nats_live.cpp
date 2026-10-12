@@ -493,7 +493,7 @@ TEST_CASE("NatsClient: public API fails fast without a broker", "[nats-offline]"
   const EnvGuard env(fail_fast_env(unique_subject("nats.offline")));
   AppContext ctx;
   init_proxy_components(ctx);
-  NatsClient &client = *ctx.m_nats_client;
+  auto &client = *ctx.m_nats_client;
 
   REQUIRE_FALSE(client.is_connected());
   REQUIRE_FALSE(client.connect());
@@ -1306,7 +1306,7 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   if (nats_binary_path().empty()) {
     SKIP("nats-server binary not available");
   }
-  pgtest::PgSrv &pg = pgtest::shared_pgn();
+  auto &pg = pgtest::shared_pgn();
   if (!pg.ensure()) {
     SKIP("postgres not available");
   }
@@ -1364,7 +1364,7 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
 
   const json envelope = json::parse(reply);
   REQUIRE(envelope[DbQueryContract::kStatus] == 200);
-  const json &body = envelope[DbQueryContract::kBody];
+  const auto &body = envelope[DbQueryContract::kBody];
   REQUIRE(body[DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
   REQUIRE(body[DbResponseContract::kColumns] ==
           json::array({json{{DbResponseContract::kName, "answer"},

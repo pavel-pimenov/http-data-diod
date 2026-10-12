@@ -665,10 +665,10 @@ void L2Worker::publish_db_gateway_ready_metric() {
   if (!m_db_query_handler) {
     return;
   }
-  prometheus::Family<prometheus::Gauge> &ready_gauge =
+  auto &ready_gauge =
       m_ctx.m_worker.m_metrics->m_db_gateway_ready;
   const std::vector<std::string> ready = m_db_query_handler->ready_databases();
-  for (const std::string &db : m_db_query_handler->configured_databases()) {
+  for (const auto &db : m_db_query_handler->configured_databases()) {
     const bool is_ready =
         std::find(ready.begin(), ready.end(), db) != ready.end();
     ready_gauge.Add({{"db", db}}).Set(is_ready ? 1.0 : 0.0);

@@ -54,7 +54,7 @@ private:
   template <typename M>
   uint64_t shard_sum(M member) const {
     uint64_t total = 0;
-    for (const Shard &shard : m_state.m_shards) {
+    for (const auto &shard : m_state.m_shards) {
       total += (shard.*member).load(std::memory_order_acquire);
     }
     return total;
@@ -117,7 +117,7 @@ public:
 
 private:
   void increment(size_t shard) {
-    Shard &s = m_state.m_shards[shard];
+    auto &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_add(1, std::memory_order_relaxed);
     s.m_total.fetch_add(1, std::memory_order_relaxed);
     // First request on this shard: register the shard as active
@@ -127,7 +127,7 @@ private:
   }
 
   void decrement(size_t shard) {
-    Shard &s = m_state.m_shards[shard];
+    auto &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_sub(1, std::memory_order_release);
     // Shard became empty: unregister it. If it was the last active shard,
     // wake up any thread waiting for completion (notify under the mutex to

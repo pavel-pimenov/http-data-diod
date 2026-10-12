@@ -166,7 +166,7 @@ struct TargetUser {
             [](const std::string &a, const std::string &b) {
               return std::stoi(a) > std::stoi(b);
             });
-  for (const std::string &version : versions) {
+  for (const auto &version : versions) {
     const std::string dir = "/usr/lib/postgresql/" + version + "/bin";
     if (has(dir)) {
       return dir;
@@ -241,7 +241,7 @@ private:
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
-      for (const std::string &arg : args) {
+      for (const auto &arg : args) {
         argv.push_back(arg.c_str());
       }
       argv.push_back(nullptr);
@@ -275,7 +275,7 @@ private:
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
-      for (const std::string &arg : args) {
+      for (const auto &arg : args) {
         argv.push_back(arg.c_str());
       }
       argv.push_back(nullptr);
@@ -511,7 +511,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(resp[DbResponseContract::kRows].size() == 2);
   REQUIRE(resp[DbResponseContract::kColumns].size() == 22);
 
-  const json &cols = resp[DbResponseContract::kColumns];
+  const auto &cols = resp[DbResponseContract::kColumns];
   const auto col = [&cols](size_t i) {
     return json{{DbResponseContract::kName, cols[i][DbResponseContract::kName]},
                 {DbResponseContract::kType, cols[i][DbResponseContract::kType]}};
@@ -534,7 +534,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(col(21) == json{{DbResponseContract::kName, "c_timetz"},
                           {DbResponseContract::kType, "TIMETZ"}});
 
-  const json &full = resp[DbResponseContract::kRows][0];
+  const auto &full = resp[DbResponseContract::kRows][0];
   REQUIRE(full[0] == true);
   REQUIRE(full[1] == 1);
   REQUIRE(full[2] == 2);
@@ -554,8 +554,8 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(full[20].get<std::string>().find("11:12") != std::string::npos);
   REQUIRE(full[21].get<std::string>().find("11:12") != std::string::npos);
 
-  const json &nulls = resp[DbResponseContract::kRows][1];
-  for (const json &value : nulls) {
+  const auto &nulls = resp[DbResponseContract::kRows][1];
+  for (const auto &value : nulls) {
     REQUIRE(value.is_null());
   }
 }
@@ -573,7 +573,7 @@ TEST_CASE("PostgresQueryExecutor: positional parameter binding", "[db-live]") {
                        "$4::float8 AS n, $5::int AS v",
                        params, -1, 10, status);
   REQUIRE(status == 200);
-  const json &row = resp[DbResponseContract::kRows][0];
+  const auto &row = resp[DbResponseContract::kRows][0];
   REQUIRE(row[0] == 7);
   REQUIRE(row[1] == "str");
   REQUIRE(row[2] == true);

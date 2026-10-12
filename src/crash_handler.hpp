@@ -313,7 +313,7 @@ private:
       }
       const std::string func = crash_utils::trim_line(lines[base]);
       const std::string loc = crash_utils::trim_line(lines[base + 1]);
-      nlohmann::json &frame = frames[exe_idx[k]];
+      auto &frame = frames[exe_idx[k]];
       if (loc != "??:0") {
         const size_t colon = loc.find_last_of(':');
         if (colon != std::string::npos) {
@@ -378,7 +378,7 @@ private:
     std::string faulting_frame =
         m_frames.m_count > 0 ? describe_frame(m_frames.m_addrs[fault_idx])
                                 : "?";
-    nlohmann::json &frames = exception_value["stacktrace"]["frames"];
+    auto &frames = exception_value["stacktrace"]["frames"];
     if (fault_idx >= 0 && static_cast<size_t>(fault_idx) < frames.size() &&
         frames[fault_idx].contains("lineno")) {
       faulting_frame +=

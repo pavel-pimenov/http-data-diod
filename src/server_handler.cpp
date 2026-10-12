@@ -94,7 +94,7 @@ void ServerHandler::handle_post(const httplib::Request &req,
       m_ctx.m_server.m_metrics->m_request_duration_seconds,
       m_ctx.m_server.m_metrics->m_requests);
 
-  const std::string &body = req.body;
+  const auto &body = req.body;
   increment_and_log_request_received(m_ctx.m_server.m_metrics->m_bytes_received,
                                      "Server", body.size());
 

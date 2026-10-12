@@ -39,7 +39,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
 
-  Entry &entry = it->second;
+  auto &entry = it->second;
   entry.m_count += 1;
   entry.m_last_seen_ms = now_ms;
   entry.m_client_ids.insert(std::string(client_id));
@@ -59,7 +59,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     cit = m_state.m_per_client_count.emplace(client_key, ClientCount{})
               .first;
   }
-  ClientCount &client_state = cit->second;
+  auto &client_state = cit->second;
   client_state.m_count += 1;
   client_state.m_last_seen_ms = now_ms;
   const size_t client_count = client_state.m_count;
@@ -115,7 +115,7 @@ nlohmann::json DuplicateDetector::report() const {
   nlohmann::json top = nlohmann::json::array();
   const size_t n = std::min(duplicates.size(), m_options.m_top_n);
   for (size_t i = 0; i < n; ++i) {
-    const Entry &entry = *duplicates[i];
+    const auto &entry = *duplicates[i];
     nlohmann::json item;
     item["count"] = entry.m_count;
     item["type"] =

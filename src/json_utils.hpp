@@ -143,7 +143,7 @@ inline json build_nats_response_envelope(
   if (!headers_json.empty()) {
     envelope[NatsResponseContract::kHeaders] = headers_json;
   }
-  json &body = envelope[NatsResponseContract::kBody];
+  auto &body = envelope[NatsResponseContract::kBody];
   body[NatsResponseContract::kBodyRequestId] = request_id;
   body[NatsResponseContract::kBodyResponse] = response;
   body[NatsResponseContract::kBodyTimestamp] = timestamp_us;

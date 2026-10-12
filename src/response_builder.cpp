@@ -20,7 +20,7 @@ void set_response_content(httplib::Response &res,
 
   // Extract the actual response from l2-server without deep-copying the JSON
   // body string (parsed_response_data outlives the reference below)
-  const std::string &l2_response = get_body_response_ref(parsed_response_data);
+  const auto &l2_response = get_body_response_ref(parsed_response_data);
   // safe_get_int: a worker envelope that somehow lacks status_code must produce
   // a 500, never throw (nlohmann operator[] on a const object throws
   // out_of_range, which would escape into the httplib handler thread).

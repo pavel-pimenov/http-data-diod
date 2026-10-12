@@ -1187,7 +1187,7 @@ TEST_CASE("JsonUtils: build_nats_response_envelope full fields", "[json-utils]")
       headers, "traceparent-value");
   REQUIRE(env[NatsResponseContract::kStatus] == 200);
   REQUIRE(env[NatsResponseContract::kHeaders] == headers);
-  const json &body = env[NatsResponseContract::kBody];
+  const auto &body = env[NatsResponseContract::kBody];
   REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-123");
   REQUIRE(body[NatsResponseContract::kBodyResponse] == "response body");
   REQUIRE(body[NatsResponseContract::kBodyTimestamp] == 1234567890);
@@ -1202,7 +1202,7 @@ TEST_CASE("JsonUtils: build_nats_response_envelope optional fields omitted",
                                           json::object(), "");
   REQUIRE(env[NatsResponseContract::kStatus] == 500);
   REQUIRE_FALSE(env.contains(NatsResponseContract::kHeaders));
-  const json &body = env[NatsResponseContract::kBody];
+  const auto &body = env[NatsResponseContract::kBody];
   REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-2");
   REQUIRE(body[NatsResponseContract::kBodyResponse] == "boom");
   REQUIRE(body[NatsResponseContract::kBodyIsBinary] == true);

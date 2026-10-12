@@ -50,7 +50,7 @@ namespace l2_routing {
 
   std::string out;
   out.reserve(in.size());
-  for (const std::string &segment : segments) {
+  for (const auto &segment : segments) {
     out += '/';
     out += segment;
   }

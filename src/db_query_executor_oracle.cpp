@@ -477,7 +477,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
           !data) {
         return make_db_sql_error(status_code, m_impl->describe_error());
       }
-      const ColumnPlan &column = columns[pos - 1];
+      const auto &column = columns[pos - 1];
       json value = nullptr;
       if (!data->isNull) {
         switch (column.m_native_type) {

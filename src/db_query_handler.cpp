@@ -10,11 +10,11 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
     m_state.m_expected_count = databases.size();
     m_state.m_configured_names.clear();
     m_state.m_configured_names.reserve(databases.size());
-    for (const DbConfig &db : databases) {
+    for (const auto &db : databases) {
       m_state.m_configured_names.push_back(db.m_name);
     }
   }
-  for (const DbConfig &db : databases) {
+  for (const auto &db : databases) {
     {
       std::lock_guard lock(m_state.m_mutex);
       if (m_state.m_executors.contains(db.m_name)) {
@@ -76,7 +76,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
     body = make_db_error_body("BAD_REQUEST", parsed.error());
     return;
   }
-  const DbQueryRequest &req = *parsed;
+  const auto &req = *parsed;
 
   DbQueryExecutor *executor = nullptr;
   {

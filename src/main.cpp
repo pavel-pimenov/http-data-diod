@@ -247,7 +247,7 @@ void run_proxy(AppContext &app_ctx) {
   auto on_proxy_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
         app_ctx.m_proxy.m_metrics->m_in_flight_requests.Decrement();
-        const std::string &path = req.path;
+        const auto &path = req.path;
         if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
             path.rfind("/debug", 0) == 0) {
           return;
@@ -354,7 +354,7 @@ void run_l2_server(AppContext &app_ctx) {
 
   auto on_server_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
-        const std::string &path = req.path;
+        const auto &path = req.path;
         if (path == "/metrics" || path.rfind("/health", 0) == 0) {
           return;
         }

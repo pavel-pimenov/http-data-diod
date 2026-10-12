@@ -91,7 +91,7 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
 
   const auto xff_it = req.headers.find("x-forwarded-for");
   if (xff_it != req.headers.end() && !xff_it->second.empty()) {
-    const std::string &xff = xff_it->second;
+    const auto &xff = xff_it->second;
     // Take the last address: the one appended by the trusted proxy closest to
     // the backend (leftmost entries may be client-supplied).
     const size_t comma_pos = xff.rfind(',');
@@ -113,7 +113,7 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
 }
 
 [[nodiscard]] inline std::string extract_query_string(const httplib::Request &req) {
-  const std::string &target = req.target;
+  const auto &target = req.target;
   const size_t q = target.find('?');
   if (q == std::string::npos) {
     return {};

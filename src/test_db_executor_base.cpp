@@ -89,7 +89,7 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active",
   REQUIRE(collected.front().metric.size() == 2);
   double idle = 0.0;
   double active = 0.0;
-  for (const prometheus::ClientMetric &m : collected.front().metric) {
+  for (const auto &m : collected.front().metric) {
     REQUIRE(m.label.size() == 2);
     const bool is_idle = m.label[1].value == "idle";
     if (is_idle) {

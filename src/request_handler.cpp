@@ -212,7 +212,7 @@ void RequestHandler::handle_duplicates(httplib::Response &res) {
 
 void RequestHandler::handle_post(const httplib::Request &req,
                                  httplib::Response &res) {
-  const std::string &body = req.body;
+  const auto &body = req.body;
   increment_and_log_request_received(m_ctx.m_proxy.m_metrics->m_bytes_received,
                                      "Proxy", body.size());
 
@@ -559,7 +559,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // request_id/trace_id are set later in process_request once they exist;
   // the scope restores the previous values on exit (covers keep-alive reuse).
   ScopedRequestContext req_ctx(req);
-  const std::string &client_ip = req_ctx.client_ip();
+  const auto &client_ip = req_ctx.client_ip();
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
   // clients that share one IP (e.g. behind NAT) in Grafana.
@@ -589,7 +589,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
     return;
   }
 
-  const std::string &path = req.path;
+  const auto &path = req.path;
 
   // Phase 2: Process request (push to backend, poll, cache)
   process_request(method, path, body, req, res, client_ip);

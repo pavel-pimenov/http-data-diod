@@ -205,7 +205,7 @@ public:
     std::vector<std::pair<std::string, IPStats>> result;
     result.reserve(std::min(m_cache.m_ip_entries.size(), kMaxExpose));
     size_t count = 0;
-    for (const std::string &ip : std::views::reverse(m_cache.m_lru_list)) {
+    for (const auto &ip : std::views::reverse(m_cache.m_lru_list)) {
       if (count >= kMaxExpose) break;
       const auto entry_it = m_cache.m_ip_entries.find(ip);
       if (entry_it != m_cache.m_ip_entries.end()) {
@@ -291,7 +291,7 @@ private:
   void evict_oldest_ips(size_t count) {
     size_t removed = 0;
     for (size_t i = 0; i < count && !m_cache.m_lru_list.empty(); ++i) {
-      const std::string &oldest_ip = m_cache.m_lru_list.front();
+      const auto &oldest_ip = m_cache.m_lru_list.front();
       m_cache.m_ip_entries.erase(oldest_ip);
       m_cache.m_lru_list.pop_front();
       removed++;

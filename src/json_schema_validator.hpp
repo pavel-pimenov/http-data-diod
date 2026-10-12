@@ -191,7 +191,7 @@ public:
         return false;
       }
 
-      const std::string &body_str = get_body_response_ref(response);
+      const auto &body_str = get_body_response_ref(response);
       if (body_str.length() > m_limits.m_max_body_size) {
         error = std::format("Response body too large: {} > {}",
                             body_str.length(), m_limits.m_max_body_size);

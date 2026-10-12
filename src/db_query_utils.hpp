@@ -112,7 +112,7 @@ parse_db_query_request(const json &j) {
   }
 
   if (j.contains(DbQueryContract::kParams)) {
-    const json &params = j[DbQueryContract::kParams];
+    const auto &params = j[DbQueryContract::kParams];
     if (params.is_null()) {
       req.m_params = json::object();
     } else if (params.is_object()) {
