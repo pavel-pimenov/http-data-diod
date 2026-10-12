@@ -145,14 +145,15 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
 }
 
 void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
-  if (!client)
+  if (!client) {
     return;
+  }
 
   // Decrement active count first
   m_counters.m_active_clients--;
 
   if (!client->is_valid()) {
-    std::lock_guard lock(m_state.m_pool_mutex);
+    std::scoped_lock lock(m_state.m_pool_mutex);
     m_counters.m_total_clients--;
     Logger::warn(
         "HttpClientPool: released invalid connection, destroying (active={})",
@@ -161,7 +162,7 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
     return;
   }
 
-  std::lock_guard lock(m_state.m_pool_mutex);
+  std::scoped_lock lock(m_state.m_pool_mutex);
 
   if (m_state.m_available_connections.size() < m_config.m_max_pool_size) {
     client->touch();
@@ -186,7 +187,7 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 }
 
 size_t HttpClientPool::available_count() const {
-  std::lock_guard lock(m_state.m_pool_mutex);
+  std::scoped_lock lock(m_state.m_pool_mutex);
   return m_state.m_available_connections.size();
 }
 

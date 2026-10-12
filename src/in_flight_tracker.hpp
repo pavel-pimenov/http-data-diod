@@ -133,7 +133,7 @@ private:
     // wake up any thread waiting for completion (notify under the mutex to
     // avoid a lost-wakeup race with wait_for_completion).
     if (prev == 1 && m_state.m_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      std::lock_guard lock(m_sync.m_mutex);
+      std::scoped_lock lock(m_sync.m_mutex);
       m_sync.m_cv.notify_all();
     }
   }

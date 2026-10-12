@@ -58,7 +58,7 @@ public:
     }
     Logger::set_client_ip(m_state.m_client_ip);
   }
-  const std::string &client_ip() const { return m_state.m_client_ip; }
+  [[nodiscard]] const std::string &client_ip() const { return m_state.m_client_ip; }
 
 private:
   struct State {
@@ -159,7 +159,7 @@ public:
                 .m_counter = ScopedMetrics(counter),
                 .m_start_us = get_current_timestamp_us()} {}
 
-  uint64_t start_us() const { return m_state.m_start_us; }
+  [[nodiscard]] uint64_t start_us() const { return m_state.m_start_us; }
 
 private:
   struct State {

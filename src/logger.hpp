@@ -75,12 +75,9 @@ private:
 };
 
 // Custom JSON formatter for structured logging
-namespace spdlog {
-namespace custom {
+namespace spdlog::custom {
 class JsonFormatter : public formatter {
 public:
-  JsonFormatter() : m_include_location(true) {}
-
   void format(const spdlog::details::log_msg &msg,
               memory_buf_t &dest) override {
     nlohmann::json j;
@@ -141,12 +138,12 @@ public:
     dest.push_back('\n');
   }
 
-  std::unique_ptr<formatter> clone() const override {
+  [[nodiscard]] std::unique_ptr<formatter> clone() const override {
     return spdlog::details::make_unique<JsonFormatter>(*this);
   }
 
 private:
-  bool m_include_location;
+  bool m_include_location = true;
 };
 
 // Text formatter used instead of the built-in pattern so that every line can
@@ -221,7 +218,7 @@ public:
     dest.push_back('\n');
   }
 
-  std::unique_ptr<formatter> clone() const override {
+  [[nodiscard]] std::unique_ptr<formatter> clone() const override {
     return spdlog::details::make_unique<TextFormatter>(m_use_colors);
   }
 
@@ -249,8 +246,7 @@ private:
     }
   }
 };
-} // namespace custom
-} // namespace spdlog
+} // namespace spdlog::custom
 
 // spdlog-based Logger wrapper for backward compatibility
 // Usage: Logger::info("message") or spdlog::info("message")
@@ -330,8 +326,7 @@ public:
       if (log_level_env) {
         auto log_level = std::string(log_level_env);
         // Convert to uppercase for comparison
-        std::transform(log_level.begin(), log_level.end(), log_level.begin(),
-                       ::toupper);
+        std::ranges::transform(log_level, log_level.begin(), ::toupper);
 
         spdlog::level::level_enum spdlog_level = spdlog::level::info; // default
 

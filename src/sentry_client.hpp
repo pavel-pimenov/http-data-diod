@@ -77,7 +77,7 @@ public:
   SentryClient(const SentryClient &) = delete;
   SentryClient &operator=(const SentryClient &) = delete;
 
-  bool enabled() const;
+  [[nodiscard]] bool enabled() const;
 
   // Enqueues the event for asynchronous delivery. No-op when disabled.
   void capture(const sentry::SentryEvent &event);

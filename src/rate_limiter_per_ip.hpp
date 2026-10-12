@@ -94,7 +94,7 @@ public:
       m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
       size_t tracked = 0;
       {
-        std::lock_guard lock(m_cache.m_mutex);
+        std::scoped_lock lock(m_cache.m_mutex);
         tracked = m_cache.m_ip_entries.size();
       }
       Logger::warn(
@@ -108,24 +108,23 @@ public:
     if (limiter->acquire()) {
       m_counters.m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
       return true;
-    } else {
-      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
-      record_rejection(client_ip);
-      Logger::debug(
-          "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
-          "empty: max_tokens_per_ip={} burst, refill={}/s). Exceeded sustained "
-          "per-IP request rate. If this is legitimate traffic, increase "
-          "PER_IP_MAX_TOKENS (burst capacity) or PER_IP_REFILL_RATE "
-          "(sustained req/s per IP)",
-          client_ip, m_config.m_max_tokens_per_ip,
-          m_config.m_refill_tokens_per_second_per_ip);
-      return false;
     }
+    m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+    record_rejection(client_ip);
+    Logger::debug(
+        "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
+        "empty: max_tokens_per_ip={} burst, refill={}/s). Exceeded sustained "
+        "per-IP request rate. If this is legitimate traffic, increase "
+        "PER_IP_MAX_TOKENS (burst capacity) or PER_IP_REFILL_RATE "
+        "(sustained req/s per IP)",
+        client_ip, m_config.m_max_tokens_per_ip,
+        m_config.m_refill_tokens_per_second_per_ip);
+    return false;
   }
 
   std::shared_ptr<RateLimiter>
   get_or_create_limiter(const std::string &client_ip) {
-    std::lock_guard lock(m_cache.m_mutex);
+    std::scoped_lock lock(m_cache.m_mutex);
 
     auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
@@ -185,7 +184,7 @@ public:
   Stats get_stats() const {
     uint64_t total = m_counters.m_total_requests.load();
     uint64_t rejected = m_counters.m_rejected_requests.load();
-    std::lock_guard lock(m_cache.m_mutex);
+    std::scoped_lock lock(m_cache.m_mutex);
     return Stats{total,
                  m_counters.m_allowed_requests.load(),
                  rejected,
@@ -200,13 +199,15 @@ public:
   // Capped to 1000 most-recent IPs to bound Prometheus scrape time and lock
   // hold (p99 mitigation for max_ips=10000, see M4).
   std::vector<std::pair<std::string, IPStats>> get_per_ip_stats() const {
-    std::lock_guard lock(m_cache.m_mutex);
+    std::scoped_lock lock(m_cache.m_mutex);
     constexpr size_t kMaxExpose = 1000;
     std::vector<std::pair<std::string, IPStats>> result;
     result.reserve(std::min(m_cache.m_ip_entries.size(), kMaxExpose));
     size_t count = 0;
     for (const auto &ip : std::views::reverse(m_cache.m_lru_list)) {
-      if (count >= kMaxExpose) break;
+      if (count >= kMaxExpose) {
+        break;
+      }
       const auto entry_it = m_cache.m_ip_entries.find(ip);
       if (entry_it != m_cache.m_ip_entries.end()) {
         result.emplace_back(
@@ -221,13 +222,13 @@ public:
   }
 
   size_t cleanup_expired_ips() {
-    std::lock_guard lock(m_cache.m_mutex);
+    std::scoped_lock lock(m_cache.m_mutex);
     return do_cleanup_expired();
   }
 
 private:
   void record_rejection(const std::string &client_ip) {
-    std::lock_guard lock(m_cache.m_mutex);
+    std::scoped_lock lock(m_cache.m_mutex);
     const auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
       it->second.m_rejected.fetch_add(1, std::memory_order_relaxed);
@@ -243,9 +244,13 @@ private:
         for (int i = 0; i < cleanup_every_seconds && !st.stop_requested();
              ++i) {
           std::this_thread::sleep_for(std::chrono::seconds(1));
-          if (st.stop_requested()) break;
+          if (st.stop_requested()) {
+            break;
+          }
         }
-        if (st.stop_requested()) break;
+        if (st.stop_requested()) {
+          break;
+        }
         cleanup_expired_ips();
       }
       Logger::debug("PerIPRateLimiter: background cleanup thread stopped");

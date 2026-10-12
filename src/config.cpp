@@ -693,11 +693,10 @@ int Config::get_env_int(const std::string &env_name, int default_val) {
     if (val >= 0) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
-    } else {
-      Logger::warn("{} must be non-negative, using default {}", env_name,
-                   default_val);
-      return default_val;
     }
+    Logger::warn("{} must be non-negative, using default {}", env_name,
+                 default_val);
+    return default_val;
   } catch (const std::exception &e) {
     Logger::warn("Invalid {} value '{}' using default {}", env_name, value,
                  default_val);
@@ -752,11 +751,10 @@ double Config::get_env_double(const std::string &env_name, double default_val,
     if (val >= min_val && val <= max_val) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
-    } else {
-      Logger::warn("{} must be between {} and {}, using default {}", env_name,
-                   min_val, max_val, default_val);
-      return default_val;
     }
+    Logger::warn("{} must be between {} and {}, using default {}", env_name,
+                 min_val, max_val, default_val);
+    return default_val;
   } catch (const std::exception &e) {
     Logger::warn("{} parse error: {}, using default {}", env_name, e.what(),
                  default_val);

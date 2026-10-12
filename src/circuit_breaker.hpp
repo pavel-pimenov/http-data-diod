@@ -29,7 +29,7 @@ struct CircuitBreaker {
   [[nodiscard]] bool allow_request();
   void record_success();
   void record_failure();
-  std::string state_name() const;
+  [[nodiscard]] std::string state_name() const;
 
 private:
   void update_gauge();

@@ -18,7 +18,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
   const uint64_t now_ms = TimeUtils::steady_ms();
-  std::lock_guard lock(m_state.m_mutex);
+  std::scoped_lock lock(m_state.m_mutex);
   evict_expired_locked(now_ms);
 
   const std::string key(body_hash);
@@ -75,18 +75,18 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
 }
 
 size_t DuplicateDetector::duplicate_bodies() const {
-  std::lock_guard lock(m_state.m_mutex);
+  std::scoped_lock lock(m_state.m_mutex);
   return static_cast<size_t>(std::ranges::count_if(
       m_state.m_entries, [](const auto &kv) { return kv.second.m_count >= 2; }));
 }
 
 size_t DuplicateDetector::per_client_count_size() const {
-  std::lock_guard lock(m_state.m_mutex);
+  std::scoped_lock lock(m_state.m_mutex);
   return m_state.m_per_client_count.size();
 }
 
 nlohmann::json DuplicateDetector::report() const {
-  std::lock_guard lock(m_state.m_mutex);
+  std::scoped_lock lock(m_state.m_mutex);
   nlohmann::json result;
   result["enabled"] = m_options.m_enabled; //-V601 nlohmann::json handles bool
 
@@ -98,12 +98,18 @@ nlohmann::json DuplicateDetector::report() const {
   for (const auto &[hash, entry] : m_state.m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
     duplicates.push_back(&entry);
     duplicate_occurrences += entry.m_count - 1;
-    if (entry.m_client_ids.size() <= 1) ++same_client; else ++cross_client;
+    if (entry.m_client_ids.size() <= 1) {
+      ++same_client;
+    } else {
+      ++cross_client;
+    }
   }
 
   std::ranges::sort(duplicates,
             [](const Entry *a, const Entry *b) {
-              if (a->m_count != b->m_count) return a->m_count > b->m_count;
+              if (a->m_count != b->m_count) {
+                return a->m_count > b->m_count;
+              }
               return a->m_first_seen_ms < b->m_first_seen_ms;
             });
 

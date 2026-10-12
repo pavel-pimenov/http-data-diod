@@ -56,10 +56,10 @@ public:
                         const std::string &traceparent = "",
                         const httplib::Headers &additional_headers = {},
                         const std::string &content_type = "application/json");
-  bool is_valid() const;
+  [[nodiscard]] bool is_valid() const;
   void invalidate();
-  int get_last_status_code() const;
-  std::chrono::steady_clock::time_point get_last_used() const;
+  [[nodiscard]] int get_last_status_code() const;
+  [[nodiscard]] std::chrono::steady_clock::time_point get_last_used() const;
   void touch();
 
 private:

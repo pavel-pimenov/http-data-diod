@@ -94,7 +94,7 @@ public:
 
 private:
   void refill() {
-    std::lock_guard lock(m_bucket.m_mutex);
+    std::scoped_lock lock(m_bucket.m_mutex);
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                              now - m_bucket.m_last_refill)

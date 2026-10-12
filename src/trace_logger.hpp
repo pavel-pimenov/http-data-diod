@@ -142,7 +142,6 @@ private:
   };
   BreakerState m_breaker;
 
-private:
   bool send_batch(const std::vector<SpanData> &batch);
   // Sends one batch with retries and records timing/queue/counter metrics.
   void send_batch_with_retry(const std::vector<SpanData> &batch,
@@ -289,11 +288,11 @@ public:
                  const std::string &service_name,
                  const nlohmann::json &attributes = {});
 
-  bool should_sample() const;
+  [[nodiscard]] bool should_sample() const;
 
   // Check if sampling should be applied (with error flag - always sample
   // errors)
-  bool should_sample(bool is_error) const;
+  [[nodiscard]] bool should_sample(bool is_error) const;
 };
 
 #endif // TRACE_LOGGER_HPP

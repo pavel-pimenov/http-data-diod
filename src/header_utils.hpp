@@ -5,6 +5,7 @@
 #include "logger.hpp"
 #include "string_utils.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <optional>
 #include <ranges>
@@ -232,10 +233,10 @@ find_header_optional(const httplib::Headers &headers, std::string_view name) {
     const char *m_marker;
     const char *m_name;
   };
-  constexpr BrowserPattern patterns[] = {
+  constexpr std::array<BrowserPattern, 6> patterns = {{
       {"Edg/", "Edge/"},    {"Chrome/", "Chrome/"}, {"Firefox/", "Firefox/"},
       {"Opera/", "Opera/"}, {"OPR/", "Opera/"},     {"Version/", "Safari/"},
-  };
+  }};
   std::span<const BrowserPattern> pat_view(patterns);
 
   for (const auto &p : pat_view) {

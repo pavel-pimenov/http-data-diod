@@ -220,7 +220,7 @@ public:
   Config() = default;
   void load_from_env();
   [[nodiscard]] bool validate(bool log_issues = true) const;
-  NatsConfig create_nats_config() const;
+  [[nodiscard]] NatsConfig create_nats_config() const;
 
   // Env helpers are static and used by both Config loading and early
   // components (e.g. Logger::init reads LOG_FORMAT before Config exists).
