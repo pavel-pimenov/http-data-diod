@@ -54,7 +54,7 @@ inline std::string next_word_lower(const std::string &s, size_t &pos) {
          !std::isspace(static_cast<unsigned char>(s[pos]))) {
     ++pos;
   }
-  std::string word = s.substr(start, pos - start);
+  const std::string word = s.substr(start, pos - start);
   return to_lower(word);
 }
 

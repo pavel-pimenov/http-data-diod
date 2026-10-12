@@ -14,7 +14,8 @@ public:
 
   ~ScopedProfiler() {
     const auto end_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> duration = end_time - m_state.m_start_time;
+    const std::chrono::duration<double> duration =
+        end_time - m_state.m_start_time;
     m_state.m_histogram.Observe(duration.count());
   }
 
@@ -41,7 +42,7 @@ public:
   ~ScopedLabeledProfiler() {
     if (m_state.m_collector != nullptr) {
       const auto end_time = std::chrono::steady_clock::now();
-      std::chrono::duration<double> duration =
+      const std::chrono::duration<double> duration =
           end_time - m_state.m_start_time;
       m_state.m_collector->get(m_state.m_label_value, 0)->Observe(duration.count());
     }

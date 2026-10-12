@@ -168,7 +168,7 @@ struct PostgresQueryExecutor::Impl {
       : m_db(db), m_owner(owner) {}
 
   ~Impl() {
-    std::scoped_lock lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     for (PGconn *conn : m_idle) {
       PQfinish(conn);
     }
@@ -184,7 +184,7 @@ struct PostgresQueryExecutor::Impl {
   }
 
   void update_pool_gauges() const {
-    std::scoped_lock lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     update_pool_gauges_locked();
   }
 
@@ -203,7 +203,7 @@ struct PostgresQueryExecutor::Impl {
 
   std::optional<PGconn *> acquire_conn() {
     {
-      std::scoped_lock lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (!m_idle.empty()) {
         PGconn *conn = m_idle.back();
         m_idle.pop_back();
@@ -219,7 +219,7 @@ struct PostgresQueryExecutor::Impl {
     }
     PGconn *conn = create_conn();
     if (!conn) {
-      std::scoped_lock lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
@@ -230,7 +230,7 @@ struct PostgresQueryExecutor::Impl {
       Logger::warn("DB executor '{}': connect failed: {}", m_db.m_name,
                    trim_copy(PQerrorMessage(conn)));
       PQfinish(conn);
-      std::scoped_lock lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
@@ -246,14 +246,14 @@ struct PostgresQueryExecutor::Impl {
     }
     if (PQstatus(conn) != CONNECTION_OK) {
       PQfinish(conn);
-      std::scoped_lock lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
       update_pool_gauges_locked();
       return;
     }
-    std::scoped_lock lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     m_idle.push_back(conn);
     update_pool_gauges_locked();
   }

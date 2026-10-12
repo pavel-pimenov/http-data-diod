@@ -6,7 +6,7 @@
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   {
-    std::scoped_lock lock(m_state.m_mutex);
+    const std::scoped_lock lock(m_state.m_mutex);
     m_state.m_expected_count = databases.size();
     m_state.m_configured_names.clear();
     m_state.m_configured_names.reserve(databases.size());
@@ -16,7 +16,7 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   }
   for (const auto &db : databases) {
     {
-      std::scoped_lock lock(m_state.m_mutex);
+      const std::scoped_lock lock(m_state.m_mutex);
       if (m_state.m_executors.contains(db.m_name)) {
         continue;
       }
@@ -32,12 +32,12 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
       continue;
     }
     executor->set_pool_metrics(m_pool_metrics);
-    std::scoped_lock lock(m_state.m_mutex);
+    const std::scoped_lock lock(m_state.m_mutex);
     if (!m_state.m_executors.contains(db.m_name)) {
       m_state.m_executors.try_emplace(db.m_name, std::move(executor));
     }
   }
-  std::scoped_lock lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   if (m_state.m_executors.empty()) {
     Logger::warn("DB handler: no database executor initialized");
     return false;
@@ -53,12 +53,12 @@ void DbQueryHandler::set_pool_metrics(
 }
 
 std::vector<std::string> DbQueryHandler::configured_databases() const {
-  std::scoped_lock lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   return m_state.m_configured_names;
 }
 
 std::vector<std::string> DbQueryHandler::ready_databases() const {
-  std::scoped_lock lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   std::vector<std::string> names;
   names.reserve(m_state.m_executors.size());
   for (const auto &[name, executor] : m_state.m_executors) {
@@ -80,7 +80,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
 
   DbQueryExecutor *executor = nullptr;
   {
-    std::scoped_lock lock(m_state.m_mutex);
+    const std::scoped_lock lock(m_state.m_mutex);
     if (req.m_db.empty() && m_state.m_executors.size() == 1) {
       executor = m_state.m_executors.begin()->second.get();
     } else if (const auto it = m_state.m_executors.find(req.m_db);
@@ -111,7 +111,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
   const int max_rows =
       resolve_positive_or(req.m_max_rows, executor->default_max_rows());
   int exec_status = 200;
-  json exec_body =
+  const json exec_body =
       executor->execute_query(req.m_sql, req.m_params, timeout_ms, max_rows,
                               exec_status);
   status_code = exec_status;

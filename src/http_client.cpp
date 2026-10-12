@@ -126,7 +126,7 @@ HttpResponse HttpClient::post(const std::string &url, const std::string &body,
                               const httplib::Headers &additional_headers) {
   Logger::debug("Calling setup_httplib_post for POST request to: {}", url);
   touch();
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, body, traceparent, additional_headers);
   return execute_request(req, body, "POST");
 }
@@ -136,7 +136,7 @@ HttpResponse HttpClient::get(const std::string &url,
                              const httplib::Headers &additional_headers) {
   Logger::debug("Calling setup_httplib_get for GET request to: {}", url);
   touch();
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, "", traceparent, additional_headers);
   return execute_request(req, "", "GET");
 }
@@ -146,7 +146,7 @@ void HttpClient::post_no_response(const std::string &url,
                                   const std::string &traceparent,
                                   const httplib::Headers &additional_headers,
                                   const std::string &content_type) {
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, body, traceparent, additional_headers);
   execute_request(req, body, "POST", content_type);
 }

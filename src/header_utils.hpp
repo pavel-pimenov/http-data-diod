@@ -237,7 +237,7 @@ find_header_optional(const httplib::Headers &headers, std::string_view name) {
       {"Edg/", "Edge/"},    {"Chrome/", "Chrome/"}, {"Firefox/", "Firefox/"},
       {"Opera/", "Opera/"}, {"OPR/", "Opera/"},     {"Version/", "Safari/"},
   }};
-  std::span<const BrowserPattern> pat_view(patterns);
+  const std::span<const BrowserPattern> pat_view(patterns);
 
   for (const auto &p : pat_view) {
     const auto pos = ua.find(p.m_marker);

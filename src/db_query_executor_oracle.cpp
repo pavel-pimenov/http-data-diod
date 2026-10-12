@@ -351,7 +351,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
                           &stmt_raw) < 0) {
     return make_db_sql_error(status_code, m_impl->describe_error());
   }
-  StmtGuard stmt_guard{stmt_raw};
+  const StmtGuard stmt_guard{stmt_raw};
 
   for (const auto &[name, value] : params.items()) {
     dpiData data{};

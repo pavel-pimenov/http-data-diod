@@ -31,7 +31,7 @@ public:
   bool init(const std::vector<DbConfig> &databases);
 
   [[nodiscard]] bool is_enabled() const {
-    std::scoped_lock lock(m_state.m_mutex);
+    const std::scoped_lock lock(m_state.m_mutex);
     return !m_state.m_executors.empty();
   }
 
@@ -39,7 +39,7 @@ public:
   // worker retries init() until this holds so a fast-starting database (e.g.
   // PostgreSQL) cannot mask a slow one (Oracle cold start).
   [[nodiscard]] bool all_configured() const {
-    std::scoped_lock lock(m_state.m_mutex);
+    const std::scoped_lock lock(m_state.m_mutex);
     return m_state.m_expected_count > 0 &&
            m_state.m_executors.size() >= m_state.m_expected_count;
   }

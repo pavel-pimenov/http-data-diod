@@ -4,6 +4,7 @@
 
 | Раунд | Тема | Детали |
 | --- | --- | --- |
+| 89 | clang-tidy — `misc-const-correctness`: 37 `const` в 12 файлах (RAII-гарды `const std::scoped_lock/lock_guard`, `PreparedRequest`, `std::span`, `duration`, JSON-тела); опция `AnalyzePointers:false` отключает ложные срабатывания на C-API out-параметрах; покрытие без изменений (6379/7120 = 89.59%) | [round-89](docs/history/round-89-clang-tidy-const-correctness.md) |
 | 88 | clang-tidy hardening — включены 13 modernize/readability-чекеров (`nodiscard`, `scoped_lock`, `ranges`, default-member-init, concat-namespaces, raw-string, avoid-c-arrays, else-after-return, braces, simplify-bool, container-contains, redundant-access/inline); починены ~70 находок в 22 файлах; production 6379/7120 = 89.59% (baseline обновлён — артефакт смены знаменателя в logger.hpp) | [round-88](docs/history/round-88-clang-tidy-modernize-readability.md) |
 | 87 | идиоматичный `auto`: 43 конверсии в 20 файлах — range-for (11) и локальные ссылочные привязки (32) с точным совпадением типа RHS; исключены параметры функций, члены класса и `json`→`std::string`-конверсии — поведение/покрытие без изменений | [round-87](docs/history/round-87-идиоматичный-auto.md) |
 | 86 | устойчивость теста невалидных URL: порт 0 (`m_port <= 0`) и 65536 — `http_client.cpp:46` набирается 3× вместо 1×, покрыта ранее пустая ветвь L45, ветви 79/136→80/136 | [round-86](docs/history/round-86-устойчивость-теста-невалидных-URL.md) |

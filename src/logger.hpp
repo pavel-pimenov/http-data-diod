@@ -95,7 +95,7 @@ public:
 
     // Level - convert string_view to string properly
     const auto level_sv = spdlog::level::to_string_view(msg.level);
-    std::string level_str(level_sv.data(), level_sv.size());
+    const std::string level_str(level_sv.data(), level_sv.size());
     j["level"] = level_str;
 
     // Service name (from thread-local context)
@@ -108,7 +108,7 @@ public:
     }
 
     // Message - convert from fmt::memory_buffer to string properly
-    std::string msg_str(msg.payload.begin(), msg.payload.end());
+    const std::string msg_str(msg.payload.begin(), msg.payload.end());
     j["message"] = msg_str;
 
     // Correlation IDs (from thread-local context)
@@ -168,7 +168,7 @@ public:
 
     // Level (optionally colored in a real terminal)
     const auto level_sv = spdlog::level::to_string_view(msg.level);
-    std::string level_str(level_sv.data(), level_sv.size());
+    const std::string level_str(level_sv.data(), level_sv.size());
     if (m_use_colors) {
       append(dest, level_color(msg.level));
     }
@@ -272,7 +272,7 @@ public:
       // runs inside std::call_once, so it must not trigger any logging.
       const auto log_format =
           Config::get_env_string_silent("LOG_FORMAT", "text");
-      bool use_json_format = log_format == "json" || log_format == "JSON";
+      const bool use_json_format = log_format == "json" || log_format == "JSON";
 
       // ANSI colors are only enabled on a real terminal (TTY). Docker logs and
       // piped output get plain text so they don't contain escape sequences.
