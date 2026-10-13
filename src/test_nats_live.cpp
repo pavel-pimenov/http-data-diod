@@ -116,7 +116,7 @@ std::string nats_binary_path() {
   if (path_env == nullptr) {
     return "";
   }
-  std::string path(path_env);
+  std::string const path(path_env);
   size_t start = 0;
   while (start <= path.size()) {
     const size_t sep = path.find(':', start);
@@ -291,14 +291,14 @@ std::string unique_subject(const std::string &base) {
 }
 
 std::pair<std::string, std::string> generate_tls_certs(const std::string &base_dir = "/tmp") {
-  std::string dir = base_dir;
+  std::string const dir = base_dir;
   const std::string prefix = dir + "/nats-tls-" + std::to_string(::getpid()) + "-" +
                              std::to_string(::time(nullptr));
   const std::string key_path = prefix + ".key";
   const std::string crt_path = prefix + ".crt";
-  std::string cmd = "openssl req -x509 -newkey rsa:2048 -keyout " + key_path +
-                    " -out " + crt_path +
-                    " -days 1 -nodes -subj '/CN=localhost' >/dev/null 2>&1";
+  std::string const cmd =
+      "openssl req -x509 -newkey rsa:2048 -keyout " + key_path + " -out " +
+      crt_path + " -days 1 -nodes -subj '/CN=localhost' >/dev/null 2>&1";
   (void)::system(cmd.c_str());
   return {crt_path, key_path};
 }
@@ -625,8 +625,8 @@ TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
         NatsHeaders{{"X-Reply-Marker", "yes"},
                     {"X-Consume-Span-Id", "span-1"}}};
   };
-  NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                          reply_fn);
+  NatsResponder const responder(live_nats_cfg(subject, server.port()), subject,
+                                reply_fn);
 
   NatsClient client(live_nats_cfg(subject, server.port()));
   REQUIRE(client.connect());
@@ -715,8 +715,8 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
       return NatsReply{R"({"status":200,"body":"ok"})",
                        NatsHeaders{{"X-Consume-Span-Id", "poll-span"}}};
     };
-    NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                            reply_fn);
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
 
     NatsPollService svc(ctx);
     const std::string out =
@@ -732,8 +732,8 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
     const auto reply_fn = [](const std::string &, const std::string &) {
       return NatsReply{""};
     };
-    NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                            reply_fn);
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
 
     NatsPollService svc(ctx);
     const std::string out =
@@ -775,8 +775,8 @@ TEST_CASE("NatsPollService: zero timeout falls back to the config timeout",
     return NatsReply{R"({"status":200,"body":"ok"})",
                      NatsHeaders{{"X-Consume-Span-Id", "poll-span"}}};
   };
-  NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                          reply_fn);
+  NatsResponder const responder(live_nats_cfg(subject, server.port()), subject,
+                                reply_fn);
 
   NatsPollService svc(ctx);
   const std::string out =
@@ -806,8 +806,8 @@ TEST_CASE("NatsPollService: reconnects a dropped client and still replies",
   const auto reply_fn = [](const std::string &, const std::string &) {
     return NatsReply{R"({"status":200,"body":"ok"})", NatsHeaders{}};
   };
-  NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                          reply_fn);
+  NatsResponder const responder(live_nats_cfg(subject, server.port()), subject,
+                                reply_fn);
 
   NatsPollService svc(ctx);
   const std::string out =
@@ -836,8 +836,8 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     const auto reply_fn = [](const std::string &, const std::string &) {
       return NatsReply{R"({"status":200,"body":{"db":"ok"}})", NatsHeaders{}};
     };
-    NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                            reply_fn);
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
 
     std::atomic<bool> shutdown{false};
     StatsLogger stats(ctx, shutdown);
@@ -858,8 +858,8 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     const auto reply_fn = [](const std::string &, const std::string &) {
       return NatsReply{"not-a-json-envelope", NatsHeaders{}};
     };
-    NatsResponder responder(live_nats_cfg(subject, server.port()), subject,
-                            reply_fn);
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
 
     std::atomic<bool> shutdown{false};
     StatsLogger stats(ctx, shutdown);
@@ -897,7 +897,7 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   REQUIRE(server.start());
   REQUIRE(server.wait_ready());
 
-  L2BackendServer backend;
+  L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
   const std::string subject = unique_subject("l2w.test");
   const EnvGuard env(
@@ -969,7 +969,7 @@ TEST_CASE("NatsClient: constructor logs configured auth and TLS flags",
   cfg.m_credentials_file = "/nonexistent-test-creds.pem";
   cfg.m_enable_tls = true;
   cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
-  NatsClient client(cfg);
+  NatsClient const client(cfg);
   // No connection is attempted from the constructor; the fixture must be
   // usable by callers that only construct.
   REQUIRE_FALSE(client.is_connected());
@@ -1077,11 +1077,9 @@ TEST_CASE("NatsClient: request returns nullopt on an empty reply", "[nats-live]"
   REQUIRE(server.wait_ready());
 
   const std::string subject = unique_subject("nats.emptyreply");
-  NatsResponder responder(
+  NatsResponder const responder(
       live_nats_cfg(subject, server.port()), subject,
-      [](const std::string &, const std::string &) {
-        return NatsReply{""};
-      });
+      [](const std::string &, const std::string &) { return NatsReply{""}; });
 
   NatsClient client(live_nats_cfg(subject, server.port()));
   REQUIRE(client.connect());
@@ -1104,7 +1102,7 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
   REQUIRE(server.start());
   REQUIRE(server.wait_ready());
 
-  L2BackendServer backend;
+  L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
   const std::string subject = unique_subject("l2w.restart");
   const EnvGuard env(
@@ -1168,7 +1166,9 @@ constexpr int kPgWaitMs = 10000;
 
 [[nodiscard]] int pg_reserve_port() {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return 0;
+  if (fd < 0) {
+    return 0;
+  }
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1176,19 +1176,21 @@ constexpr int kPgWaitMs = 10000;
   if (::bind(fd, (const sockaddr*)&addr, sizeof(addr)) != 0) { ::close(fd); return 0; }
   socklen_t len = sizeof(addr);
   if (::getsockname(fd, (sockaddr*)&addr, &len) != 0) { ::close(fd); return 0; }
-  int p = ntohs(addr.sin_port);
+  int const p = ntohs(addr.sin_port);
   ::close(fd);
   return p;
 }
 
 [[nodiscard]] bool pg_tcp_probe(int port) {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) return false;
+  if (fd < 0) {
+    return false;
+  }
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons((uint16_t)port);
-  int rc = ::connect(fd, (const sockaddr*)&addr, sizeof(addr));
+  int const rc = ::connect(fd, (const sockaddr *)&addr, sizeof(addr));
   ::close(fd);
   return rc == 0;
 }
@@ -1196,7 +1198,9 @@ constexpr int kPgWaitMs = 10000;
 [[nodiscard]] bool pg_wait(const std::function<bool()>& pred, int ms) {
   auto d = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
   while (std::chrono::steady_clock::now() < d) {
-    if (pred()) return true;
+    if (pred()) {
+      return true;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
   return pred();
@@ -1208,80 +1212,176 @@ struct PgTarget {
 };
 
 [[nodiscard]] PgTarget pg_target() {
-  if (::geteuid() != 0) return PgTarget{true,false,::geteuid(),::getegid(),""};
+  if (::geteuid() != 0) {
+    return PgTarget{true, false, ::geteuid(), ::getegid(), ""};
+  }
   const passwd* pw = ::getpwnam("postgres");
-  if (!pw) return PgTarget{};
+  if (!pw) {
+    return PgTarget{};
+  }
   return PgTarget{true,true,pw->pw_uid,pw->pw_gid,"postgres"};
 }
 
 [[nodiscard]] bool pg_droppriv(const PgTarget& t) {
-  if (!t.need) return true;
-  if (::setgid(t.gid)!=0) return false;
-  if (::initgroups(t.name.c_str(), t.gid)!=0) return false;
+  if (!t.need) {
+    return true;
+  }
+  if (::setgid(t.gid) != 0) {
+    return false;
+  }
+  if (::initgroups(t.name.c_str(), t.gid) != 0) {
+    return false;
+  }
   return ::setuid(t.uid)==0;
 }
 
 [[nodiscard]] bool pg_redir(const char* p) {
-  int fd = ::open(p, O_WRONLY|O_CREAT|O_APPEND, 0644);
-  if (fd<0) return false;
+  int const fd = ::open(p, O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd < 0) {
+    return false;
+  }
   ::dup2(fd,1); ::dup2(fd,2);
-  if (fd>2) ::close(fd);
+  if (fd > 2) {
+    ::close(fd);
+  }
   return true;
 }
 
 [[nodiscard]] std::string pg_bindir() {
   auto has=[&](const std::string& d){ return ::access((d+"/initdb").c_str(),X_OK)==0 && ::access((d+"/postgres").c_str(),X_OK)==0; };
-  if (has("/usr/local/bin")) return "/usr/local/bin";
+  if (has("/usr/local/bin")) {
+    return "/usr/local/bin";
+  }
   std::error_code ec;
   const std::filesystem::path ld("/usr/lib/postgresql");
-  if (!std::filesystem::exists(ld,ec)) return "";
+  if (!std::filesystem::exists(ld, ec)) {
+    return "";
+  }
   std::vector<std::string> vs;
-  for (auto& e: std::filesystem::directory_iterator(ld,ec)) if (e.is_directory()) vs.push_back(e.path().filename().string());
+  for (auto &e : std::filesystem::directory_iterator(ld, ec)) {
+    if (e.is_directory()) {
+      vs.push_back(e.path().filename().string());
+    }
+  }
   std::sort(vs.begin(),vs.end(),[](auto&a,auto&b){return std::stoi(a)>std::stoi(b);});
-  for (auto&v:vs){ auto d="/usr/lib/postgresql/"+v+"/bin"; if (has(d)) return d; }
+  for (auto&v:vs){ auto d="/usr/lib/postgresql/"+v+"/bin";
+    if (has(d)) {
+      return d;
+    }
+  }
   return "";
 }
 
 class PgSrv {
 public:
-  int port() const { return m_port; }
+  [[nodiscard]] int port() const { return m_port; }
   bool ensure() {
-    if (m_pid>0) return true;
-    if (m_fail) return false;
+    if (m_pid > 0) {
+      return true;
+    }
+    if (m_fail) {
+      return false;
+    }
     if (!start()) { m_fail=true; return false; }
     return true;
   }
   void stop() {
-    if (m_pid<=0) return;
+    if (m_pid <= 0) {
+      return;
+    }
     ::kill(m_pid,SIGINT);
     auto dl = std::chrono::steady_clock::now()+std::chrono::seconds(5);
     int st=0;
-    while (::waitpid(m_pid,&st,WNOHANG)==0 && std::chrono::steady_clock::now()<dl)
+    while (::waitpid(m_pid, &st, WNOHANG) == 0 &&
+           std::chrono::steady_clock::now() < dl) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     if (::waitpid(m_pid,&st,WNOHANG)==0) { ::kill(m_pid,SIGKILL); ::waitpid(m_pid,&st,0); }
     m_pid=-1;
   }
   ~PgSrv(){ stop(); }
 private:
-  bool alive() const { if (m_pid<=0) return false; int st=0; return ::waitpid(m_pid,&st,WNOHANG)==0; }
-  bool run_wait(const std::string& exe,const std::vector<std::string>& args,const std::string& log,const PgTarget&t) const {
-    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); (void)pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
-    if (p<0) return false; int st=0; while (::waitpid(p,&st,0)<0 && errno==EINTR){} return WIFEXITED(st)&&WEXITSTATUS(st)==0;
+  [[nodiscard]] bool alive() const {
+    if (m_pid <= 0) {
+      return false;
+    }
+    int st = 0;
+    return ::waitpid(m_pid, &st, WNOHANG) == 0;
   }
-  pid_t spawn(const std::string& exe,const std::vector<std::string>& args,const std::string& log,const PgTarget&t) const {
-    pid_t p=::fork(); if (p==0){ if (!pg_droppriv(t)) _exit(127); (void)pg_redir(log.c_str()); std::vector<const char*> av; av.push_back(exe.c_str()); for (auto&a:args) av.push_back(a.c_str()); av.push_back(nullptr); ::execv(exe.c_str(), (char*const*)av.data()); _exit(127); }
+  [[nodiscard]] bool run_wait(const std::string &exe,
+                              const std::vector<std::string> &args,
+                              const std::string &log, const PgTarget &t) const {
+    pid_t const p = ::fork();
+    if (p == 0) {
+      if (!pg_droppriv(t)) {
+        _exit(127);
+      }
+      (void)pg_redir(log.c_str());
+      std::vector<const char *> av;
+      av.push_back(exe.c_str());
+      for (auto &a : args) {
+        av.push_back(a.c_str());
+      }
+      av.push_back(nullptr);
+      ::execv(exe.c_str(), (char *const *)av.data());
+      _exit(127);
+    }
+    if (p < 0) {
+      return false;
+    }
+    int st = 0;
+    while (::waitpid(p, &st, 0) < 0 && errno == EINTR) {
+    }
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+  }
+  [[nodiscard]] pid_t spawn(const std::string &exe,
+                            const std::vector<std::string> &args,
+                            const std::string &log, const PgTarget &t) const {
+    pid_t const p = ::fork();
+    if (p == 0) {
+      if (!pg_droppriv(t)) {
+        _exit(127);
+      }
+      (void)pg_redir(log.c_str());
+      std::vector<const char *> av;
+      av.push_back(exe.c_str());
+      for (auto &a : args) {
+        av.push_back(a.c_str());
+      }
+      av.push_back(nullptr);
+      ::execv(exe.c_str(), (char *const *)av.data());
+      _exit(127);
+    }
     return p;
   }
   bool start() {
-    if (m_bindir.empty()){ m_bindir=pg_bindir(); if (m_bindir.empty()) return false; }
-    auto t=pg_target(); if (!t.ok) return false;
-    m_port=pg_reserve_port(); if (m_port<=0) return false;
+    if (m_bindir.empty()){ m_bindir=pg_bindir();
+      if (m_bindir.empty()) {
+        return false;
+      }
+    }
+    auto t=pg_target();
+    if (!t.ok) {
+      return false;
+    }
+    m_port=pg_reserve_port();
+    if (m_port <= 0) {
+      return false;
+    }
     const std::string tmpl="/tmp/pgdbn-XXXXXX";
     std::vector<char> dt(tmpl.begin(),tmpl.end()); dt.push_back(0);
-    char* d=::mkdtemp(dt.data()); if (!d) return false; m_datadir=d;
+    char* d=::mkdtemp(dt.data());
+    if (!d) {
+      return false;
+    }
+    m_datadir = d;
     if (t.need && ::chown(m_datadir.c_str(),t.uid,t.gid)!=0){ cleanup(); return false; }
     if (!run_wait(m_bindir+"/initdb",{"-D",m_datadir,"-U","postgres","-A","trust","--no-locale","-E","UTF8"}, "/tmp/pginitn-"+std::to_string(m_port)+".log",t)){ cleanup(); return false; }
-    pid_t sp=spawn(m_bindir+"/postgres",{"-D",m_datadir,"-p",std::to_string(m_port),"-h","127.0.0.1","-k","/tmp"}, "/tmp/pgservn-"+std::to_string(m_port)+".log",t);
+    pid_t const sp =
+        spawn(m_bindir + "/postgres",
+              {"-D", m_datadir, "-p", std::to_string(m_port), "-h", "127.0.0.1",
+               "-k", "/tmp"},
+              "/tmp/pgservn-" + std::to_string(m_port) + ".log", t);
     if (sp<0){ cleanup(); return false; }
     m_pid=sp;
     if (!pg_wait([this]{ return pg_tcp_probe(m_port)&&alive(); }, kPgWaitMs)){ stop(); cleanup(); return false; }
@@ -1400,30 +1500,41 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   runner.join();
 }
 TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]") {
-  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
   NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
   natsMsg* reply=nullptr;
   auto st = natsConnection_RequestString(&reply, nc, "no.such.subject.timeout0", "hi", (int64_t)0);
-  (void)st; if (reply) natsMsg_Destroy(reply);
+  (void)st;
+  if (reply) {
+    natsMsg_Destroy(reply);
+  }
   natsConnection_Destroy(nc);
 }
 
 TEST_CASE("NatsClient: subscribe rejects invalid subject", "[nats-live]") {
-  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
   NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
   natsSubscription* sub=nullptr;
   auto st = natsConnection_SubscribeSync(&sub, nc, "bad subject");
   REQUIRE(st == NATS_INVALID_SUBJECT);
-  if (sub) natsSubscription_Destroy(sub);
+  if (sub) {
+    natsSubscription_Destroy(sub);
+  }
   natsConnection_Destroy(nc);
 }
 
 TEST_CASE("NatsClient: request times out when subscriber never replies", "[nats-live]") {
-  if (nats_binary_path().empty()) SKIP("nats-server binary not available");
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
   NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
@@ -1433,7 +1544,9 @@ TEST_CASE("NatsClient: request times out when subscriber never replies", "[nats-
   natsMsg* reply=nullptr;
   auto sreq = natsConnection_RequestString(&reply, nc, "test.timeout.never.reply", "ping", (int64_t)50);
   REQUIRE(sreq == NATS_TIMEOUT);
-  if (reply) natsMsg_Destroy(reply);
+  if (reply) {
+    natsMsg_Destroy(reply);
+  }
   natsSubscription_Destroy(sub);
   natsConnection_Destroy(nc);
 }

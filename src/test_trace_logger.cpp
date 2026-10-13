@@ -30,8 +30,9 @@ bool wait_for_condition(const auto &pred, int timeout_ms) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   while (std::chrono::steady_clock::now() < deadline) {
-    if (pred())
+    if (pred()) {
       return true;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(25));
   }
   return pred();
@@ -52,7 +53,7 @@ struct TraceMockServer {
                       std::this_thread::sleep_for(
                           std::chrono::microseconds(m_slow_us));
                     }
-                    std::lock_guard lock(m_mu);
+                    std::scoped_lock const lock(m_mu);
                     m_bodies.push_back(req.body);
                     res.status = 200;
                   });
@@ -66,8 +67,9 @@ struct TraceMockServer {
 
   ~TraceMockServer() {
     m_server.stop();
-    if (m_thread.joinable())
+    if (m_thread.joinable()) {
       m_thread.join();
+    }
   }
 
   std::string endpoint() const {
@@ -75,12 +77,12 @@ struct TraceMockServer {
   }
 
   size_t body_count() const {
-    std::lock_guard lock(m_mu);
+    std::scoped_lock const lock(m_mu);
     return m_bodies.size();
   }
 
   std::vector<std::string> snapshot_bodies() const {
-    std::lock_guard lock(m_mu);
+    std::scoped_lock const lock(m_mu);
     return m_bodies;
   }
 };
@@ -226,9 +228,10 @@ struct SentryTracingEnv {
 };
 
 bool is_hex_string(const std::string &s) {
-  for (char c : s) {
-    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+  for (char const c : s) {
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
       return false;
+    }
   }
   return true;
 }
@@ -323,7 +326,7 @@ TEST_CASE("TraceLogger: should_sample respects deterministic rate bounds",
 
 TEST_CASE("TraceLogger: log_request suppresses unsampled success",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 50, 1000, 0.0);
   env.m_logger->log_request("GET", "http://svc/query", 200, 1000, 2000, "test");
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -335,7 +338,7 @@ TEST_CASE("TraceLogger: log_request suppresses unsampled success",
 
 TEST_CASE("TraceLogger: log_request always samples errors at zero rate",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 50, 500, 0.0);
   env.m_logger->log_request("POST", "http://svc/query", 500, 1000, 2000,
                             "test", "req-1");
@@ -352,7 +355,7 @@ TEST_CASE("TraceLogger: log_request always samples errors at zero rate",
 
 TEST_CASE("TraceLogger: batch of spans is delivered to Jaeger endpoint",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 2, 500, 1.0);
   for (int i = 0; i < 3; ++i) {
     env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -431,7 +434,7 @@ TEST_CASE("TraceLogger: sentry breaker sheds envelopes while open", "[tracing]"
   // Healthy Jaeger target, dead Sentry target: the first envelope delivery
   // fails and opens the sentry breaker (threshold 1, long cooldown), the
   // second batch is shed in the cooldown window.
-  TraceMockServer server;
+  TraceMockServer const server;
   TracingBreakerSettings settings;
   settings.m_failure_threshold = 1;
   settings.m_cooldown_base_ms = 60000;
@@ -452,7 +455,7 @@ TEST_CASE("TraceLogger: sentry breaker sheds envelopes while open", "[tracing]"
 
 TEST_CASE("TraceLogger: full queue drops spans and increments failed",
           "[tracing]") {
-  TraceMockServer server(4'000'000);
+  TraceMockServer const server(4'000'000);
   TraceLoggerEnv env(server.endpoint(), 50, 1000, 1.0);
   for (int i = 0; i < 10100; ++i) {
     env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -486,7 +489,7 @@ TEST_CASE("TraceLogger: send_span posts a single span and reports failure",
 
 TEST_CASE("TraceLogger: log_request merges additional attributes",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 50, 500, 1.0);
   env.m_logger->log_request(
       "PATCH", "http://svc/item", 201, 1000, 2000, "test", "req-2", "", "", "",
@@ -502,7 +505,7 @@ TEST_CASE("TraceLogger: log_request merges additional attributes",
 
 TEST_CASE("TraceLogger: log_span_to_jaeger enqueues real traces",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 50, 500, 1.0);
   log_span_to_jaeger(env.m_logger.get(), "DELETE", "http://svc/item", 200,
                      1000, 2000, "test", "req-3");
@@ -516,7 +519,7 @@ TEST_CASE("TraceLogger: log_span_to_jaeger enqueues real traces",
 }
 
 TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
 
   const auto parsed = handle_trace_context(
@@ -536,7 +539,7 @@ TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
 
 TEST_CASE("TraceLogger: make_span_and_traceparent uses the tracer",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
 
   TraceContext ctx;
@@ -594,14 +597,15 @@ TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
       }
     });
   }
-  for (auto &t : threads)
+  for (auto &t : threads) {
     t.join();
+  }
   REQUIRE(ok.load() == kThreads * kEach);
 }
 
 TEST_CASE("TraceLogger: sender loop idle-timeout resumes on enqueue",
           "[tracing]") {
-  TraceMockServer server;
+  TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 50, 100, 1.0);
   // Let sender_loop idle-poll (wait_for timeout fires, continue loop)
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -620,12 +624,12 @@ TEST_CASE("TracingHelpers: get_traceparent_header present and absent",
   with.emplace("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
   REQUIRE(get_traceparent_header(with) ==
           "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
-  httplib::Headers without;
+  httplib::Headers const without;
   REQUIRE(get_traceparent_header(without).empty());
 }
 
 TEST_CASE("TracingHelpers: begin_request_trace with real headers", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
 
   httplib::Headers with;
@@ -647,7 +651,7 @@ TEST_CASE("TracingHelpers: begin_request_trace with real headers", "[tracing]") 
 }
 
 TEST_CASE("TracingHelpers: extract_and_validate raw variants", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
 
   const TraceContext parsed = TraceContextHelper::extract_and_validate(
@@ -665,7 +669,7 @@ TEST_CASE("TracingHelpers: extract_and_validate raw variants", "[tracing]") {
 
 TEST_CASE("TracingHelpers: JaegerSpanLogger real-tracer spam variants",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
   ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
@@ -754,7 +758,7 @@ TEST_CASE("TracingHelpers: log_rate_limit_rejection limit branches",
 
 TEST_CASE("TracingHelpers: make_span_and_traceparent hint and sampled",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
   ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
@@ -776,7 +780,7 @@ TEST_CASE("TracingHelpers: make_span_and_traceparent hint and sampled",
 
 TEST_CASE("TracingHelpers: add_proxy_trace_fields populates request",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
   ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
@@ -809,7 +813,7 @@ TEST_CASE("TracingHelpers: set_traceparent_response_header branch",
           "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01");
 
   httplib::Response res_empty;
-  TraceContext ctx_empty;
+  TraceContext const ctx_empty;
   set_traceparent_response_header(res_empty, ctx_empty);
   REQUIRE(res_empty.get_header_value("traceparent").empty());
 }
@@ -830,7 +834,7 @@ TEST_CASE("TracingHelpers: log_worker_span guards trace_id", "[tracing]") {
 
 TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
   auto *tracer = env.m_logger.get();
 
   TraceContext ctx;
@@ -1195,13 +1199,13 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
   std::vector<std::string> sentry_auth_headers;
   jaeger_server.Post("/api/traces",
                      [&](const httplib::Request &req, httplib::Response &res) {
-                       std::lock_guard lock(mu);
+                       std::scoped_lock const lock(mu);
                        jaeger_bodies.push_back(req.body);
                        res.status = 200;
                      });
   sentry_server.Post("/api/2/envelope/",
                      [&](const httplib::Request &req, httplib::Response &res) {
-                       std::lock_guard lock(mu);
+                       std::scoped_lock const lock(mu);
                        sentry_bodies.push_back(req.body);
                        const auto it = req.headers.find("X-Sentry-Auth");
                        sentry_auth_headers.push_back(
@@ -1226,14 +1230,14 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
 
   REQUIRE(wait_for_condition(
       [&] {
-        std::lock_guard lock(mu);
+        std::scoped_lock lock(mu);
         return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
       },
       8000));
 
   std::string envelope;
   {
-    std::lock_guard lock(mu);
+    std::scoped_lock const lock(mu);
     REQUIRE(!jaeger_bodies.empty());
     envelope = sentry_bodies.front();
   }
@@ -1249,10 +1253,12 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
   env.reset();
   jaeger_server.stop();
   sentry_server.stop();
-  if (jaeger_thread.joinable())
+  if (jaeger_thread.joinable()) {
     jaeger_thread.join();
-  if (sentry_thread.joinable())
+  }
+  if (sentry_thread.joinable()) {
     sentry_thread.join();
+  }
 }
 
 TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
@@ -1262,7 +1268,7 @@ TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
   std::vector<std::string> sentry_bodies;
   sentry_server.Post("/api/2/envelope/",
                      [&](const httplib::Request &req, httplib::Response &res) {
-                       std::lock_guard lock(mu);
+                       std::scoped_lock const lock(mu);
                        sentry_bodies.push_back(req.body);
                        res.status = 200;
                      });
@@ -1284,15 +1290,16 @@ TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
 
   std::this_thread::sleep_for(std::chrono::milliseconds(400));
   {
-    std::lock_guard lock(mu);
+    std::scoped_lock const lock(mu);
     REQUIRE(sentry_bodies.empty());
   }
   REQUIRE(env->sentry_sent() == 0.0);
 
   env.reset();
   sentry_server.stop();
-  if (sentry_thread.joinable())
+  if (sentry_thread.joinable()) {
     sentry_thread.join();
+  }
 }
 
 TEST_CASE("TraceLogger: sentry delivery failure is counted as failed",
@@ -1321,7 +1328,7 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
   std::vector<std::string> sentry_bodies;
   sentry_server.Post("/api/2/envelope/",
                      [&](const httplib::Request &req, httplib::Response &res) {
-                       std::lock_guard lock(mu);
+                       std::scoped_lock const lock(mu);
                        sentry_bodies.push_back(req.body);
                        res.status = 200;
                      });
@@ -1340,7 +1347,7 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
 
   REQUIRE(wait_for_condition(
       [&] {
-        std::lock_guard lock(mu);
+        std::scoped_lock lock(mu);
         return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
       },
       8000));
@@ -1349,7 +1356,7 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
 
   std::string envelope;
   {
-    std::lock_guard lock(mu);
+    std::scoped_lock const lock(mu);
     envelope = sentry_bodies.front();
   }
   REQUIRE(envelope.find("\"type\":\"transaction\"") != std::string::npos);
@@ -1358,8 +1365,9 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
 
   env.reset();
   sentry_server.stop();
-  if (sentry_thread.joinable())
+  if (sentry_thread.joinable()) {
     sentry_thread.join();
+  }
 }
 
 TEST_CASE("TraceLogger: sentry delivery with null counters is safe",

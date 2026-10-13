@@ -535,7 +535,7 @@ TEST_CASE("Header utils: skip and redact", "[header-utils]") {
 TEST_CASE(
     "Header utils: filter_headers skips default headers case-insensitively",
     "[header-utils]") {
-  httplib::Headers source = {
+  httplib::Headers const source = {
       {"Host", "example.com"},
       {"Content-Length", "42"},
       {"X-Custom", "value"},
@@ -553,9 +553,9 @@ TEST_CASE(
 
 TEST_CASE("Header utils: filter_headers honours a custom skip set",
           "[header-utils]") {
-  httplib::Headers source = {{"X-Drop", "1"}, {"X-Keep", "2"}};
+  httplib::Headers const source = {{"X-Drop", "1"}, {"X-Keep", "2"}};
   httplib::Headers dest;
-  header_utils::HeaderSet skip = {"x-drop"};
+  header_utils::HeaderSet const skip = {"x-drop"};
   HeaderUtils::filter_headers(source, dest, skip);
 
   REQUIRE_FALSE(dest.find("X-Drop") != dest.end());
@@ -564,7 +564,7 @@ TEST_CASE("Header utils: filter_headers honours a custom skip set",
 
 TEST_CASE("Header utils: filter_headers_to_json skips default headers",
           "[header-utils]") {
-  httplib::Headers source = {
+  httplib::Headers const source = {
       {"Authorization", "Bearer secret"},
       {"X-Forwarded-For", "1.2.3.4"},
       {"Transfer-Encoding", "chunked"},
@@ -581,7 +581,7 @@ TEST_CASE("Header utils: filter_headers_to_json skips default headers",
 
 TEST_CASE("Header utils: filter_headers_from_json skips default headers",
           "[header-utils]") {
-  nlohmann::json source = {
+  nlohmann::json const source = {
       {"Host", "example.com"},
       {"X-Request-Id", "abc"},
   };
@@ -602,7 +602,7 @@ TEST_CASE("Header utils: filter_headers_from_json ignores non-object input",
 
 TEST_CASE("Header utils: headers_to_json preserves all pairs",
           "[header-utils]") {
-  httplib::Headers source = {{"A", "1"}, {"B", "2"}};
+  httplib::Headers const source = {{"A", "1"}, {"B", "2"}};
   const auto out = HeaderUtils::headers_to_json(source);
   REQUIRE(out.size() == 2);
   REQUIRE(out["A"] == "1");
@@ -611,7 +611,7 @@ TEST_CASE("Header utils: headers_to_json preserves all pairs",
 
 TEST_CASE("Header utils: should_skip_header with custom set",
           "[header-utils]") {
-  header_utils::HeaderSet skip = {"x-custom"};
+  header_utils::HeaderSet const skip = {"x-custom"};
   REQUIRE(HeaderUtils::should_skip_header("X-Custom", skip));
   REQUIRE(HeaderUtils::should_skip_header("x-custom", skip));
   REQUIRE_FALSE(HeaderUtils::should_skip_header("X-Other", skip));
@@ -630,36 +630,37 @@ TEST_CASE("Random utils: between stays within the inclusive range",
 TEST_CASE("Schema validator: required fields, methods, paths, sizes",
           "[schema-validator]") {
   std::string error;
-  RequestValidator validator = create_standard_request_validator();
-  json ok = {{"method", "POST"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
+  RequestValidator const validator = create_standard_request_validator();
+  json const ok = {
+      {"method", "POST"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
   REQUIRE(validator.validate(ok, error));
   REQUIRE_NOTHROW(validator.validate_or_throw(ok));
 
-  json missing = {{"method", "POST"}, {"path", "/v1/sql"}};
+  json const missing = {{"method", "POST"}, {"path", "/v1/sql"}};
   REQUIRE_FALSE(validator.validate(missing, error));
   REQUIRE(error.find("Missing required field") != std::string::npos);
   REQUIRE_THROWS_AS(validator.validate_or_throw(missing),
                     std::invalid_argument);
 
-  json bad_method = {
+  json const bad_method = {
       {"method", "DELETE"}, {"path", "/v1/sql"}, {"request_id", "r1"}};
   REQUIRE_FALSE(validator.validate(bad_method, error));
   REQUIRE(error.find("Method not allowed") != std::string::npos);
 
   RequestValidator path_validator = create_standard_request_validator();
   path_validator.add_allowed_path("/v1");
-  json bad_path = {
+  json const bad_path = {
       {"method", "POST"}, {"path", "/other"}, {"request_id", "r1"}};
   REQUIRE_FALSE(path_validator.validate(bad_path, error));
   REQUIRE(error.find("Path not allowed") != std::string::npos);
 
-  json too_long_path = {{"method", "POST"},
-                        {"path", std::string(3000, 'x')},
-                        {"request_id", "r1"}};
+  json const too_long_path = {{"method", "POST"},
+                              {"path", std::string(3000, 'x')},
+                              {"request_id", "r1"}};
   REQUIRE_FALSE(validator.validate(too_long_path, error));
   REQUIRE(error.find("Path too long") != std::string::npos);
 
-  json too_big_body = {
+  json const too_big_body = {
       {"method", "POST"},
       {"path", "/v1/sql"},
       {"request_id", "r1"},
@@ -667,10 +668,10 @@ TEST_CASE("Schema validator: required fields, methods, paths, sizes",
   REQUIRE_FALSE(validator.validate(too_big_body, error));
   REQUIRE(error.find("Body too large") != std::string::npos);
 
-  json with_body_ok = {{"method", "POST"},
-                       {"path", "/v1/sql"},
-                       {"request_id", "r1"},
-                       {"body", "small"}};
+  json const with_body_ok = {{"method", "POST"},
+                             {"path", "/v1/sql"},
+                             {"request_id", "r1"},
+                             {"body", "small"}};
   REQUIRE(validator.validate(with_body_ok, error));
 }
 
@@ -680,18 +681,19 @@ TEST_CASE("Schema validator: response status and body rules",
   ResponseValidator validator = create_standard_response_validator();
   validator.add_allowed_status_code(200);
 
-  json ok = {{"status_code", 200}, {"body", {{"response", "payload"}}}};
+  json const ok = {{"status_code", 200}, {"body", {{"response", "payload"}}}};
   REQUIRE(validator.validate(ok, error));
 
-  json bad_status = {{"status_code", 500}, {"body", {{"response", "payload"}}}};
+  json const bad_status = {{"status_code", 500},
+                           {"body", {{"response", "payload"}}}};
   REQUIRE_FALSE(validator.validate(bad_status, error));
   REQUIRE(error.find("Status code not allowed") != std::string::npos);
 
-  json missing_body = {{"status_code", 200}};
+  json const missing_body = {{"status_code", 200}};
   REQUIRE_FALSE(validator.validate(missing_body, error));
   REQUIRE(error.find("body required but missing") != std::string::npos);
 
-  json too_big = {
+  json const too_big = {
       {"status_code", 200},
       {"body",
        {{"response",
@@ -742,7 +744,7 @@ TEST_CASE("Dynamic labeled family: counter increments and renders",
 
 TEST_CASE("Dynamic labeled family: empty family is omitted on collect",
           "[labeled-family]") {
-  DynamicLabeledFamily<prometheus::Counter> family(
+  DynamicLabeledFamily<prometheus::Counter> const family(
       "client_id",
       std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
           {"requests_total", "help"}});
@@ -772,7 +774,7 @@ TEST_CASE("Dynamic labeled family: snapshot provider replaces gauge set",
           "[labeled-family]") {
   auto current_requests = 0.0;
   auto current_rejected = 0.0;
-  DynamicLabeledFamily<prometheus::Gauge> family(
+  DynamicLabeledFamily<prometheus::Gauge> const family(
       "ip",
       std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
           {"ip_requests", "req"}, {"ip_rejected", "rej"}},
@@ -794,7 +796,7 @@ TEST_CASE("Dynamic labeled family: snapshot provider replaces gauge set",
 TEST_CASE("Dynamic labeled family: provider drops vanished labels",
           "[labeled-family]") {
   auto present = true;
-  DynamicLabeledFamily<prometheus::Gauge> family(
+  DynamicLabeledFamily<prometheus::Gauge> const family(
       "ip",
       std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
           {"ip_requests", "req"}},
@@ -1126,20 +1128,20 @@ TEST_CASE("JsonUtils: try_parse returns unexpected on malformed JSON",
 
 TEST_CASE("JsonUtils: get_response_body fallback on empty/missing body",
           "[json-utils][branch-cover]") {
-  json empty;
+  json const empty;
   const auto &body = get_response_body(empty);
   REQUIRE(body.is_object());
   REQUIRE(body.empty());
-  json bad{{"body", "not-object"}};
+  json const bad{{"body", "not-object"}};
   const auto &body2 = get_response_body(bad);
   REQUIRE(body2.is_object());
 }
 
 TEST_CASE("JsonUtils: get_body_response_ref fallback on missing key",
           "[json-utils][branch-cover]") {
-  json j;
+  json const j;
   REQUIRE(get_body_response_ref(j).empty());
-  json j2{{"body", json::object()}};
+  json const j2{{"body", json::object()}};
   REQUIRE(get_body_response_ref(j2).empty());
 }
 
@@ -1151,7 +1153,7 @@ TEST_CASE("JsonUtils: build_nats_response_envelope with empty headers",
   REQUIRE_FALSE(env.contains(NatsResponseContract::kHeaders));
   REQUIRE_FALSE(env.contains(NatsResponseContract::kBodyTraceparent));
   // Populate headers and traceparent in a second call.
-  json hdrs{{"X-Custom", "val"}};
+  json const hdrs{{"X-Custom", "val"}};
   const json env2 = build_nats_response_envelope(
       200, "req-2", "ok", 12345, false, "text/plain", hdrs, "00-abc");
   REQUIRE(env2.contains(NatsResponseContract::kHeaders));
@@ -1278,31 +1280,31 @@ TEST_CASE("Gateway: strip_sql_comments single trailing dash/slash",
 
 TEST_CASE("Gateway: parse_request params as array rejected",
           "[db-query-utils][branch-cover]") {
-  json req{{"type", "query"},
-           {"request_id", "r"},
-           {"db", "d"},
-           {"sql", "SELECT 1"},
-           {"params", json::array()}};
+  json const req{{"type", "query"},
+                 {"request_id", "r"},
+                 {"db", "d"},
+                 {"sql", "SELECT 1"},
+                 {"params", json::array()}};
   REQUIRE_FALSE(parse_db_query_request(req).has_value());
 }
 
 TEST_CASE("Gateway: parse_request params with nested object rejected",
           "[db-query-utils][branch-cover]") {
-  json req{{"type", "query"},
-           {"request_id", "r"},
-           {"db", "d"},
-           {"sql", "SELECT 1"},
-           {"params", json{{"k", json::object()}}}};
+  json const req{{"type", "query"},
+                 {"request_id", "r"},
+                 {"db", "d"},
+                 {"sql", "SELECT 1"},
+                 {"params", json{{"k", json::object()}}}};
   REQUIRE_FALSE(parse_db_query_request(req).has_value());
 }
 
 TEST_CASE("Gateway: parse_request params with array value rejected",
           "[db-query-utils][branch-cover]") {
-  json req{{"type", "query"},
-           {"request_id", "r"},
-           {"db", "d"},
-           {"sql", "SELECT 1"},
-           {"params", json{{"k", json::array()}}}};
+  json const req{{"type", "query"},
+                 {"request_id", "r"},
+                 {"db", "d"},
+                 {"sql", "SELECT 1"},
+                 {"params", json{{"k", json::array()}}}};
   REQUIRE_FALSE(parse_db_query_request(req).has_value());
 }
 
@@ -1310,11 +1312,11 @@ TEST_CASE("Gateway: parse_request accepts all scalar param types",
           "[db-query-utils][branch-cover]") {
   json params{
       {"n", nullptr}, {"b", true}, {"i", 42}, {"d", 3.14}, {"s", "str"}};
-  json req{{"type", "query"},
-           {"request_id", "r"},
-           {"db", "d"},
-           {"sql", "SELECT 1"},
-           {"params", params}};
+  json const req{{"type", "query"},
+                 {"request_id", "r"},
+                 {"db", "d"},
+                 {"sql", "SELECT 1"},
+                 {"params", params}};
   auto result = parse_db_query_request(req);
   REQUIRE(result.has_value());
   REQUIRE(result->m_params.size() == 5);

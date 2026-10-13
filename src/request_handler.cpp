@@ -464,7 +464,7 @@ void RequestHandler::process_request(const std::string &method,
       m_ctx.m_proxy.m_metrics->m_client_requests);
 
   // RAII: decrement active clients on exit
-  ActiveClientTracker tracker(m_stats_logger);
+  ActiveClientTracker const tracker(m_stats_logger);
 
   Logger::debug("Proxy received request.path: {}", req.path);
   Logger::debug("Proxy received request body ({} bytes): {}", req.body.size(),
@@ -558,7 +558,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // Correlate every log line of this request via the thread-local context.
   // request_id/trace_id are set later in process_request once they exist;
   // the scope restores the previous values on exit (covers keep-alive reuse).
-  ScopedRequestContext req_ctx(req);
+  ScopedRequestContext const req_ctx(req);
   const auto &client_ip = req_ctx.client_ip();
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
@@ -605,7 +605,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   const uint64_t start_us = get_current_timestamp_us();
   const auto request_id = m_services.m_id_generator.generate_uuid();
 
-  ScopedRequestContext req_ctx(req);
+  ScopedRequestContext const req_ctx(req);
   Logger::set_request_id(request_id);
   std::string inlet_span_id;
   const TraceContext trace_ctx = begin_request_trace(

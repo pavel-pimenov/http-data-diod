@@ -19,7 +19,7 @@ public:
 
   bool init() override { return true; }
 
-  bool is_ready() const override { return true; }
+  [[nodiscard]] bool is_ready() const override { return true; }
 
   json execute_query(const std::string & /*sql*/, const json & /*params*/,
                      int /*timeout_ms*/, int /*max_rows*/,
@@ -55,7 +55,7 @@ DbConfig make_db() {
 
 TEST_CASE("DbExecutorBase: configured defaults are exposed",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   REQUIRE(ex.default_timeout_ms() == 1234);
   REQUIRE(ex.default_max_rows() == 111);
   REQUIRE(ex.db_name() == "pg-test");
@@ -124,7 +124,7 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
 
 TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   DbRowCollector rows(10);
   rows.try_add(json::array({1, "a"}));
   rows.try_add(json::array({2, "b"}));
@@ -142,7 +142,7 @@ TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",
 
 TEST_CASE("DbExecutorBase: build_query_response marks truncation",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   DbRowCollector rows(1);
   REQUIRE(rows.try_add(json::array({1})));
   REQUIRE_FALSE(rows.try_add(json::array({2})));

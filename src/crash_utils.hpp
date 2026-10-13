@@ -36,7 +36,7 @@ inline std::string trim_line(std::string s) {
 
 inline std::string demangle_symbol(const char *mangled) {
   int status = 0;
-  std::unique_ptr<char, decltype(&std::free)> demangled(
+  std::unique_ptr<char, decltype(&std::free)> const demangled(
       abi::__cxa_demangle(mangled, nullptr, nullptr, &status), &std::free);
   if (status == 0 && demangled) {
     return std::string(demangled.get());

@@ -256,7 +256,7 @@ void SentryClient::capture(const sentry::SentryEvent &event) {
     return;
   }
   {
-    std::lock_guard<std::mutex> lock(m_queue.m_mutex);
+    std::scoped_lock const lock(m_queue.m_mutex);
     if (m_queue.m_queue.size() >= m_config.m_max_queue_size) {
       m_queue.m_queue.pop_front();
       --m_queue.m_pending;
@@ -311,7 +311,7 @@ void SentryClient::sender_loop(std::stop_token st) {
       process_event(event);
     }
     {
-      std::lock_guard<std::mutex> lock(m_queue.m_mutex);
+      std::scoped_lock const lock(m_queue.m_mutex);
       m_queue.m_pending -= batch.size();
       m_metrics.m_queue_size.Set(
           static_cast<double>(m_queue.m_pending));
@@ -355,9 +355,8 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   if (!m_config.m_dsn_data->m_secret_key.empty()) {
     sentry_key += "/" + m_config.m_dsn_data->m_secret_key;
   }
-  httplib::Headers headers{
-      {"X-Sentry-Auth",
-       "Sentry sentry_version=7, sentry_key=" + sentry_key}};
+  httplib::Headers const headers{
+      {"X-Sentry-Auth", "Sentry sentry_version=7, sentry_key=" + sentry_key}};
   const int timeout_seconds = m_config.m_timeout_ms / 1000;
 
   httplib::Result res;

@@ -85,16 +85,19 @@ std::string JaegerLogger::generate_traceparent(std::string_view trace_id,
 // Simplified validation - check key positions only
 bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   // Format: 00-{32hex}-{16hex}-{2hex} = 55 chars
-  if (traceparent.size() != 55)
+  if (traceparent.size() != 55) {
     return false;
+  }
 
   // Check version prefix
-  if (traceparent[0] != '0' || traceparent[1] != '0' || traceparent[2] != '-')
+  if (traceparent[0] != '0' || traceparent[1] != '0' || traceparent[2] != '-') {
     return false;
+  }
 
   // Check separators at key positions
-  if (traceparent[35] != '-' || traceparent[52] != '-')
+  if (traceparent[35] != '-' || traceparent[52] != '-') {
     return false;
+  }
 
   // Quick hex validation at sample positions (not all for performance)
   const auto is_hex = [](char c) {
@@ -102,20 +105,25 @@ bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   };
 
   // Check trace_id start and end
-  if (!is_hex(traceparent[3]) || !is_hex(traceparent[34]))
+  if (!is_hex(traceparent[3]) || !is_hex(traceparent[34])) {
     return false;
+  }
   // Check span_id start and end
-  if (!is_hex(traceparent[36]) || !is_hex(traceparent[51]))
+  if (!is_hex(traceparent[36]) || !is_hex(traceparent[51])) {
     return false;
+  }
   // Check flags
-  if (!is_hex(traceparent[53]) || !is_hex(traceparent[54]))
+  if (!is_hex(traceparent[53]) || !is_hex(traceparent[54])) {
     return false;
+  }
 
   // Validate flags (must be 00 or 01)
-  if (traceparent[53] != '0')
+  if (traceparent[53] != '0') {
     return false;
-  if (traceparent[54] != '0' && traceparent[54] != '1')
+  }
+  if (traceparent[54] != '0' && traceparent[54] != '1') {
     return false;
+  }
 
   return true;
 }
@@ -144,10 +152,12 @@ bool JaegerLogger::parse_traceparent(std::string_view traceparent,
 }
 
 bool JaegerLogger::should_sample() const {
-  if (m_jaeger.m_sample_rate >= 1.0)
+  if (m_jaeger.m_sample_rate >= 1.0) {
     return true;
-  if (m_jaeger.m_sample_rate <= 0.0)
+  }
+  if (m_jaeger.m_sample_rate <= 0.0) {
     return false;
+  }
 
   // Thread-local generator for sampling decision
   thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -156,8 +166,9 @@ bool JaegerLogger::should_sample() const {
 
 bool JaegerLogger::should_sample(bool is_error) const {
   // Always sample error spans for debugging
-  if (is_error)
+  if (is_error) {
     return true;
+  }
 
   // Apply normal sampling for non-error spans
   return should_sample();
@@ -426,15 +437,16 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                  const std::string &service_name,
                                  const nlohmann::json &attributes) {
   {
-    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
+    std::unique_lock const lock(m_delivery.m_span_queue.m_mutex);
     if (m_delivery.m_span_queue.m_spans.size() >= g_tracing_max_queue_size) {
       m_jaeger_metrics.m_spans_failed.Increment();
       Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
       return;
     }
-    uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                          std::chrono::steady_clock::now().time_since_epoch())
-                          .count();
+    uint64_t const now_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
     m_delivery.m_span_queue.m_spans.push_back({trace_id, span_id, parent_id, name,
                                     service_name, start_us, end_us, now_us,
                                     attributes});
@@ -451,7 +463,7 @@ void JaegerLogger::log_request(
     const nlohmann::json &additional_attributes,
     const std::string &name_override) {
   // Apply sampling - always sample errors (4xx and 5xx status codes)
-  bool is_error = (status_code >= 400);
+  bool const is_error = (status_code >= 400);
   if (!should_sample(is_error)) {
     return;
   }
@@ -496,7 +508,7 @@ std::string JaegerLogger::random_hex_fast(size_t len) {
 
   // Generate 8 chars at a time (64 bits)
   for (size_t i = 0; i < len; i += 16) {
-    uint64_t val = g_dis(g_gen);
+    uint64_t const val = g_dis(g_gen);
     for (size_t j = 0; j < 16 && (i + j) < len; ++j) {
       res += g_hex_chars[(val >> (j * 4)) & 0xF];
     }
@@ -520,8 +532,12 @@ void JaegerLogger::sender_loop(std::stop_token st) {
             [&] {
               return st.stop_requested() || !m_delivery.m_span_queue.m_spans.empty();
             });
-        if (st.stop_requested()) break;
-        if (m_delivery.m_span_queue.m_spans.empty()) continue;
+        if (st.stop_requested()) {
+          break;
+        }
+        if (m_delivery.m_span_queue.m_spans.empty()) {
+          continue;
+        }
       }
       while (!m_delivery.m_span_queue.m_spans.empty() &&
              batch.size() < m_jaeger.m_batch_size) {
@@ -539,7 +555,7 @@ void JaegerLogger::sender_loop(std::stop_token st) {
   // Flush remaining spans on shutdown (quick, non-blocking)
   std::vector<SpanData> final_batch;
   {
-    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
+    std::unique_lock const lock(m_delivery.m_span_queue.m_mutex);
     while (!m_delivery.m_span_queue.m_spans.empty()) {
       final_batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
       m_delivery.m_span_queue.m_spans.pop_front();
@@ -567,9 +583,10 @@ void JaegerLogger::sender_loop(std::stop_token st) {
 void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
                                          const std::stop_token &st) {
   const auto start_time = std::chrono::steady_clock::now();
-  uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
+  uint64_t const now_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count();
   double avg_queue_time_s = 0.0;
   for (const auto &span : batch) {
     avg_queue_time_s +=
@@ -595,7 +612,7 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
         batch.size());
     deliver_sentry_transactions(batch);
     const auto end_time = std::chrono::steady_clock::now();
-    double duration =
+    double const duration =
         std::chrono::duration<double>(end_time - start_time).count();
     m_jaeger_metrics.m_last_send_duration.Set(duration);
     m_jaeger_metrics.m_send_latency.Observe(duration);
@@ -647,15 +664,16 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   deliver_sentry_transactions(batch);
 
   const auto end_time = std::chrono::steady_clock::now();
-  double duration =
+  double const duration =
       std::chrono::duration<double>(end_time - start_time).count();
   m_jaeger_metrics.m_last_send_duration.Set(duration);
   m_jaeger_metrics.m_send_latency.Observe(duration);
 }
 
 bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
-  if (batch.empty())
+  if (batch.empty()) {
     return true;
+  }
 
   nlohmann::json batch_json = nlohmann::json::array();
 

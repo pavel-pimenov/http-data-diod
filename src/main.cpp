@@ -92,7 +92,7 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
     Logger::info("{} server thread started, listening on port {}", server_name,
                  port);
     try {
-      bool listen_result = server.listen("0.0.0.0", port);
+      bool const listen_result = server.listen("0.0.0.0", port);
       if (!listen_result) {
         Logger::error(
             "{} server.listen() returned false - port binding failed!",
@@ -464,7 +464,8 @@ int main() { // NOLINT(bugprone-exception-escape)
       {
         const char *dir =
             crash_dump_dir ? crash_dump_dir : g_default_crash_dump_dir;
-        std::string test_file = std::string(dir) + "/crash_test_marker.txt";
+        std::string const test_file =
+            std::string(dir) + "/crash_test_marker.txt";
         std::ofstream f(test_file);
         if (f.is_open()) {
           f << "crash handler test marker\n";

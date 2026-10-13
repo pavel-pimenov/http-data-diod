@@ -53,7 +53,7 @@ void log_nats_consume_span(JaegerLogger *tracer, const std::string &request_id,
   if (!tracer || trace_id.empty()) {
     return;
   }
-  nlohmann::json attrs = {
+  nlohmann::json const attrs = {
       {"messaging.system", "nats"},
       {"messaging.operation", "consume"},
       {"messaging.destination", destination},
@@ -403,7 +403,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
     const auto &worker_parent_span_id = nats_consume_span_id;
 
-    TracingSpans spans =
+    TracingSpans const spans =
         create_tracing_spans(metadata.m_trace_ctx, worker_parent_span_id);
 
     task.m_activity.m_status = send_l2_response(metadata, spans, reply_to,
@@ -426,15 +426,15 @@ int L2Worker::send_l2_response(const RequestData &metadata,
                                const std::string &reply_to,
                                const std::string &nats_consume_span_id,
                                uint64_t start_us) {
-  L2Response l2_response = execute_l2_call(metadata, spans);
+  L2Response const l2_response = execute_l2_call(metadata, spans);
 
-  ResponseData response_data = prepare_response_data(l2_response, spans);
+  ResponseData const response_data = prepare_response_data(l2_response, spans);
 
   HttpResponse http_response;
   http_response.m_body = l2_response.m_body;
   http_response.m_headers = l2_response.m_headers;
   http_response.m_status = l2_response.m_status_code;
-  json response_headers_json = prepare_response_headers(http_response);
+  json const response_headers_json = prepare_response_headers(http_response);
 
   std::string l2_response_stored = l2_response.m_body;
   if (response_data.m_is_binary) {
@@ -497,9 +497,10 @@ void L2Worker::send_nats_response_impl(const std::string &reply_to,
     }
 
     try {
-      bool success = headers ? m_clients.m_nats_client->publish_with_headers(
-                                   reply_to, response_json, *headers)
-                             : m_clients.m_nats_client->publish(reply_to, response_json);
+      bool const success =
+          headers ? m_clients.m_nats_client->publish_with_headers(
+                        reply_to, response_json, *headers)
+                  : m_clients.m_nats_client->publish(reply_to, response_json);
       if (success) {
         Logger::debug("NATS response sent to: {}, size: {}", reply_to,
                       response_json.size());
@@ -629,7 +630,7 @@ void L2Worker::observe_db_query_outcome(const json &request_data, int status,
   if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
     const std::string db_span_id =
         JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
-    nlohmann::json attrs = {
+    nlohmann::json const attrs = {
         {"db.name", db_name},
         {"db.operation",
          JsonUtils::safe_get_string(request_data, DbQueryContract::kType)},

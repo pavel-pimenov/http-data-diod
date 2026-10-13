@@ -312,7 +312,9 @@ bool L2Worker::is_nats_connected() const {
 // demonstrates coroutine-based backpressure — no vector allocation, frame
 // suspends between attempts, composes with ranges::filter/take.
 std::generator<int> attempt_sequence(int max) {
-  for (int i = 1; i <= max; ++i) co_yield i;
+  for (int i = 1; i <= max; ++i) {
+    co_yield i;
+  }
   co_return;
 }
 #endif
@@ -443,7 +445,7 @@ bool L2Worker::parse_request_data(const std::string &request_json,
   auto validated = validate_and_parse_json(request_json, "Worker")
                        .and_then([&](json j) -> std::expected<json, std::string> {
                          std::string parse_error;
-                         static RequestValidator validator =
+                         static RequestValidator const validator =
                              create_standard_request_validator();
                          if (!validator.validate(j, parse_error)) {
                            Logger::error("Worker request validation failed: {}",

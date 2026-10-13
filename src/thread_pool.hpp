@@ -68,7 +68,7 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
           false,
           max_queue_size == 0 ? threads * g_max_queue_per_thread
                               : max_queue_size} {
-  for (size_t i = 0; i < threads; ++i)
+  for (size_t i = 0; i < threads; ++i) {
     m_workers.m_workers.emplace_back([this](std::stop_token st) {
       for (;;) {
         std::vector<std::function<void()>> batch;
@@ -80,8 +80,9 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
                    !this->m_queue.m_tasks.empty();
           });
           if ((st.stop_requested() || this->m_queue.m_stop.load()) &&
-              this->m_queue.m_tasks.empty())
+              this->m_queue.m_tasks.empty()) {
             return;
+          }
           const size_t to_take =
               std::min(g_dequeue_batch, this->m_queue.m_tasks.size());
           for (size_t n = 0; n < to_take; ++n) {
@@ -90,9 +91,12 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
           }
         }
         this->m_queue.m_not_full.notify_all();
-        for (const std::function<void()> &task : batch) task();
+        for (const std::function<void()> &task : batch) {
+          task();
+        }
       }
     });
+  }
 }
 
 // add new work item to the pool
@@ -117,8 +121,9 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
     });
 
     // don't allow enqueueing after stopping the pool
-    if (this->m_queue.m_stop)
+    if (this->m_queue.m_stop) {
       throw std::runtime_error("enqueue on stopped ThreadPool");
+    }
 
     this->m_queue.m_tasks.emplace([task]() { (*task)(); });
   }
@@ -131,23 +136,28 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
 // fail with std::runtime_error. Uses jthread request_stop + latch-style barrier.
 inline void ThreadPool::shutdown() {
   {
-    std::unique_lock lock(m_queue.m_mutex);
-    if (m_queue.m_stop.exchange(true))
+    std::unique_lock const lock(m_queue.m_mutex);
+    if (m_queue.m_stop.exchange(true)) {
       return;
+    }
   }
-  for (auto &w : m_workers.m_workers) w.request_stop();
+  for (auto &w : m_workers.m_workers) {
+    w.request_stop();
+  }
   m_queue.m_condition.notify_all();
   m_queue.m_not_full.notify_all();
-  for (std::jthread &worker : m_workers.m_workers)
-    if (worker.joinable())
+  for (std::jthread &worker : m_workers.m_workers) {
+    if (worker.joinable()) {
       worker.join();
+    }
+  }
 }
 
 // the destructor joins all threads
 inline ThreadPool::~ThreadPool() { shutdown(); }
 
 inline size_t ThreadPool::queue_size() const {
-  std::lock_guard lock(m_queue.m_mutex);
+  std::scoped_lock const lock(m_queue.m_mutex);
   return m_queue.m_tasks.size();
 }
 

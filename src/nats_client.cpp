@@ -45,14 +45,18 @@ void nats_message_callback(natsConnection *nc, natsSubscription *sub,
 NatsClient::NatsClient(const NatsConfig &cfg)
     : m_config(cfg) {
   std::string auth_info;
-  if (!m_config.m_username.empty())
+  if (!m_config.m_username.empty()) {
     auth_info += " username=" + m_config.m_username;
-  if (!m_config.m_token.empty())
+  }
+  if (!m_config.m_token.empty()) {
     auth_info += " token=***";
-  if (!m_config.m_credentials_file.empty())
+  }
+  if (!m_config.m_credentials_file.empty()) {
     auth_info += " creds_file=" + m_config.m_credentials_file;
-  if (m_config.m_enable_tls)
+  }
+  if (m_config.m_enable_tls) {
     auth_info += " tls=enabled";
+  }
 
   Logger::info("NATS client created: {}:{} subject={} queue_group={}{}",
                m_config.m_host, m_config.m_port, m_config.m_subject,
@@ -65,7 +69,7 @@ NatsClient::~NatsClient() {
     // connection resources are being torn down.
     m_state.m_shutdown.store(true, std::memory_order_release);
     {
-      std::lock_guard lock(m_connection.m_mutex);
+      std::scoped_lock const lock(m_connection.m_mutex);
       cleanup();
     }
     // natsConnection_Destroy() fires the Closed callback asynchronously on the
@@ -114,7 +118,7 @@ bool NatsClient::connect() {
       return false;
     }
 
-    std::lock_guard lock(m_connection.m_mutex);
+    std::scoped_lock const lock(m_connection.m_mutex);
 
     if (m_state.m_connected && m_connection.m_conn != nullptr) {
       return true;
@@ -337,7 +341,7 @@ void NatsClient::closed_cb(natsConnection *nc, void *closure) {
 }
 
 void NatsClient::disconnect() {
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
   disconnect_locked();
   Logger::info("Disconnected from NATS server");
 }
@@ -506,7 +510,7 @@ bool NatsClient::publish(std::string_view subject, std::string_view data) {
 
   const std::string subject_str(subject);
   const std::string data_str(data);
-  natsStatus s =
+  natsStatus const s =
       natsConnection_PublishString(conn, subject_str.c_str(), data_str.c_str());
   if (s != NATS_OK) {
     mark_disconnected("publish failed for subject '" + std::string(subject) +
@@ -524,7 +528,7 @@ bool NatsClient::subscribe(std::string_view subject,
     return false;
   }
 
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
 
   if (!m_connection.m_conn) {
     mark_disconnected("subscribe: connection is null");
@@ -573,7 +577,7 @@ bool NatsClient::subscribe_queue(std::string_view subject,
 }
 
 void NatsClient::unsubscribe() {
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
   if (m_subscriptions.empty()) {
     return;
   }
@@ -585,7 +589,7 @@ void NatsClient::unsubscribe() {
 }
 
 bool NatsClient::drain(int timeout_ms) {
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
 
   // Drain subscription: waits for in-flight message handlers to complete
   drain_subscription_locked(true);
@@ -615,7 +619,7 @@ bool NatsClient::check_connection() {
     return false;
   }
 
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
 
   if (!m_connection.m_conn) {
     mark_disconnected("health check: connection is null");
@@ -645,7 +649,7 @@ std::optional<std::string> NatsClient::ping() {
 }
 
 std::optional<std::string> NatsClient::get_last_error() const {
-  std::lock_guard lock(m_error_state.m_error_mutex);
+  std::scoped_lock const lock(m_error_state.m_error_mutex);
   return m_error_state.m_last_error.empty()
              ? std::nullopt
              : std::optional(m_error_state.m_last_error);
@@ -721,12 +725,12 @@ void NatsClient::set_error(const std::string &error) {
 }
 
 void NatsClient::set_last_error(const std::string &error) {
-  std::lock_guard lock(m_error_state.m_error_mutex);
+  std::scoped_lock const lock(m_error_state.m_error_mutex);
   m_error_state.m_last_error = error;
 }
 
 natsConnection *NatsClient::acquire_connection(const std::string &operation) {
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
   if (!m_connection.m_conn) {
     mark_disconnected(operation + ": connection is null");
     return nullptr;
@@ -738,7 +742,7 @@ bool NatsClient::is_connected() const {
   if (!m_state.m_connected.load(std::memory_order_acquire)) {
     return false;
   }
-  std::lock_guard lock(m_connection.m_mutex);
+  std::scoped_lock const lock(m_connection.m_mutex);
   if (!m_connection.m_conn) {
     return false;
   }

@@ -802,8 +802,8 @@ TEST_CASE("NatsPushService: traceparent and inlet span with a tracer",
   attach_tracer(ctx);
   NatsPushService push(ctx);
 
-  json request{{NatsContract::kRequestId, "req-45"},
-               {NatsContract::kProxyInletSpanId, "inlet-1"}};
+  json const request{{NatsContract::kRequestId, "req-45"},
+                     {NatsContract::kProxyInletSpanId, "inlet-1"}};
   const TraceContext trace;
   const std::string serialized =
       push.push_request(request, "trace-3", "span-3", trace);
@@ -928,7 +928,7 @@ TEST_CASE("DbQueryHandler: reports readiness without a reachable database",
 
   handler.set_pool_metrics(nullptr);
 
-  json invalid = json::array();
+  json const invalid = json::array();
   int status = 0;
   json body;
   handler.handle_request(invalid, status, body);

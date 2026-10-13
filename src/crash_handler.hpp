@@ -87,13 +87,13 @@ private:
     if (scheme_end == std::string::npos) {
       return;
     }
-    size_t start = scheme_end + 3;
+    size_t const start = scheme_end + 3;
     auto at_pos = dsn.find('@', start);
     if (at_pos == std::string::npos) {
       return;
     }
     m_sentry.m_key = dsn.substr(start, at_pos - start);
-    size_t host_start = at_pos + 1;
+    size_t const host_start = at_pos + 1;
     auto slash_pos = dsn.find('/', host_start);
     std::string host_port;
     if (slash_pos == std::string::npos) {
@@ -120,7 +120,7 @@ private:
   // buffers. No heap allocation, no iostream — a signal may interrupt malloc.
   static void write_crash_report(int signum, const siginfo_t *info) {
     // Generate timestamped filename using stack buffer
-    time_t now = time(nullptr);
+    time_t const now = time(nullptr);
     struct tm tm_buf{};
     localtime_r(&now, &tm_buf);
     char time_str[32];
@@ -144,7 +144,7 @@ private:
     append(".txt");
     filename[pos] = '\0';
 
-    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int const fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
       return;
     }
@@ -201,7 +201,7 @@ private:
     write(fd, stack_header, strlen(stack_header));
 
     void *callstack[128];
-    int frames = backtrace(callstack, 128);
+    int const frames = backtrace(callstack, 128);
 
     for (int i = 0; i < frames; ++i) {
       char frame_buf[64];
@@ -405,7 +405,7 @@ private:
         header.dump() + "\n" + item_header.dump() + "\n" + event_str;
 
     // Connect and send (best-effort; child process will exit regardless)
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int const sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
       return;
     }
@@ -459,7 +459,7 @@ private:
     write_crash_report(signum, info);
 
     // Send to Sentry in a short-lived child process (fork is async-signal-safe)
-    pid_t child = fork();
+    pid_t const child = fork();
     if (child == 0) {
       send_crash_to_sentry(signum, info);
       _exit(0);

@@ -69,7 +69,7 @@ void require_common_registry_only_on_common(AppContext &ctx) {
 
 TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
           "[app_context]") {
-  AppCtxEnvGuard mode("MODE", "worker");
+  AppCtxEnvGuard const mode("MODE", "worker");
 
   AppContext ctx;
 
@@ -95,7 +95,7 @@ TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
 
 TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
           "[app_context]") {
-  AppCtxEnvGuard mode("MODE", "l2-server");
+  AppCtxEnvGuard const mode("MODE", "l2-server");
 
   AppContext ctx;
 

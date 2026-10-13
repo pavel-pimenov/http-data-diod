@@ -201,7 +201,7 @@ TEST_CASE("HttpClient: static instance counters track lifecycle",
   const uint64_t created_before = HttpClient::g_total_created.load();
   const uint64_t destroyed_before = HttpClient::g_total_destroyed.load();
   {
-    HttpClient local(5);
+    HttpClient const local(5);
     REQUIRE(HttpClient::g_instance_count.load() == instances_before + 1);
     REQUIRE(HttpClient::g_total_created.load() == created_before + 1);
   }

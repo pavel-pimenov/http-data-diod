@@ -83,7 +83,7 @@ public:
   }
 
   std::vector<prometheus::MetricFamily> Collect() const override {
-    std::lock_guard lock(m_state.m_mutex);
+    std::lock_guard const lock(m_state.m_mutex);
     if constexpr (std::is_same_v<T, prometheus::Gauge>) {
       if (m_config.m_provider) {
         replace_from_provider();

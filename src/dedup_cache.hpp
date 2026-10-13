@@ -28,7 +28,7 @@ public:
       return std::nullopt;
     }
     const uint64_t now_ms = now_ms_since_epoch();
-    std::lock_guard lock(m_state.m_mutex);
+    std::scoped_lock const lock(m_state.m_mutex);
     const auto it = m_state.m_entries.find(std::string(request_id));
     if (it == m_state.m_entries.end()) {
       return std::nullopt;
@@ -48,7 +48,7 @@ public:
       return;
     }
     const uint64_t now_ms = now_ms_since_epoch();
-    std::lock_guard lock(m_state.m_mutex);
+    std::scoped_lock const lock(m_state.m_mutex);
     evict_expired_locked(now_ms);
 
     const std::string key(request_id);

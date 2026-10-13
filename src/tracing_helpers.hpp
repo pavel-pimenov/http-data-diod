@@ -102,8 +102,9 @@ public:
               const std::string &parent_span_id,
               const std::string &request_id = "",
               const nlohmann::json &attrs = nlohmann::json::object()) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, url, status_code, start_us, end_us,
                         proxy_service_name(mode) + "-call-l2-server",
@@ -116,8 +117,9 @@ public:
       int status_code, uint64_t start_us, uint64_t end_us,
       const TraceContext &trace_ctx, const std::string &mode,
       const std::string &span_id, const std::string &request_id) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, path, status_code, start_us, end_us,
                         proxy_service_name(mode) + "-process-request",
@@ -132,8 +134,9 @@ public:
                                  const TraceContext &trace_ctx,
                                  const std::string &mode,
                                  const std::string &request_id) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, path, status_code, start_us, end_us,
                         proxy_service_name(mode), request_id,
@@ -151,8 +154,9 @@ public:
                 const std::string &trace_id, const std::string &span_id,
                 const std::string &parent_id, int64_t start_us,
                 const nlohmann::json &extra_attrs = nlohmann::json::object()) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     const int64_t end_us = TimeUtils::epoch_us();
     nlohmann::json attrs = extra_attrs;

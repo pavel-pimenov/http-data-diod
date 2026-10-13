@@ -631,8 +631,8 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
 
   int slow_status = 0;
   std::thread slow([&ex, &slow_status] {
-    json body = ex.execute_query("SELECT pg_sleep(0.4), 1", json::object(), -1,
-                                 1, slow_status);
+    json const body = ex.execute_query("SELECT pg_sleep(0.4), 1",
+                                       json::object(), -1, 1, slow_status);
     (void)body;
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -750,7 +750,7 @@ TEST_CASE("DbQueryHandler: re-init keeps already ready executors", "[db-live]") 
 TEST_CASE("DbQueryHandler: partial init leaves the reachable database ready",
           "[db-live]") {
   REQUIRE_PG();
-  DbConfig reachable = make_pg_cfg(shared_pg());
+  DbConfig const reachable = make_pg_cfg(shared_pg());
   DbConfig unreachable;
   unreachable.m_name = "other";
   unreachable.m_driver = "postgres";
@@ -800,7 +800,7 @@ TEST_CASE("DbQueryHandler: partial init leaves the reachable database ready",
 TEST_CASE("DbQueryHandler: empty db with multiple executors is 404",
           "[db-live]") {
   REQUIRE_PG();
-  DbConfig first = make_pg_cfg(shared_pg());
+  DbConfig const first = make_pg_cfg(shared_pg());
   DbConfig second = first;
   second.m_name = "pg2";
 

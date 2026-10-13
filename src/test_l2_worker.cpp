@@ -159,8 +159,8 @@ L2BackendServer &g_l2_backend() {
 // L2_SERVER_URLS as a JSON array: the loopback backend plus a dead address
 // used by the connection-failure and circuit-breaker paths.
 std::string l2_server_urls() {
-  json urls = json::array({g_l2_backend().api_url(),
-                           std::string("http://127.0.0.1:1/dead")});
+  json const urls = json::array(
+      {g_l2_backend().api_url(), std::string("http://127.0.0.1:1/dead")});
   return urls.dump();
 }
 
@@ -264,7 +264,7 @@ public:
                                     const httplib::Headers &headers) {
     L2Worker::L2Response l2_response;
     l2_response.m_headers = headers;
-    L2Worker::TracingSpans spans;
+    L2Worker::TracingSpans const spans;
     const L2Worker::ResponseData data =
         worker.prepare_response_data(l2_response, spans);
     return json{{"content_type", data.m_content_type},

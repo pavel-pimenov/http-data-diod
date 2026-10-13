@@ -175,7 +175,7 @@ TEST_CASE("Sentry event JSON: omits optional fields when empty",
 
 TEST_CASE("Sentry event JSON: every level maps to its Sentry string",
           "[sentry-client]") {
-  sentry::SentryEvent event;
+  sentry::SentryEvent const event;
   const auto level = [&](sentry::EventLevel lv) {
     sentry::SentryEvent e;
     e.m_message = "m";
