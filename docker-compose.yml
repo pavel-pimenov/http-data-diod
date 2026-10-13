@@ -458,6 +458,7 @@ services:
       - NATS_SUBJECT=${NATS_SUBJECT:-service.proxy}
       - NATS_QUEUE_GROUP=${NATS_QUEUE_GROUP:-proxy_workers}
       - NATS_TIMEOUT_MS=${NATS_TIMEOUT_MS:-30000}
+      - NATS_CONNECT_TIMEOUT_MS=${NATS_CONNECT_TIMEOUT_MS:-5000}
       # NATS Authentication (optional)
       - NATS_USERNAME=${NATS_USERNAME:-}
       - NATS_PASSWORD=${NATS_PASSWORD:-}
@@ -678,6 +679,7 @@ services:
       - NATS_SUBJECT=${NATS_SUBJECT:-service.proxy}
       - NATS_QUEUE_GROUP=${NATS_QUEUE_GROUP:-proxy_workers}
       - NATS_TIMEOUT_MS=${NATS_TIMEOUT_MS:-30000}
+      - NATS_CONNECT_TIMEOUT_MS=${NATS_CONNECT_TIMEOUT_MS:-5000}
       # NATS Authentication (optional)
       - NATS_USERNAME=${NATS_USERNAME:-}
       - NATS_PASSWORD=${NATS_PASSWORD:-}

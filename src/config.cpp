@@ -171,8 +171,11 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
     check(!cfg.m_nats.m_host.empty(), "NATS host cannot be empty");
     check(!cfg.m_nats.m_subject.empty(), "NATS subject cannot be empty");
     check(positive(cfg.m_nats.m_timeout_ms),
-          std::format("Invalid NATS timeout: {} (must be > 0)",
+          std::format("Invalid NATS_TIMEOUT_MS: {} (must be > 0)",
                       cfg.m_nats.m_timeout_ms));
+    check(positive(cfg.m_nats.m_connect_timeout_ms),
+          std::format("Invalid NATS_CONNECT_TIMEOUT_MS: {} (must be > 0)",
+                      cfg.m_nats.m_connect_timeout_ms));
 
     // NATS TLS
     if (cfg.m_nats.m_enable_tls) {
@@ -550,6 +553,8 @@ void Config::load_nats_config() {
   m_nats.m_subject = get_env_string("NATS_SUBJECT", m_nats.m_subject);
   m_nats.m_queue_group = get_env_string("NATS_QUEUE_GROUP", m_nats.m_queue_group);
   m_nats.m_timeout_ms = get_env_int("NATS_TIMEOUT_MS", m_nats.m_timeout_ms);
+  m_nats.m_connect_timeout_ms =
+      get_env_int("NATS_CONNECT_TIMEOUT_MS", m_nats.m_connect_timeout_ms);
 
   m_nats.m_username = get_env_string("NATS_USERNAME", m_nats.m_username);
   m_nats.m_password = get_env_string("NATS_PASSWORD", m_nats.m_password);
@@ -784,6 +789,7 @@ NatsConfig Config::create_nats_config() const {
   cfg.m_subject = m_nats.m_subject;
   cfg.m_queue_group = m_nats.m_queue_group;
   cfg.m_timeout_ms = m_nats.m_timeout_ms;
+  cfg.m_connect_timeout_ms = m_nats.m_connect_timeout_ms;
   cfg.m_username = m_nats.m_username;
   cfg.m_password = m_nats.m_password;
   cfg.m_token = m_nats.m_token;

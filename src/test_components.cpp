@@ -507,6 +507,12 @@ TEST_CASE("Config: zero NATS timeout fails validation", "[config]") {
   REQUIRE(config.validate(false) == false);
 }
 
+TEST_CASE("Config: zero NATS connect timeout fails validation", "[config]") {
+  Config config;
+  config.m_nats.m_connect_timeout_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
 TEST_CASE("Config: empty NATS subject fails validation", "[config]") {
   Config config;
   config.m_nats.m_subject = "";
@@ -839,6 +845,7 @@ TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
   EnvVarGuard const subj("NATS_SUBJECT", "svc.in");
   EnvVarGuard const qg("NATS_QUEUE_GROUP", "grp");
   EnvVarGuard const tm("NATS_TIMEOUT_MS", "5000");
+  EnvVarGuard const ct("NATS_CONNECT_TIMEOUT_MS", "2500");
   EnvVarGuard const user("NATS_USERNAME", "user");
   EnvVarGuard const pass("NATS_PASSWORD", "pass");
   EnvVarGuard const tok("NATS_TOKEN", "tok");
@@ -855,6 +862,7 @@ TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
   REQUIRE(nc.m_subject == "svc.in");
   REQUIRE(nc.m_queue_group == "grp");
   REQUIRE(nc.m_timeout_ms == 5000);
+  REQUIRE(nc.m_connect_timeout_ms == 2500);
   REQUIRE(nc.m_username == "user");
   REQUIRE(nc.m_password == "pass");
   REQUIRE(nc.m_token == "tok");

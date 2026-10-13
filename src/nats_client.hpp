@@ -25,6 +25,9 @@ struct NatsConfig {
   std::string m_subject;
   std::string m_queue_group;
   int m_timeout_ms = 30000;
+  // Separate, smaller timeout for the connection handshake so an unreachable
+  // host cannot stall connect() for the full request timeout.
+  int m_connect_timeout_ms = 5000;
   std::string m_username;
   std::string m_password;
   std::string m_token;

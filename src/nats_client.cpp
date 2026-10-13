@@ -236,7 +236,7 @@ bool NatsClient::setup_options(const std::string &url) {
   CHECK_NATS_OK(natsOptions_SetClosedCB(m_connection.m_opts, &NatsClient::closed_cb, this),
                 "Failed to set NATS closed callback");
   CHECK_NATS_OK(natsOptions_SetTimeout(
-                    m_connection.m_opts, ms_to_seconds(m_config.m_timeout_ms)),
+                    m_connection.m_opts, ms_to_seconds(m_config.m_connect_timeout_ms)),
                 "Failed to set NATS timeout");
 
   if (!m_config.m_token.empty()) {
