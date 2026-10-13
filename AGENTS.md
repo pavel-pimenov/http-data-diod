@@ -13,6 +13,7 @@
   - `lcov --capture --directory <gcda_dir> --base-directory <repo_root> --substitute 's|/app|<абс. repo>/src|' --ignore-errors source,empty,unused,inconsistent -o cov.info`, затем `lcov --extract cov.info '<repo>/src/*' -o proj.info` и `genhtml proj.info -o html/`.
   - `gcovr --object-directory <gcda_dir> --root <repo>/src --filter 'src/.*' --html --html-details -o coverage.html --gcov-ignore-errors=all`.
 * Используй clang-tidy
+* Используй cppcheck (`./scripts/run-cppcheck.sh`; вендорные заголовки гасятся `src/cppcheck-suppressions.txt`)
 * Правила наименования C++
   - Для членов класс используй в имени префикс m_
   - Для глобальных или статических перемых используй в имени префикс g_

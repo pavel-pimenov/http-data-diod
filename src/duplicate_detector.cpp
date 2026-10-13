@@ -102,7 +102,11 @@ nlohmann::json DuplicateDetector::report() const {
   size_t same_client = 0;
   size_t cross_client = 0;
   // ranges::filter + ranges::to — C++23 сахар вместо ручного цикла
-  for (const auto &[hash, entry] : m_state.m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
+  auto duplicates_view =
+      m_state.m_entries | std::views::filter([](const auto &e) {
+        return e.second.m_count >= 2;
+      });
+  for (const auto &[hash, entry] : duplicates_view) {
     duplicates.push_back(&entry);
     duplicate_occurrences += entry.m_count - 1;
     if (entry.m_client_ids.size() <= 1) {

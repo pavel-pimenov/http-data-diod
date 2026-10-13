@@ -806,6 +806,19 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 ./scripts/run-clang-tidy.sh --all        # весь проект (медленно, ~20 мин)
 ```
 
+Запуск cppcheck (после изменений):
+
+```bash
+./scripts/run-cppcheck.sh                # только изменённые файлы
+./scripts/run-cppcheck.sh --all          # весь проект
+```
+
+Гейтится по severity `error/warning/performance/portability` в проектных файлах.
+Находки в вендорных заголовках (`httplib`, `base64`, `nats`, `odpi`, `json`,
+`prometheus-cpp`) подавляются списком `src/cppcheck-suppressions.txt`. Оба
+инструмента автоматически запускаются в pre-commit (пропуск:
+`SKIP_CLANG_TIDY=1` / `SKIP_CPPCHECK=1`) и в CI (джобы `clang-tidy` и `cppcheck`).
+
 ---
 
 ## Покрытие юнит-тестов (coverage)

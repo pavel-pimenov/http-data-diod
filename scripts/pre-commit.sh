@@ -128,6 +128,22 @@ run_clang_tidy() {
     return 0
 }
 
+# Run cppcheck on changed C++ files (in the builder container).
+# SKIP_CPPCHECK=1 skips the check (run it manually: ./scripts/run-cppcheck.sh
+# after refactoring rounds).
+run_cppcheck() {
+    if [ "${SKIP_CPPCHECK:-0}" = "1" ]; then
+        log_warn "SKIP_CPPCHECK=1 — cppcheck check skipped (run ./scripts/run-cppcheck.sh manually)"
+        return 0
+    fi
+    log_info "Running cppcheck on changed C++ files..."
+    if ! ./scripts/run-cppcheck.sh; then
+        log_error "cppcheck found issues in changed C++ files!"
+        return 1
+    fi
+    return 0
+}
+
 # Main pre-commit logic
 main() {
     local commit_message="$1"
@@ -196,6 +212,12 @@ main() {
         exit 1
     fi
 
+    # Run cppcheck on changed C++ files
+    if ! run_cppcheck; then
+        log_error "Pre-commit cppcheck failed!"
+        exit 1
+    fi
+
     echo ""
     echo "=========================================="
     log_info "✅ All pre-commit tests passed!"
@@ -206,9 +228,8 @@ main() {
     if [ -n "$commit_message" ]; then
         log_info "Committing changes..."
         git add -A
-        git commit -m "$commit_message"
 
-        if [ $? -eq 0 ]; then
+        if git commit -m "$commit_message"; then
             echo ""
             log_info "✅ Changes committed successfully!"
             echo ""

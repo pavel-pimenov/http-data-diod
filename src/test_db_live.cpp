@@ -238,10 +238,9 @@ private:
                               const TargetUser &target) const {
     const pid_t pid = ::fork();
     if (pid == 0) {
-      if (!drop_privileges(target)) {
+      if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
         _exit(127);
       }
-      redirect_to(logfile.c_str());
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
@@ -272,10 +271,9 @@ private:
                                    const TargetUser &target) const {
     const pid_t pid = ::fork();
     if (pid == 0) {
-      if (!drop_privileges(target)) {
+      if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
         _exit(127);
       }
-      redirect_to(logfile.c_str());
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
