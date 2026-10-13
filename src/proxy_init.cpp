@@ -5,8 +5,15 @@
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 #include "nats_client.hpp"
+#include "prometheus/gauge.h"
+#include "prometheus/counter.h"
+#include "prometheus/histogram.h"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
+#include <memory>
+#include <cstdint>
+#include <vector>
+#include <utility>
 
 void init_proxy_components(AppContext &app_ctx) {
   if (app_ctx.is_proxy_components_initialized()) {

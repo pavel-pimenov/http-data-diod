@@ -1,5 +1,6 @@
 // Unit tests for RateLimiter, InFlightTracker, Config, base64, JsonUtils,
 // JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool, DbQueryUtils
+#include "app_context.hpp"
 #include "base64_utils.hpp"
 #include "circuit_breaker.hpp"
 #include "common_utils.hpp"
@@ -7,10 +8,15 @@
 #include "db_query_utils.hpp"
 #include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
+#include "header_utils.hpp"
+#include "error_types.hpp"
 #include "in_flight_tracker.hpp"
+#include "json_response_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
 #include "nats_client.hpp"
+#include "nlohmann/json.hpp"
+#include "prometheus/gauge.h"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "request_id_generator.hpp"
@@ -18,12 +24,16 @@
 #include "response_builder.hpp"
 #include "retry_handler.hpp"
 #include "retry_utils.hpp"
+#include "string_utils.hpp"
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
+#include "url_utils.hpp"
 #include "worker_request_parser.hpp"
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cstdint>
@@ -32,6 +42,12 @@
 #include <future>
 #include <prometheus/counter.h>
 #include <regex>
+#include <stdlib.h>
+#include <stdexcept>
+#include <spdlog/formatter.h>
+#include <spdlog/common.h>
+#include <spdlog/common-inl.h>
+#include <string>
 #include <unordered_set>
 #include <prometheus/registry.h>
 #include <set>
@@ -1691,7 +1707,6 @@ TEST_CASE("ThreadPool: shutdown drains queued tasks", "[thread-pool]") {
 
 #include "logger.hpp"
 #include <spdlog/details/log_msg.h>
-#include <sstream>
 #include <unordered_map>
 
 TEST_CASE("Logger: LogContext thread-local fields", "[logger]") {

@@ -15,6 +15,8 @@
 // synchronisation is bounded — nothing may hang the docker build.
 
 #include "app_context.hpp"
+#include "common_utils.hpp"
+#include "config.hpp"
 #include "db_query_utils.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
@@ -26,7 +28,6 @@
 #include "stats_logger.hpp"
 #include "trace_logger.hpp"
 
-#include <arpa/inet.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -35,15 +36,23 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fcntl.h>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
+#include <nats/nats.h>
+#include <nats/status.h>
 #include <netinet/in.h>
 #include <optional>
+#include <stdlib.h>
+#include <signal.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -1157,7 +1166,6 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 #include <pwd.h>
 #include <grp.h>
 #include <cerrno>
-#include <format>
 #include <algorithm>
 #include <cstdint>
 

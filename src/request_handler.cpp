@@ -1,8 +1,23 @@
 #include "request_handler.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
+#include "config.hpp"
 #include "crash_handler.hpp"
 #include "db_gateway_routing.hpp"
-#include <execinfo.h>
+#include "stats_logger.hpp"
+#include "url_utils.hpp"
+#include "json_response_utils.hpp"
+#include <cstddef>
+#include <exception>
+#include "dynamic_labeled_family.hpp"
+#include <cstdint>
+#include "trace_context_extractor.hpp"
+#include "response_builder.hpp"
+#include "request_data_preparer.hpp"
+#include "header_utils.hpp"
+#include "time_utils.hpp"
+#include <memory>
+#include <utility>
 #if __has_include(<stacktrace>)
 #include <stacktrace>
 #endif
@@ -14,7 +29,7 @@
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
-#include "nats_client.hpp"
+#include "nats_client.hpp" // IWYU pragma: keep (NatsClient via shared_ptr needs complete type)
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "sentry_client.hpp"

@@ -10,14 +10,24 @@
 #include "json_utils.hpp"
 #include "l2_routing.hpp"
 #include "logger.hpp"
+#include "nlohmann/json.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/gauge.h"
+#include "prometheus/client_metric.h"
+#include "prometheus/registry.h"
 #include "random_utils.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <stdlib.h>
+#include <stdexcept>
 #include <string>
-#include <unordered_map>
+#include <thread>
+#include <vector>
+#include <utility>
 
 using db_gateway_routing::classify_method;
 using db_gateway_routing::normalize_path_rest;

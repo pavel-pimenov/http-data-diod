@@ -1,6 +1,8 @@
 #include "string_utils.hpp"
 
 #include <cctype>
+#include <string>
+#include <string_view>
 
 [[nodiscard]] std::string to_lower(std::string_view s) {
   std::string lower;

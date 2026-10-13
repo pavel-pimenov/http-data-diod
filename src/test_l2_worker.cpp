@@ -13,7 +13,9 @@
 // l2_worker.hpp declares a friend of L2Worker.
 
 #include "app_context.hpp"
+#include "common_utils.hpp"
 #include "db_query_utils.hpp"
+#include "http_client.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
@@ -23,10 +25,12 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdlib.h>
 #include <string>
 #include <thread>
 #include <utility>

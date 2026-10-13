@@ -9,35 +9,37 @@
 // server still pass. The coverage image runs ./test_components, so all
 // synchronisation is bounded — nothing may hang the docker build.
 
+#include "config.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_postgres.hpp"
 #include "db_query_handler.hpp"
-#include "db_query_utils.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
 
-#include <arpa/inet.h>
 #include <algorithm>
-#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
+#include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <functional>
 #include <grp.h>
 #include <libpq-fe.h>
-#include <memory>
 #include <netinet/in.h>
 #include <pwd.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string>
 #include <sys/socket.h>
-#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 namespace {

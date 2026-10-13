@@ -9,6 +9,7 @@
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <memory>
@@ -16,8 +17,10 @@
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #include <prometheus/registry.h>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace {
 

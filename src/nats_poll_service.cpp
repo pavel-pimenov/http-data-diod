@@ -1,13 +1,18 @@
 #include "nats_poll_service.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
-#include "json_utils.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"
+#include "retry_handler.hpp"
 #include "time_utils.hpp"
 #include "tracing_helpers.hpp"
 #include <chrono>
+#include <string>
+#include <cstdint>
+#include <exception>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 NatsPollService::NatsPollService(AppContext &ctx) : m_ctx(ctx) {}
 

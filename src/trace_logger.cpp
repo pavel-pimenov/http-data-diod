@@ -1,11 +1,27 @@
 #include "trace_logger.hpp"
 #include "http_client_pool.hpp"
 #include "logger.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include "sentry_client.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
+#include <cstdint>
+#include <cstddef>
+#include <chrono>
+#include <exception>
 #include <format>
+#include <memory>
+#include <mutex>
 #include <random>
+#include <string>
+#include <stop_token>
 #include <string_view>
+#include <utility>
+#include <vector>
+#include <thread>
 
 // Thread-local random generator for fast ID generation (initialized once per
 // thread)

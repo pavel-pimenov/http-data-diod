@@ -4,12 +4,17 @@
 // that only implements the pure-virtual surface. Linked into test_components
 // alongside db_query_executor_base.cpp.
 
+#include "config.hpp"
 #include "db_query_executor_base.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_utils.hpp"
+#include "prometheus/gauge.h"
+#include "json_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <memory>
 #include <prometheus/registry.h>
+#include <string>
 
 namespace {
 

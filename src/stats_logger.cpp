@@ -1,6 +1,12 @@
 #include "stats_logger.hpp"
+#include "app_context.hpp"
 #include "duplicate_detector.hpp"
 #include "logger.hpp"
+#include <atomic>
+#include <cstdint>
+#include <stop_token>
+#include <chrono>
+#include <mutex>
 
 StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag,
                          int log_interval_seconds)

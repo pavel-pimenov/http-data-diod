@@ -1,7 +1,9 @@
 #include "app_context.hpp"
+#include "prometheus/registry.h"
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
-#include <cstdlib>
+#include <stdlib.h>
+#include <memory>
 #include <string>
 #include <vector>
 

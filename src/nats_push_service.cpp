@@ -1,9 +1,13 @@
 #include "nats_push_service.hpp"
+#include "app_context.hpp"
+#include "common_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
-#include "nats_client.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include "tracing_helpers.hpp"
+#include <string>
+#include <cstdint>
 
 NatsPushService::NatsPushService(AppContext &ctx) : m_ctx(ctx) {}
 

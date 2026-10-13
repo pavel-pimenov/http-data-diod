@@ -1,14 +1,25 @@
 #include "nats_client.hpp"
 #include "json_utils.hpp"
+#include "logger.hpp"
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <format>
-#include <stdexcept>
+#include <nats/status.h>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 
 // Include NATS C headers
 #include <nats/nats.h>
+#include <vector>
+#include <utility>
 
 namespace {
 // Converts a NATS status to a loggable string, guarding against null text.

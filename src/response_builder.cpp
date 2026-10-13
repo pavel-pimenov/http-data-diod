@@ -1,9 +1,15 @@
 #include "response_builder.hpp"
+#include "common_utils.hpp"
+#include "app_context.hpp"
+#include "error_types.hpp"
+#include "json_response_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "nlohmann/json.hpp"
 #include "tracing_helpers.hpp"
-#include <algorithm>
 #include <base64.hpp>
+#include <string>
+#include <cstdint>
 
 void set_response_content(httplib::Response &res,
                           const nlohmann::json &parsed_response_data,

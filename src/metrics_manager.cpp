@@ -1,4 +1,12 @@
 #include "metrics_manager.hpp"
+#include "prometheus/counter.h"
+#include <memory>
+#include "prometheus/registry.h"
+#include <string>
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include <vector>
+#include "prometheus/family.h"
 
 prometheus::Counter &MetricsManager::create_counter(
     const std::shared_ptr<prometheus::Registry> &registry,

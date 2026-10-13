@@ -1,14 +1,18 @@
 #include "common_utils.hpp"
-#include "base64_utils.hpp"
 #include "error_types.hpp"
-#include "header_utils.hpp"
 #include "json_utils.hpp"
-#include "url_utils.hpp"
+#include "prometheus/counter.h"
+#include "logger.hpp"
+#include "nlohmann/json.hpp"
 #include <array>
+#include <cstddef>
+#include <expected>
+#include <cstdint>
 #include <format>
 #include <openssl/sha.h>
-#include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 
 std::string compute_sha256_hex(std::string_view data) {
   static constexpr std::string_view g_hex = "0123456789abcdef";

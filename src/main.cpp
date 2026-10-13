@@ -1,15 +1,20 @@
+#include "config.hpp"
 #include "crash_handler.hpp"
+#include "error_types.hpp"
+#include "json_response_utils.hpp"
 #include "logger.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
+#include <exception>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 
@@ -19,6 +24,7 @@
 #include <prometheus/exposer.h>
 
 #include "nlohmann/json.hpp"
+#include "prometheus/registry.h"
 #include "stats_page.hpp"
 
 #include "app_context.hpp"
@@ -28,6 +34,7 @@
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
 #include "timed_task_queue.hpp"
+#include "trace_logger.hpp"
 
 extern const char *g_l2_proxy_version;
 

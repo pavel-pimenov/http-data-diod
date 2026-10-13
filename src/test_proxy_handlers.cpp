@@ -15,6 +15,7 @@
 
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "config.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_oracle.hpp"
 #include "db_query_handler.hpp"
@@ -37,6 +38,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <stdlib.h>
 #include <string>
 #include <thread>
 #include <utility>

@@ -1,18 +1,19 @@
 #include "server_handler.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
 #include "httplib/httplib.h"
+#include "json_response_utils.hpp"
 #include "logger.hpp"
-#include "prometheus/counter.h"
 #include "prometheus/registry.h"
-#include "scoped_profiler.hpp"
 #include "sentry_client.hpp"
 #include "tracing_helpers.hpp"
+#include "url_utils.hpp"
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <random>
 #include <thread>
-#include <unistd.h>
 
 namespace {
 // Minimal valid 1x1 32-bit ICO file (70 bytes): ICONDIR + ICONDIRENTRY +

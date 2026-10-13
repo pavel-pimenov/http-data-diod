@@ -1,12 +1,23 @@
 #include "sentry_client.hpp"
 
+#include "nlohmann/json.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/gauge.h"
 #include "random_utils.hpp"
 #include "time_utils.hpp"
 #include "logger.hpp"
 #include "httplib/httplib.h"
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <string>
+#include <cstddef>
+#include <optional>
+#include <stop_token>
+#include <mutex>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 

@@ -1,21 +1,32 @@
 #include "common_utils.hpp"
 #include "db_gateway_routing.hpp"
+#include "db_query_handler.hpp"
 #include "db_query_utils.hpp"
+#include "http_client.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "nats_client.hpp"
+#include "prometheus/gauge.h"
+#include "prometheus/family.h"
+#include "prometheus/counter.h"
 #include "retry_utils.hpp"
 #include "sentry_client.hpp"
-#include "time_utils.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 #include <algorithm>
+#include <atomic>
 #include <base64.hpp>
 #include <chrono>
+#include <cstdint>
+#include <exception>
 #include <format>
+#include <memory>
 #include <nlohmann/json.hpp>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 // Logs the final worker response span with the terminal HTTP status when

@@ -7,13 +7,18 @@
 #include "common_utils.hpp"
 #include "duplicate_detector.hpp"
 #include "httplib/httplib.h"
+#include "json_utils.hpp"
 #include "nlohmann/json.hpp"
+#include "sentry_client.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstddef>
+#include <memory>
+#include <cstdint>
 #include <mutex>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>

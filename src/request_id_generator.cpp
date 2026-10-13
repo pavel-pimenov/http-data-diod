@@ -4,6 +4,7 @@
 #include <chrono>
 #include <ctime>
 #include <format>
+#include <string>
 
 thread_local std::string RequestIdGenerator::cached_date_str;
 

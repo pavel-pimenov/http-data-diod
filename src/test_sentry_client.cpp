@@ -5,11 +5,14 @@
 #include "httplib/httplib.h"
 #include "sentry_client.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/registry.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
