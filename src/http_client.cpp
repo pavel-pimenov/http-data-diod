@@ -1,6 +1,13 @@
 #include "http_client.hpp"
 #include "common_utils.hpp"
 #include "logger.hpp"
+#include "url_utils.hpp"
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
 
 std::atomic<int> HttpClient::g_instance_count{0};
 std::atomic<uint64_t> HttpClient::g_total_created{0};

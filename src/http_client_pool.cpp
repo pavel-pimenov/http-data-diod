@@ -1,8 +1,13 @@
 #include "http_client_pool.hpp"
+#include "http_client.hpp"
 #include "logger.hpp"
 #include <chrono>
+#include <cstddef>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
-#include <thread>
+#include <string>
+#include <utility>
 
 HttpClientPool::HttpClientPool(size_t max_pool_size, int timeout_seconds,
                                int acquire_timeout_seconds,

@@ -5,11 +5,11 @@
 #include "nlohmann/json.hpp"
 #include "string_utils.hpp"
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
+#include <exception>
 #include <format>
 #include <initializer_list>
-#include <sstream>
+#include <string>
 
 // Defined in version.cpp (kept in its own TU so version bumps recompile only
 // that file, not the heavy config/main translation units).

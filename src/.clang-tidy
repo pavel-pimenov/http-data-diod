@@ -7,6 +7,7 @@ Checks: >
   misc-redundant-expression,
   misc-unused-using-decls,
   misc-const-correctness,
+  misc-include-cleaner,
   modernize-use-nullptr,
   modernize-use-override,
   modernize-use-auto,
@@ -61,3 +62,5 @@ CheckOptions:
     value: 'NULL'
   - key: misc-const-correctness.AnalyzePointers
     value: 'false'
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: 'httplib\.h;postgres_ext\.h;libpq-fe\.h;base64\.hpp;dpi\.h'

@@ -1,4 +1,6 @@
 #include "db_query_executor_oracle.hpp"
+#include "config.hpp"
+#include "db_query_executor_base.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -6,10 +8,13 @@
 #include <base64.hpp>
 #include <dpi.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>

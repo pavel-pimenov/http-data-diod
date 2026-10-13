@@ -1,9 +1,16 @@
 #include "duplicate_detector.hpp"
 #include "logger.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 

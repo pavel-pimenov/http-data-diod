@@ -1,12 +1,17 @@
 #include "app_context.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
-#include "rate_limiter.hpp"
-#include "rate_limiter_per_ip.hpp"
-#include "duplicate_detector.hpp"
+// The AppContext destructor is defined out of line: its unique_ptr members
+// (see app_context.hpp) need complete types here, which include-cleaner cannot
+// see through the unique_ptr default deleter, so keep these includes.
+#include "rate_limiter.hpp"        // IWYU pragma: keep
+#include "rate_limiter_per_ip.hpp" // IWYU pragma: keep
+#include "duplicate_detector.hpp"  // IWYU pragma: keep
 #include "sentry_client.hpp"
-#include "trace_logger.hpp"
+#include "trace_logger.hpp" // IWYU pragma: keep
 #include <cstdlib>
+#include <memory>
+#include <prometheus/registry.h>
 
 ProxyContext::~ProxyContext() = default;
 

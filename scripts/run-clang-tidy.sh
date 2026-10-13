@@ -21,8 +21,13 @@
 #
 # Parallelism:
 #   Files are linted by N parallel clang-tidy processes (N = CLANG_TIDY_JOBS,
-#   defaults to the number of host CPUs) to avoid a multi-minute serial sweep.
-#   Each TU still re-parses the bundled headers, so memory scales with N.
+#   defaults to min(host CPUs, 4)) to avoid a multi-minute serial sweep. Each  
+#   TU still re-parses the bundled headers, so memory scales with N; the
+#   default fan-out is capped because an oversized batch makes the container
+#   OOM-kill workers (SIGKILL / exit 137) and their diagnostics would silently
+#   vanish (a false clean sweep). Each TU writes its own log; workers that were
+#   killed are retried serially before results are aggregated, so the sweep is
+#   always complete regardless of the parallelism.
 
 set -e
 
@@ -148,16 +153,56 @@ main() {
     # `xargs -P ''` inside the container lints nothing while the script still
     # reports success (silent false-green). Fall back to sysctl, then to 4.
     local jobs="${CLANG_TIDY_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+    # Cap the auto-detected fan-out: each TU re-parses the bundled headers and
+    # can peak above 1 GB, so a large batch OOM-kills workers in the 8 GB
+    # container (exit 137). CLANG_TIDY_JOBS still overrides the cap.
+    if [ -z "${CLANG_TIDY_JOBS:-}" ] && [ "$jobs" -gt 4 ]; then
+        jobs=4
+    fi
     log_info "Linting ${#files[@]} files in parallel (jobs=${jobs})..."
 
-    local log
+    local log logdir f key rc
     log=$(mktemp)
+    # The log dir must live on a path Docker Desktop shares with the container:
+    # mktemp's default ($TMPDIR=/var/folders/...) is NOT shared, so the mount
+    # would be silently empty. $BUILD_DIR is inside the repo and gitignored.
+    mkdir -p "$PROJECT_ROOT/$BUILD_DIR"
+    logdir=$(mktemp -d "$PROJECT_ROOT/$BUILD_DIR/tidy-logs.XXXXXX")
+    # Per-TU helper: keep each clang-tidy process' output and exit code in its
+    # own file so a killed worker cannot corrupt or swallow another one's
+    # diagnostics when many processes share a single pipe.
+    cat > "$logdir/run_one.sh" <<EOS
+#!/bin/sh
+f="\$1"
+key=\$(printf '%s' "\$f" | tr '/' '_')
+clang-tidy -p $BUILD_DIR_CONTAINER --header-filter='.*\\.(hpp|h)\$' "\$f" > "/logs/\$key.log" 2>&1
+echo \$? > "/logs/\$key.rc"
+EOS
+
     printf '%s\n' "${container_files[@]}" \
-        | docker run --rm -i -v "$PROJECT_ROOT/$L2_DIR:/app" -w /app "$LINT_IMAGE" sh -c \
-            "xargs -P $jobs -n1 \
-                clang-tidy -p $BUILD_DIR_CONTAINER \
-                    --header-filter='.*\.(hpp|h)\$'" \
-        > "$log" 2>&1 || true
+        | docker run --rm -i -v "$PROJECT_ROOT/$L2_DIR:/app" -w /app \
+            -v "$logdir:/logs" "$LINT_IMAGE" sh -c \
+            "xargs -P $jobs -n1 sh /logs/run_one.sh" || true
+
+    # Retry TUs whose worker was killed (rc missing or >= 128, e.g. OOM SIGKILL
+    # = 137) one at a time: serial execution stays well under the memory limit.
+    for f in "${container_files[@]}"; do
+        key=$(printf '%s' "$f" | tr '/' '_')
+        rc=$(cat "$logdir/$key.rc" 2>/dev/null || echo killed)
+        if [ "$rc" = "killed" ] || { [ "$rc" -ge 128 ] 2>/dev/null; }; then
+            log_warn "clang-tidy worker for $f did not finish (rc=$rc); retrying serially"
+            docker run --rm -v "$PROJECT_ROOT/$L2_DIR:/app" -w /app \
+                -v "$logdir:/logs" "$LINT_IMAGE" sh /logs/run_one.sh "$f" || true
+        fi
+    done
+
+    # Aggregate per-TU logs in the original file order for stable output.
+    for f in "${container_files[@]}"; do
+        key=$(printf '%s' "$f" | tr '/' '_')
+        if [ -f "$logdir/$key.log" ]; then
+            cat "$logdir/$key.log" >> "$log"
+        fi
+    done
 
     local real_errors real_warnings
     real_errors=$(grep -E '^/app/[^:]+:[0-9]+:[0-9]+: error:' "$log" | grep -vE "$IGNORE_PATH_RE" || true)
@@ -166,7 +211,7 @@ main() {
     if [ -n "$real_errors" ]; then
         log_error "clang-tidy found errors in project files:"
         echo "$real_errors"
-        rm -f "$log"
+        rm -f "$log"; rm -rf "$logdir"
         return 1
     fi
 
@@ -176,7 +221,7 @@ main() {
     else
         log_info "✓ clang-tidy: no errors or warnings in project files"
     fi
-    rm -f "$log"
+    rm -f "$log"; rm -rf "$logdir"
     return 0
 }
 

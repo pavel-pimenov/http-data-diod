@@ -1,12 +1,17 @@
 #include "db_query_executor_postgres.hpp"
+#include "config.hpp"
+#include "db_query_executor_base.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "time_utils.hpp"
 #include <base64.hpp>
 #include <libpq-fe.h>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>

@@ -1,8 +1,17 @@
 #include "db_query_handler.hpp"
+#include "config.hpp"
+#include "db_query_executor.hpp"
 #include "db_query_utils.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
 #include "time_utils.hpp"
+#include <cstdint>
 #include <format>
+#include <mutex>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <utility>
+#include <vector>
 
 bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   {

@@ -1,4 +1,8 @@
 #include "circuit_breaker.hpp"
+#include "logger.hpp"
+#include "time_utils.hpp"
+#include <cstdint>
+#include <prometheus/gauge.h>
 
 void CircuitBreaker::set_gauge(prometheus::Gauge &gauge) {
   m_gauge = gauge;

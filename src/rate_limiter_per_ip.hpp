@@ -89,12 +89,12 @@ public:
   bool acquire(const std::string &client_ip) {
     m_counters.m_total_requests.fetch_add(1, std::memory_order_relaxed);
 
-    std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
+    const std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
     if (!limiter) {
       m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
       size_t tracked = 0;
       {
-        std::scoped_lock lock(m_cache.m_mutex);
+        const std::scoped_lock lock(m_cache.m_mutex);
         tracked = m_cache.m_ip_entries.size();
       }
       Logger::warn(
@@ -124,7 +124,7 @@ public:
 
   std::shared_ptr<RateLimiter>
   get_or_create_limiter(const std::string &client_ip) {
-    std::scoped_lock lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
 
     auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
@@ -182,9 +182,9 @@ public:
   }
 
   Stats get_stats() const {
-    uint64_t total = m_counters.m_total_requests.load();
-    uint64_t rejected = m_counters.m_rejected_requests.load();
-    std::scoped_lock lock(m_cache.m_mutex);
+    const uint64_t total = m_counters.m_total_requests.load();
+    const uint64_t rejected = m_counters.m_rejected_requests.load();
+    const std::scoped_lock lock(m_cache.m_mutex);
     return Stats{total,
                  m_counters.m_allowed_requests.load(),
                  rejected,
@@ -199,7 +199,7 @@ public:
   // Capped to 1000 most-recent IPs to bound Prometheus scrape time and lock
   // hold (p99 mitigation for max_ips=10000, see M4).
   std::vector<std::pair<std::string, IPStats>> get_per_ip_stats() const {
-    std::scoped_lock lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     constexpr size_t kMaxExpose = 1000;
     std::vector<std::pair<std::string, IPStats>> result;
     result.reserve(std::min(m_cache.m_ip_entries.size(), kMaxExpose));
@@ -222,13 +222,13 @@ public:
   }
 
   size_t cleanup_expired_ips() {
-    std::scoped_lock lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     return do_cleanup_expired();
   }
 
 private:
   void record_rejection(const std::string &client_ip) {
-    std::scoped_lock lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     const auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
       it->second.m_rejected.fetch_add(1, std::memory_order_relaxed);
