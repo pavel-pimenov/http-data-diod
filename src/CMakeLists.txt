@@ -515,6 +515,7 @@ if(BUILD_TESTS)
         test_http_pipeline.cpp
         test_coverage_ext.cpp
         test_db_executor_base.cpp
+        test_pg_value_utils.cpp
         test_sentry_client.cpp
         test_trace_logger.cpp
         test_crash_utils.cpp

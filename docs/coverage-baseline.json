@@ -20,8 +20,8 @@
       "branches_covered": 34
     },
     "common_utils.cpp": {
-      "lines": 138,
-      "covered": 132,
+      "lines": 139,
+      "covered": 133,
       "branches": 170,
       "branches_covered": 116
     },
@@ -50,8 +50,8 @@
       "branches_covered": 7
     },
     "crash_utils.hpp": {
-      "lines": 31,
-      "covered": 30,
+      "lines": 32,
+      "covered": 31,
       "branches": 34,
       "branches_covered": 26
     },
@@ -92,10 +92,10 @@
       "branches_covered": 33
     },
     "db_query_executor_postgres.cpp": {
-      "lines": 304,
-      "covered": 271,
-      "branches": 460,
-      "branches_covered": 248
+      "lines": 215,
+      "covered": 196,
+      "branches": 330,
+      "branches_covered": 175
     },
     "db_query_handler.cpp": {
       "lines": 83,
@@ -122,10 +122,10 @@
       "branches_covered": 40
     },
     "duplicate_detector.cpp": {
-      "lines": 131,
-      "covered": 125,
-      "branches": 198,
-      "branches_covered": 116
+      "lines": 134,
+      "covered": 128,
+      "branches": 200,
+      "branches_covered": 117
     },
     "dynamic_labeled_family.hpp": {
       "lines": 93,
@@ -196,8 +196,8 @@
     "json_schema_validator.hpp": {
       "lines": 102,
       "covered": 101,
-      "branches": 110,
-      "branches_covered": 78
+      "branches": 108,
+      "branches_covered": 77
     },
     "json_utils.hpp": {
       "lines": 58,
@@ -224,8 +224,8 @@
       "branches_covered": 41
     },
     "l2_worker_nats.cpp": {
-      "lines": 361,
-      "covered": 315,
+      "lines": 362,
+      "covered": 316,
       "branches": 826,
       "branches_covered": 391
     },
@@ -276,6 +276,12 @@
       "covered": 27,
       "branches": 90,
       "branches_covered": 46
+    },
+    "pg_value_utils.hpp": {
+      "lines": 91,
+      "covered": 88,
+      "branches": 130,
+      "branches_covered": 90
     },
     "pool_executor.hpp": {
       "lines": 18,
@@ -392,8 +398,8 @@
       "branches_covered": 46
     },
     "stats_page.hpp": {
-      "lines": 206,
-      "covered": 203,
+      "lines": 209,
+      "covered": 206,
       "branches": 387,
       "branches_covered": 246
     },
@@ -404,8 +410,8 @@
       "branches_covered": 4
     },
     "thread_pool.hpp": {
-      "lines": 58,
-      "covered": 57,
+      "lines": 60,
+      "covered": 59,
       "branches": 132,
       "branches_covered": 82
     },
@@ -434,8 +440,8 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 431,
-      "covered": 391,
+      "lines": 433,
+      "covered": 393,
       "branches": 1146,
       "branches_covered": 598
     },
