@@ -66,11 +66,20 @@ struct NatsErrorState {
 // NATS client for request/response messaging pattern
 class NatsClient : public IConnectableClient {
 public:
+  // Default number of natsConnection_Connect attempts performed by connect().
+  static constexpr int kDefaultConnectAttempts = 3;
+
   explicit NatsClient(const NatsConfig &cfg);
 
   ~NatsClient() override;
 
-  [[nodiscard]] bool connect();
+  // Establishes the connection. max_attempts bounds the number of
+  // natsConnection_Connect attempts (>= 1). It is bounded so a caller
+  // (publish/request/subscribe/health check) can never block indefinitely when
+  // the broker is unreachable; callers that need long-term recovery retry on
+  // their own schedule. Setup-option failures (e.g. a bad TLS CA bundle) abort
+  // immediately without consuming attempts.
+  [[nodiscard]] bool connect(int max_attempts = kDefaultConnectAttempts);
 
   void disconnect();
 

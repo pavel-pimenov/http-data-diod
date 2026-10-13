@@ -3,6 +3,7 @@
 #include "logger.hpp"
 #include <array>
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -115,7 +116,7 @@ void NatsClient::wait_for_closed_callback() {
   }
 }
 
-bool NatsClient::connect() {
+bool NatsClient::connect(int max_attempts) {
   if (m_state.m_connected && m_connection.m_conn != nullptr) {
     return true;
   }
@@ -123,8 +124,9 @@ bool NatsClient::connect() {
   const auto url = std::format("nats://{}:{}", m_config.m_host,
                                m_config.m_port);
   bool first_attempt = true;
+  const int attempts = std::max(1, max_attempts);
 
-  while (true) {
+  for (int attempt = 0; attempt < attempts; ++attempt) {
     if (m_state.m_shutdown.load(std::memory_order_acquire)) {
       Logger::warn("NATS connect aborted: shutdown requested");
       return false;
@@ -163,16 +165,21 @@ bool NatsClient::connect() {
       m_state.m_connected = false;
       set_last_error("Failed to connect to NATS server: " + url + ": " +
                      nats_status_text(s));
-      Logger::warn("{}; retrying in 1 second", get_last_error().value_or(""));
       cleanup();
     } catch (const std::exception &e) {
       m_state.m_connected = false;
       set_last_error(std::string("Exception in NATS connect: ") + e.what());
-      Logger::warn("{}; retrying in 1 second", get_last_error().value_or(""));
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (attempt + 1 < attempts) {
+      Logger::warn("{}; retrying in 1 second", get_last_error().value_or(""));
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
+
+  Logger::warn("NATS connect gave up after {} attempt(s): {}", attempts,
+               get_last_error().value_or(""));
+  return false;
 }
 
 // setup_options applies a fixed sequence of natsOptions_* calls where any
@@ -214,9 +221,16 @@ bool NatsClient::setup_options(const std::string &url) {
   CHECK_NATS_OK(natsOptions_SetErrorHandler(m_connection.m_opts, &NatsClient::error_cb,
                                             this),
                 "Failed to set NATS error callback");
-  CHECK_NATS_OK(natsOptions_SetRetryOnFailedConnect(m_connection.m_opts, true, nullptr,
+  // Retry-on-failed-connect MUST stay disabled: with it enabled,
+  // natsConnection_Connect() blocks until the broker becomes reachable (it never
+  // returns while the server is down), which hangs the caller while holding
+  // m_connection.m_mutex. Instead natsConnection_Connect() returns
+  // NATS_NO_SERVERS promptly and connect() drives the (bounded) retry loop.
+  // Reconnection of an already-established connection is independent of this
+  // flag and still handled by AllowReconnect/MaxReconnect above.
+  CHECK_NATS_OK(natsOptions_SetRetryOnFailedConnect(m_connection.m_opts, false, nullptr,
                                                     nullptr),
-                "Failed to enable NATS retry-on-failed-connect");
+                "Failed to disable NATS retry-on-failed-connect");
   CHECK_NATS_OK(natsOptions_SetReconnectWait(m_connection.m_opts, 1000),
                 "Failed to set NATS reconnect wait");
   CHECK_NATS_OK(natsOptions_SetClosedCB(m_connection.m_opts, &NatsClient::closed_cb, this),
@@ -772,9 +786,11 @@ bool NatsClient::ensure_connected() {
     return true;
   }
 
-  Logger::warn("NATS client is disconnected. Reconnecting and waiting for NATS "
-               "server availability...");
-  return connect();
+  Logger::warn("NATS connection is not ready; attempting a single reconnect");
+  // A single attempt keeps request/publish/subscribe latency bounded when the
+  // broker is down; callers with their own backoff (worker, poll service) drive
+  // longer recovery.
+  return connect(1);
 }
 
 bool NatsClient::mark_disconnected(const std::string &reason) {

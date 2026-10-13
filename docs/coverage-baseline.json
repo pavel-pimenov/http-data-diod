@@ -254,10 +254,10 @@
       "branches_covered": 26
     },
     "nats_client.cpp": {
-      "lines": 457,
-      "covered": 393,
-      "branches": 756,
-      "branches_covered": 362
+      "lines": 462,
+      "covered": 406,
+      "branches": 760,
+      "branches_covered": 382
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -395,7 +395,7 @@
       "lines": 88,
       "covered": 86,
       "branches": 74,
-      "branches_covered": 45
+      "branches_covered": 46
     },
     "stats_page.hpp": {
       "lines": 209,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 81
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

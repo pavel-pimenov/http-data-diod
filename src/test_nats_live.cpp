@@ -775,6 +775,68 @@ TEST_CASE("NatsClient: subscribe rejects an invalid subject", "[nats-live]") {
   client.disconnect();
 }
 
+TEST_CASE("NatsClient: connect fails fast when the broker is unreachable",
+          "[nats-live]") {
+  // A reserved-but-unbound port: natsConnection_Connect() returns
+  // NATS_NO_SERVERS promptly. Regression guard for round 102: with
+  // RetryOnFailedConnect enabled the C client never returns while the server is
+  // down, so connect() blocked forever while holding the connection mutex.
+  const int closed_port = reserve_loopback_port();
+  REQUIRE(closed_port > 0);
+
+  NatsClient client(
+      live_nats_cfg(unique_subject("nats.unreachable"), closed_port));
+  const auto start = std::chrono::steady_clock::now();
+  REQUIRE_FALSE(client.connect());
+  const auto elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  REQUIRE(elapsed_ms < 15000);
+  REQUIRE_FALSE(client.is_connected());
+  REQUIRE(client.get_last_error().has_value());
+
+  // The public API must fail fast too (single bounded reconnect attempt).
+  const auto api_start = std::chrono::steady_clock::now();
+  CHECK_FALSE(client.check_connection());
+  CHECK_FALSE(client.ping().has_value());
+  CHECK_FALSE(client.publish("s", "d"));
+  CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - api_start)
+            .count() < 10000);
+}
+
+TEST_CASE("NatsClient: health check fails fast once the broker stops",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  const std::string subject = unique_subject("nats.healthdown");
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  REQUIRE(client.connect());
+  REQUIRE(client.is_connected());
+
+  server.stop();
+  REQUIRE(wait_for_condition([&client]() { return !client.is_connected(); },
+                             10000));
+
+  // Regression guard: check_connection()/ping() used to hang forever here
+  // because ensure_connected() -> connect() never returned while the broker was
+  // down.
+  const auto start = std::chrono::steady_clock::now();
+  CHECK_FALSE(client.check_connection());
+  CHECK_FALSE(client.ping().has_value());
+  CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start)
+            .count() < 10000);
+
+  client.disconnect();
+}
+
 // ============================================================================
 // Track B: NatsPollService / DB gateway / worker over a live broker
 // ============================================================================
