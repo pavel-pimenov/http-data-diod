@@ -155,7 +155,7 @@
       "lines": 94,
       "covered": 90,
       "branches": 136,
-      "branches_covered": 80
+      "branches_covered": 79
     },
     "http_client.hpp": {
       "lines": 14,
@@ -321,9 +321,9 @@
     },
     "request_handler.cpp": {
       "lines": 449,
-      "covered": 405,
+      "covered": 412,
       "branches": 961,
-      "branches_covered": 483
+      "branches_covered": 497
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 82
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

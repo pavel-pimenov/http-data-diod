@@ -1037,6 +1037,60 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
   }
 }
 
+TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  {
+    // Default path: readiness reports the live connection state without
+    // initiating a reconnect.
+    EnvVars vars = live_proxy_env(server.port(), unique_subject("poll.rdy"),
+                                  unique_subject("db.rdy"));
+    vars["HEALTH_READY_ALLOW_CONNECT"] = "false";
+    const EnvGuard env(vars);
+    AppContext ctx;
+    init_proxy_components(ctx);
+    REQUIRE_FALSE(ctx.m_config.m_app.m_health_ready_allow_connect);
+    REQUIRE(ctx.m_nats_client->is_connected());
+
+    std::atomic<bool> shutdown{false};
+    StatsLogger stats(ctx, shutdown);
+    RequestHandler handler(ctx, stats);
+    httplib::Response res;
+    handler.handle_get(make_get("/health/ready"), res);
+    REQUIRE(res.status == 200);
+    REQUIRE(json::parse(res.body)["status"] == "ready");
+    REQUIRE(ctx.m_proxy.m_metrics->m_health_ready.Value() == 1.0);
+    REQUIRE(ctx.m_proxy.m_metrics->m_nats_connected.Value() == 1.0);
+  }
+
+  {
+    // Opt-in blocking path: HEALTH_READY_ALLOW_CONNECT=true pings the broker
+    // and reports ready when the pong round-trip succeeds.
+    EnvVars vars = live_proxy_env(server.port(), unique_subject("poll.rdy2"),
+                                  unique_subject("db.rdy2"));
+    vars["HEALTH_READY_ALLOW_CONNECT"] = "true";
+    const EnvGuard env(vars);
+    AppContext ctx;
+    REQUIRE(ctx.m_config.m_app.m_health_ready_allow_connect);
+    init_proxy_components(ctx);
+    REQUIRE(ctx.m_nats_client->is_connected());
+
+    std::atomic<bool> shutdown{false};
+    StatsLogger stats(ctx, shutdown);
+    RequestHandler handler(ctx, stats);
+    httplib::Response res;
+    handler.handle_get(make_get("/health/ready"), res);
+    REQUIRE(res.status == 200);
+    REQUIRE(json::parse(res.body)["status"] == "ready");
+    REQUIRE(ctx.m_proxy.m_metrics->m_health_ready.Value() == 1.0);
+  }
+}
+
 TEST_CASE("L2Worker: run loop serves requests over a live broker",
           "[nats-live]") {
   if (nats_binary_path().empty()) {
