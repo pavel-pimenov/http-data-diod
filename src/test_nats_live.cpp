@@ -698,6 +698,83 @@ TEST_CASE("NatsClient: reconnects after the broker restarts", "[nats-live]") {
                              10000));
 }
 
+TEST_CASE("NatsClient: request timeout marks the connection down and records "
+          "the error",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  const std::string subject = unique_subject("nats.reqtimeout");
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  REQUIRE(client.connect());
+
+  std::atomic<int> received{0};
+  REQUIRE(client.subscribe(subject, [&received](const std::string &,
+                                                const std::string &,
+                                                const std::string &) {
+    received.fetch_add(1);
+  }));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  // The subscriber receives the request but never replies, so the request
+  // fails on the wait timeout (not NATS_NO_RESPONDERS) and the client treats
+  // the connection as unhealthy.
+  const std::optional<std::string> reply = client.request(subject, "ping", 100);
+  REQUIRE_FALSE(reply.has_value());
+  REQUIRE(received.load() == 1);
+  REQUIRE(client.get_last_error().has_value());
+  REQUIRE_FALSE(client.is_connected());
+
+  client.disconnect();
+}
+
+TEST_CASE("NatsClient: request with timeout 0 falls back to the config timeout",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  const std::string subject = unique_subject("nats.reqtimeout0");
+  const auto reply_fn = [](const std::string &, const std::string &) {
+    return NatsReply{"pong", NatsHeaders{}};
+  };
+  NatsResponder const responder(live_nats_cfg(subject, server.port()), subject,
+                                reply_fn);
+
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  REQUIRE(client.connect());
+  const std::optional<std::string> reply = client.request(subject, "ping", 0);
+  REQUIRE(reply.has_value());
+  REQUIRE(*reply == "pong");
+
+  client.disconnect();
+}
+
+TEST_CASE("NatsClient: subscribe rejects an invalid subject", "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  NatsClient client(live_nats_cfg(unique_subject("nats.badsub"), server.port()));
+  REQUIRE(client.connect());
+  REQUIRE_FALSE(client.subscribe("invalid subject with spaces",
+                                 [](const std::string &, const std::string &,
+                                    const std::string &) {}));
+  REQUIRE(client.get_last_error().has_value());
+
+  client.disconnect();
+}
+
 // ============================================================================
 // Track B: NatsPollService / DB gateway / worker over a live broker
 // ============================================================================

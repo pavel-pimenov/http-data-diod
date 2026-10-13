@@ -594,3 +594,20 @@ TEST_CASE("L2Worker: run loop and DB gateway NATS handlers", "[l2-worker]") {
       make_db_error_body("DB_UNAVAILABLE", "pool exhausted"),
       1000, 2000, trace_ctx, "db-unknown", "consume-span");
 }
+
+TEST_CASE("L2Worker: DB query before the gateway is initialized reports 503",
+          "[l2-worker]") {
+  const EnvGuard env(worker_env(l2_server_urls()));
+  AppContext ctx;
+  attach_tracer(ctx);
+  L2Worker worker(ctx);
+  const std::string reply_to = "l2-proxy.db.reply";
+
+  const json request{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                     {DbQueryContract::kRequestId, "db-no-gateway"},
+                     {DbQueryContract::kDb, "pg"},
+                     {DbQueryContract::kSql, "select 1"}};
+  L2WorkerTestAccess::process_db_query_from_nats(worker, request.dump(),
+                                                 reply_to);
+  REQUIRE_FALSE(worker.is_nats_connected());
+}

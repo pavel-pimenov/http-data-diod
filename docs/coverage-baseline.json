@@ -225,9 +225,9 @@
     },
     "l2_worker_nats.cpp": {
       "lines": 362,
-      "covered": 316,
+      "covered": 319,
       "branches": 826,
-      "branches_covered": 391
+      "branches_covered": 395
     },
     "logger.hpp": {
       "lines": 275,
@@ -255,9 +255,9 @@
     },
     "nats_client.cpp": {
       "lines": 457,
-      "covered": 385,
+      "covered": 393,
       "branches": 756,
-      "branches_covered": 349
+      "branches_covered": 362
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -395,7 +395,7 @@
       "lines": 88,
       "covered": 86,
       "branches": 74,
-      "branches_covered": 46
+      "branches_covered": 45
     },
     "stats_page.hpp": {
       "lines": 209,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 82
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
