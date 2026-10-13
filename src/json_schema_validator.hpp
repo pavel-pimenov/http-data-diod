@@ -13,6 +13,10 @@
 
 #include "json_utils.hpp"
 
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+#include <flat_set>
+#endif
+
 // Request Validator
 // Validates L2 server requests
 //
@@ -67,7 +71,7 @@ public:
 
   bool validate(const json &request, std::string &error) const {
     for (const auto &field : m_allowed.m_required_fields) {
-      if (request.find(field) == request.end()) {
+      if (!request.contains(field)) {
         error = "Missing required field: " + field;
         return false;
       }

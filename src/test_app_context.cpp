@@ -34,7 +34,7 @@ std::vector<std::string> family_names(
 bool has_family(const std::shared_ptr<prometheus::Registry> &registry,
                 const std::string &name) {
   const auto names = family_names(registry);
-  return std::find(names.begin(), names.end(), name) != names.end();
+  return std::ranges::find(names, name) != names.end();
 }
 
 const std::vector<std::string> &common_l2_families() {

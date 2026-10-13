@@ -357,9 +357,8 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
             if (method == "POST") {
               return client->post(request_url, body, traceparent,
                                   forwarded_headers);
-            } else {
-              return client->get(request_url, traceparent, forwarded_headers);
             }
+            return client->get(request_url, traceparent, forwarded_headers);
           });
 
       size_t response_size = http_response.m_body.size();
@@ -445,9 +444,9 @@ bool L2Worker::parse_request_data(const std::string &request_json,
   auto validated = validate_and_parse_json(request_json, "Worker")
                        .and_then([&](json j) -> std::expected<json, std::string> {
                          std::string parse_error;
-                         static RequestValidator const validator =
+                         static RequestValidator const g_validator =
                              create_standard_request_validator();
-                         if (!validator.validate(j, parse_error)) {
+                         if (!g_validator.validate(j, parse_error)) {
                            Logger::error("Worker request validation failed: {}",
                                          parse_error);
                            handle_processing_error_with_category(

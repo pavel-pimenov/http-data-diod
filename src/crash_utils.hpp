@@ -1,6 +1,7 @@
 #ifndef CRASH_UTILS_HPP
 #define CRASH_UTILS_HPP
 
+#include <array>
 #include <cxxabi.h>
 #include <cstdlib>
 #include <memory>
@@ -50,13 +51,14 @@ inline std::string base_name(const std::string &path) {
 }
 
 inline std::string self_exe_path() {
-  char buf[4096];
-  const ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  std::array<char, 4096> buf{};
+  const ssize_t len =
+      readlink("/proc/self/exe", buf.data(), buf.size() - 1);
   if (len <= 0) {
     return "";
   }
   buf[len] = '\0';
-  return std::string(buf);
+  return std::string(buf.data());
 }
 
 } // namespace crash_utils

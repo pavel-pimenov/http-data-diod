@@ -6,11 +6,12 @@
 #include "httplib/httplib.h"
 #include <algorithm>
 #include <atomic>
+#include <string_view>
 
 namespace {
 
 void append_hex_digits(uint64_t value, std::string &out) {
-  static constexpr char k_hex_digits[] = "0123456789abcdef";
+  static constexpr std::string_view k_hex_digits = "0123456789abcdef";
   for (size_t i = 0; i < 16; ++i) {
     out.push_back(k_hex_digits[(value >> (4 * i)) & 0xF]);
   }

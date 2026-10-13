@@ -41,7 +41,7 @@ constexpr std::array<unsigned char, 70> g_favicon_ico = {
 // Marker header sent by message_counter.py to opt in to the correlation-test
 // echo (req_id + req_hash). Regular production clients do not send it, so the
 // l2-server stays a plain value-echo backend without per-request SHA-256 cost.
-constexpr char g_correlation_test_header[] = "X-Correlation-Test";
+constexpr const char *g_correlation_test_header = "X-Correlation-Test";
 
 } // namespace
 

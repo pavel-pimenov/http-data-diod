@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <format>
 #include <random>
+#include <string_view>
 
 // Thread-local random generator for fast ID generation (initialized once per
 // thread)
@@ -504,7 +505,7 @@ std::string JaegerLogger::random_hex_fast(size_t len) {
   std::string res;
   res.reserve(len);
 
-  static const char g_hex_chars[] = "0123456789abcdef";
+  static const std::string_view g_hex_chars = "0123456789abcdef";
 
   // Generate 8 chars at a time (64 bits)
   for (size_t i = 0; i < len; i += 16) {

@@ -27,6 +27,8 @@
 #include "trace_logger.hpp"
 
 #include <arpa/inet.h>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -46,7 +48,6 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
-#include <algorithm>
 
 extern std::atomic<bool> g_shutdown_flag;
 
@@ -103,7 +104,7 @@ using EnvVars = std::map<std::string, std::optional<std::string>>;
 // Path of the nats-server binary COPYed into the builder image; empty when the
 // binary is not installed (tests then SKIP). Also consulted along PATH so the
 // tests can run against a hand-installed binary.
-constexpr const char *const kNatsServerCandidates[] = {
+constexpr std::array<const char *, 2> kNatsServerCandidates = {
     "/usr/local/bin/nats-server", "/usr/bin/nats-server"};
 
 std::string nats_binary_path() {
@@ -291,7 +292,7 @@ std::string unique_subject(const std::string &base) {
 }
 
 std::pair<std::string, std::string> generate_tls_certs(const std::string &base_dir = "/tmp") {
-  std::string const dir = base_dir;
+  std::string const& dir = base_dir;
   const std::string prefix = dir + "/nats-tls-" + std::to_string(::getpid()) + "-" +
                              std::to_string(::time(nullptr));
   const std::string key_path = prefix + ".key";
@@ -909,7 +910,7 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
 
   struct RestoreShutdownFlag {
     ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } restore_shutdown;
+  } const restore_shutdown;
 
   REQUIRE(worker.is_nats_connected());
   g_shutdown_flag = false;
@@ -1114,7 +1115,7 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 
   struct RestoreShutdownFlag {
     ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } restore_shutdown;
+  } const restore_shutdown;
 
   REQUIRE(worker.is_nats_connected());
   g_shutdown_flag = false;
@@ -1207,8 +1208,10 @@ constexpr int kPgWaitMs = 10000;
 }
 
 struct PgTarget {
-  bool ok=false, need=false;
-  uid_t uid=0; gid_t gid=0; std::string name;
+  bool m_ok = false, m_need = false;
+  uid_t m_uid = 0;
+  gid_t m_gid = 0;
+  std::string m_name;
 };
 
 [[nodiscard]] PgTarget pg_target() {
@@ -1223,16 +1226,16 @@ struct PgTarget {
 }
 
 [[nodiscard]] bool pg_droppriv(const PgTarget& t) {
-  if (!t.need) {
+  if (!t.m_need) {
     return true;
   }
-  if (::setgid(t.gid) != 0) {
+  if (::setgid(t.m_gid) != 0) {
     return false;
   }
-  if (::initgroups(t.name.c_str(), t.gid) != 0) {
+  if (::initgroups(t.m_name.c_str(), t.m_gid) != 0) {
     return false;
   }
-  return ::setuid(t.uid)==0;
+  return ::setuid(t.m_uid)==0;
 }
 
 [[nodiscard]] bool pg_redir(const char* p) {
@@ -1263,7 +1266,7 @@ struct PgTarget {
       vs.push_back(e.path().filename().string());
     }
   }
-  std::sort(vs.begin(),vs.end(),[](auto&a,auto&b){return std::stoi(a)>std::stoi(b);});
+  std::ranges::sort(vs,[](auto&a,auto&b){return std::stoi(a)>std::stoi(b);});
   for (auto&v:vs){ auto d="/usr/lib/postgresql/"+v+"/bin";
     if (has(d)) {
       return d;
@@ -1361,7 +1364,7 @@ private:
       }
     }
     auto t=pg_target();
-    if (!t.ok) {
+    if (!t.m_ok) {
       return false;
     }
     m_port=pg_reserve_port();
@@ -1375,7 +1378,10 @@ private:
       return false;
     }
     m_datadir = d;
-    if (t.need && ::chown(m_datadir.c_str(),t.uid,t.gid)!=0){ cleanup(); return false; }
+    if (t.m_need && ::chown(m_datadir.c_str(), t.m_uid, t.m_gid) != 0) {
+      cleanup();
+      return false;
+    }
     if (!run_wait(m_bindir+"/initdb",{"-D",m_datadir,"-U","postgres","-A","trust","--no-locale","-E","UTF8"}, "/tmp/pginitn-"+std::to_string(m_port)+".log",t)){ cleanup(); return false; }
     pid_t const sp =
         spawn(m_bindir + "/postgres",
@@ -1435,7 +1441,7 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
 
   struct RestoreShutdownFlag {
     ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } restore_shutdown;
+  } const restore_shutdown;
   g_shutdown_flag = false;
   std::thread runner([&worker] { worker.run(); });
 

@@ -16,6 +16,8 @@
 #include "logger.hpp"
 
 #include <arpa/inet.h>
+#include <algorithm>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cerrno>
 #include <chrono>
@@ -162,7 +164,7 @@ struct TargetUser {
       versions.push_back(entry.path().filename().string());
     }
   }
-  std::sort(versions.begin(), versions.end(),
+  std::ranges::sort(versions,
             [](const std::string &a, const std::string &b) {
               return std::stoi(a) > std::stoi(b);
             });
@@ -846,10 +848,11 @@ TEST_CASE("DbQueryHandler: rejects malformed requests before dispatch",
   // lookup, so these cover the DbQueryContract validation branches offline.
   DbQueryHandler handler;
 
-  const struct {
-    json request;
-    std::string expect;
-  } cases[] = {
+  struct MalformedRequest {
+    json m_request;
+    std::string m_expect;
+  };
+  const std::vector<MalformedRequest> cases = {
       {json::array({1}), "must be a JSON object"},
       {json{{DbQueryContract::kType, "upsert"},
             {DbQueryContract::kRequestId, "r"},
@@ -887,12 +890,12 @@ TEST_CASE("DbQueryHandler: rejects malformed requests before dispatch",
   for (const auto &c : cases) {
     int status = 0;
     json body;
-    handler.handle_request(c.request, status, body);
+    handler.handle_request(c.m_request, status, body);
     REQUIRE(status == 400);
     REQUIRE(body[DbResponseContract::kStatus] ==
             DbResponseContract::kStatusError);
     const std::string message =
         body[DbResponseContract::kError][DbResponseContract::kMessage];
-    CHECK(message.find(c.expect) != std::string::npos);
+    CHECK(message.find(c.m_expect) != std::string::npos);
   }
 }

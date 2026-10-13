@@ -1,5 +1,6 @@
 #include "nats_client.hpp"
 #include "json_utils.hpp"
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <format>
@@ -277,11 +278,11 @@ void NatsClient::on_reconnected(natsConnection *nc) {
 
     std::string connected_url_suffix;
     if (nc != nullptr) {
-      char connected_url[256] = {0};
-      if (natsConnection_GetConnectedUrl(nc, connected_url,
-                                         sizeof(connected_url)) == NATS_OK &&
+      std::array<char, 256> connected_url{};
+      if (natsConnection_GetConnectedUrl(nc, connected_url.data(),
+                                         connected_url.size()) == NATS_OK &&
           connected_url[0] != '\0') {
-        connected_url_suffix = std::string(": ") + connected_url;
+        connected_url_suffix = std::string(": ") + connected_url.data();
       }
     }
 

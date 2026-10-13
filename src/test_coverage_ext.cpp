@@ -1712,7 +1712,7 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
 
   REQUIRE(queue.enqueue([&]() {
     {
-      std::scoped_lock lock(gate);
+      std::scoped_lock const lock(gate);
       started = true;
     }
     gate_cv.notify_all();

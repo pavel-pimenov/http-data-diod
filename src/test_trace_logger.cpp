@@ -229,7 +229,7 @@ struct SentryTracingEnv {
 
 bool is_hex_string(const std::string &s) {
   for (char const c : s) {
-    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+    if ((c < '0' || c > '9') && (c < 'a' || c > 'f')) {
       return false;
     }
   }
@@ -590,10 +590,8 @@ TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
       for (int j = 0; j < kEach; ++j) {
         // Catch2 forbids REQUIRE/CHECK from non-main threads (its output
         // redirect would race); assert via atomic counter, REQUIRE after join.
-        const bool r = env.m_logger->should_sample();
-        if (r == true || r == false) {
-          ok.fetch_add(1, std::memory_order_relaxed);
-        }
+        static_cast<void>(env.m_logger->should_sample());
+        ok.fetch_add(1, std::memory_order_relaxed);
       }
     });
   }
@@ -1230,7 +1228,7 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
 
   REQUIRE(wait_for_condition(
       [&] {
-        std::scoped_lock lock(mu);
+        std::scoped_lock const lock(mu);
         return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
       },
       8000));
@@ -1347,7 +1345,7 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
 
   REQUIRE(wait_for_condition(
       [&] {
-        std::scoped_lock lock(mu);
+        std::scoped_lock const lock(mu);
         return env->sentry_sent() >= 1.0 && !sentry_bodies.empty();
       },
       8000));

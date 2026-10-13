@@ -2,6 +2,7 @@
 #define STATS_PAGE_HPP
 
 #include <algorithm>
+#include <array>
 #include <ctime>
 #include <memory>
 #include <ranges>
@@ -203,8 +204,8 @@ inline std::string build_stats_html(
   html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   html << "<title>" << escape_html(service_name) << " — status</title>\n";
   const std::time_t now = std::time(nullptr);
-  char tsbuf[64];
-  std::strftime(tsbuf, sizeof(tsbuf), "%Y-%m-%d %H:%M:%S UTC",
+  std::array<char, 64> tsbuf{};
+  std::strftime(tsbuf.data(), tsbuf.size(), "%Y-%m-%d %H:%M:%S UTC",
                 std::gmtime(&now));
 
   html << "<style>\n";
@@ -240,8 +241,8 @@ inline std::string build_stats_html(
    html << ".spark{display:block;width:100%;}\n";
    html << "</style>\n</head>\n<body>\n";
   html << "<div class=\"banner\"><span>" << banner_text << " — "
-       << escape_html(service_name) << "</span><span class=\"ts\">" << tsbuf
-       << " · 5s</span></div>\n";
+       << escape_html(service_name) << "</span><span class=\"ts\">"
+       << tsbuf.data() << " · 5s</span></div>\n";
   html << "<div class=\"grid\">\n";
 
   // Cap series per tile so labeled/dense families (per-IP, per-client-id) don't

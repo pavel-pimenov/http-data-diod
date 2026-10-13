@@ -10,8 +10,8 @@
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
-#include <base64.hpp>
 #include <algorithm>
+#include <base64.hpp>
 #include <chrono>
 #include <format>
 #include <nlohmann/json.hpp>
@@ -671,7 +671,7 @@ void L2Worker::publish_db_gateway_ready_metric() {
   const std::vector<std::string> ready = m_db_query_handler->ready_databases();
   for (const auto &db : m_db_query_handler->configured_databases()) {
     const bool is_ready =
-        std::find(ready.begin(), ready.end(), db) != ready.end();
+        std::ranges::find(ready, db) != ready.end();
     ready_gauge.Add({{"db", db}}).Set(is_ready ? 1.0 : 0.0);
   }
 }

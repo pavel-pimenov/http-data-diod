@@ -11,9 +11,10 @@
 #include <string_view>
 
 std::string compute_sha256_hex(std::string_view data) {
-  static constexpr char g_hex[] = "0123456789abcdef";
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
+  static constexpr std::string_view g_hex = "0123456789abcdef";
+  std::array<unsigned char, SHA256_DIGEST_LENGTH> hash{};
+  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
+         hash.data());
   std::string result;
   result.reserve(SHA256_DIGEST_LENGTH * 2);
   for (const unsigned char byte : hash) {

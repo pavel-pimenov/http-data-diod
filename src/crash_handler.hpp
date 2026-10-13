@@ -63,8 +63,8 @@ private:
   // Crash backtrace buffer (async-signal-safe: fixed-size array, no
   // allocation) plus its frame count, captured by the signal handler.
   struct CrashFrames {
-    static inline constexpr int kMaxFrames = 128;
-    static inline void *m_addrs[kMaxFrames];
+    static constexpr int kMaxFrames = 128;
+    static inline std::array<void *, kMaxFrames> m_addrs{};
     static inline int m_count = 0;
   };
 
@@ -123,28 +123,28 @@ private:
     time_t const now = time(nullptr);
     struct tm tm_buf{};
     localtime_r(&now, &tm_buf);
-    char time_str[32];
-    strftime(time_str, sizeof(time_str), "%Y%m%d_%H%M%S", &tm_buf);
+    std::array<char, 32> time_str{};
+    strftime(time_str.data(), time_str.size(), "%Y%m%d_%H%M%S", &tm_buf);
 
-    char filename[512];
+    std::array<char, 512> filename{};
     const char *dir = m_dump_dir.c_str();
     const char *sig = crash_utils::signal_name(signum);
     // Build filename: dir/crash_YYYYMMDD_HHMMSS_SIGNAL.txt
     int pos = 0;
     auto append = [&](const char *s) {
-      while (*s && pos < static_cast<int>(sizeof(filename)) - 1) {
+      while (*s && pos < static_cast<int>(filename.size()) - 1) {
         filename[pos++] = *s++;
       }
     };
     append(dir);
     append("/crash_");
-    append(time_str);
+    append(time_str.data());
     append("_");
     append(sig);
     append(".txt");
     filename[pos] = '\0';
 
-    int const fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int const fd = open(filename.data(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
       return;
     }
@@ -160,14 +160,14 @@ private:
     write(fd, pid_prefix, strlen(pid_prefix));
 
     // PID
-    char pid_buf[16];
+    std::array<char, 16> pid_buf{};
     int pid_len = 0;
     pid_t pid = getpid();
     // itoa for PID
     if (pid == 0) {
       pid_buf[pid_len++] = '0';
     } else {
-      char tmp[16];
+      std::array<char, 16> tmp{};
       int i = 0;
       while (pid > 0) {
         tmp[i++] = '0' + (pid % 10);
@@ -178,20 +178,20 @@ private:
       }
     }
     pid_buf[pid_len] = '\0';
-    write(fd, pid_buf, pid_len);
+    write(fd, pid_buf.data(), pid_len);
 
     // Timestamp
     write(fd, ts_prefix, strlen(ts_prefix));
-    write(fd, time_str, strlen(time_str));
+    write(fd, time_str.data(), strlen(time_str.data()));
     write(fd, "\n", 1);
 
     // Fault address
     if (info != nullptr) {
       const char *fault_prefix = "Fault address: ";
       write(fd, fault_prefix, strlen(fault_prefix));
-      char addr_buf[32];
-      snprintf(addr_buf, sizeof(addr_buf), "%p", info->si_addr);
-      write(fd, addr_buf, strlen(addr_buf));
+      std::array<char, 32> addr_buf{};
+      snprintf(addr_buf.data(), addr_buf.size(), "%p", info->si_addr);
+      write(fd, addr_buf.data(), strlen(addr_buf.data()));
       write(fd, "\n", 1);
     }
 
@@ -200,13 +200,13 @@ private:
     const char *stack_header = "\n=== STACK TRACE (raw addresses) ===\n";
     write(fd, stack_header, strlen(stack_header));
 
-    void *callstack[128];
-    int const frames = backtrace(callstack, 128);
+    std::array<void *, 128> callstack{};
+    int const frames = backtrace(callstack.data(), static_cast<int>(callstack.size()));
 
     for (int i = 0; i < frames; ++i) {
-      char frame_buf[64];
-      snprintf(frame_buf, sizeof(frame_buf), "#%d %p\n", i, callstack[i]);
-      write(fd, frame_buf, strlen(frame_buf));
+      std::array<char, 64> frame_buf{};
+      snprintf(frame_buf.data(), frame_buf.size(), "#%d %p\n", i, callstack[i]);
+      write(fd, frame_buf.data(), strlen(frame_buf.data()));
     }
 
     const char *resolve_hint =
@@ -219,12 +219,12 @@ private:
 
   static std::string describe_frame(const void *addr) {
     Dl_info dli{};
-    char buf[64];
+    std::array<char, 64> buf{};
     if (dladdr(addr, &dli) != 0 && dli.dli_sname != nullptr) {
       return crash_utils::demangle_symbol(dli.dli_sname);
     }
-    snprintf(buf, sizeof(buf), "0x%lx", reinterpret_cast<unsigned long>(addr));
-    return buf;
+    snprintf(buf.data(), buf.size(), "0x%lx", reinterpret_cast<unsigned long>(addr));
+    return std::string(buf.data());
   }
 
   static int find_faulting_frame_index() {
@@ -268,11 +268,11 @@ private:
       return;
     }
 
-    char in_path[256];
-    char out_path[256];
-    snprintf(in_path, sizeof(in_path), "%s/addr2line-in-%d.txt", m_dump_dir.c_str(), static_cast<int>(getpid()));
-    snprintf(out_path, sizeof(out_path), "%s/addr2line-out-%d.txt", m_dump_dir.c_str(), static_cast<int>(getpid()));
-    FILE *wf = fopen(in_path, "w");
+    std::array<char, 256> in_path{};
+    std::array<char, 256> out_path{};
+    snprintf(in_path.data(), in_path.size(), "%s/addr2line-in-%d.txt", m_dump_dir.c_str(), static_cast<int>(getpid()));
+    snprintf(out_path.data(), out_path.size(), "%s/addr2line-out-%d.txt", m_dump_dir.c_str(), static_cast<int>(getpid()));
+    FILE *wf = fopen(in_path.data(), "w");
     if (wf == nullptr) {
       return;
     }
@@ -288,20 +288,20 @@ private:
     fclose(wf);
 
     const std::string cmd = std::string(kAddr2line) + " -e '" + exe +
-                            "' -f -C < '" + in_path + "' > '" + out_path +
-                            "' 2>/dev/null";
+                            "' -f -C < '" + in_path.data() + "' > '" +
+                            out_path.data() + "' 2>/dev/null";
     static_cast<void>(system(cmd.c_str()));
-    unlink(in_path);
+    unlink(in_path.data());
 
-    FILE *in = fopen(out_path, "r");
-    unlink(out_path);
+    FILE *in = fopen(out_path.data(), "r");
+    unlink(out_path.data());
     if (in == nullptr) {
       return;
     }
     std::vector<std::string> lines;
-    char line[512];
-    while (fgets(line, sizeof(line), in) != nullptr) {
-      lines.emplace_back(line);
+    std::array<char, 512> line{};
+    while (fgets(line.data(), static_cast<int>(line.size()), in) != nullptr) {
+      lines.emplace_back(line.data());
     }
     fclose(in);
 
@@ -341,7 +341,7 @@ private:
     std::array<char, 33> event_id{};
     {
       std::random_device rd;
-      uint32_t a = rd(), b = rd(), c = rd(), d = rd();
+      const uint32_t a = rd(), b = rd(), c = rd(), d = rd();
       snprintf(event_id.data(), event_id.size(), "%08x%08x%08x%08x", a, b, c, d);
     }
 
@@ -351,9 +351,9 @@ private:
                               {"platform", "native"}};
     std::string fault_addr;
     if (info != nullptr) {
-      char addr[32];
-      snprintf(addr, sizeof(addr), "%p", info->si_addr);
-      fault_addr = addr;
+      std::array<char, 32> addr{};
+      snprintf(addr.data(), addr.size(), "%p", info->si_addr);
+      fault_addr.assign(addr.data());
     }
     nlohmann::json exception_value{
         {"type", crash_utils::signal_name(signum)},
@@ -361,10 +361,10 @@ private:
         {"stacktrace", {{"frames", nlohmann::json::array()}}}};
     const int fault_idx = find_faulting_frame_index();
     for (int i = 0; i < m_frames.m_count; ++i) {
-      char addr[32];
-      snprintf(addr, sizeof(addr), "%lx",
+      std::array<char, 32> addr{};
+      snprintf(addr.data(), addr.size(), "%lx",
                reinterpret_cast<unsigned long>(m_frames.m_addrs[i]));
-      nlohmann::json frame{{"instruction_addr", std::string("0x") + addr}};
+      nlohmann::json frame{{"instruction_addr", std::string("0x") + addr.data()}};
       Dl_info dli{};
       if (dladdr(m_frames.m_addrs[i], &dli) != 0 && dli.dli_sname != nullptr) {
         frame["function"] = crash_utils::demangle_symbol(dli.dli_sname);
@@ -447,15 +447,15 @@ private:
     // the event is actually ingested (otherwise the container restart may
     // drop an unread connection). Connection: close makes the server send its
     // response then close, so read returns 0 (EOF).
-    char sbuf[512];
-    while (read(sockfd, sbuf, sizeof(sbuf)) > 0) {
+    std::array<char, 512> sbuf{};
+    while (read(sockfd, sbuf.data(), sbuf.size()) > 0) {
     }
     close(sockfd);
   }
 
   static void signal_handler(int signum, siginfo_t *info,
                              void * /*context*/) {
-    m_frames.m_count = backtrace(m_frames.m_addrs, m_frames.kMaxFrames);
+    m_frames.m_count = backtrace(m_frames.m_addrs.data(), m_frames.kMaxFrames);
     write_crash_report(signum, info);
 
     // Send to Sentry in a short-lived child process (fork is async-signal-safe)
