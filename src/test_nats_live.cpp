@@ -983,7 +983,8 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     REQUIRE(ctx.m_nats_client->is_connected());
 
     const auto reply_fn = [](const std::string &, const std::string &) {
-      return NatsReply{R"({"status":200,"body":{"db":"ok"}})", NatsHeaders{}};
+      return NatsReply{R"({"status":200,"body":{"db":"ok"}})",
+                       NatsHeaders{{"X-Consume-Span-Id", "consume-db-1"}}};
     };
     NatsResponder const responder(live_nats_cfg(subject, server.port()),
                                   subject, reply_fn);

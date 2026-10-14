@@ -155,7 +155,7 @@
       "lines": 94,
       "covered": 90,
       "branches": 136,
-      "branches_covered": 79
+      "branches_covered": 80
     },
     "http_client.hpp": {
       "lines": 14,
@@ -213,9 +213,9 @@
     },
     "l2_worker.cpp": {
       "lines": 313,
-      "covered": 277,
+      "covered": 281,
       "branches": 496,
-      "branches_covered": 265
+      "branches_covered": 270
     },
     "l2_worker.hpp": {
       "lines": 6,
@@ -321,9 +321,9 @@
     },
     "request_handler.cpp": {
       "lines": 449,
-      "covered": 412,
+      "covered": 413,
       "branches": 961,
-      "branches_covered": 497
+      "branches_covered": 499
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 81
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

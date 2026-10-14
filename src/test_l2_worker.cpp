@@ -367,6 +367,13 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(get.m_status == 200);
   REQUIRE(get.m_body.find("l2-span-2") != std::string::npos);
 
+  // Query string is appended only to the actual HTTP call URL (logs/span URLs
+  // stay clean).
+  const HttpResponse with_query = worker.call_l2_server(
+      "/api/value", "", kTraceparent, {}, "GET", "", "", "filter=1");
+  REQUIRE(with_query.m_status == 200);
+  REQUIRE(with_query.m_body.find("l2-span-") != std::string::npos);
+
   // Path outside every configured L2 base: rejected before any HTTP call.
   const HttpResponse denied = worker.call_l2_server("/admin", "{}");
   REQUIRE(denied.m_status == 403);
@@ -610,4 +617,25 @@ TEST_CASE("L2Worker: DB query before the gateway is initialized reports 503",
   L2WorkerTestAccess::process_db_query_from_nats(worker, request.dump(),
                                                  reply_to);
   REQUIRE_FALSE(worker.is_nats_connected());
+}
+
+TEST_CASE("L2Worker: explicit thread pool type is honoured", "[l2-worker]") {
+  {
+    // Non-"none" pool type takes the CUSTOM branch directly.
+    EnvVars vars = worker_env(l2_server_urls());
+    vars["THREAD_POOL_TYPE"] = "custom";
+    const EnvGuard env(vars);
+    AppContext ctx;
+    const L2Worker worker(ctx);
+    REQUIRE_FALSE(worker.is_nats_connected());
+  }
+  {
+    // Non-worker mode with "none" keeps the inline NONE pool.
+    EnvVars vars = worker_env(l2_server_urls());
+    vars["MODE"] = "proxy";
+    const EnvGuard env(vars);
+    AppContext ctx;
+    const L2Worker worker(ctx);
+    REQUIRE_FALSE(worker.is_nats_connected());
+  }
 }
