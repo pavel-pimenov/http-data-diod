@@ -15,6 +15,7 @@
 #include "db_query_handler.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "test_pg_diag.hpp"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -22,6 +23,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
@@ -260,14 +262,17 @@ private:
       _exit(127);
     }
     if (pid < 0) {
-      Logger::warn("pg live test: fork failed for {}", exe);
+      pg_test_diag::fail(
+          std::format("fork {} failed: {}", exe, std::strerror(errno)));
       return false;
     }
     int status = 0;
     while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-      Logger::warn("pg live test: '{}' failed (see {})", exe, logfile);
+      pg_test_diag::fail(std::format("'{}' failed (rc={}): {}", exe,
+                                     WEXITSTATUS(status),
+                                     pg_test_diag::log_tail(logfile)));
       return false;
     }
     return true;
@@ -308,9 +313,15 @@ private:
       return false;
     }
 
+    // A full /tmp is the classic silent killer here: initdb fails, the tests
+    // SKIP and the coverage gate fails without naming the cause.
+    if (!pg_test_diag::enough_free_space()) {
+      return false;
+    }
+
     m_port = reserve_loopback_port();
     if (m_port <= 0) {
-      Logger::warn("pg live test: no free loopback port");
+      pg_test_diag::fail("no free loopback port");
       return false;
     }
 
@@ -319,14 +330,15 @@ private:
     dir_tmpl.push_back('\0');
     char *dir = ::mkdtemp(dir_tmpl.data());
     if (dir == nullptr) {
-      Logger::warn("pg live test: mkdtemp failed");
+      pg_test_diag::fail(std::format("mkdtemp failed: {}", std::strerror(errno)));
       return false;
     }
     m_datadir = dir;
 
     if (target.m_need_switch &&
         ::chown(m_datadir.c_str(), target.m_uid, target.m_gid) != 0) {
-      Logger::warn("pg live test: chown datadir failed");
+      pg_test_diag::fail(std::format("chown datadir failed: {}",
+                                     std::strerror(errno)));
       cleanup_datadir();
       return false;
     }
@@ -336,6 +348,8 @@ private:
                   {"-D", m_datadir, "-U", "postgres", "-A", "trust",
                    "--no-locale", "-E", "UTF8"},
                   init_log, target)) {
+      pg_test_diag::fail(
+          std::format("initdb failed: {}", pg_test_diag::log_tail(init_log)));
       cleanup_datadir();
       return false;
     }
@@ -347,7 +361,8 @@ private:
          "-k", "/tmp"},
         server_log, target);
     if (server_pid < 0) {
-      Logger::warn("pg live test: fork postgres failed");
+      pg_test_diag::fail(
+          std::format("fork postgres failed: {}", std::strerror(errno)));
       cleanup_datadir();
       return false;
     }
@@ -356,7 +371,9 @@ private:
     const bool ready = wait_for_condition(
         [this] { return sql_probe(m_port) && alive(); }, kServerWaitTimeoutMs);
     if (!ready) {
-      Logger::warn("pg live test: server at {} never became ready", m_port);
+      pg_test_diag::fail(std::format(
+          "server at {} never became ready: {}",
+          m_port, pg_test_diag::log_tail(server_log)));
       stop();
       cleanup_datadir();
       return false;

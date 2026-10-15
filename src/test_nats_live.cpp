@@ -1408,6 +1408,10 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 #include <cerrno>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <format>
+
+#include "test_pg_diag.hpp"
 
 namespace pgtest {
 
@@ -1430,18 +1434,21 @@ constexpr int kPgWaitMs = 10000;
   return p;
 }
 
-[[nodiscard]] bool pg_tcp_probe(int port) {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
+// A bare TCP accept only means the postmaster bound the port: right after the
+// start it still answers SQL connections with "the database system is starting
+// up" (see test_db_live.cpp). Probe with libpq so that "ready" really means an
+// accepted SQL session before the worker is pointed at the cluster.
+[[nodiscard]] bool pg_sql_probe(int port) {
+  const std::string conninfo = std::format(
+      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=1",
+      port);
+  PGconn *conn = PQconnectdb(conninfo.c_str());
+  if (conn == nullptr) {
     return false;
   }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = htons((uint16_t)port);
-  int const rc = ::connect(fd, (const sockaddr *)&addr, sizeof(addr));
-  ::close(fd);
-  return rc == 0;
+  const bool ok = PQstatus(conn) == CONNECTION_OK;
+  PQfinish(conn);
+  return ok;
 }
 
 [[nodiscard]] bool pg_wait(const std::function<bool()>& pred, int ms) {
@@ -1608,37 +1615,49 @@ private:
   bool start() {
     if (m_bindir.empty()){ m_bindir=pg_bindir();
       if (m_bindir.empty()) {
+        pg_test_diag::fail("postgres binaries not installed, skipping");
         return false;
       }
     }
     auto t=pg_target();
     if (!t.m_ok) {
+      pg_test_diag::fail("no 'postgres' user in this image, skipping");
+      return false;
+    }
+    // A full /tmp makes initdb fail; report it instead of degrading to a silent
+    // SKIP that only shows up as a coverage-gate drop.
+    if (!pg_test_diag::enough_free_space()) {
       return false;
     }
     m_port=pg_reserve_port();
     if (m_port <= 0) {
+      pg_test_diag::fail("no free loopback port");
       return false;
     }
     const std::string tmpl="/tmp/pgdbn-XXXXXX";
     std::vector<char> dt(tmpl.begin(),tmpl.end()); dt.push_back(0);
     char* d=::mkdtemp(dt.data());
     if (!d) {
+      pg_test_diag::fail(std::format("mkdtemp failed: {}", std::strerror(errno)));
       return false;
     }
     m_datadir = d;
     if (t.m_need && ::chown(m_datadir.c_str(), t.m_uid, t.m_gid) != 0) {
+      pg_test_diag::fail(std::format("chown datadir failed: {}", std::strerror(errno)));
       cleanup();
       return false;
     }
-    if (!run_wait(m_bindir+"/initdb",{"-D",m_datadir,"-U","postgres","-A","trust","--no-locale","-E","UTF8"}, "/tmp/pginitn-"+std::to_string(m_port)+".log",t)){ cleanup(); return false; }
+    const std::string init_log = "/tmp/pginitn-" + std::to_string(m_port) + ".log";
+    if (!run_wait(m_bindir+"/initdb",{"-D",m_datadir,"-U","postgres","-A","trust","--no-locale","-E","UTF8"}, init_log,t)){ pg_test_diag::fail(std::format("initdb failed: {}", pg_test_diag::log_tail(init_log))); cleanup(); return false; }
+    const std::string serv_log = "/tmp/pgservn-" + std::to_string(m_port) + ".log";
     pid_t const sp =
         spawn(m_bindir + "/postgres",
               {"-D", m_datadir, "-p", std::to_string(m_port), "-h", "127.0.0.1",
                "-k", "/tmp"},
-              "/tmp/pgservn-" + std::to_string(m_port) + ".log", t);
-    if (sp<0){ cleanup(); return false; }
+              serv_log, t);
+    if (sp<0){ pg_test_diag::fail(std::format("fork postgres failed: {}", std::strerror(errno))); cleanup(); return false; }
     m_pid=sp;
-    if (!pg_wait([this]{ return pg_tcp_probe(m_port)&&alive(); }, kPgWaitMs)){ stop(); cleanup(); return false; }
+    if (!pg_wait([this]{ return pg_sql_probe(m_port)&&alive(); }, kPgWaitMs)){ pg_test_diag::fail(std::format("server at {} never became ready: {}", m_port, pg_test_diag::log_tail(serv_log))); stop(); cleanup(); return false; }
     return true;
   }
   void cleanup(){ m_pid=-1; if (!m_datadir.empty()){ std::error_code ec; std::filesystem::remove_all(m_datadir,ec); m_datadir.clear(); } }
