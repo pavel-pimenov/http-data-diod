@@ -22,7 +22,6 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
-#include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
@@ -69,19 +68,20 @@ constexpr int kServerWaitTimeoutMs = 10000;
   return port;
 }
 
-[[nodiscard]] bool tcp_probe(int port) {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
+// A bare TCP accept only proves the postmaster bound the port: right after the
+// start it still answers SQL connections with "the database system is starting
+// up". Probe with libpq so that "ready" really means an accepted SQL session.
+[[nodiscard]] bool sql_probe(int port) {
+  const std::string conninfo = std::format(
+      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=1",
+      port);
+  PGconn *conn = PQconnectdb(conninfo.c_str());
+  if (conn == nullptr) {
     return false;
   }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = htons(static_cast<uint16_t>(port));
-  const int rc = ::connect(fd, reinterpret_cast<const sockaddr *>(&addr),
-                           sizeof(addr));
-  ::close(fd);
-  return rc == 0;
+  const bool ok = PQstatus(conn) == CONNECTION_OK;
+  PQfinish(conn);
+  return ok;
 }
 
 [[nodiscard]] bool wait_for_condition(const std::function<bool()> &predicate,
@@ -192,7 +192,14 @@ public:
 
   bool ensure_started() {
     if (m_pid > 0) {
-      return true;
+      if (alive()) {
+        return true;
+      }
+      // The server exited behind our back (crash, OOM, external kill): the
+      // port is stale, so drop the datadir and bring a fresh cluster up.
+      Logger::warn("pg live test: shared server died, restarting");
+      m_pid = -1;
+      cleanup_datadir();
     }
     if (m_failed) {
       return false;
@@ -221,6 +228,7 @@ public:
       ::waitpid(m_pid, &status, 0);
     }
     m_pid = -1;
+    cleanup_datadir();
   }
 
 private:
@@ -346,8 +354,7 @@ private:
     m_pid = server_pid;
 
     const bool ready = wait_for_condition(
-        [this] { return tcp_probe(m_port) && alive(); },
-        kServerWaitTimeoutMs);
+        [this] { return sql_probe(m_port) && alive(); }, kServerWaitTimeoutMs);
     if (!ready) {
       Logger::warn("pg live test: server at {} never became ready", m_port);
       stop();
