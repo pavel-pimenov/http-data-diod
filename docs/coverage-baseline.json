@@ -93,9 +93,9 @@
     },
     "db_query_executor_postgres.cpp": {
       "lines": 215,
-      "covered": 196,
+      "covered": 202,
       "branches": 330,
-      "branches_covered": 175
+      "branches_covered": 183
     },
     "db_query_handler.cpp": {
       "lines": 83,
@@ -123,9 +123,9 @@
     },
     "duplicate_detector.cpp": {
       "lines": 134,
-      "covered": 128,
+      "covered": 130,
       "branches": 200,
-      "branches_covered": 117
+      "branches_covered": 118
     },
     "dynamic_labeled_family.hpp": {
       "lines": 93,
@@ -375,9 +375,9 @@
     },
     "sentry_client.cpp": {
       "lines": 247,
-      "covered": 240,
+      "covered": 241,
       "branches": 668,
-      "branches_covered": 350
+      "branches_covered": 352
     },
     "sentry_client.hpp": {
       "lines": 2,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
@@ -441,9 +441,9 @@
     },
     "trace_logger.cpp": {
       "lines": 433,
-      "covered": 393,
+      "covered": 394,
       "branches": 1146,
-      "branches_covered": 598
+      "branches_covered": 600
     },
     "trace_logger.hpp": {
       "lines": 30,

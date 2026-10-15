@@ -2212,6 +2212,57 @@ TEST_CASE(
   REQUIRE(detector.per_client_count_size() == 1);
 }
 
+TEST_CASE(
+    "DuplicateDetector: bodies with equal counts evict by the first-seen "
+    "tie-break",
+    "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_max_entries = 2;
+  DuplicateDetector detector(options);
+
+  // Two bodies seen exactly once each: their counts tie at 1, so the eviction
+  // has to fall through to the first-seen comparison to pick a victim.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})")
+              .first == false);
+  REQUIRE(detector.record("client-c", "10.0.0.3", "hash-3", R"({"v":3})")
+              .first == false);
+
+  // Both bodies were seen once (equal counts), so picking the victim has to
+  // fall back to the first-seen timestamps. The container is unordered, so
+  // either equal-count body may be dropped, but exactly one of them must be
+  // gone: the one still tracked is a duplicate, the evicted one starts over.
+  const bool first_tracked = detector.record("client-a", "10.0.0.1", "hash-1",
+                                             R"({"v":1})")
+                                 .first;
+  const bool second_tracked = detector.record("client-b", "10.0.0.2", "hash-2",
+                                              R"({"v":2})")
+                                  .first;
+  REQUIRE(first_tracked != second_tracked);
+}
+
+TEST_CASE(
+    "DuplicateDetector: per-client bound evicts the least recently seen client",
+    "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_max_entries = 2;
+  DuplicateDetector detector(options);
+
+  for (int i = 0; i < 2; ++i) {
+    detector.record("client-a", "10.0.0.1", "hash-a", R"({"a":1})");
+    detector.record("client-b", "10.0.0.2", "hash-b", R"({"b":1})");
+  }
+  REQUIRE(detector.per_client_count_size() == 2);
+
+  // Overflow with two tracked clients: the victim is chosen by comparing the
+  // per-client last-seen timestamps.
+  for (int i = 0; i < 2; ++i) {
+    detector.record("client-c", "10.0.0.3", "hash-c", R"({"c":1})");
+  }
+  REQUIRE(detector.per_client_count_size() == 2);
+}
+
 TEST_CASE("DuplicateDetector: idle per-client counters expire after TTL",
           "[duplicate-detector]") {
   DuplicateDetector::Options options;

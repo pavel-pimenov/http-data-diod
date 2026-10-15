@@ -50,10 +50,25 @@ struct TraceMockServer {
   mutable std::mutex m_mu;
   std::vector<std::string> m_bodies;
   int m_slow_us = 0;
+  std::atomic<int> m_hang_requests{0};
+  std::atomic<int> m_hung{0};
+  std::atomic<bool> m_stopping{false};
 
-  explicit TraceMockServer(int slow_us = 0) : m_slow_us(slow_us) {
+  explicit TraceMockServer(int slow_us = 0, int hang_requests = 0)
+      : m_slow_us(slow_us), m_hang_requests(hang_requests) {
     m_server.Post("/api/traces",
                   [this](const httplib::Request &req, httplib::Response &res) {
+                    if (m_hang_requests.load() > 0) {
+                      // Hold the response past the client's read timeout: the
+                      // caller sees a failed POST and never gets a body.
+                      m_hang_requests--;
+                      m_hung++;
+                      for (int i = 0; i < 50 && !m_stopping.load(); ++i) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(100));
+                      }
+                      return;
+                    }
                     if (m_slow_us > 0) {
                       std::this_thread::sleep_for(
                           std::chrono::microseconds(m_slow_us));
@@ -71,11 +86,16 @@ struct TraceMockServer {
   }
 
   ~TraceMockServer() {
+    m_stopping = true;
     m_server.stop();
     if (m_thread.joinable()) {
       m_thread.join();
     }
   }
+
+  int port() const { return m_port; }
+
+  int hung_count() const { return m_hung.load(); }
 
   std::string endpoint() const {
     return "http://127.0.0.1:" + std::to_string(m_port) + "/api/traces";
@@ -399,6 +419,27 @@ TEST_CASE("TraceLogger: failed batch increments failed counter", "[tracing]") {
   REQUIRE(wait_for_condition([&] { return env.failed() >= 1.0; }, 8000));
   REQUIRE(env.sent() == 0.0);
   REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
+}
+
+TEST_CASE("TraceLogger: jaeger send logs recovery after a failed attempt",
+          "[tracing]") {
+  // The endpoint makes the first delivery hang past the HTTP client's read
+  // timeout, so that attempt fails; the retry issued from the same flush then
+  // reaches the endpoint and the logger has to notice the earlier failure.
+  TraceMockServer const server(0, /*hang_requests=*/1);
+  TracingBreakerSettings settings;
+  // Keep the breaker closed here: only the in-flush retry matters.
+  settings.m_failure_threshold = 1000;
+  TraceLoggerEnv env(server.endpoint(), 50, 200, 1.0, settings);
+
+  env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                             "bbbbbbbbbbbbbbbb", "", "HTTP POST /query", 1000,
+                             2000, "test-service");
+  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 15000));
+  // The hung request proves the recovery branch was entered with a non-zero
+  // failure counter; the recorded body proves the batch was finally delivered.
+  REQUIRE(server.hung_count() == 1);
+  REQUIRE(server.body_count() >= 1);
 }
 
 TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "

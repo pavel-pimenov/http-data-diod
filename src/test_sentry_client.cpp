@@ -201,6 +201,8 @@ TEST_CASE("Sentry event JSON: every level maps to its Sentry string",
     REQUIRE(json["level"] == "fatal");
     REQUIRE(json["exception"]["values"][0]["value"] == "fatal boom");
   }
+  // Out-of-range enum values fall back to the last-resort "error" level.
+  REQUIRE(level(static_cast<sentry::EventLevel>(99)) == "error");
 }
 
 TEST_CASE("Sentry event JSON: transaction and non-string tags are kept",

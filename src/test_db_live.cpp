@@ -671,6 +671,50 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
   slow.join();
 }
 
+TEST_CASE("PostgresQueryExecutor: zero-column result set is a SQL error",
+          "[db-live]") {
+  REQUIRE_PG();
+  {
+    // PostgreSQL accepts zero-column tables, and SELECT * FROM one yields
+    // PGRES_TUPLES_OK with no fields at all.
+    PqConn conn(shared_pg());
+    conn.exec("CREATE TABLE IF NOT EXISTS pg_zero_col ()");
+  }
+  PostgresQueryExecutor ex(make_pg_cfg(shared_pg()));
+  REQUIRE(ex.init());
+
+  int status = 0;
+  const json resp = ex.execute_query("SELECT * FROM pg_zero_col",
+                                     json::object(), -1, 10, status);
+  REQUIRE(status == 422);
+  REQUIRE(resp[DbResponseContract::kStatus] ==
+          DbResponseContract::kStatusError);
+  REQUIRE(resp[DbResponseContract::kError][DbResponseContract::kMessage] ==
+          "Statement returned no result set");
+}
+
+TEST_CASE("PostgresQueryExecutor: ping fails on a terminated backend",
+          "[db-live]") {
+  REQUIRE_PG();
+  PostgresQueryExecutor ex(make_pg_cfg(shared_pg(), /*pool_max=*/1));
+  REQUIRE(ex.init());
+
+  int status = 0;
+  REQUIRE(ex.execute_query("SELECT 1", json::object(), -1, 1, status)
+              [DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+
+  // Kill the backend behind the pooled connection: the connection object stays
+  // alive locally, so the next command on it can no longer reach PostgreSQL.
+  PqConn killer(shared_pg());
+  killer.exec("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+              "WHERE datname = 'postgres' AND pid <> pg_backend_pid()");
+
+  REQUIRE_FALSE(ex.ping(500));
+  // The pool dropped the dead connection, so a fresh one is created and the
+  // executor recovers on the next ping.
+  REQUIRE(ex.ping(500));
+}
+
 TEST_CASE("PostgresQueryExecutor: handles a connection lost mid-pool",
           "[db-live]") {
   REQUIRE_PG();
