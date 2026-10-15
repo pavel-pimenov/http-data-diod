@@ -2310,6 +2310,18 @@ TEST_CASE("DedupCache: bounded size evicts the oldest entry",
   REQUIRE(cache.find("c").has_value());
 }
 
+TEST_CASE("DedupCache: store reaps expired entries before inserting",
+          "[dedup-cache]") {
+  // store() runs evict_expired_locked() first, so a stale entry is dropped
+  // even if nobody calls find() on it in between.
+  DedupCache cache(true, 16, 20);
+  cache.store("req-1", "v1");
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  cache.store("req-2", "v2");
+  REQUIRE_FALSE(cache.find("req-1").has_value());
+  REQUIRE(cache.find("req-2").has_value());
+}
+
 TEST_CASE("DedupCache: refresh moves entry to the back (LRU order)",
           "[dedup-cache]") {
   DedupCache cache(true, 2, 60000);

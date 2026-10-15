@@ -117,9 +117,9 @@
     },
     "dedup_cache.hpp": {
       "lines": 53,
-      "covered": 50,
+      "covered": 52,
       "branches": 64,
-      "branches_covered": 40
+      "branches_covered": 43
     },
     "duplicate_detector.cpp": {
       "lines": 134,
@@ -129,9 +129,9 @@
     },
     "dynamic_labeled_family.hpp": {
       "lines": 93,
-      "covered": 87,
+      "covered": 92,
       "branches": 164,
-      "branches_covered": 85
+      "branches_covered": 91
     },
     "error_categorizer.hpp": {
       "lines": 30,
@@ -207,9 +207,9 @@
     },
     "l2_routing.hpp": {
       "lines": 79,
-      "covered": 72,
+      "covered": 77,
       "branches": 142,
-      "branches_covered": 91
+      "branches_covered": 99
     },
     "l2_worker.cpp": {
       "lines": 313,
@@ -285,9 +285,9 @@
     },
     "pool_executor.hpp": {
       "lines": 18,
-      "covered": 17,
+      "covered": 18,
       "branches": 30,
-      "branches_covered": 16
+      "branches_covered": 18
     },
     "proxy_init.cpp": {
       "lines": 93,
@@ -401,7 +401,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 246
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -417,9 +417,9 @@
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
-      "covered": 24,
+      "covered": 26,
       "branches": 22,
-      "branches_covered": 11
+      "branches_covered": 14
     },
     "time_utils.hpp": {
       "lines": 35,

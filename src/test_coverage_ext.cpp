@@ -212,6 +212,22 @@ TEST_CASE("Pool executor: null pool throws", "[pool-executor]") {
       std::runtime_error);
 }
 
+TEST_CASE("Pool executor: pool returning no connection throws",
+          "[pool-executor]") {
+  // A pool that hands out nothing (all connections invalid/closed) must be a
+  // hard error rather than a null dereference in the caller.
+  struct NullPool {
+    using client_type = MockHttpClient;
+    std::unique_ptr<MockHttpClient> acquire_connection() { return nullptr; }
+    void release_connection(std::unique_ptr<MockHttpClient>) {}
+  };
+  NullPool pool;
+  REQUIRE_THROWS_AS(
+      execute_http_command_with_status(
+          &pool, [](MockHttpClient *) { return std::string("never reached"); }),
+      std::runtime_error);
+}
+
 TEST_CASE("Pool executor: returns result and status code", "[pool-executor]") {
   MockPool pool;
   auto result = execute_http_command_with_status(&pool, [](MockHttpClient *c) {
@@ -922,6 +938,16 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM queue_size reflects pending work",
   pool.enqueue([]() {});
   pool.enqueue([]() {});
   REQUIRE(pool.queue_size() <= 2);
+}
+
+TEST_CASE("ThreadPoolWrapper: unknown pool type is rejected on enqueue",
+          "[thread-pool-wrapper]") {
+  // The enum only carries CUSTOM/NONE; an out-of-range value must be refused
+  // instead of dereferencing a pool that was never constructed.
+  auto const unknown = static_cast<ThreadPoolWrapper::Type>(42);
+  ThreadPoolWrapper pool(unknown, 1);
+  REQUIRE(pool.queue_size() == 0);
+  REQUIRE_THROWS_AS(pool.enqueue([]() { return 1; }), std::runtime_error);
 }
 
 // ============================================================================

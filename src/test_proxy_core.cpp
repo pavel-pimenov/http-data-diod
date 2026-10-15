@@ -780,6 +780,37 @@ TEST_CASE("Dynamic labeled family: max_entries cap evicts oldest",
   REQUIRE(families[0].metric.size() == 2);
 }
 
+TEST_CASE("Dynamic labeled family: gauge without a provider still collects",
+          "[labeled-family]") {
+  // No provider: the Gauge path falls back to the TTL/LRU sweep and exports
+  // whatever the caller recorded via get().
+  DynamicLabeledFamily<prometheus::Gauge> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Gauge>::Series>{
+          {"inflight", "In-flight per client"}});
+  family.get("alice", 0)->Set(3.0);
+
+  const auto families = family.Collect();
+  REQUIRE(families.size() == 1);
+  REQUIRE(families[0].metric.size() == 1);
+  REQUIRE(families[0].metric[0].gauge.value == 3.0);
+}
+
+TEST_CASE("Dynamic labeled family: TTL drops an idle label value on collect",
+          "[labeled-family]") {
+  DynamicLabeledFamily<prometheus::Counter> family(
+      "client_id",
+      std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
+          {"requests_total", "Requests per client"}},
+      {}, /*ttl_seconds=*/1);
+  family.get("alice", 0)->Increment();
+  REQUIRE(family.Collect().size() == 1);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  // "alice" is now older than the TTL, so the sweep removes her series.
+  REQUIRE(family.Collect().empty());
+}
+
 TEST_CASE("Dynamic labeled family: snapshot provider replaces gauge set",
           "[labeled-family]") {
   auto current_requests = 0.0;
@@ -1391,6 +1422,26 @@ TEST_CASE("L2 routing: no servers configured is denied", "[l2-routing]") {
   std::string selected;
   REQUIRE_FALSE(
       find_allowed_l2_server({}, "/api/v1", selected));
+}
+
+TEST_CASE("L2 routing: path-only base falls back to the legacy prefix match",
+          "[l2-routing]") {
+  // A base without scheme/host is rejected by parse_url, so the legacy prefix
+  // fallback decides the route ("/api" still matches "/api/v1").
+  const std::vector<std::string> urls{"/api"};
+  std::string selected;
+  REQUIRE(find_allowed_l2_server(urls, "/api/v1", selected));
+  REQUIRE(selected == "/api");
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/nope", selected));
+}
+
+TEST_CASE("L2 routing: unparsable base without a prefix match is denied",
+          "[l2-routing]") {
+  // Malformed (no host after the scheme) and unrelated to the path: the
+  // fallback does not match, so the lookup continues and finally denies.
+  const std::vector<std::string> urls{"http://"};
+  std::string selected;
+  REQUIRE_FALSE(find_allowed_l2_server(urls, "/api/v1", selected));
 }
 
 TEST_CASE("L2 routing: safe paths always map to the first server",
