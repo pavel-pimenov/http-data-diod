@@ -520,6 +520,25 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
   REQUIRE(html.find("requests_total") != std::string::npos);
 }
 
+TEST_CASE("Stats page: dense labeled family renders the +N more overflow row",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = prometheus::BuildGauge()
+                     .Name("dense_series")
+                     .Help("dense family")
+                     .Register(*registry);
+  // kMaxSeriesPerTile is 6 in build_stats_html: 8 series must collapse to the
+  // first 6 plus a "+2 more" overflow row.
+  for (int i = 0; i < 8; ++i) {
+    family.Add({{"shard", std::to_string(i)}}).Set(static_cast<double>(i));
+  }
+
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("dense_series") != std::string::npos);
+  REQUIRE(html.find("+2 more") != std::string::npos);
+}
+
 TEST_CASE("Stats page: build_stats_html flags degraded when health not ready",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();

@@ -775,6 +775,45 @@ TEST_CASE("NatsClient: subscribe rejects an invalid subject", "[nats-live]") {
   client.disconnect();
 }
 
+TEST_CASE("NatsClient: rejects empty subject and empty header key",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  const std::string subject = unique_subject("nats.badargs");
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  REQUIRE(client.connect());
+  REQUIRE(client.is_connected());
+
+  // Empty subject: natsMsg_Create fails before anything is published, so the
+  // client stays connected and only records the error.
+  REQUIRE_FALSE(client.request("", "payload", 500).has_value());
+  REQUIRE(client.is_connected());
+  REQUIRE_FALSE(client.publish_with_headers("", "payload", {}));
+  REQUIRE(client.is_connected());
+  REQUIRE(client.get_last_error().has_value());
+
+  // Empty header key: set_msg_headers fails, the message is destroyed and
+  // nothing is published — the connection is untouched.
+  REQUIRE_FALSE(client.publish_with_headers(subject, "payload", {{"", "v"}}));
+  REQUIRE(client.is_connected());
+  REQUIRE(client
+              .request_with_headers(subject, "payload", {{"", "v"}}, {}, 500)
+              .m_data.empty());
+  REQUIRE(client.is_connected());
+
+  // Legacy publish path: natsConnection_PublishString rejects the empty subject
+  // and marks the client down, so it runs last.
+  REQUIRE_FALSE(client.publish("", "payload"));
+  REQUIRE_FALSE(client.is_connected());
+
+  client.disconnect();
+}
+
 TEST_CASE("NatsClient: connect fails fast when the broker is unreachable",
           "[nats-live]") {
   // A reserved-but-unbound port: natsConnection_Connect() returns
@@ -1152,6 +1191,13 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   REQUIRE(r2.has_value());
   REQUIRE(json::parse(*r2)[NatsResponseContract::kStatus] == 200);
   REQUIRE(backend.m_posts.load() == 1);
+
+  // A fire-and-forget publish (no reply subject) reaches the worker's
+  // queue-group subscription; the worker must drop it instead of enqueuing a
+  // response it cannot address. NATS delivers messages on a subject in order,
+  // so the next request below is guaranteed to be handled after this drop.
+  REQUIRE(test_client.publish(
+      subject, make_worker_request("live-no-reply", "/api/value").dump()));
 
   // Unparseable payload: the worker replies 400 instead of panicking.
   const std::optional<std::string> r3 =

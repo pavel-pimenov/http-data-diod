@@ -177,9 +177,9 @@
     },
     "in_flight_tracker.hpp": {
       "lines": 60,
-      "covered": 55,
+      "covered": 57,
       "branches": 42,
-      "branches_covered": 23
+      "branches_covered": 27
     },
     "interfaces.hpp": {
       "lines": 1,
@@ -225,9 +225,9 @@
     },
     "l2_worker_nats.cpp": {
       "lines": 362,
-      "covered": 319,
+      "covered": 321,
       "branches": 826,
-      "branches_covered": 395
+      "branches_covered": 397
     },
     "logger.hpp": {
       "lines": 275,
@@ -255,9 +255,9 @@
     },
     "nats_client.cpp": {
       "lines": 462,
-      "covered": 406,
+      "covered": 425,
       "branches": 794,
-      "branches_covered": 399
+      "branches_covered": 425
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -401,7 +401,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 244
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 81
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

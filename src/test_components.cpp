@@ -240,8 +240,8 @@ TEST_CASE("InFlightTracker: Waits for completion", "[in-flight]") {
     completed = true;
   });
 
-  bool const result =
-      tracker.wait_for_completion(std::chrono::seconds(2), false);
+  // log_issues=true (the default) so the "completed" log line is exercised.
+  bool const result = tracker.wait_for_completion(std::chrono::seconds(2));
   t.join();
 
   REQUIRE(result == true);
@@ -265,8 +265,8 @@ TEST_CASE("InFlightTracker: Timeout works", "[in-flight]") {
   while (!started.load()) {
     std::this_thread::yield();
   }
-  bool const result =
-      tracker.wait_for_completion(std::chrono::seconds(1), false);
+  // Default log_issues=true so the timeout warn line is exercised too.
+  bool const result = tracker.wait_for_completion(std::chrono::seconds(1));
   t.join();
 
   REQUIRE(result == false);
