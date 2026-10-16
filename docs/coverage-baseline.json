@@ -227,7 +227,7 @@
       "lines": 362,
       "covered": 321,
       "branches": 826,
-      "branches_covered": 397
+      "branches_covered": 401
     },
     "logger.hpp": {
       "lines": 275,
@@ -321,9 +321,9 @@
     },
     "request_handler.cpp": {
       "lines": 449,
-      "covered": 413,
+      "covered": 428,
       "branches": 961,
-      "branches_covered": 499
+      "branches_covered": 526
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -401,7 +401,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 244
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 7,

@@ -229,7 +229,10 @@ public:
         ::dup2(fd, STDERR_FILENO);
         ::close(fd);
       }
-      if (m_tls_cert.empty() || m_tls_key.empty()) {
+      if (!m_config_file.empty()) {
+        ::execlp("nats-server", "nats-server", "-c", m_config_file.c_str(),
+                 nullptr);
+      } else if (m_tls_cert.empty() || m_tls_key.empty()) {
         ::execlp("nats-server", "nats-server", "-a", "127.0.0.1", "-p",
                  port.c_str(), nullptr);
       } else {
@@ -287,11 +290,14 @@ public:
     m_tls_key = key;
   }
 
+  void use_config_file(const std::string &path) { m_config_file = path; }
+
 private:
   int m_port = 0;
   pid_t m_pid = 0;
   std::string m_tls_cert;
   std::string m_tls_key;
+  std::string m_config_file;
 };
 
 std::string unique_subject(const std::string &base) {
@@ -876,6 +882,56 @@ TEST_CASE("NatsClient: health check fails fast once the broker stops",
   client.disconnect();
 }
 
+TEST_CASE("NatsClient: async error callback records a permission violation",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  const std::string config_path =
+      "/tmp/nats-perm-" + std::to_string(server.port()) + ".conf";
+  {
+    std::ofstream config(config_path);
+    REQUIRE(config.is_open());
+    config << "host: 127.0.0.1\n";
+    config << "port: " << server.port() << "\n";
+    config << "authorization {\n";
+    config << "  users = [\n";
+    config << "    { user: \"denied\", password: \"secret\", permissions: "
+              "{ publish: { deny: \">\" } } }\n";
+    config << "  ]\n";
+    config << "}\n";
+  }
+  server.use_config_file(config_path);
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  NatsConfig cfg = live_nats_cfg(unique_subject("nats.denied"), server.port());
+  cfg.m_username = "denied";
+  cfg.m_password = "secret";
+  NatsClient client(cfg);
+  REQUIRE(client.connect());
+
+  // The user may connect but not publish: the broker answers with a
+  // permissions-violation -ERR that libnats delivers through the asynchronous
+  // error handler (`_processPermissionViolation` -> error callback). Waiting for
+  // the recorded error makes on_async_nats_error() deterministic, unlike the
+  // accidental coverage the worker reconnect test provided (whose timing made
+  // the nats_client line coverage flaky).
+  (void)client.publish(cfg.m_subject, "denied");
+  const bool observed = wait_for_condition(
+      [&client]() {
+        const std::optional<std::string> last_error = client.get_last_error();
+        return last_error.has_value() &&
+               last_error->find("asynchronous NATS error") !=
+                   std::string::npos;
+      },
+      8000);
+  client.disconnect();
+  ::unlink(config_path.c_str());
+  REQUIRE(observed);
+}
+
 // ============================================================================
 // Track B: NatsPollService / DB gateway / worker over a live broker
 // ============================================================================
@@ -1074,6 +1130,70 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     httplib::Response res;
     handler.handle_get(req, res);
     REQUIRE(res.status == 504);
+  }
+}
+
+TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live "
+          "broker",
+          "[nats-live]") {
+  if (nats_binary_path().empty()) {
+    SKIP("nats-server binary not available");
+  }
+  NatsServer server;
+  REQUIRE(server.start());
+  REQUIRE(server.wait_ready());
+
+  {
+    // A responder subscribed to the proxy's own NATS subject answers the poll,
+    // so the generic request path runs past poll_for_response() into
+    // send_response() (the ordinary proxy->worker->client success path, which
+    // offline tests only ever see time out with 504).
+    const std::string subject = unique_subject("proxy.ok");
+    const EnvGuard env(live_proxy_env(server.port(), subject));
+    AppContext ctx;
+    init_proxy_components(ctx);
+    REQUIRE(ctx.m_nats_client->is_connected());
+    const auto reply_fn = [](const std::string &, const std::string &) {
+      return NatsReply{build_nats_response_envelope(
+                           200, "req-proxy-ok", R"({"proxied":true})", 0,
+                           false, "application/json", json::object(), "")
+                           .dump(),
+                       NatsHeaders{}};
+    };
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
+
+    std::atomic<bool> shutdown{false};
+    StatsLogger stats(ctx, shutdown);
+    RequestHandler handler(ctx, stats);
+    const httplib::Request req = make_get("/api/v1/anything");
+    httplib::Response res;
+    handler.handle_get(req, res);
+    REQUIRE(res.status == 200);
+    REQUIRE(json::parse(res.body)["proxied"] == true);
+  }
+
+  {
+    // A reply that is not a JSON envelope reaches the invalid_response branch
+    // of the generic path.
+    const std::string subject = unique_subject("proxy.badresp");
+    const EnvGuard env(live_proxy_env(server.port(), subject));
+    AppContext ctx;
+    init_proxy_components(ctx);
+    const auto reply_fn = [](const std::string &, const std::string &) {
+      return NatsReply{"not-a-json-envelope", NatsHeaders{}};
+    };
+    NatsResponder const responder(live_nats_cfg(subject, server.port()),
+                                  subject, reply_fn);
+
+    std::atomic<bool> shutdown{false};
+    StatsLogger stats(ctx, shutdown);
+    RequestHandler handler(ctx, stats);
+    const httplib::Request req = make_get("/api/v1/anything");
+    httplib::Response res;
+    handler.handle_get(req, res);
+    REQUIRE(res.status == 500);
+    REQUIRE(json::parse(res.body)["error"] == "Invalid response format");
   }
 }
 
