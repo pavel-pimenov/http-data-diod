@@ -401,7 +401,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 244
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -413,7 +413,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,
@@ -440,10 +440,10 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 433,
-      "covered": 394,
-      "branches": 1146,
-      "branches_covered": 600
+      "lines": 408,
+      "covered": 384,
+      "branches": 1124,
+      "branches_covered": 592
     },
     "trace_logger.hpp": {
       "lines": 30,

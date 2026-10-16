@@ -150,6 +150,12 @@ private:
   // (one multi-item envelope per batch). Fire-and-forget, never blocks the
   // request path; per-span outcome lands in m_sentry_metrics.m_spans_sent/_failed.
   void deliver_sentry_transactions(const std::vector<SpanData> &batch);
+  // Records one delivery failure against a sink and opens its exponential
+  // breaker once the consecutive-failure threshold is reached: subsequent
+  // batches are then shed for the cooldown window instead of hammering the
+  // dead target. Shared by the Jaeger and Sentry/GlitchTip sinks.
+  void record_sink_failure(ExponentialBreaker &breaker, uint64_t now_steady_ms,
+                           std::string_view sink_name);
 
   // Fast random hex generation (thread-local, no re-initialization)
   static std::string random_hex_fast(size_t len);

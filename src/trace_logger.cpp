@@ -336,6 +336,25 @@ std::string JaegerLogger::build_sentry_envelope(
   return envelope;
 }
 
+// Opens the sink's breaker once consecutive failures reach the threshold: the
+// cooldown window doubles per opening (base << failures-1), clamped to the
+// configured maximum. Both the Jaeger and Sentry/GlitchTip sinks share it.
+void JaegerLogger::record_sink_failure(ExponentialBreaker &breaker,
+                                       uint64_t now_steady_ms,
+                                       std::string_view sink_name) {
+  ++breaker.m_consecutive_failures;
+  if (breaker.m_consecutive_failures <
+      m_breaker.m_settings.m_failure_threshold) {
+    return;
+  }
+  const uint64_t cooldown_ms = std::min<uint64_t>(
+      (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
+          << (std::min(breaker.m_consecutive_failures.load(), 20) - 1),
+      (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
+  breaker.m_cooldown_until_steady_ms = now_steady_ms + cooldown_ms;
+  Logger::warn("{} breaker opened, shedding for {}ms", sink_name, cooldown_ms);
+}
+
 void JaegerLogger::deliver_sentry_transactions(
     const std::vector<SpanData> &batch) {
   if (!m_sentry.m_dsn || !m_pools.m_sentry_client_pool || batch.empty()) {
@@ -385,13 +404,9 @@ void JaegerLogger::deliver_sentry_transactions(
   // transaction of the batch.
   const std::string envelope = build_sentry_envelope(events);
   try {
+    // acquire_connection() throws on pool exhaustion (it never returns a null
+    // client), so a timeout lands in the catch below and is accounted there.
     auto client = m_pools.m_sentry_client_pool->acquire_connection();
-    if (!client) {
-      if (m_sentry_metrics.m_spans_failed) {
-        m_sentry_metrics.m_spans_failed->Increment(event_count);
-      }
-      return;
-    }
     client->post_no_response(
         url, envelope, "",
         httplib::Headers{{"X-Sentry-Auth", auth}},
@@ -405,20 +420,7 @@ void JaegerLogger::deliver_sentry_transactions(
   } catch (const std::exception &e) {
     Logger::error(
         "Sentry transaction delivery failed (non-critical): {}", e.what());
-    m_breaker.m_sentry.m_consecutive_failures++;
-    if (m_breaker.m_sentry.m_consecutive_failures >=
-        m_breaker.m_settings.m_failure_threshold) {
-      uint64_t cooldown_ms =
-          std::min<uint64_t>(
-              (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
-                               20) -
-                      1),
-              (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.m_cooldown_until_steady_ms =
-          now_steady_ms + cooldown_ms;
-      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
-    }
+    record_sink_failure(m_breaker.m_sentry, now_steady_ms, "Sentry");
     if (m_sentry_metrics.m_spans_failed) {
       m_sentry_metrics.m_spans_failed->Increment(event_count);
     }
@@ -426,20 +428,7 @@ void JaegerLogger::deliver_sentry_transactions(
     Logger::error(
         "Sentry transaction delivery failed with unknown error "
         "(non-critical)");
-    m_breaker.m_sentry.m_consecutive_failures++;
-    if (m_breaker.m_sentry.m_consecutive_failures >=
-        m_breaker.m_settings.m_failure_threshold) {
-      uint64_t cooldown_ms =
-          std::min<uint64_t>(
-              (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
-                               20) -
-                      1),
-              (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.m_cooldown_until_steady_ms =
-          now_steady_ms + cooldown_ms;
-      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
-    }
+    record_sink_failure(m_breaker.m_sentry, now_steady_ms, "Sentry");
     if (m_sentry_metrics.m_spans_failed) {
       m_sentry_metrics.m_spans_failed->Increment(event_count);
     }
@@ -643,22 +632,9 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
       m_breaker.m_jaeger.m_cooldown_until_steady_ms = 0;
     } else {
       retries++;
-      m_breaker.m_jaeger.m_consecutive_failures++;
       Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
                    g_tracing_max_retries, delay_ms);
-      if (m_breaker.m_jaeger.m_consecutive_failures >=
-          m_breaker.m_settings.m_failure_threshold) {
-        uint64_t cooldown_ms =
-            std::min<uint64_t>(
-                (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                    << (std::min(m_breaker.m_jaeger.m_consecutive_failures.load(),
-                                 20) -
-                        1),
-                (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-        m_breaker.m_jaeger.m_cooldown_until_steady_ms =
-            now_ms + cooldown_ms;
-        Logger::warn("Jaeger breaker opened, shedding for {}ms", cooldown_ms);
-      }
+      record_sink_failure(m_breaker.m_jaeger, now_ms, "Jaeger");
       if (retries < g_tracing_max_retries) {
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         delay_ms *= 2;
@@ -708,13 +684,10 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
   // Counter is incremented only by the caller (sender_loop / flush) to avoid
   // double-counting: send_batch returns false and the caller decides.
   try {
-    // Use very short timeout for tracing (don't block on Jaeger issues)
+    // Use very short timeout for tracing (don't block on Jaeger issues).
+    // acquire_connection() throws on pool exhaustion instead of returning a
+    // null client, so timeouts are handled by the catch below.
     auto client = m_pools.m_http_client_pool->acquire_connection();
-    if (!client) {
-      // Pool exhausted - drop spans silently (tracing is not critical)
-      return false;
-    }
-
     // Send with very short timeout - tracing should never block
     client->post_no_response(m_jaeger.m_url, payload_str, "");
     m_pools.m_http_client_pool->release_connection(std::move(client));
@@ -752,12 +725,9 @@ bool JaegerLogger::send_span(const std::string &trace_id,
 
   // Fire-and-forget: never block main logic
   try {
+    // acquire_connection() throws on pool exhaustion instead of returning a
+    // null client, so timeouts are handled by the catch below.
     auto client = m_pools.m_http_client_pool->acquire_connection();
-    if (!client) {
-      m_jaeger_metrics.m_spans_failed.Increment();
-      return false;
-    }
-
     client->post_no_response(m_jaeger.m_url, payload_str, "");
     m_pools.m_http_client_pool->release_connection(std::move(client));
     return true;
