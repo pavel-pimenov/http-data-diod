@@ -152,28 +152,28 @@
       "branches_covered": 131
     },
     "http_client.cpp": {
-      "lines": 98,
-      "covered": 92,
-      "branches": 136,
-      "branches_covered": 80
+      "lines": 103,
+      "covered": 97,
+      "branches": 140,
+      "branches_covered": 83
     },
     "http_client.hpp": {
-      "lines": 14,
-      "covered": 13,
+      "lines": 15,
+      "covered": 14,
       "branches": 64,
       "branches_covered": 32
     },
     "http_client_pool.cpp": {
-      "lines": 117,
-      "covered": 105,
-      "branches": 126,
-      "branches_covered": 74
+      "lines": 131,
+      "covered": 118,
+      "branches": 142,
+      "branches_covered": 83
     },
     "http_client_pool.hpp": {
       "lines": 3,
       "covered": 3,
-      "branches": 35,
-      "branches_covered": 17
+      "branches": 43,
+      "branches_covered": 21
     },
     "in_flight_tracker.hpp": {
       "lines": 60,

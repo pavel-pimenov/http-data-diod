@@ -50,25 +50,12 @@ struct TraceMockServer {
   mutable std::mutex m_mu;
   std::vector<std::string> m_bodies;
   int m_slow_us = 0;
-  std::atomic<int> m_hang_requests{0};
-  std::atomic<int> m_hung{0};
-  std::atomic<bool> m_stopping{false};
 
-  explicit TraceMockServer(int slow_us = 0, int hang_requests = 0)
-      : m_slow_us(slow_us), m_hang_requests(hang_requests) {
+  // `port` = 0 binds an ephemeral port; a non-zero value rebinds a previously
+  // reserved port (used to bring an endpoint back on the same address).
+  explicit TraceMockServer(int slow_us = 0, int port = 0) : m_slow_us(slow_us) {
     m_server.Post("/api/traces",
                   [this](const httplib::Request &req, httplib::Response &res) {
-                    if (m_hang_requests.load() > 0) {
-                      // Hold the response past the client's read timeout: the
-                      // caller sees a failed POST and never gets a body.
-                      m_hang_requests--;
-                      m_hung++;
-                      for (int i = 0; i < 50 && !m_stopping.load(); ++i) {
-                        std::this_thread::sleep_for(
-                            std::chrono::milliseconds(100));
-                      }
-                      return;
-                    }
                     if (m_slow_us > 0) {
                       std::this_thread::sleep_for(
                           std::chrono::microseconds(m_slow_us));
@@ -81,12 +68,16 @@ struct TraceMockServer {
                  [](const httplib::Request &, httplib::Response &res) {
                    res.status = 200;
                  });
-    m_port = m_server.bind_to_any_port("127.0.0.1");
+    if (port > 0) {
+      REQUIRE(m_server.bind_to_port("127.0.0.1", port));
+      m_port = port;
+    } else {
+      m_port = m_server.bind_to_any_port("127.0.0.1");
+    }
     m_thread = std::thread([this] { m_server.listen_after_bind(); });
   }
 
   ~TraceMockServer() {
-    m_stopping = true;
     m_server.stop();
     if (m_thread.joinable()) {
       m_thread.join();
@@ -94,8 +85,6 @@ struct TraceMockServer {
   }
 
   int port() const { return m_port; }
-
-  int hung_count() const { return m_hung.load(); }
 
   std::string endpoint() const {
     return "http://127.0.0.1:" + std::to_string(m_port) + "/api/traces";
@@ -421,25 +410,46 @@ TEST_CASE("TraceLogger: failed batch increments failed counter", "[tracing]") {
   REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
 }
 
-TEST_CASE("TraceLogger: jaeger send logs recovery after a failed attempt",
+TEST_CASE("TraceLogger: jaeger delivery recovers after the endpoint comes back",
           "[tracing]") {
-  // The endpoint makes the first delivery hang past the HTTP client's read
-  // timeout, so that attempt fails; the retry issued from the same flush then
-  // reaches the endpoint and the logger has to notice the earlier failure.
-  TraceMockServer const server(0, /*hang_requests=*/1);
+  // Reserve a loopback port, then release it: the first batch is delivered to
+  // a refused connection and fails every attempt. The endpoint then returns on
+  // the same port and the next batch has to reach it -- possible only if the
+  // failed attempts handed their pool slots back (they used to leak and
+  // exhaust the 3-slot pool for good).
+  int port = 0;
+  {
+    httplib::Server const probe;
+    port = const_cast<httplib::Server &>(probe).bind_to_any_port("127.0.0.1");
+  }
+  REQUIRE(port > 0);
+
   TracingBreakerSettings settings;
-  // Keep the breaker closed here: only the in-flush retry matters.
+  // Keep the breaker closed here: the scenario exercises the connection pool
+  // and the recovery log, not shedding.
   settings.m_failure_threshold = 1000;
-  TraceLoggerEnv env(server.endpoint(), 50, 200, 1.0, settings);
+  const std::string endpoint =
+      "http://127.0.0.1:" + std::to_string(port) + "/api/traces";
+  TraceLoggerEnv env(endpoint, 50, 200, 1.0, settings);
 
   env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /query", 1000,
                              2000, "test-service");
-  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 15000));
-  // The hung request proves the recovery branch was entered with a non-zero
-  // failure counter; the recorded body proves the batch was finally delivered.
-  REQUIRE(server.hung_count() == 1);
-  REQUIRE(server.body_count() >= 1);
+  // All retries must be done before the endpoint returns, otherwise a late
+  // retry would mask an exhausted pool.
+  REQUIRE(wait_for_condition([&] { return env.failed() >= 1.0; }, 20000));
+  REQUIRE(env.sent() == 0.0);
+
+  // The endpoint comes back on the same port: the next batch must get through
+  // and the logger has to notice that delivery recovered (it had accumulated
+  // failures just before).
+  TraceMockServer const server(0, port);
+  REQUIRE(server.port() == port);
+  env.m_logger->enqueue_span("cccccccccccccccccccccccccccccccc",
+                             "dddddddddddddddd", "", "HTTP POST /query", 1000,
+                             2000, "test-service");
+  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 20000));
+  REQUIRE(server.body_count() == 1);
 }
 
 TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "

@@ -431,3 +431,54 @@ TEST_CASE("HttpClientPool: pool full on release destroys connection",
   REQUIRE(pool.total_clients() == 0);
   REQUIRE(pool.available_count() == 1);
 }
+
+TEST_CASE("HttpClientPool: connection dropped without release returns its slot",
+          "[http-client-pool]") {
+  HttpClientPool pool(1, 1, 1);
+
+  {
+    // Simulates a consumer that throws before release_connection: the client
+    // is destroyed while still checked out.
+    auto dropped = pool.acquire_connection();
+    REQUIRE(dropped != nullptr);
+    REQUIRE(pool.total_clients() == 1);
+    REQUIRE(pool.active_clients() == 1);
+  }
+
+  // Before the fix the slot stayed leaked and the pool could never be used
+  // again; now the dropped connection frees it.
+  REQUIRE(pool.total_clients() == 0);
+  REQUIRE(pool.active_clients() == 0);
+
+  auto again = pool.acquire_connection();
+  REQUIRE(again != nullptr);
+  REQUIRE(pool.total_clients() == 1);
+  REQUIRE(pool.active_clients() == 1);
+  pool.release_connection(std::move(again));
+  REQUIRE(pool.total_clients() == 1);
+  REQUIRE(pool.active_clients() == 0);
+  REQUIRE(pool.available_count() == 1);
+}
+
+TEST_CASE("HttpClientPool: dropped connection resets the active gauge",
+          "[http-client-pool]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &active = prometheus::BuildGauge()
+                     .Name("test_pool_drop_active")
+                     .Help("active pool clients after a drop")
+                     .Register(*registry)
+                     .Add({});
+  PoolMetrics metrics;
+  metrics.m_active_clients = std::ref(active);
+
+  HttpClientPool pool(1, 1, 1);
+  pool.set_metrics(metrics);
+
+  {
+    auto dropped = pool.acquire_connection();
+    REQUIRE(active.Value() == 1);
+  }
+  REQUIRE(active.Value() == 0);
+  REQUIRE(pool.total_clients() == 0);
+  REQUIRE(pool.active_clients() == 0);
+}

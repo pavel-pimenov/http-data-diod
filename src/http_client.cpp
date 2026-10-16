@@ -5,9 +5,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 std::atomic<int> HttpClient::g_instance_count{0};
 std::atomic<uint64_t> HttpClient::g_total_created{0};
@@ -31,8 +33,17 @@ HttpClient::HttpClient(const int timeout_seconds,
                 timeout_seconds);
 }
 
+void HttpClient::set_pool_release_hook(std::function<void(bool)> hook) {
+  m_pool_release_hook = std::move(hook);
+}
+
 HttpClient::~HttpClient() {
   try {
+    // A consumer may drop the client without releasing it (e.g. an HTTP call
+    // that threw): the pool hook then returns the slot instead of leaking it.
+    if (m_pool_release_hook) {
+      m_pool_release_hook(m_pool_leased.load());
+    }
     --g_instance_count;
     ++g_total_destroyed;
     Logger::debug("delete HttpClient (active: {}, created: {}, destroyed: {})",
