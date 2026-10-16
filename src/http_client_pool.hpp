@@ -40,7 +40,7 @@ public:
 private:
   // Tunables controlling pool/Gateway behaviour. Mirrors the constructor
   // parameters (without connection metrics, which live in m_stats).
-  struct PoolConfig {
+  struct PoolConfig { //-V730
     size_t m_max_pool_size;
     int m_timeout_seconds;
     int m_acquire_timeout_seconds; // Timeout for waiting on available conn

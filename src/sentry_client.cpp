@@ -100,7 +100,7 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
     return std::nullopt;
   }
   int port = scheme == "https" ? 443 : 80;
-  if (port_sep != std::string::npos && port_sep + 1 < host_port.size()) {
+  if (port_sep != std::string::npos && port_sep + 1 < host_port.size()) { //-V1051
     const std::string_view port_str =
         std::string_view(host_port).substr(port_sep + 1);
     if (port_str.empty() ||

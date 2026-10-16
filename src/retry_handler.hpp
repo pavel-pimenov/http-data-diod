@@ -30,12 +30,12 @@ public:
   }
 
 private:
-  struct Config {
+  struct Config { //-V730
     int m_initial_delay_ms;
     int m_max_delay_ms;
   } m_config;
 
-  struct State {
+  struct State { //-V730
     int m_current_delay_ms;
     int m_consecutive_failures = 0;
   } m_state;

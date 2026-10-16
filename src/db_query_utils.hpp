@@ -265,7 +265,7 @@ public:
   [[nodiscard]] bool truncated() const { return m_state.m_truncated; }
 
 private:
-  struct State {
+  struct State { //-V730
     size_t m_max_rows;
     json m_rows = json::array();
     bool m_truncated = false;

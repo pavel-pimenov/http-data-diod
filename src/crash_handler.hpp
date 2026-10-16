@@ -341,7 +341,7 @@ private:
     std::array<char, 33> event_id{};
     {
       std::random_device rd;
-      const uint32_t a = rd(), b = rd(), c = rd(), d = rd();
+      const uint32_t a = rd(), b = rd(), c = rd(), d = rd(); //-V656
       snprintf(event_id.data(), event_id.size(), "%08x%08x%08x%08x", a, b, c, d);
     }
 
@@ -375,12 +375,13 @@ private:
     }
     annotate_exe_frames(exception_value["stacktrace"]["frames"]);
 
-    std::string faulting_frame =
-        m_frames.m_count > 0 ? describe_frame(m_frames.m_addrs[fault_idx])
-                                : "?";
     auto &frames = exception_value["stacktrace"]["frames"];
-    if (fault_idx >= 0 && static_cast<size_t>(fault_idx) < frames.size() &&
-        frames[fault_idx].contains("lineno")) {
+    const bool have_fault_frame =
+        m_frames.m_count > 0 && static_cast<size_t>(fault_idx) < frames.size();
+    std::string faulting_frame = have_fault_frame
+                                     ? describe_frame(m_frames.m_addrs[fault_idx])
+                                     : "?";
+    if (have_fault_frame && frames[fault_idx].contains("lineno")) {
       faulting_frame +=
           " " + frames[fault_idx]["filename"].get<std::string>() + ":" +
           std::to_string(frames[fault_idx]["lineno"].get<int>());
