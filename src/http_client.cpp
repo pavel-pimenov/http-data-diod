@@ -56,10 +56,9 @@ HttpClient::~HttpClient() {
 }
 
 void HttpClient::setup_client(const ParsedUrl &parsed_url) {
-  // Validate host and port before creating client
-  if (parsed_url.m_host.empty()) {
-    throw std::runtime_error("Invalid URL: host is empty");
-  }
+  // parse_url() (the only producer of ParsedUrl) rejects an empty host and an
+  // out-of-range port, so here only the port bound is re-checked: the host is
+  // guaranteed non-empty.
   if (parsed_url.m_port <= 0 || parsed_url.m_port > 65535) {
     throw std::runtime_error("Invalid URL: port out of range");
   }

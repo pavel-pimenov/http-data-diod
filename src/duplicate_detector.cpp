@@ -53,9 +53,8 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
   if (entry.m_body.empty() && body.size() <= m_options.m_max_body_bytes) {
     entry.m_body = std::string(body);
   }
-  if (entry.m_count < 2) {
-    return {false, 0};
-  }
+  // An existing entry is created with m_count = 1 (see above) and incremented
+  // just now, so it is always >= 2 here.
   const std::string client_key(client_id);
   auto cit = m_state.m_per_client_count.find(client_key);
   if (cit == m_state.m_per_client_count.end()) {

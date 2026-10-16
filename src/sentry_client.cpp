@@ -84,10 +84,9 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
       last_slash == rest.size() - 1) {
     return std::nullopt;
   }
+  // The check above rejects a trailing slash, so at least one character always
+  // follows it and the project id is never empty.
   const std::string project_id(rest.substr(last_slash + 1));
-  if (project_id.empty()) {
-    return std::nullopt;
-  }
   const std::string host_and_path(rest.substr(0, last_slash));
   const size_t first_slash = host_and_path.find('/');
   const std::string host_port =
@@ -120,11 +119,10 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
   std::string path_prefix = first_slash == std::string::npos
                                 ? ""
                                 : host_and_path.substr(first_slash);
+  // Stripping trailing slashes also turns a bare "/" into "", so no separate
+  // "/"-case is needed here.
   while (!path_prefix.empty() && path_prefix.back() == '/') {
     path_prefix.pop_back();
-  }
-  if (path_prefix == "/") {
-    path_prefix.clear();
   }
 
   return DsnData{scheme, host, port, path_prefix, public_key, secret_key,

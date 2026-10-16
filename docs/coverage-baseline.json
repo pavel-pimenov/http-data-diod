@@ -122,10 +122,10 @@
       "branches_covered": 43
     },
     "duplicate_detector.cpp": {
-      "lines": 134,
-      "covered": 130,
-      "branches": 200,
-      "branches_covered": 118
+      "lines": 132,
+      "covered": 129,
+      "branches": 198,
+      "branches_covered": 117
     },
     "dynamic_labeled_family.hpp": {
       "lines": 93,
@@ -152,10 +152,10 @@
       "branches_covered": 131
     },
     "http_client.cpp": {
-      "lines": 103,
-      "covered": 97,
-      "branches": 140,
-      "branches_covered": 83
+      "lines": 101,
+      "covered": 96,
+      "branches": 136,
+      "branches_covered": 82
     },
     "http_client.hpp": {
       "lines": 15,
@@ -374,10 +374,10 @@
       "branches_covered": 3
     },
     "sentry_client.cpp": {
-      "lines": 247,
-      "covered": 241,
-      "branches": 668,
-      "branches_covered": 352
+      "lines": 243,
+      "covered": 239,
+      "branches": 662,
+      "branches_covered": 349
     },
     "sentry_client.hpp": {
       "lines": 2,
