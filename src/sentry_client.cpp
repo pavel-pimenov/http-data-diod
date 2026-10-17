@@ -1,6 +1,7 @@
 #include "sentry_client.hpp"
 
 #include "async_sender_queue.hpp"
+#include "http_setup.hpp"
 #include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "prometheus/counter.h"
@@ -362,17 +363,13 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   if (m_config.m_dsn_data->m_scheme == "https") {
     httplib::SSLClient client(m_config.m_dsn_data->m_host,
                               m_config.m_dsn_data->m_port);
-    client.set_connection_timeout(5, 0);
-    client.set_read_timeout(timeout_seconds, 0);
-    client.set_write_timeout(timeout_seconds, 0);
+    setup_http_connection(client, timeout_seconds, false);
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   } else {
     httplib::Client client(m_config.m_dsn_data->m_host,
                            m_config.m_dsn_data->m_port);
-    client.set_connection_timeout(5, 0);
-    client.set_read_timeout(timeout_seconds, 0);
-    client.set_write_timeout(timeout_seconds, 0);
+    setup_http_connection(client, timeout_seconds, false);
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   }

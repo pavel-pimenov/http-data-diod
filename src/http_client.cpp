@@ -1,5 +1,6 @@
 #include "http_client.hpp"
 #include "common_utils.hpp"
+#include "http_setup.hpp"
 #include "logger.hpp"
 #include "url_utils.hpp"
 #include <atomic>

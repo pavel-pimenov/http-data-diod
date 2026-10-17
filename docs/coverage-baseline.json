@@ -32,10 +32,10 @@
       "branches_covered": 116
     },
     "common_utils.hpp": {
-      "lines": 30,
-      "covered": 30,
-      "branches": 40,
-      "branches_covered": 22
+      "lines": 22,
+      "covered": 22,
+      "branches": 38,
+      "branches_covered": 20
     },
     "config.cpp": {
       "lines": 574,
@@ -181,6 +181,12 @@
       "branches": 43,
       "branches_covered": 21
     },
+    "http_setup.hpp": {
+      "lines": 8,
+      "covered": 8,
+      "branches": 2,
+      "branches_covered": 2
+    },
     "in_flight_tracker.hpp": {
       "lines": 60,
       "covered": 58,
@@ -243,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 87,
+      "covered": 88,
       "branches": 95,
-      "branches_covered": 63
+      "branches_covered": 64
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -261,9 +267,9 @@
     },
     "nats_client.cpp": {
       "lines": 458,
-      "covered": 421,
+      "covered": 422,
       "branches": 748,
-      "branches_covered": 399
+      "branches_covered": 401
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -380,10 +386,10 @@
       "branches_covered": 3
     },
     "sentry_client.cpp": {
-      "lines": 232,
-      "covered": 228,
-      "branches": 632,
-      "branches_covered": 331
+      "lines": 228,
+      "covered": 224,
+      "branches": 624,
+      "branches_covered": 327
     },
     "sentry_client.hpp": {
       "lines": 2,

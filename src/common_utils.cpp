@@ -1,5 +1,6 @@
 #include "common_utils.hpp"
 #include "error_types.hpp"
+#include "http_setup.hpp"
 #include "json_utils.hpp"
 #include "prometheus/counter.h"
 #include "logger.hpp"
