@@ -20,7 +20,7 @@
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "retry_handler.hpp"
-#include "trace_logger.hpp"
+#include "test_support.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -45,49 +45,12 @@ namespace {
 constexpr const char *kTraceparent =
     "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
-// RAII override of several env vars; nullopt unsets the variable. The values
-// must be in place before the Config is loaded by the AppContext ctor.
-class EnvGuard {
-public:
-  explicit EnvGuard(const std::map<std::string, std::optional<std::string>>
-                        &vars) {
-    m_vars.reserve(vars.size());
-    for (const auto &[name, value] : vars) {
-      m_vars.emplace_back(name, read_env(name.c_str()));
-      if (value.has_value()) {
-        setenv(name.c_str(), value->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  ~EnvGuard() {
-    for (const auto &[name, previous] : m_vars) {
-      if (previous.has_value()) {
-        setenv(name.c_str(), previous->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  EnvGuard(const EnvGuard &) = delete;
-  EnvGuard &operator=(const EnvGuard &) = delete;
-  EnvGuard(EnvGuard &&) = delete;
-  EnvGuard &operator=(EnvGuard &&) = delete;
-
-private:
-  static std::optional<std::string> read_env(const char *name) {
-    const char *value = std::getenv(name);
-    if (value == nullptr) {
-      return std::nullopt;
-    }
-    return std::string(value);
-  }
-
-  std::vector<std::pair<std::string, std::optional<std::string>>> m_vars;
-};
+// Scoped env-var overrides (EnvMapGuard/EnvVars) and the tracer stub are shared
+// via test_support.hpp; the values must be in place before the Config is loaded
+// by the AppContext ctor.
+using test_support::attach_tracer;
+using test_support::EnvMapGuard;
+using test_support::EnvVars;
 
 // Loopback stand-in for the L2 backend: covers the success, retry, binary and
 // content-type-less response paths of the worker call pipeline.
@@ -168,8 +131,6 @@ std::string l2_server_urls() {
   return urls.dump();
 }
 
-using EnvVars = std::map<std::string, std::optional<std::string>>;
-
 // Worker mode plus the fail-fast NATS setup described in the file header.
 // THREAD_POOL_TYPE=none makes the ctor take the "force CUSTOM for worker"
 // branch.
@@ -196,18 +157,6 @@ EnvVars worker_env(const std::string &urls) {
   vars["L2_SERVER_PORT"] = "8088";
   vars["L2_SERVER_URLS"] = urls;
   return vars;
-}
-
-// Attaches a tracer whose sender thread never flushes during the test (batch
-// and interval far above what a single test produces): the spans are enqueued
-// and dropped with the context, but every tracer branch of the worker runs.
-void attach_tracer(AppContext &ctx) {
-  auto &metrics = *ctx.m_tracing_metrics;
-  ctx.m_tracer = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", metrics.m_spans_sent,
-      metrics.m_spans_failed, metrics.m_queue_size, metrics.m_last_send_duration,
-      metrics.m_send_latency, metrics.m_queue_time,
-      /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
 }
 
 json make_worker_request(const std::string &request_id,
@@ -339,7 +288,7 @@ public:
 
 TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
           "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -416,7 +365,7 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
 
 TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
           "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
 
@@ -471,7 +420,7 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
 // ============================================================================
 
 TEST_CASE("L2Worker: NATS request pipeline", "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -551,7 +500,7 @@ TEST_CASE("L2Worker: run loop and DB gateway NATS handlers", "[l2-worker]") {
   vars["DB_POSTGRES_PASSWORD"] = "l2test";
   vars["DB_POSTGRES_HOST"] = "127.0.0.1";
   vars["DB_POSTGRES_PORT"] = "1";
-  const EnvGuard env(vars);
+  const EnvMapGuard env(vars);
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -604,7 +553,7 @@ TEST_CASE("L2Worker: run loop and DB gateway NATS handlers", "[l2-worker]") {
 
 TEST_CASE("L2Worker: DB query before the gateway is initialized reports 503",
           "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -624,7 +573,7 @@ TEST_CASE("L2Worker: explicit thread pool type is honoured", "[l2-worker]") {
     // Non-"none" pool type takes the CUSTOM branch directly.
     EnvVars vars = worker_env(l2_server_urls());
     vars["THREAD_POOL_TYPE"] = "custom";
-    const EnvGuard env(vars);
+    const EnvMapGuard env(vars);
     AppContext ctx;
     const L2Worker worker(ctx);
     REQUIRE_FALSE(worker.is_nats_connected());
@@ -633,7 +582,7 @@ TEST_CASE("L2Worker: explicit thread pool type is honoured", "[l2-worker]") {
     // Non-worker mode with "none" keeps the inline NONE pool.
     EnvVars vars = worker_env(l2_server_urls());
     vars["MODE"] = "proxy";
-    const EnvGuard env(vars);
+    const EnvMapGuard env(vars);
     AppContext ctx;
     const L2Worker worker(ctx);
     REQUIRE_FALSE(worker.is_nats_connected());

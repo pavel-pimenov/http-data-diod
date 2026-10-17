@@ -29,12 +29,11 @@
 #include "response_builder.hpp"
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
-#include "trace_logger.hpp"
+#include "test_support.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <cstdlib>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -46,48 +45,10 @@
 
 namespace {
 
-// RAII override of several env vars, restoring the previous value (set or
-// unset) on scope exit so one test cannot leak state into the next one.
-class EnvGuard {
-public:
-  EnvGuard(std::initializer_list<std::pair<const char *, const char *>> vars) {
-    m_vars.reserve(vars.size());
-    for (const auto &[name, value] : vars) {
-      m_vars.emplace_back(name, read_env(name));
-      if (value == nullptr) {
-        unsetenv(name);
-      } else {
-        setenv(name, value, 1);
-      }
-    }
-  }
-
-  ~EnvGuard() {
-    for (const auto &[name, previous] : m_vars) {
-      if (previous.has_value()) {
-        setenv(name.c_str(), previous->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  EnvGuard(const EnvGuard &) = delete;
-  EnvGuard &operator=(const EnvGuard &) = delete;
-  EnvGuard(EnvGuard &&) = delete;
-  EnvGuard &operator=(EnvGuard &&) = delete;
-
-private:
-  static std::optional<std::string> read_env(const char *name) {
-    const char *value = std::getenv(name);
-    if (value == nullptr) {
-      return std::nullopt;
-    }
-    return std::string(value);
-  }
-
-  std::vector<std::pair<std::string, std::optional<std::string>>> m_vars;
-};
+using test_support::attach_tracer;
+using test_support::EnvGuard;
+using test_support::make_get;
+using test_support::make_post;
 
 // Proxy mode plus the fail-fast NATS setup described in the file header.
 class ProxyEnv {
@@ -110,33 +71,6 @@ public:
 private:
   EnvGuard m_env;
 };
-
-httplib::Request make_get(const std::string &path) {
-  httplib::Request req;
-  req.method = "GET";
-  req.path = path;
-  return req;
-}
-
-httplib::Request make_post(const std::string &path, const std::string &body) {
-  httplib::Request req;
-  req.method = "POST";
-  req.path = path;
-  req.body = body;
-  return req;
-}
-
-// Batched Jaeger exporter pointed at a refused port: spans are buffered and
-// the flush fails harmlessly, so the tracer-dependent branches become
-// reachable without an observability backend.
-void attach_tracer(AppContext &ctx) {
-  auto &metrics = *ctx.m_tracing_metrics;
-  ctx.m_tracer = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", metrics.m_spans_sent,
-      metrics.m_spans_failed, metrics.m_queue_size, metrics.m_last_send_duration,
-      metrics.m_send_latency, metrics.m_queue_time,
-      /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
-}
 
 } // namespace
 

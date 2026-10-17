@@ -26,7 +26,7 @@
 #include "proxy_init.hpp"
 #include "request_handler.hpp"
 #include "stats_logger.hpp"
-#include "trace_logger.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
 #include <array>
@@ -65,50 +65,13 @@ namespace {
 constexpr const char *kTraceparent =
     "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
-// RAII override of several env vars; nullopt unsets the variable. The values
-// must be in place before the Config is loaded by the AppContext ctor.
-class EnvGuard {
-public:
-  explicit EnvGuard(const std::map<std::string, std::optional<std::string>> &vars) {
-    m_vars.reserve(vars.size());
-    for (const auto &[name, value] : vars) {
-      m_vars.emplace_back(name, read_env(name.c_str()));
-      if (value.has_value()) {
-        setenv(name.c_str(), value->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  ~EnvGuard() {
-    for (const auto &[name, previous] : m_vars) {
-      if (previous.has_value()) {
-        setenv(name.c_str(), previous->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  EnvGuard(const EnvGuard &) = delete;
-  EnvGuard &operator=(const EnvGuard &) = delete;
-  EnvGuard(EnvGuard &&) = delete;
-  EnvGuard &operator=(EnvGuard &&) = delete;
-
-private:
-  static std::optional<std::string> read_env(const char *name) {
-    const char *value = std::getenv(name);
-    if (value == nullptr) {
-      return std::nullopt;
-    }
-    return std::string(value);
-  }
-
-  std::vector<std::pair<std::string, std::optional<std::string>>> m_vars;
-};
-
-using EnvVars = std::map<std::string, std::optional<std::string>>;
+// Scoped env-var overrides (EnvMapGuard/EnvVars) and the tracer/request stubs
+// are shared via test_support.hpp; the values must be in place before the
+// Config is loaded by the AppContext ctor.
+using test_support::attach_tracer;
+using test_support::EnvMapGuard;
+using test_support::EnvVars;
+using test_support::make_get;
 
 // Path of the nats-server binary COPYed into the builder image; empty when the
 // binary is not installed (tests then SKIP). Also consulted along PATH so the
@@ -396,25 +359,6 @@ EnvVars live_worker_env(int port, const std::string &subject,
   return vars;
 }
 
-// Batched Jaeger exporter pointed at a refused port: spans are buffered and
-// the flush fails harmlessly, so the tracer-dependent branches become
-// reachable without an observability backend.
-void attach_tracer(AppContext &ctx) {
-  auto &metrics = *ctx.m_tracing_metrics;
-  ctx.m_tracer = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", metrics.m_spans_sent,
-      metrics.m_spans_failed, metrics.m_queue_size,
-      metrics.m_last_send_duration, metrics.m_send_latency, metrics.m_queue_time,
-      /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
-}
-
-httplib::Request make_get(const std::string &path) {
-  httplib::Request req;
-  req.method = "GET";
-  req.path = path;
-  return req;
-}
-
 json make_worker_request(const std::string &request_id,
                          const std::string &path) {
   json request;
@@ -506,7 +450,7 @@ struct L2BackendServer {
 // ============================================================================
 
 TEST_CASE("NatsClient: public API fails fast without a broker", "[nats-offline]") {
-  const EnvGuard env(fail_fast_env(unique_subject("nats.offline")));
+  const EnvMapGuard env(fail_fast_env(unique_subject("nats.offline")));
   AppContext ctx;
   init_proxy_components(ctx);
   auto &client = *ctx.m_nats_client;
@@ -541,7 +485,7 @@ TEST_CASE("NatsClient: public API fails fast without a broker", "[nats-offline]"
 
 TEST_CASE("NatsPollService: retries while the client stays disconnected",
           "[nats-offline]") {
-  const EnvGuard env(fail_fast_env(unique_subject("nats.polloff")));
+  const EnvMapGuard env(fail_fast_env(unique_subject("nats.polloff")));
   AppContext ctx;
   init_proxy_components(ctx);
   REQUIRE_FALSE(ctx.m_nats_client->is_connected());
@@ -558,7 +502,7 @@ TEST_CASE("NatsPollService: returns empty when the NATS client is missing",
           "[nats-offline]") {
   TraceContext trace_ctx;
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
-  const EnvGuard env(live_proxy_env(4222, unique_subject("poll.null")));
+  const EnvMapGuard env(live_proxy_env(4222, unique_subject("poll.null")));
   AppContext ctx;
   // init_proxy_components() is deliberately NOT called: the proxy service must
   // tolerate a poll before the NATS client is created.
@@ -949,7 +893,7 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
 
   {
     const std::string subject = unique_subject("poll.ok");
-    const EnvGuard env(live_proxy_env(server.port(), subject));
+    const EnvMapGuard env(live_proxy_env(server.port(), subject));
     AppContext ctx;
     attach_tracer(ctx);
     init_proxy_components(ctx);
@@ -970,7 +914,7 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
 
   {
     const std::string subject = unique_subject("poll.empty");
-    const EnvGuard env(live_proxy_env(server.port(), subject));
+    const EnvMapGuard env(live_proxy_env(server.port(), subject));
     AppContext ctx;
     init_proxy_components(ctx);
     const auto reply_fn = [](const std::string &, const std::string &) {
@@ -987,7 +931,7 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
 
   {
     const std::string subject = unique_subject("poll.noreply");
-    const EnvGuard env(live_proxy_env(server.port(), subject));
+    const EnvMapGuard env(live_proxy_env(server.port(), subject));
     AppContext ctx;
     init_proxy_components(ctx);
 
@@ -1010,7 +954,7 @@ TEST_CASE("NatsPollService: zero timeout falls back to the config timeout",
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
 
   const std::string subject = unique_subject("poll.timeout0");
-  const EnvGuard env(live_proxy_env(server.port(), subject));
+  const EnvMapGuard env(live_proxy_env(server.port(), subject));
   AppContext ctx;
   init_proxy_components(ctx);
   REQUIRE(ctx.m_nats_client->is_connected());
@@ -1040,7 +984,7 @@ TEST_CASE("NatsPollService: reconnects a dropped client and still replies",
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
 
   const std::string subject = unique_subject("poll.reconnect");
-  const EnvGuard env(live_proxy_env(server.port(), subject));
+  const EnvMapGuard env(live_proxy_env(server.port(), subject));
   AppContext ctx;
   init_proxy_components(ctx);
   REQUIRE(ctx.m_nats_client->is_connected());
@@ -1070,7 +1014,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
 
   {
     const std::string subject = unique_subject("db.ok");
-    const EnvGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
+    const EnvMapGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
                                       subject));
     AppContext ctx;
     attach_tracer(ctx);
@@ -1096,7 +1040,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
 
   {
     const std::string subject = unique_subject("db.bad");
-    const EnvGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
+    const EnvMapGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
                                       subject));
     AppContext ctx;
     init_proxy_components(ctx);
@@ -1117,7 +1061,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
 
   {
     const std::string subject = unique_subject("db.timeout");
-    const EnvGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
+    const EnvMapGuard env(live_proxy_env(server.port(), unique_subject("poll.no"),
                                       subject));
     AppContext ctx;
     init_proxy_components(ctx);
@@ -1149,7 +1093,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
     // send_response() (the ordinary proxy->worker->client success path, which
     // offline tests only ever see time out with 504).
     const std::string subject = unique_subject("proxy.ok");
-    const EnvGuard env(live_proxy_env(server.port(), subject));
+    const EnvMapGuard env(live_proxy_env(server.port(), subject));
     AppContext ctx;
     init_proxy_components(ctx);
     REQUIRE(ctx.m_nats_client->is_connected());
@@ -1177,7 +1121,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
     // A reply that is not a JSON envelope reaches the invalid_response branch
     // of the generic path.
     const std::string subject = unique_subject("proxy.badresp");
-    const EnvGuard env(live_proxy_env(server.port(), subject));
+    const EnvMapGuard env(live_proxy_env(server.port(), subject));
     AppContext ctx;
     init_proxy_components(ctx);
     const auto reply_fn = [](const std::string &, const std::string &) {
@@ -1211,7 +1155,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     EnvVars vars = live_proxy_env(server.port(), unique_subject("poll.rdy"),
                                   unique_subject("db.rdy"));
     vars["HEALTH_READY_ALLOW_CONNECT"] = "false";
-    const EnvGuard env(vars);
+    const EnvMapGuard env(vars);
     AppContext ctx;
     init_proxy_components(ctx);
     REQUIRE_FALSE(ctx.m_config.m_app.m_health_ready_allow_connect);
@@ -1234,7 +1178,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     EnvVars vars = live_proxy_env(server.port(), unique_subject("poll.rdy2"),
                                   unique_subject("db.rdy2"));
     vars["HEALTH_READY_ALLOW_CONNECT"] = "true";
-    const EnvGuard env(vars);
+    const EnvMapGuard env(vars);
     AppContext ctx;
     REQUIRE(ctx.m_config.m_app.m_health_ready_allow_connect);
     init_proxy_components(ctx);
@@ -1263,7 +1207,7 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
   const std::string subject = unique_subject("l2w.test");
-  const EnvGuard env(
+  const EnvMapGuard env(
       live_worker_env(server.port(), subject, urls.dump()));
   AppContext ctx;
   attach_tracer(ctx);
@@ -1475,7 +1419,7 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
   L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
   const std::string subject = unique_subject("l2w.restart");
-  const EnvGuard env(
+  const EnvMapGuard env(
       live_worker_env(server.port(), subject, urls.dump()));
   AppContext ctx;
   attach_tracer(ctx);
@@ -1821,7 +1765,7 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   vars["DB_POSTGRES_USER"] = "postgres";
   vars["DB_POSTGRES_PASSWORD"] = "";
   vars["DB_QUERY_DEFAULT_TIMEOUT_MS"] = "2000";
-  const EnvGuard env(vars);
+  const EnvMapGuard env(vars);
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
