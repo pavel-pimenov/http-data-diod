@@ -191,18 +191,14 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
     nats_healthy = false;
   }
 
-  m_ctx.m_proxy.m_metrics->m_nats_connected.Set(nats_healthy ? 1.0 : 0.0);
-  m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
+  set_nats_readiness_gauges(m_ctx.m_proxy.m_metrics->m_nats_connected,
+                            m_ctx.m_proxy.m_metrics->m_health_ready,
+                            nats_healthy);
 
   if (nats_healthy) {
     set_health_ready_nats(res, "l2-proxy");
   } else {
-    res.status = 503;
-    nlohmann::json error_body;
-    error_body["status"] = "not_ready";
-    error_body["service"] = "l2-proxy";
-    error_body["error"] = error_msg;
-    send_json_response(res, res.status, error_body);
+    set_health_not_ready_nats(res, "l2-proxy", error_msg);
   }
 }
 

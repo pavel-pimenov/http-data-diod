@@ -3,6 +3,7 @@
 #include "error_types.hpp"
 #include "json_response_utils.hpp"
 #include "logger.hpp"
+#include "metrics_manager.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -297,15 +298,12 @@ void run_worker(AppContext &app_ctx) {
   health_server.Get("/health/ready", [&worker, &app_ctx](const httplib::Request & /*req*/,
                                                  httplib::Response &res) {
     const bool ready = worker.is_nats_connected();
-    app_ctx.m_worker.m_metrics->m_nats_connected.Set(ready ? 1.0 : 0.0);
-    app_ctx.m_worker.m_metrics->m_health_ready.Set(ready ? 1.0 : 0.0);
+    set_nats_readiness_gauges(app_ctx.m_worker.m_metrics->m_nats_connected,
+                              app_ctx.m_worker.m_metrics->m_health_ready, ready);
     if (ready) {
       set_health_ready_nats(res, "l2-worker");
     } else {
-      res.status = 503;
-      res.set_content(
-          R"({"status": "not_ready", "service": "l2-worker", "error": "NATS not connected"})",
-          "application/json");
+      set_health_not_ready_nats(res, "l2-worker", "NATS not connected");
     }
   });
 

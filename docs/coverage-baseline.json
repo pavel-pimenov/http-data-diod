@@ -200,10 +200,10 @@
       "branches_covered": 0
     },
     "json_response_utils.hpp": {
-      "lines": 30,
-      "covered": 30,
-      "branches": 40,
-      "branches_covered": 21
+      "lines": 36,
+      "covered": 36,
+      "branches": 46,
+      "branches_covered": 24
     },
     "json_schema_validator.hpp": {
       "lines": 102,
@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 87,
+      "covered": 90,
       "branches": 95,
-      "branches_covered": 63
+      "branches_covered": 65
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -260,10 +260,10 @@
       "branches_covered": 5
     },
     "metrics_manager.hpp": {
-      "lines": 25,
-      "covered": 25,
-      "branches": 78,
-      "branches_covered": 36
+      "lines": 30,
+      "covered": 30,
+      "branches": 80,
+      "branches_covered": 38
     },
     "nats_client.cpp": {
       "lines": 458,
@@ -332,10 +332,10 @@
       "branches_covered": 27
     },
     "request_handler.cpp": {
-      "lines": 446,
-      "covered": 425,
-      "branches": 953,
-      "branches_covered": 521
+      "lines": 440,
+      "covered": 419,
+      "branches": 935,
+      "branches_covered": 510
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -413,7 +413,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
