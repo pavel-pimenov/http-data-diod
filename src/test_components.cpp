@@ -9,6 +9,7 @@
 #include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
 #include "header_utils.hpp"
+#include "http_setup.hpp"
 #include "error_types.hpp"
 #include "in_flight_tracker.hpp"
 #include "json_response_utils.hpp"
@@ -25,6 +26,7 @@
 #include "retry_handler.hpp"
 #include "retry_utils.hpp"
 #include "string_utils.hpp"
+#include "test_support.hpp"
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
@@ -670,30 +672,15 @@ TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   REQUIRE(config.validate(false) == false);
 }
 
-namespace {
-
-class EnvVarGuard {
-public:
-  EnvVarGuard(const char *name, const char *value) : m_name(name) {
-    if (value == nullptr) {
-      unsetenv(m_name.c_str());
-    } else {
-      setenv(m_name.c_str(), value, 1);
-    }
-  }
-  ~EnvVarGuard() { unsetenv(m_name.c_str()); }
-
-private:
-  std::string m_name;
-};
-
-} // namespace
+// Scoped env-var overrides come from test_support.hpp (EnvGuard restores the
+// previous value on scope exit).
+using test_support::EnvGuard;
 
 TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
-  EnvVarGuard const mode("MODE", "proxy");
-  EnvVarGuard const host("L2_SERVER_HOST", "10.0.0.5");
-  EnvVarGuard const port("L2_SERVER_PORT", "9090");
-  EnvVarGuard const proto("L2_SERVER_PROTOCOL", "http");
+  EnvGuard const mode{{"MODE", "proxy"}};
+  EnvGuard const host{{"L2_SERVER_HOST", "10.0.0.5"}};
+  EnvGuard const port{{"L2_SERVER_PORT", "9090"}};
+  EnvGuard const proto{{"L2_SERVER_PROTOCOL", "http"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "proxy");
@@ -704,11 +691,11 @@ TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
 }
 
 TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
-  EnvVarGuard const dsn("SENTRY_DSN", "https://key@host/42");
-  EnvVarGuard const rel("SENTRY_RELEASE", "v1.0");
-  EnvVarGuard const env("SENTRY_ENVIRONMENT", "prod");
-  EnvVarGuard const timeout("SENTRY_TIMEOUT_MS", "5000");
-  EnvVarGuard const qsize("SENTRY_MAX_QUEUE_SIZE", "512");
+  EnvGuard const dsn{{"SENTRY_DSN", "https://key@host/42"}};
+  EnvGuard const rel{{"SENTRY_RELEASE", "v1.0"}};
+  EnvGuard const env{{"SENTRY_ENVIRONMENT", "prod"}};
+  EnvGuard const timeout{{"SENTRY_TIMEOUT_MS", "5000"}};
+  EnvGuard const qsize{{"SENTRY_MAX_QUEUE_SIZE", "512"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_sentry.m_dsn == "https://key@host/42");
@@ -719,8 +706,8 @@ TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
 }
 
 TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
-  EnvVarGuard const urls("L2_SERVER_URLS",
-                         R"(["http://host1:8088","http://host2:8089"])");
+  EnvGuard const urls{{"L2_SERVER_URLS",
+                       R"(["http://host1:8088","http://host2:8089"])"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 2);
@@ -730,7 +717,7 @@ TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
 
 TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
           "[config]") {
-  EnvVarGuard const urls("L2_SERVER_URLS", "not-json");
+  EnvGuard const urls{{"L2_SERVER_URLS", "not-json"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 1);
@@ -739,7 +726,7 @@ TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
 
 TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
           "[config]") {
-  EnvVarGuard const urls("L2_SERVER_URLS", R"("just-a-string")");
+  EnvGuard const urls{{"L2_SERVER_URLS", R"("just-a-string")"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 1);
@@ -747,7 +734,7 @@ TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
 }
 
 TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
-  EnvVarGuard const mode("MODE", "l2-server");
+  EnvGuard const mode{{"MODE", "l2-server"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "l2-server");
@@ -757,8 +744,8 @@ TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
 }
 
 TEST_CASE("Config: worker mode loads NATS config", "[config]") {
-  EnvVarGuard const mode("MODE", "worker");
-  EnvVarGuard const subj("NATS_SUBJECT", "svc.worker");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const subj{{"NATS_SUBJECT", "svc.worker"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "worker");
@@ -768,92 +755,92 @@ TEST_CASE("Config: worker mode loads NATS config", "[config]") {
 
 TEST_CASE("Config: get_env_bool parses all true/false forms", "[config]") {
   for (const char *v : {"true", "1", "yes", "on", "TRUE", "Yes"}) {
-    EnvVarGuard const e("TEST_BOOL", v);
+    EnvGuard const e{{"TEST_BOOL", v}};
     REQUIRE(Config::get_env_bool("TEST_BOOL", false) == true);
   }
   for (const char *v : {"false", "0", "no", "off", "FALSE", "No"}) {
-    EnvVarGuard const e("TEST_BOOL", v);
+    EnvGuard const e{{"TEST_BOOL", v}};
     REQUIRE(Config::get_env_bool("TEST_BOOL", true) == false);
   }
-  EnvVarGuard const e("TEST_BOOL", "maybe");
+  EnvGuard const e{{"TEST_BOOL", "maybe"}};
   REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
 }
 
 TEST_CASE("Config: get_env_bool returns default when unset", "[config]") {
-  EnvVarGuard const e("TEST_BOOL", nullptr);
+  EnvGuard const e{{"TEST_BOOL", nullptr}};
   REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
   REQUIRE(Config::get_env_bool("TEST_BOOL", false) == false);
 }
 
 TEST_CASE("Config: get_env_int parses valid value", "[config]") {
-  EnvVarGuard const e("TEST_INT", "42");
+  EnvGuard const e{{"TEST_INT", "42"}};
   REQUIRE(Config::get_env_int("TEST_INT", 1) == 42);
 }
 
 TEST_CASE("Config: get_env_int negative falls back to default", "[config]") {
-  EnvVarGuard const e("TEST_INT", "-5");
+  EnvGuard const e{{"TEST_INT", "-5"}};
   REQUIRE(Config::get_env_int("TEST_INT", 10) == 10);
 }
 
 TEST_CASE("Config: get_env_int non-numeric falls back to default", "[config]") {
-  EnvVarGuard const e("TEST_INT", "abc");
+  EnvGuard const e{{"TEST_INT", "abc"}};
   REQUIRE(Config::get_env_int("TEST_INT", 7) == 7);
 }
 
 TEST_CASE("Config: get_env_int unset returns default", "[config]") {
-  EnvVarGuard const e("TEST_INT", nullptr);
+  EnvGuard const e{{"TEST_INT", nullptr}};
   REQUIRE(Config::get_env_int("TEST_INT", 3) == 3);
 }
 
 TEST_CASE("Config: get_env_double parses and validates range", "[config]") {
-  EnvVarGuard const e("TEST_DBL", "0.5");
+  EnvGuard const e{{"TEST_DBL", "0.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 0.5);
-  EnvVarGuard const e2("TEST_DBL", "1.5");
+  EnvGuard const e2{{"TEST_DBL", "1.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 1.0);
-  EnvVarGuard const e3("TEST_DBL", "abc");
+  EnvGuard const e3{{"TEST_DBL", "abc"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 0.7) == 0.7);
 }
 
 TEST_CASE("Config: get_env_double honours a custom range", "[config]") {
-  EnvVarGuard const e("TEST_DBL_CUSTOM", "0.5");
+  EnvGuard const e{{"TEST_DBL_CUSTOM", "0.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 0.5);
-  EnvVarGuard const e2("TEST_DBL_CUSTOM", "15.0");
+  EnvGuard const e2{{"TEST_DBL_CUSTOM", "15.0"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 1.0);
-  EnvVarGuard const e3("TEST_DBL_CUSTOM", "-2.0");
+  EnvGuard const e3{{"TEST_DBL_CUSTOM", "-2.0"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 3.0, -5.0, 5.0) == -2.0);
 }
 
 TEST_CASE("Config: get_env_string and silent variants", "[config]") {
-  EnvVarGuard const e("TEST_STR", "hello");
+  EnvGuard const e{{"TEST_STR", "hello"}};
   REQUIRE(Config::get_env_string("TEST_STR", "d") == "hello");
   REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "hello");
-  EnvVarGuard const e2("TEST_STR", nullptr);
+  EnvGuard const e2{{"TEST_STR", nullptr}};
   REQUIRE(Config::get_env_string("TEST_STR", "d") == "d");
   REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "d");
 }
 
 TEST_CASE("Config: get_env_protocol validates http/https", "[config]") {
-  EnvVarGuard const e("TEST_PROTO", "https");
+  EnvGuard const e{{"TEST_PROTO", "https"}};
   REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "https");
-  EnvVarGuard const e2("TEST_PROTO", "ftp");
+  EnvGuard const e2{{"TEST_PROTO", "ftp"}};
   REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "http");
 }
 
 TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
-  EnvVarGuard const host("NATS_HOST", "nats.example");
-  EnvVarGuard const port("NATS_PORT", "4223");
-  EnvVarGuard const subj("NATS_SUBJECT", "svc.in");
-  EnvVarGuard const qg("NATS_QUEUE_GROUP", "grp");
-  EnvVarGuard const tm("NATS_TIMEOUT_MS", "5000");
-  EnvVarGuard const ct("NATS_CONNECT_TIMEOUT_MS", "2500");
-  EnvVarGuard const user("NATS_USERNAME", "user");
-  EnvVarGuard const pass("NATS_PASSWORD", "pass");
-  EnvVarGuard const tok("NATS_TOKEN", "tok");
-  EnvVarGuard const cred("NATS_CREDENTIALS_FILE", "/cred");
-  EnvVarGuard const tls("NATS_ENABLE_TLS", "true");
-  EnvVarGuard const cert("NATS_TLS_CERT_FILE", "/cert.pem");
-  EnvVarGuard const key("NATS_TLS_KEY_FILE", "/key.pem");
-  EnvVarGuard const ca("NATS_TLS_CA_CERT_FILE", "/ca.pem");
+  EnvGuard const host{{"NATS_HOST", "nats.example"}};
+  EnvGuard const port{{"NATS_PORT", "4223"}};
+  EnvGuard const subj{{"NATS_SUBJECT", "svc.in"}};
+  EnvGuard const qg{{"NATS_QUEUE_GROUP", "grp"}};
+  EnvGuard const tm{{"NATS_TIMEOUT_MS", "5000"}};
+  EnvGuard const ct{{"NATS_CONNECT_TIMEOUT_MS", "2500"}};
+  EnvGuard const user{{"NATS_USERNAME", "user"}};
+  EnvGuard const pass{{"NATS_PASSWORD", "pass"}};
+  EnvGuard const tok{{"NATS_TOKEN", "tok"}};
+  EnvGuard const cred{{"NATS_CREDENTIALS_FILE", "/cred"}};
+  EnvGuard const tls{{"NATS_ENABLE_TLS", "true"}};
+  EnvGuard const cert{{"NATS_TLS_CERT_FILE", "/cert.pem"}};
+  EnvGuard const key{{"NATS_TLS_KEY_FILE", "/key.pem"}};
+  EnvGuard const ca{{"NATS_TLS_CA_CERT_FILE", "/ca.pem"}};
   Config config;
   config.load_from_env();
   NatsConfig nc = config.create_nats_config();
@@ -877,14 +864,14 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
           "[config]") {
   // Full connection config (host/user/password/pool) is loaded only in worker
   // mode, which owns the driver connection pools.
-  EnvVarGuard const mode("MODE", "worker");
-  EnvVarGuard const qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard const pe("DB_POSTGRES_ENABLED", "true");
-  EnvVarGuard const host("DB_POSTGRES_HOST", "pg.example");
-  EnvVarGuard const port("DB_POSTGRES_PORT", "5433");
-  EnvVarGuard const db("DB_POSTGRES_DB", "mydb");
-  EnvVarGuard const user("DB_POSTGRES_USER", "alice");
-  EnvVarGuard const pass("DB_POSTGRES_PASSWORD", "secret");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
+  EnvGuard const host{{"DB_POSTGRES_HOST", "pg.example"}};
+  EnvGuard const port{{"DB_POSTGRES_PORT", "5433"}};
+  EnvGuard const db{{"DB_POSTGRES_DB", "mydb"}};
+  EnvGuard const user{{"DB_POSTGRES_USER", "alice"}};
+  EnvGuard const pass{{"DB_POSTGRES_PASSWORD", "secret"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_enabled == true);
@@ -904,10 +891,10 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
 
 TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
           "[config]") {
-  EnvVarGuard const mode("MODE", "worker");
-  EnvVarGuard const qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard const oe("DB_ORACLE_ENABLED", "true");
-  EnvVarGuard const pe("DB_POSTGRES_ENABLED", "true");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const oe{{"DB_ORACLE_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_databases.size() == 2);
@@ -918,10 +905,10 @@ TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
 TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
   // Proxy registers DB names/drivers for /v1/sql/* listing & validation, but
   // reads no connection fields (host/user/password) — those belong to worker.
-  EnvVarGuard const qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard const pe("DB_POSTGRES_ENABLED", "true");
-  EnvVarGuard const host("DB_POSTGRES_HOST", "pg.example");
-  EnvVarGuard const user("DB_POSTGRES_USER", "alice");
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
+  EnvGuard const host{{"DB_POSTGRES_HOST", "pg.example"}};
+  EnvGuard const user{{"DB_POSTGRES_USER", "alice"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_databases.size() == 1);
@@ -936,7 +923,7 @@ TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
 
 TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
           "[config]") {
-  EnvVarGuard const qe("DB_QUERY_ENABLED", "true");
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_enabled == true);
@@ -945,9 +932,9 @@ TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
 
 TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
           "[config]") {
-  EnvVarGuard const proto("PROXY_PROTOCOL", "https");
-  EnvVarGuard const cert("SSL_SERVER_CERT_FILE", "/cert.pem");
-  EnvVarGuard const key("SSL_SERVER_KEY_FILE", "/key.pem");
+  EnvGuard const proto{{"PROXY_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", "/cert.pem"}};
+  EnvGuard const key{{"SSL_SERVER_KEY_FILE", "/key.pem"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_proxy.m_protocol == "https");
@@ -956,8 +943,8 @@ TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
 }
 
 TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
-  EnvVarGuard const proto("PROXY_PROTOCOL", "https");
-  EnvVarGuard const cert("SSL_SERVER_CERT_FILE", "");
+  EnvGuard const proto{{"PROXY_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", ""}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_proxy.m_protocol == "https");
@@ -965,10 +952,10 @@ TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
 }
 
 TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
-  EnvVarGuard const mode("MODE", "proxy");
-  EnvVarGuard const proto("L2_SERVER_PROTOCOL", "https");
-  EnvVarGuard const cert("SSL_SERVER_CERT_FILE", "/l2cert.pem");
-  EnvVarGuard const key("SSL_SERVER_KEY_FILE", "/l2key.pem");
+  EnvGuard const mode{{"MODE", "proxy"}};
+  EnvGuard const proto{{"L2_SERVER_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", "/l2cert.pem"}};
+  EnvGuard const key{{"SSL_SERVER_KEY_FILE", "/l2key.pem"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_protocol == "https");
@@ -1251,7 +1238,7 @@ TEST_CASE("JsonUtils: get_body_* navigate the response envelope",
 
 TEST_CASE("ResponseBuilder: envelope without status_code -> HTTP 500, no throw",
           "[response-builder]") {
-  EnvVarGuard const mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = json::object(
@@ -1269,7 +1256,7 @@ TEST_CASE("ResponseBuilder: envelope without status_code -> HTTP 500, no throw",
 
 TEST_CASE("ResponseBuilder: envelope status_code passthrough",
           "[response-builder]") {
-  EnvVarGuard const mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = build_nats_response_envelope(
@@ -1284,7 +1271,7 @@ TEST_CASE("ResponseBuilder: envelope status_code passthrough",
 
 TEST_CASE("ResponseBuilder: non-object payload -> HTTP 500 error envelope",
           "[response-builder]") {
-  EnvVarGuard const mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = json::array({1, 2, 3});
@@ -1300,7 +1287,7 @@ TEST_CASE("ResponseBuilder: non-object payload -> HTTP 500 error envelope",
 
 TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
           "[response-builder]") {
-  EnvVarGuard const mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const std::string raw_binary("\x00\x01\x02\xff\xfe", 5);
@@ -2691,7 +2678,7 @@ TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
   Xorshift64 rng(0xFEEDBEEF);
   for (int i = 0; i < 5000; ++i) {
     const std::string value = random_ascii_string(rng, 64);
-    EnvVarGuard const env("FUZZ_VALUE", value.c_str());
+    EnvGuard const env{{"FUZZ_VALUE", value.c_str()}};
     (void)Config::get_env_int("FUZZ_VALUE", 42);
     (void)Config::get_env_double("FUZZ_VALUE", 0.5);
     (void)Config::get_env_bool("FUZZ_VALUE", true);

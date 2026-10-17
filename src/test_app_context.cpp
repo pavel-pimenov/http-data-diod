@@ -1,4 +1,5 @@
 #include "app_context.hpp"
+#include "test_support.hpp"
 #include "prometheus/registry.h"
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -9,20 +10,7 @@
 
 namespace {
 
-class AppCtxEnvGuard {
-public:
-  AppCtxEnvGuard(const char *name, const char *value) : m_name(name) {
-    if (value == nullptr) {
-      unsetenv(m_name.c_str());
-    } else {
-      setenv(m_name.c_str(), value, 1);
-    }
-  }
-  ~AppCtxEnvGuard() { unsetenv(m_name.c_str()); }
-
-private:
-  std::string m_name;
-};
+using test_support::EnvGuard;
 
 std::vector<std::string> family_names(
     const std::shared_ptr<prometheus::Registry> &registry) {
@@ -71,7 +59,7 @@ void require_common_registry_only_on_common(AppContext &ctx) {
 
 TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
           "[app_context]") {
-  AppCtxEnvGuard const mode("MODE", "worker");
+  EnvGuard const mode{{"MODE", "worker"}};
 
   AppContext ctx;
 
@@ -97,7 +85,7 @@ TEST_CASE("AppContext: worker mode builds l2_common registry and mode stats",
 
 TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
           "[app_context]") {
-  AppCtxEnvGuard const mode("MODE", "l2-server");
+  EnvGuard const mode{{"MODE", "l2-server"}};
 
   AppContext ctx;
 
