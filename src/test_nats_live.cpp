@@ -1433,8 +1433,6 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 
 #include <libpq-fe.h>
 #include <filesystem>
-#include <pwd.h>
-#include <grp.h>
 #include <cerrno>
 #include <algorithm>
 #include <cstdint>
@@ -1447,69 +1445,13 @@ namespace pgtest {
 
 constexpr int kPgWaitMs = 10000;
 
+using pg_test_diag::drop_privileges;
+using pg_test_diag::postgres_sql_probe;
+using pg_test_diag::redirect_to;
+using pg_test_diag::resolve_server_user;
+using pg_test_diag::ServerUser;
 using test_support::reserve_loopback_port;
-
-// A bare TCP accept only means the postmaster bound the port: right after the
-// start it still answers SQL connections with "the database system is starting
-// up" (see test_db_live.cpp). Probe with libpq so that "ready" really means an
-// accepted SQL session before the worker is pointed at the cluster.
-[[nodiscard]] bool pg_sql_probe(int port) {
-  const std::string conninfo = std::format(
-      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=1",
-      port);
-  PGconn *conn = PQconnectdb(conninfo.c_str());
-  if (conn == nullptr) {
-    return false;
-  }
-  const bool ok = PQstatus(conn) == CONNECTION_OK;
-  PQfinish(conn);
-  return ok;
-}
-
 using test_support::wait_for_condition;
-
-struct PgTarget {
-  bool m_ok = false, m_need = false;
-  uid_t m_uid = 0;
-  gid_t m_gid = 0;
-  std::string m_name;
-};
-
-[[nodiscard]] PgTarget pg_target() {
-  if (::geteuid() != 0) {
-    return PgTarget{true, false, ::geteuid(), ::getegid(), ""};
-  }
-  const passwd* pw = ::getpwnam("postgres");
-  if (!pw) {
-    return PgTarget{};
-  }
-  return PgTarget{true,true,pw->pw_uid,pw->pw_gid,"postgres"};
-}
-
-[[nodiscard]] bool pg_droppriv(const PgTarget& t) {
-  if (!t.m_need) {
-    return true;
-  }
-  if (::setgid(t.m_gid) != 0) {
-    return false;
-  }
-  if (::initgroups(t.m_name.c_str(), t.m_gid) != 0) {
-    return false;
-  }
-  return ::setuid(t.m_uid)==0;
-}
-
-[[nodiscard]] bool pg_redir(const char* p) {
-  int const fd = ::open(p, O_WRONLY | O_CREAT | O_APPEND, 0644);
-  if (fd < 0) {
-    return false;
-  }
-  ::dup2(fd,1); ::dup2(fd,2);
-  if (fd > 2) {
-    ::close(fd);
-  }
-  return true;
-}
 
 [[nodiscard]] std::string pg_bindir() {
   auto has=[&](const std::string& d){ return ::access((d+"/initdb").c_str(),X_OK)==0 && ::access((d+"/postgres").c_str(),X_OK)==0; };
@@ -1574,13 +1516,13 @@ private:
   }
   [[nodiscard]] bool run_wait(const std::string &exe,
                               const std::vector<std::string> &args,
-                              const std::string &log, const PgTarget &t) const {
+                              const std::string &log, const ServerUser &t) const {
     pid_t const p = ::fork();
     if (p == 0) {
-      if (!pg_droppriv(t)) {
+      if (!drop_privileges(t)) {
         _exit(127);
       }
-      (void)pg_redir(log.c_str());
+      (void)redirect_to(log.c_str());
       std::vector<const char *> av;
       av.push_back(exe.c_str());
       for (auto &a : args) {
@@ -1600,13 +1542,13 @@ private:
   }
   [[nodiscard]] pid_t spawn(const std::string &exe,
                             const std::vector<std::string> &args,
-                            const std::string &log, const PgTarget &t) const {
+                            const std::string &log, const ServerUser &t) const {
     pid_t const p = ::fork();
     if (p == 0) {
-      if (!pg_droppriv(t)) {
+      if (!drop_privileges(t)) {
         _exit(127);
       }
-      (void)pg_redir(log.c_str());
+      (void)redirect_to(log.c_str());
       std::vector<const char *> av;
       av.push_back(exe.c_str());
       for (auto &a : args) {
@@ -1625,7 +1567,7 @@ private:
         return false;
       }
     }
-    auto t=pg_target();
+    const auto t = resolve_server_user();
     if (!t.m_ok) {
       pg_test_diag::fail("no 'postgres' user in this image, skipping");
       return false;
@@ -1648,7 +1590,7 @@ private:
       return false;
     }
     m_datadir = d;
-    if (t.m_need && ::chown(m_datadir.c_str(), t.m_uid, t.m_gid) != 0) {
+    if (t.m_need_switch && ::chown(m_datadir.c_str(), t.m_uid, t.m_gid) != 0) {
       pg_test_diag::fail(std::format("chown datadir failed: {}", std::strerror(errno)));
       cleanup();
       return false;
@@ -1663,7 +1605,7 @@ private:
               serv_log, t);
     if (sp<0){ pg_test_diag::fail(std::format("fork postgres failed: {}", std::strerror(errno))); cleanup(); return false; }
     m_pid=sp;
-    if (!wait_for_condition([this]{ return pg_sql_probe(m_port)&&alive(); }, kPgWaitMs)){ pg_test_diag::fail(std::format("server at {} never became ready: {}", m_port, pg_test_diag::log_tail(serv_log))); stop(); cleanup(); return false; }
+    if (!wait_for_condition([this]{ return postgres_sql_probe(m_port)&&alive(); }, kPgWaitMs)){ pg_test_diag::fail(std::format("server at {} never became ready: {}", m_port, pg_test_diag::log_tail(serv_log))); stop(); cleanup(); return false; }
     return true;
   }
   void cleanup(){ m_pid=-1; if (!m_datadir.empty()){ std::error_code ec; std::filesystem::remove_all(m_datadir,ec); m_datadir.clear(); } }

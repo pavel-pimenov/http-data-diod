@@ -14,12 +14,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fcntl.h>
 #include <format>
 #include <fstream>
+#include <grp.h>
 #include <ios>
+#include <libpq-fe.h>
+#include <pwd.h>
 #include <string>
 #include <string_view>
 #include <sys/statvfs.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace pg_test_diag {
 
@@ -78,6 +84,74 @@ inline void fail(std::string_view reason) {
   out.resize(static_cast<size_t>(in.gcount()));
   std::ranges::replace(out, '\n', ' ');
   return out;
+}
+
+// Unix user a forked postgres must run as: an existing non-root user (postgres,
+// or the current user when the test already runs unprivileged). Root is refused
+// by postgres, so the harness has to switch before exec.
+struct ServerUser {
+  bool m_ok = false;
+  bool m_need_switch = false;
+  uid_t m_uid = 0;
+  gid_t m_gid = 0;
+  std::string m_name;
+};
+
+[[nodiscard]] inline ServerUser resolve_server_user() {
+  if (::geteuid() != 0) {
+    return ServerUser{true, false, ::geteuid(), ::getegid(), ""};
+  }
+  const struct passwd *pw = ::getpwnam("postgres");
+  if (pw == nullptr) {
+    Logger::warn("pg live test: no 'postgres' user in this image, skipping");
+    return ServerUser{};
+  }
+  return ServerUser{true, true, pw->pw_uid, pw->pw_gid,
+                    std::string(pw->pw_name)};
+}
+
+[[nodiscard]] inline bool drop_privileges(const ServerUser &user) {
+  if (!user.m_need_switch) {
+    return true;
+  }
+  if (::setgid(user.m_gid) != 0) {
+    return false;
+  }
+  if (::initgroups(user.m_name.c_str(), user.m_gid) != 0) {
+    return false;
+  }
+  return ::setuid(user.m_uid) == 0;
+}
+
+// Point the forked server's stdout/stderr at the harness log, so a failed
+// cluster start can be explained by log_tail() instead of vanishing.
+[[nodiscard]] inline bool redirect_to(const char *path) {
+  const int fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd < 0) {
+    return false;
+  }
+  ::dup2(fd, 1);
+  ::dup2(fd, 2);
+  if (fd > 2) {
+    ::close(fd);
+  }
+  return true;
+}
+
+// A bare TCP accept only proves the postmaster bound the port: right after the
+// start it still answers SQL connections with "the database system is starting
+// up". Probe with libpq so that "ready" really means an accepted SQL session.
+[[nodiscard]] inline bool postgres_sql_probe(int port) {
+  const std::string conninfo = std::format(
+      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=1",
+      port);
+  PGconn *conn = PQconnectdb(conninfo.c_str());
+  if (conn == nullptr) {
+    return false;
+  }
+  const bool ok = PQstatus(conn) == CONNECTION_OK;
+  PQfinish(conn);
+  return ok;
 }
 
 } // namespace pg_test_diag

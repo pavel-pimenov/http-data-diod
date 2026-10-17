@@ -25,13 +25,9 @@
 #include <csignal>
 #include <cstddef>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <format>
-#include <functional>
-#include <grp.h>
 #include <libpq-fe.h>
-#include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string>
@@ -44,76 +40,15 @@
 
 namespace {
 
+using pg_test_diag::drop_privileges;
+using pg_test_diag::postgres_sql_probe;
+using pg_test_diag::redirect_to;
+using pg_test_diag::resolve_server_user;
+using pg_test_diag::ServerUser;
 using test_support::reserve_loopback_port;
 using test_support::wait_for_condition;
 
 constexpr int kServerWaitTimeoutMs = 10000;
-
-// A bare TCP accept only proves the postmaster bound the port: right after the
-// start it still answers SQL connections with "the database system is starting
-// up". Probe with libpq so that "ready" really means an accepted SQL session.
-[[nodiscard]] bool sql_probe(int port) {
-  const std::string conninfo = std::format(
-      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=1",
-      port);
-  PGconn *conn = PQconnectdb(conninfo.c_str());
-  if (conn == nullptr) {
-    return false;
-  }
-  const bool ok = PQstatus(conn) == CONNECTION_OK;
-  PQfinish(conn);
-  return ok;
-}
-
-// Unix user the server must run as: an existing non-root user (postgres, or the
-// current user when the test already runs unprivileged). Root is refused by
-// postgres.
-struct TargetUser {
-  bool m_ok = false;
-  bool m_need_switch = false;
-  uid_t m_uid = 0;
-  gid_t m_gid = 0;
-  std::string m_name;
-};
-
-[[nodiscard]] TargetUser resolve_target_user() {
-  if (::geteuid() != 0) {
-    return TargetUser{true, false, ::geteuid(), ::getegid(), ""};
-  }
-  const struct passwd *pw = ::getpwnam("postgres");
-  if (pw == nullptr) {
-    Logger::warn("pg live test: no 'postgres' user in this image, skipping");
-    return TargetUser{};
-  }
-  return TargetUser{true,  true,  pw->pw_uid,
-                    pw->pw_gid, std::string(pw->pw_name)};
-}
-
-[[nodiscard]] bool drop_privileges(const TargetUser &target) {
-  if (!target.m_need_switch) {
-    return true;
-  }
-  if (::setgid(target.m_gid) != 0) {
-    return false;
-  }
-  if (::initgroups(target.m_name.c_str(), target.m_gid) != 0) {
-    return false;
-  }
-  return ::setuid(target.m_uid) == 0;
-}
-
-[[nodiscard]] bool redirect_to(const char *path) {
-  const int fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-  if (fd < 0) {
-    return false;
-  }
-  ::dup2(fd, 1);
-  ::dup2(fd, 2);
-  if (fd > 2) {
-    ::close(fd);
-  }
-  return true;
-}
 
 [[nodiscard]] std::string postgres_bin_dir() {
   const auto has = [](const std::string &dir) {
@@ -211,7 +146,7 @@ private:
   [[nodiscard]] bool run_wait(const std::string &exe,
                               const std::vector<std::string> &args,
                               const std::string &logfile,
-                              const TargetUser &target) const {
+                              const ServerUser &target) const {
     const pid_t pid = ::fork();
     if (pid == 0) {
       if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
@@ -247,7 +182,7 @@ private:
   [[nodiscard]] pid_t spawn_server(const std::string &exe,
                                    const std::vector<std::string> &args,
                                    const std::string &logfile,
-                                   const TargetUser &target) const {
+                                   const ServerUser &target) const {
     const pid_t pid = ::fork();
     if (pid == 0) {
       if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
@@ -274,7 +209,7 @@ private:
         return false;
       }
     }
-    const TargetUser target = resolve_target_user();
+    const ServerUser target = resolve_server_user();
     if (!target.m_ok) {
       return false;
     }
@@ -335,7 +270,7 @@ private:
     m_pid = server_pid;
 
     const bool ready = wait_for_condition(
-        [this] { return sql_probe(m_port) && alive(); }, kServerWaitTimeoutMs);
+        [this] { return postgres_sql_probe(m_port) && alive(); }, kServerWaitTimeoutMs);
     if (!ready) {
       pg_test_diag::fail(std::format(
           "server at {} never became ready: {}",
