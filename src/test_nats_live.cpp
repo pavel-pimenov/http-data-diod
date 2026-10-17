@@ -212,6 +212,19 @@ public:
     REQUIRE(wait_ready());
   }
 
+  // Starts the broker for a live test, or marks the test skipped when the
+  // nats-server binary is not part of the image (SKIP throws, so it unwinds
+  // through the caller like the guard it replaced). The guard and the two
+  // start assertions used to be copy-pasted at the top of every [nats-live]
+  // test and re-typed around each extra broker inside a test.
+  void start_live() {
+    if (nats_binary_path().empty()) {
+      SKIP("nats-server binary not available");
+    }
+    REQUIRE(start());
+    REQUIRE(wait_ready());
+  }
+
   ~NatsServer() { stop(); }
 
   void enable_tls(const std::string &cert, const std::string &key) {
@@ -485,12 +498,8 @@ TEST_CASE("NatsPollService: returns empty when the NATS client is missing",
 
 TEST_CASE("NatsClient: pub/sub round-trip, headers and queue subscribers",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.pubsub");
   NatsClient client(live_nats_cfg(subject, server.port()));
@@ -537,12 +546,8 @@ TEST_CASE("NatsClient: pub/sub round-trip, headers and queue subscribers",
 
 TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.reqrep");
   const auto reply_fn = [](const std::string &, const std::string &) {
@@ -583,12 +588,8 @@ TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
 }
 
 TEST_CASE("NatsClient: reconnects after the broker restarts", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.reconnect");
   NatsClient client(live_nats_cfg(subject, server.port()));
@@ -617,12 +618,8 @@ TEST_CASE("NatsClient: reconnects after the broker restarts", "[nats-live]") {
 TEST_CASE("NatsClient: request timeout marks the connection down and records "
           "the error",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.reqtimeout");
   NatsClient client(live_nats_cfg(subject, server.port()));
@@ -650,12 +647,8 @@ TEST_CASE("NatsClient: request timeout marks the connection down and records "
 
 TEST_CASE("NatsClient: request with timeout 0 falls back to the config timeout",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.reqtimeout0");
   const auto reply_fn = [](const std::string &, const std::string &) {
@@ -674,12 +667,8 @@ TEST_CASE("NatsClient: request with timeout 0 falls back to the config timeout",
 }
 
 TEST_CASE("NatsClient: subscribe rejects an invalid subject", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   NatsClient client(live_nats_cfg(unique_subject("nats.badsub"), server.port()));
   REQUIRE(client.connect());
@@ -693,12 +682,8 @@ TEST_CASE("NatsClient: subscribe rejects an invalid subject", "[nats-live]") {
 
 TEST_CASE("NatsClient: rejects empty subject and empty header key",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.badargs");
   NatsClient client(live_nats_cfg(subject, server.port()));
@@ -763,12 +748,8 @@ TEST_CASE("NatsClient: connect fails fast when the broker is unreachable",
 
 TEST_CASE("NatsClient: health check fails fast once the broker stops",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.healthdown");
   NatsClient client(live_nats_cfg(subject, server.port()));
@@ -794,9 +775,6 @@ TEST_CASE("NatsClient: health check fails fast once the broker stops",
 
 TEST_CASE("NatsClient: async error callback records a permission violation",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
   const std::string config_path =
       "/tmp/nats-perm-" + std::to_string(server.port()) + ".conf";
@@ -813,8 +791,7 @@ TEST_CASE("NatsClient: async error callback records a permission violation",
     config << "}\n";
   }
   server.use_config_file(config_path);
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   NatsConfig cfg = live_nats_cfg(unique_subject("nats.denied"), server.port());
   cfg.m_username = "denied";
@@ -848,12 +825,8 @@ TEST_CASE("NatsClient: async error callback records a permission violation",
 
 TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
   TraceContext trace_ctx;
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
 
@@ -910,12 +883,8 @@ TEST_CASE("NatsPollService: round-trip, empty reply retry and no responders",
 
 TEST_CASE("NatsPollService: zero timeout falls back to the config timeout",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
   TraceContext trace_ctx;
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
 
@@ -940,12 +909,8 @@ TEST_CASE("NatsPollService: zero timeout falls back to the config timeout",
 
 TEST_CASE("NatsPollService: reconnects a dropped client and still replies",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
   TraceContext trace_ctx;
   trace_ctx.m_trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
 
@@ -971,12 +936,8 @@ TEST_CASE("NatsPollService: reconnects a dropped client and still replies",
 
 TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   {
     const std::string subject = unique_subject("db.ok");
@@ -1040,12 +1001,8 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
 TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live "
           "broker",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   {
     // A responder subscribed to the proxy's own NATS subject answers the poll,
@@ -1098,12 +1055,8 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
 }
 
 TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   {
     // Default path: readiness reports the live connection state without
@@ -1149,12 +1102,8 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
 
 TEST_CASE("L2Worker: run loop serves requests over a live broker",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
@@ -1335,12 +1284,8 @@ TEST_CASE("NatsClient: connect to a down broker succeeds once it starts",
 }
 
 TEST_CASE("NatsClient: request returns nullopt on an empty reply", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   const std::string subject = unique_subject("nats.emptyreply");
   NatsResponder const responder(
@@ -1361,12 +1306,8 @@ TEST_CASE("NatsClient: request returns nullopt on an empty reply", "[nats-live]"
 
 TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
           "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
   NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
+  server.start_live();
 
   L2BackendServer const backend;
   const json urls = json::array({backend.api_url()});
@@ -1610,17 +1551,13 @@ DbConfig mk_pg(const PgSrv& s,int pm=5,int qtm=5000){
 
 
 TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db-live-combo]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
+  NatsServer server;
+  server.start_live();
+
   auto &pg = pgtest::shared_pgn();
   if (!pg.ensure()) {
     SKIP("postgres not available");
   }
-
-  NatsServer server;
-  REQUIRE(server.start());
-  REQUIRE(server.wait_ready());
 
   const std::string subject = unique_subject("l2w.dbq-main");
   const std::string db_subject = unique_subject("l2w.dbq-db");
@@ -1707,10 +1644,8 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   runner.join();
 }
 TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
-  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  NatsServer s;
+  s.start_live();
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
   natsMsg* reply=nullptr;
@@ -1723,10 +1658,8 @@ TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]
 }
 
 TEST_CASE("NatsClient: subscribe rejects invalid subject", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
-  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  NatsServer s;
+  s.start_live();
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
   natsSubscription* sub=nullptr;
@@ -1739,10 +1672,8 @@ TEST_CASE("NatsClient: subscribe rejects invalid subject", "[nats-live]") {
 }
 
 TEST_CASE("NatsClient: request times out when subscriber never replies", "[nats-live]") {
-  if (nats_binary_path().empty()) {
-    SKIP("nats-server binary not available");
-  }
-  NatsServer s; REQUIRE(s.start()); REQUIRE(s.wait_ready());
+  NatsServer s;
+  s.start_live();
   natsConnection* nc = nullptr;
   REQUIRE(natsConnection_ConnectTo(&nc, ("nats://127.0.0.1:"+std::to_string(s.port())).c_str()) == NATS_OK);
   natsSubscription* sub=nullptr;
