@@ -218,10 +218,10 @@
       "branches_covered": 99
     },
     "l2_worker.cpp": {
-      "lines": 313,
-      "covered": 281,
-      "branches": 496,
-      "branches_covered": 270
+      "lines": 302,
+      "covered": 270,
+      "branches": 474,
+      "branches_covered": 259
     },
     "l2_worker.hpp": {
       "lines": 6,
@@ -261,9 +261,9 @@
     },
     "nats_client.cpp": {
       "lines": 458,
-      "covered": 422,
+      "covered": 421,
       "branches": 748,
-      "branches_covered": 401
+      "branches_covered": 399
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -407,7 +407,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 246
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 7,

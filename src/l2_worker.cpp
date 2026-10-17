@@ -499,21 +499,11 @@ bool L2Worker::parse_request_data(const std::string &request_json,
 
 L2Worker::RequestData
 L2Worker::extract_request_metadata(const json &request_data) {
-  const worker_request_parser::WorkerRequestData decoded =
-      worker_request_parser::decode_nats_request(request_data);
-
   RequestData metadata;
-  metadata.m_request_id = decoded.m_request_id;
-  metadata.m_path = decoded.m_path;
-  metadata.m_query = decoded.m_query;
-  metadata.m_method = decoded.m_method;
-  metadata.m_body = decoded.m_body;
-  metadata.m_client_ip = decoded.m_client_ip;
-  metadata.m_proxy_ip = decoded.m_proxy_ip;
-  metadata.m_traceparent = decoded.m_traceparent;
-  metadata.m_proxy_traceparent = decoded.m_proxy_traceparent;
-  metadata.m_proxy_span_id = decoded.m_proxy_span_id;
-  metadata.m_forwarded_headers = decoded.m_forwarded_headers;
+  // Fill the shared-contract fields in one move instead of copying them
+  // field by field; the base subobject is assigned in place.
+  static_cast<worker_request_parser::WorkerRequestData &>(metadata) =
+      worker_request_parser::decode_nats_request(request_data);
 
   const auto effective_traceparent =
       !metadata.m_proxy_traceparent.empty() ? metadata.m_proxy_traceparent

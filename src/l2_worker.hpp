@@ -11,6 +11,7 @@
 #include "nats_client.hpp"
 #include "nlohmann/json.hpp"
 #include "thread_pool_wrapper.hpp"
+#include "worker_request_parser.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -138,19 +139,11 @@ private:
   // Records the outgoing NATS response payload size into m_bytes_sent.
   void record_bytes_sent(size_t bytes);
 
-  struct RequestData {
-    std::string m_request_id;
-    std::string m_path;
-    std::string m_query;
-    std::string m_method;
-    std::string m_body;
-    std::string m_client_ip;
-    std::string m_proxy_ip;
-    std::string m_traceparent;
-    std::string m_proxy_traceparent;
-    std::string m_proxy_span_id;
+  // Worker-side view of the decoded NATS request: the shared contract fields
+  // (worker_request_parser::WorkerRequestData) plus the TraceContext the worker
+  // derives from the effective traceparent.
+  struct RequestData : worker_request_parser::WorkerRequestData {
     TraceContext m_trace_ctx;
-    httplib::Headers m_forwarded_headers;
   };
 
   struct TracingSpans {
