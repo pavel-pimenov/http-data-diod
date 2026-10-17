@@ -282,9 +282,11 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
 }
 
 std::string JaegerLogger::sentry_envelope_url(const sentry::DsnData &dsn) {
-  const std::string scheme = dsn.m_scheme.empty() ? "http" : dsn.m_scheme;
-  return scheme + "://" + dsn.m_host + ":" + std::to_string(dsn.m_port) +
-         sentry::envelope_path(dsn);
+  const std::string_view scheme = dsn.m_scheme.empty()
+                                      ? std::string_view{"http"}
+                                      : std::string_view{dsn.m_scheme};
+  return std::format("{}://{}:{}{}", scheme, dsn.m_host, dsn.m_port,
+                     sentry::envelope_path(dsn));
 }
 
 std::string JaegerLogger::sentry_auth_header(const sentry::DsnData &dsn) {
@@ -325,9 +327,9 @@ void JaegerLogger::record_sink_failure(ExponentialBreaker &breaker,
     return;
   }
   const uint64_t cooldown_ms = std::min<uint64_t>(
-      (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
+      static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_base_ms)
           << (std::min(breaker.m_consecutive_failures.load(), 20) - 1),
-      (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
+      static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_max_ms));
   breaker.m_cooldown_until_steady_ms = now_steady_ms + cooldown_ms;
   Logger::warn("{} breaker opened, shedding for {}ms", sink_name, cooldown_ms);
 }

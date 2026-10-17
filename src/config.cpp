@@ -27,9 +27,11 @@ bool get_env_raw(const std::string &env_name, std::string &out_value) {
 }
 
 // Logs the fallback when an env var is not set. Shared by all get_env_*
-// overloads so the message stays consistent.
-void log_env_default(const std::string &env_name,
-                     const std::string &default_val) {
+// overloads so the message stays consistent; templated on the default value so
+// numeric defaults are formatted by the logger instead of being stringified at
+// the call site first.
+template <typename T>
+void log_env_default(const std::string &env_name, const T &default_val) {
   Logger::info("Using default {}: {} (override with {} environment variable)",
                env_name, default_val, env_name);
 }
@@ -690,7 +692,7 @@ bool Config::get_env_bool(const std::string &env_name, bool default_val) {
 int Config::get_env_int(const std::string &env_name, int default_val) {
   std::string value;
   if (!get_env_raw(env_name, value)) {
-    log_env_default(env_name, std::to_string(default_val));
+    log_env_default(env_name, default_val);
     return default_val;
   }
   try {
@@ -748,7 +750,7 @@ double Config::get_env_double(const std::string &env_name, double default_val,
                               double min_val, double max_val) {
   std::string value;
   if (!get_env_raw(env_name, value)) {
-    log_env_default(env_name, std::to_string(default_val));
+    log_env_default(env_name, default_val);
     return default_val;
   }
   try {
