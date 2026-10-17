@@ -102,7 +102,7 @@ REFS = {
     "prometheus-cpp": "66b615591d17808437fc1ed8a6b6624fdc34b77e",
     "civetweb": "v1.16",
     "nats.c": "v3.14.0",
-    "cpp-httplib": "v0.60.1",
+    "cpp-httplib": "v0.61.0",
     "base64": "master",
     "odpi": "v26.0.0",
 }
@@ -201,6 +201,8 @@ def apply_lib(name, ref, args):
         print(f"== {name} (pin {REFS[name]} -> {ref}) ==")
     else:
         print(f"== {name} (pin {REFS[name]}) ==")
+    # запись разрешена только для либ, у которых ref явно переопределён --ref
+    write = args.apply and not args.dry_run and name in args.overridden
     with tempfile.TemporaryDirectory(prefix=f"vendored-{name}-") as tmp:
         tmp_dir = Path(tmp)
         repo_dir = tmp_dir / "repo"
@@ -235,7 +237,7 @@ def apply_lib(name, ref, args):
                     continue
                 changed += 1
                 note = PATCHED.get(str(rel))
-                apply_to = args.apply and not args.dry_run
+                apply_to = write
                 if note and apply_to and not args.force:
                     skipped += 1
                     if args.verbose:
@@ -249,7 +251,7 @@ def apply_lib(name, ref, args):
                     label = f" [local patch: {note}]" if note else ""
                     print(f"  [~] changed {rel}{label}")
             pruned = 0
-            if args.apply and args.prune and not args.dry_run:
+            if write and args.prune:
                 for local_file in missing_up:
                     if (str(local_file.relative_to(SRC_DIR)) in PATCHED
                             and not args.force):
@@ -263,7 +265,7 @@ def apply_lib(name, ref, args):
                 f"missing-upstream, {len(upstream_only)} upstream-only "
                 f"(вне минимального набора)"
             )
-            if args.apply and not args.dry_run:
+            if write:
                 summary += f", {written} записано, {skipped} патчей пропущено"
             if pruned:
                 summary += f", {pruned} удалено"
@@ -292,6 +294,7 @@ def main():
                         help="печатать каждый изменившийся файл")
     args = parser.parse_args()
     args.apply = bool(args.ref)
+    args.overridden = set()
     args._written = 0
     args._skipped = 0
 
@@ -305,6 +308,7 @@ def main():
         if name not in refs:
             parser.error(f"неизвестная либа {name!r} (выбирайте из {LIB_NAMES})")
         refs[name] = ref
+        args.overridden.add(name)
 
     for name in LIB_NAMES:
         if args.only and name != args.only:
