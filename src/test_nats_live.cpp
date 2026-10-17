@@ -242,6 +242,29 @@ private:
   std::string m_config_file;
 };
 
+// Runs L2Worker::run() on a background thread with the process-wide shutdown
+// flag cleared, and raises the flag plus joins on scope exit. A test that fails
+// in the middle would otherwise leave the worker running and the flag raised
+// for the next test, and a joinable std::thread reaching its destructor aborts
+// the whole binary. The flag is the same global the signal handlers toggle.
+class WorkerRunner {
+public:
+  explicit WorkerRunner(L2Worker &worker) {
+    g_shutdown_flag = false;
+    m_thread = std::thread([&worker] { worker.run(); });
+  }
+
+  ~WorkerRunner() {
+    g_shutdown_flag = true;
+    if (m_thread.joinable()) {
+      m_thread.join();
+    }
+  }
+
+private:
+  std::thread m_thread;
+};
+
 std::string unique_subject(const std::string &base) {
   static std::atomic<unsigned> seq{0};
   return base + "." + std::to_string(::getpid()) + "." +
@@ -1115,13 +1138,8 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   L2Worker worker(ctx);
   NatsClient test_client(live_nats_cfg(subject, server.port()));
 
-  struct RestoreShutdownFlag {
-    ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } const restore_shutdown;
-
   REQUIRE(worker.is_nats_connected());
-  g_shutdown_flag = false;
-  std::thread runner([&worker] { worker.run(); });
+  WorkerRunner const runner(worker);
 
   REQUIRE(test_client.connect());
 
@@ -1169,10 +1187,6 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
       test_client.request(subject, "not-json", 3000);
   REQUIRE(r3.has_value());
   REQUIRE(json::parse(*r3)["error"] == "Invalid request format");
-
-  g_shutdown_flag = true;
-  REQUIRE(runner.joinable());
-  runner.join();
 }
 
 TEST_CASE("NatsClient: constructor logs configured auth and TLS flags",
@@ -1319,13 +1333,8 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
   L2Worker worker(ctx);
   NatsClient test_client(live_nats_cfg(subject, server.port()));
 
-  struct RestoreShutdownFlag {
-    ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } const restore_shutdown;
-
   REQUIRE(worker.is_nats_connected());
-  g_shutdown_flag = false;
-  std::thread runner([&worker] { worker.run(); });
+  WorkerRunner const runner(worker);
 
   REQUIRE(test_client.connect());
 
@@ -1352,10 +1361,6 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
   // subscription refresh.
   REQUIRE(wait_for_condition(make_sender("restart-req-2"), 12000));
   REQUIRE(backend.m_posts.load() == 2);
-
-  g_shutdown_flag = true;
-  REQUIRE(runner.joinable());
-  runner.join();
 }
 
 #include <libpq-fe.h>
@@ -1577,14 +1582,10 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
   attach_tracer(ctx);
   L2Worker worker(ctx);
 
-  struct RestoreShutdownFlag {
-    ~RestoreShutdownFlag() { g_shutdown_flag = false; }
-  } const restore_shutdown;
-  g_shutdown_flag = false;
-  std::thread runner([&worker] { worker.run(); });
-
   NatsClient test_client(live_nats_cfg(subject, server.port()));
   REQUIRE(test_client.connect());
+
+  WorkerRunner const runner(worker);
 
   // Query served end-to-end: NATS -> worker -> live PostgreSQL -> reply.
   const json payload = {{DbQueryContract::kSql, "SELECT 42 AS answer"}};
@@ -1638,10 +1639,6 @@ TEST_CASE("L2Worker: serves DB queries over live NATS+Postgres", "[nats-live][db
           DbResponseContract::kStatusOk);
   REQUIRE(penv[DbQueryContract::kBody].contains(
       DbResponseContract::kLatencyMs));
-
-  g_shutdown_flag = true;
-  REQUIRE(runner.joinable());
-  runner.join();
 }
 TEST_CASE("NatsClient: request with timeout 0 uses config timeout", "[nats-live]") {
   NatsServer s;

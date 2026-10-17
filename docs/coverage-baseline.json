@@ -267,9 +267,9 @@
     },
     "nats_client.cpp": {
       "lines": 458,
-      "covered": 423,
+      "covered": 422,
       "branches": 748,
-      "branches_covered": 403
+      "branches_covered": 401
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 85
+      "branches_covered": 82
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
