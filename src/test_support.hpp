@@ -131,6 +131,29 @@ inline httplib::Request make_post(const std::string &path,
   return req;
 }
 
+// Drives one request through a handler (RequestHandler, ServerHandler or the
+// ProxyHandler fixture — anything exposing handle_get/handle_post) and hands
+// back the response, so a test body states "call and assert on what came back"
+// in one line. make_get / make_post only build the request.
+template <typename Handler>
+[[nodiscard]] inline httplib::Response call_get(Handler &handler,
+                                                const std::string &path) {
+  const httplib::Request req = make_get(path);
+  httplib::Response res;
+  handler.handle_get(req, res);
+  return res;
+}
+
+template <typename Handler>
+[[nodiscard]] inline httplib::Response call_post(Handler &handler,
+                                                 const std::string &path,
+                                                 const std::string &body) {
+  const httplib::Request req = make_post(path, body);
+  httplib::Response res;
+  handler.handle_post(req, res);
+  return res;
+}
+
 // Reserve an ephemeral loopback TCP port: bind to port 0, read the port the
 // kernel picked, release it. The live-server fixtures (nats-server, postgres)
 // need a port that is free right now before they fork the real server onto it.

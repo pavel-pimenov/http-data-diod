@@ -46,6 +46,8 @@
 namespace {
 
 using test_support::attach_tracer;
+using test_support::call_get;
+using test_support::call_post;
 using test_support::EnvGuard;
 using test_support::make_get;
 using test_support::make_post;
@@ -137,55 +139,41 @@ TEST_CASE("ServerHandler: health, favicon and value echo", "[server-handler]") {
   ServerHandler handler(ctx);
 
   {
-    const httplib::Request req = make_get("/health/live");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/health/live");
     REQUIRE(res.status == 200);
     REQUIRE(res.body.find("alive") != std::string::npos);
   }
   {
-    const httplib::Request req = make_get("/health");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/health");
     REQUIRE(res.status == 200);
     REQUIRE(res.body.find("alive") != std::string::npos);
   }
   {
-    const httplib::Request req = make_get("/health/ready");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/health/ready");
     REQUIRE(res.status == 200);
     REQUIRE(res.body.find("ready") != std::string::npos);
     REQUIRE(ctx.m_server.m_metrics->m_health_ready.Value() == 1.0);
   }
   {
-    const httplib::Request req = make_get("/favicon.ico");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/favicon.ico");
     REQUIRE(res.get_header_value("Content-Type") == "image/x-icon");
     REQUIRE(res.body.size() == 70);
     REQUIRE(res.body.compare(0, 4, std::string("\x00\x00\x01\x00", 4)) == 0);
   }
   {
-    const httplib::Request req = make_get("/");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["value_return"] == 0);
     REQUIRE(json::parse(res.body).contains("server_span_id"));
   }
 
   {
-    const httplib::Request req = make_post("/", "not json");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", "not json");
     REQUIRE(res.status == 400);
     REQUIRE(json::parse(res.body)["error"] == "Invalid JSON");
   }
   {
-    const httplib::Request req = make_post("/", R"({"value":42})");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", R"({"value":42})");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["value_return"] == 42);
   }
@@ -211,9 +199,7 @@ TEST_CASE("ServerHandler: traced response logging", "[server-handler]") {
   attach_tracer(ctx);
   ServerHandler handler(ctx);
 
-  const httplib::Request req = make_get("/");
-  httplib::Response res;
-  handler.handle_get(req, res);
+  httplib::Response const res = call_get(handler, "/");
   REQUIRE(res.status == 200);
   REQUIRE(json::parse(res.body).contains("server_span_id"));
 }
@@ -225,9 +211,7 @@ TEST_CASE("ServerHandler: test-mode response delay", "[server-handler]") {
   REQUIRE(ctx.m_config.m_server.m_test_response_delay_ms == 1);
 
   ServerHandler handler(ctx);
-  const httplib::Request req = make_post("/", R"({"value":1})");
-  httplib::Response res;
-  handler.handle_post(req, res);
+  httplib::Response const res = call_post(handler, "/", R"({"value":1})");
   REQUIRE(res.status == 200);
   REQUIRE(json::parse(res.body)["value_return"] == 1);
 }
@@ -243,16 +227,12 @@ TEST_CASE("RequestHandler: GET health, stats and debug endpoints",
   ProxyHandler handler(ctx);
 
   {
-    const httplib::Request req = make_get("/health/live");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/health/live");
     REQUIRE(res.status == 200);
     REQUIRE(res.body.find("alive") != std::string::npos);
   }
   {
-    const httplib::Request req = make_get("/stats");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/stats");
     REQUIRE(res.get_header_value("Content-Type") ==
             "text/html; charset=utf-8");
     REQUIRE(res.body.find("<html") != std::string::npos);
@@ -260,17 +240,13 @@ TEST_CASE("RequestHandler: GET health, stats and debug endpoints",
   {
     // The crash endpoint stays disarmed by default (ENABLE_CRASH_TEST_ENDPOINT
     // is off): a public client must not be able to SIGSEGV the proxy.
-    const httplib::Request req = make_get("/crash-test");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/crash-test");
     REQUIRE(res.status == 404);
     REQUIRE(json::parse(res.body)["error"].get<std::string>().find("disabled") !=
             std::string::npos);
   }
   {
-    const httplib::Request req = make_get("/debug/stacktrace");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/debug/stacktrace");
     REQUIRE(res.status == 200);
     const json body = json::parse(res.body);
     REQUIRE(body.contains("stacktrace"));
@@ -279,9 +255,7 @@ TEST_CASE("RequestHandler: GET health, stats and debug endpoints",
   {
     // No NATS client at all: readiness must answer fast with 503 instead of
     // trying to dial the backend.
-    const httplib::Request req = make_get("/health/ready");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/health/ready");
     REQUIRE(res.status == 503);
     REQUIRE(json::parse(res.body)["error"] == "NATS connection not available");
     REQUIRE(json::parse(res.body)["status"] == "not_ready");
@@ -289,16 +263,12 @@ TEST_CASE("RequestHandler: GET health, stats and debug endpoints",
   }
   {
     // Duplicate detector is only created by init_proxy_components().
-    const httplib::Request req = make_get("/debug/duplicates");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/debug/duplicates");
     REQUIRE(res.status == 404);
   }
   {
     // Unknown GET falls through to the backend path and times out with 504.
-    const httplib::Request req = make_get("/");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/");
     REQUIRE(res.status == 504);
     REQUIRE(json::parse(res.body)["error"] == "Timeout waiting for response");
   }
@@ -315,9 +285,7 @@ TEST_CASE("RequestHandler: readiness with a configured NATS client",
 
   ProxyHandler handler(ctx);
 
-  const httplib::Request req = make_get("/health/ready");
-  httplib::Response res;
-  handler.handle_get(req, res);
+  httplib::Response const res = call_get(handler, "/health/ready");
   REQUIRE(res.status == 503);
   REQUIRE(json::parse(res.body)["error"] == "NATS connection not available");
   REQUIRE(ctx.m_proxy.m_metrics->m_nats_connected.Value() == 0.0);
@@ -330,9 +298,7 @@ TEST_CASE("RequestHandler: POST without a backend answers 504",
   ProxyHandler handler(ctx);
 
   {
-    const httplib::Request req = make_post("/", "not json");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", "not json");
     REQUIRE(res.status == 400);
     REQUIRE(json::parse(res.body)["error"] == "Invalid JSON in request body");
   }
@@ -363,17 +329,13 @@ TEST_CASE("RequestHandler: global rate limiter rejects with 429",
   ProxyHandler handler(ctx);
 
   {
-    const httplib::Request req = make_post("/", R"({"value":1})");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", R"({"value":1})");
     REQUIRE(res.status == 504);
   }
   {
     // The bucket holds a single token and refills only once per second, so the
     // second back-to-back request is deterministically rejected.
-    const httplib::Request req = make_post("/", R"({"value":2})");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", R"({"value":2})");
     REQUIRE(res.status == 429);
     REQUIRE(res.get_header_value("Retry-After") == "1");
     REQUIRE(res.get_header_value("X-RateLimit-Limit") == "1");
@@ -435,23 +397,17 @@ TEST_CASE("RequestHandler: duplicate POST is counted but still forwarded",
 
   const std::string body = R"({"value":1})";
   {
-    const httplib::Request req = make_post("/", body);
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", body);
     REQUIRE(res.status == 504);
   }
   {
     // Same body again: detected as a duplicate but rejection is off, so the
     // request is still handed to the backend (504, not 409).
-    const httplib::Request req = make_post("/", body);
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", body);
     REQUIRE(res.status == 504);
   }
   {
-    const httplib::Request req = make_get("/debug/duplicates");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/debug/duplicates");
     REQUIRE(res.status == 200);
     const json report = json::parse(res.body);
     REQUIRE(report["enabled"] == true);
@@ -476,15 +432,11 @@ TEST_CASE("RequestHandler: duplicate POST is rejected with 409",
 
   const std::string body = R"({"value":3})";
   {
-    const httplib::Request req = make_post("/", body);
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", body);
     REQUIRE(res.status == 504);
   }
   {
-    const httplib::Request req = make_post("/", body);
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/", body);
     REQUIRE(res.status == 409);
     REQUIRE(json::parse(res.body)["error"] == "duplicate request");
   }
@@ -502,9 +454,7 @@ TEST_CASE("RequestHandler: DB gateway answers 404 when disabled",
 
   ProxyHandler handler(ctx);
 
-  const httplib::Request req = make_get("/v1/sql");
-  httplib::Response res;
-  handler.handle_get(req, res);
+  httplib::Response const res = call_get(handler, "/v1/sql");
   REQUIRE(res.status == 404);
   REQUIRE(json::parse(res.body)["error"]["code"] == "NOT_FOUND");
   REQUIRE(json::parse(res.body)["error"]["message"] == "DB gateway is disabled");
@@ -522,9 +472,7 @@ TEST_CASE("RequestHandler: DB gateway list, ping and query routing",
   ProxyHandler handler(ctx);
 
   {
-    const httplib::Request req = make_get("/v1/sql");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql");
     REQUIRE(res.status == 200);
     const json list = json::parse(res.body);
     REQUIRE(list["databases"].size() == 1);
@@ -533,51 +481,37 @@ TEST_CASE("RequestHandler: DB gateway list, ping and query routing",
     REQUIRE(list["databases"][0]["enabled"] == true);
   }
   {
-    const httplib::Request req = make_post("/v1/sql", "");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/v1/sql", "");
     REQUIRE(res.status == 405);
     REQUIRE(json::parse(res.body)["error"]["code"] == "METHOD_NOT_ALLOWED");
   }
   {
     // No NATS client in this context: the routed ping lands on the 503 branch.
-    const httplib::Request req = make_get("/v1/sql/postgres/ping");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/ping");
     REQUIRE(res.status == 503);
     REQUIRE(json::parse(res.body)["error"]["code"] == "DB_UNAVAILABLE");
   }
   {
-    const httplib::Request req = make_post("/v1/sql/postgres/ping", "");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/v1/sql/postgres/ping", "");
     REQUIRE(res.status == 405);
   }
   {
-    const httplib::Request req = make_get("/v1/sql/postgres/query");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/query");
     REQUIRE(res.status == 405);
   }
   {
-    const httplib::Request req = make_get("/v1/sql/postgres");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres");
     REQUIRE(res.status == 404);
     REQUIRE(json::parse(res.body)["error"]["message"] ==
             "Unknown DB gateway path");
   }
   {
-    const httplib::Request req = make_get("/v1/sql/postgres/delete");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/delete");
     REQUIRE(res.status == 404);
     REQUIRE(json::parse(res.body)["error"]["code"] == "NOT_FOUND");
   }
   {
-    const httplib::Request req = make_get("/v1/sql/unknown/ping");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/unknown/ping");
     REQUIRE(res.status == 404);
     REQUIRE(json::parse(res.body)["error"]["code"] == "UNKNOWN_DATABASE");
   }
@@ -591,9 +525,7 @@ TEST_CASE("RequestHandler: DB gateway list, ping and query routing",
     REQUIRE(json::parse(res.body)["error"]["message"] == "Invalid JSON body");
   }
   {
-    const httplib::Request req = make_post("/v1/sql/postgres/query", "{}");
-    httplib::Response res;
-    handler.handle_post(req, res);
+    httplib::Response const res = call_post(handler, "/v1/sql/postgres/query", "{}");
     REQUIRE(res.status == 400);
     REQUIRE(json::parse(res.body)["error"]["code"] == "BAD_REQUEST");
   }
@@ -628,9 +560,7 @@ TEST_CASE("RequestHandler: DB gateway maps a failed NATS round-trip to 503",
 
   ProxyHandler handler(ctx);
 
-  const httplib::Request req = make_get("/v1/sql/postgres/ping");
-  httplib::Response res;
-  handler.handle_get(req, res);
+  httplib::Response const res = call_get(handler, "/v1/sql/postgres/ping");
   REQUIRE(res.status == 503);
   REQUIRE(json::parse(res.body)["error"]["code"] == "DB_UNAVAILABLE");
 }

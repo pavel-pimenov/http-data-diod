@@ -68,9 +68,10 @@ constexpr const char *kTraceparent =
 // are shared via test_support.hpp; the values must be in place before the
 // Config is loaded by the AppContext ctor.
 using test_support::attach_tracer;
+using test_support::call_get;
+using test_support::call_post;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
-using test_support::make_get;
 using test_support::ProxyHandler;
 using test_support::reserve_loopback_port;
 using test_support::wait_for_condition;
@@ -979,9 +980,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
                                   subject, reply_fn);
 
     ProxyHandler handler(ctx);
-    const httplib::Request req = make_get("/v1/sql/postgres/ping");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/ping");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["db"] == "ok");
   }
@@ -999,9 +998,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
                                   subject, reply_fn);
 
     ProxyHandler handler(ctx);
-    const httplib::Request req = make_get("/v1/sql/postgres/ping");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/ping");
     REQUIRE(res.status == 502);
   }
 
@@ -1014,9 +1011,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     REQUIRE(ctx.m_nats_client->is_connected());
 
     ProxyHandler handler(ctx);
-    const httplib::Request req = make_get("/v1/sql/postgres/ping");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/v1/sql/postgres/ping");
     REQUIRE(res.status == 504);
   }
 }
@@ -1048,9 +1043,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
                                   subject, reply_fn);
 
     ProxyHandler handler(ctx);
-    const httplib::Request req = make_get("/api/v1/anything");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/api/v1/anything");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["proxied"] == true);
   }
@@ -1069,9 +1062,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
                                   subject, reply_fn);
 
     ProxyHandler handler(ctx);
-    const httplib::Request req = make_get("/api/v1/anything");
-    httplib::Response res;
-    handler.handle_get(req, res);
+    httplib::Response const res = call_get(handler, "/api/v1/anything");
     REQUIRE(res.status == 500);
     REQUIRE(json::parse(res.body)["error"] == "Invalid response format");
   }
@@ -1094,8 +1085,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     REQUIRE(ctx.m_nats_client->is_connected());
 
     ProxyHandler handler(ctx);
-    httplib::Response res;
-    handler.handle_get(make_get("/health/ready"), res);
+    httplib::Response const res = call_get(handler, "/health/ready");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["status"] == "ready");
     REQUIRE(ctx.m_proxy.m_metrics->m_health_ready.Value() == 1.0);
@@ -1115,8 +1105,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     REQUIRE(ctx.m_nats_client->is_connected());
 
     ProxyHandler handler(ctx);
-    httplib::Response res;
-    handler.handle_get(make_get("/health/ready"), res);
+    httplib::Response const res = call_get(handler, "/health/ready");
     REQUIRE(res.status == 200);
     REQUIRE(json::parse(res.body)["status"] == "ready");
     REQUIRE(ctx.m_proxy.m_metrics->m_health_ready.Value() == 1.0);
