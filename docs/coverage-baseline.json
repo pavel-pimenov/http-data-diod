@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 88,
+      "covered": 87,
       "branches": 95,
-      "branches_covered": 64
+      "branches_covered": 63
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -413,7 +413,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -422,16 +422,16 @@
       "branches_covered": 4
     },
     "thread_pool.hpp": {
-      "lines": 60,
-      "covered": 59,
+      "lines": 62,
+      "covered": 62,
       "branches": 132,
       "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
-      "lines": 26,
-      "covered": 26,
-      "branches": 22,
-      "branches_covered": 14
+      "lines": 23,
+      "covered": 23,
+      "branches": 18,
+      "branches_covered": 13
     },
     "time_utils.hpp": {
       "lines": 35,

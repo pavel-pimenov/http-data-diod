@@ -11,10 +11,26 @@
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #if __has_include(<stop_token>)
 #include <stop_token>
 #endif
+
+namespace thread_pool_detail {
+// Binds a callable and its arguments into a packaged_task. Shared by the real
+// bounded queue (ThreadPool::enqueue) and the inline Type::NONE path of
+// ThreadPoolWrapper so the "capture + std::invoke" step lives in one place.
+template <class F, class... Args>
+auto make_packaged_task(F &&f, Args &&...args) {
+  using return_type = std::invoke_result_t<F, Args...>;
+  return std::make_shared<std::packaged_task<return_type()>>(
+      [f = std::forward<F>(f),
+       ... args = std::forward<Args>(args)]() mutable -> return_type {
+        return std::invoke(f, args...);
+      });
+}
+} // namespace thread_pool_detail
 
 // Fixed-size worker thread pool with a bounded, blocking task queue.
 //
@@ -105,11 +121,8 @@ auto ThreadPool::enqueue(F &&f, Args &&...args)
     -> std::future<typename std::invoke_result_t<F, Args...>> {
   using return_type = typename std::invoke_result_t<F, Args...>;
 
-  auto task = std::make_shared<std::packaged_task<return_type()>>(
-      [f = std::forward<F>(f),
-       ... args = std::forward<Args>(args)]() mutable -> return_type {
-        return std::invoke(f, args...);
-      });
+  auto task = thread_pool_detail::make_packaged_task(
+      std::forward<F>(f), std::forward<Args>(args)...);
 
   std::future<return_type> res = task->get_future();
   {

@@ -33,12 +33,8 @@ public:
       return m_backend.m_custom_pool->enqueue(std::forward<F>(f),
                                               std::forward<Args>(args)...);
     case Type::NONE: {
-      auto task = std::make_shared<
-          std::packaged_task<std::invoke_result_t<F, Args...>()>>(
-          [f = std::forward<F>(f),
-           ... args = std::forward<Args>(args)]() mutable {
-            return std::invoke(f, args...);
-          });
+      auto task = thread_pool_detail::make_packaged_task(
+          std::forward<F>(f), std::forward<Args>(args)...);
       std::future<std::invoke_result_t<F, Args...>> result = task->get_future();
       (*task)();
       return result;
