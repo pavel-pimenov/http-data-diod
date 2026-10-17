@@ -199,13 +199,11 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_histogram_family(
           m_proxy_registry, "l2_proxy_db_request_duration_seconds",
           "Histogram of HTTP DB Gateway request processing duration in "
-          "seconds by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "seconds by database"),
       MetricsManager::create_histogram_family(
           m_proxy_registry, "l2_proxy_db_nats_request_duration_seconds",
           "Histogram of HTTP DB Gateway NATS round-trip duration in seconds "
-          "by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "by database"),
       MetricsManager::create_gauge(
           m_proxy_registry, "l2_proxy_in_flight_requests",
           "Current number of in-flight proxy HTTP requests"),
@@ -287,8 +285,7 @@ void AppContext::init_worker_metrics() {
           "by database, type and HTTP status"),
       MetricsManager::create_histogram_family(
           m_worker_registry, "l2_worker_db_query_duration_seconds",
-          "Histogram of DB query execution duration in seconds by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "Histogram of DB query execution duration in seconds by database"),
       MetricsManager::create_gauge_family(
           m_worker_registry, "l2_worker_db_pool_connections",
           "Current number of DB pool connections by database and state "

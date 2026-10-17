@@ -319,7 +319,7 @@ TEST_CASE("MetricsManager: family creators behave as collectables",
   REQUIRE(gfam.Collect().empty());
 
   auto &hfam = MetricsManager::create_histogram_family(
-      registry, "mm_hfam", "", std::vector<double>{0.1, 1.0});
+      registry, "mm_hfam", "");
   hfam.Add({{"db", "x"}}, std::vector<double>{0.1, 1.0}).Observe(0.2);
   auto hcollected = hfam.Collect();
   REQUIRE(hcollected.front().metric.size() == 1);
@@ -333,7 +333,7 @@ TEST_CASE("MetricsManager: array-arg creators forward bucket bounds",
       registry, "mm_hist_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_10s);
   hist.Observe(5.0);
   auto &fam = MetricsManager::create_histogram_family(
-      registry, "mm_hfam_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_5s);
+      registry, "mm_hfam_arr", "");
   REQUIRE(fam.Collect().empty());
 }
 
@@ -377,7 +377,7 @@ TEST_CASE("MetricsManager: observe_db_request_duration observes seconds",
           "[metrics-manager]") {
   auto registry = std::make_shared<prometheus::Registry>();
   auto &fam = MetricsManager::create_histogram_family(
-      registry, "db_dur", "", latency_buckets_ms_to_10s());
+      registry, "db_dur", "");
   observe_db_request_duration(fam, "pg", 1'000'000, 1'100'000);
   auto collected = fam.Collect();
   REQUIRE(collected.front().metric.size() == 1);

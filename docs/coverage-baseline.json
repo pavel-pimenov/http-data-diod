@@ -248,16 +248,16 @@
       "branches_covered": 63
     },
     "metrics_manager.cpp": {
-      "lines": 24,
-      "covered": 24,
-      "branches": 54,
-      "branches_covered": 27
+      "lines": 16,
+      "covered": 16,
+      "branches": 10,
+      "branches_covered": 5
     },
     "metrics_manager.hpp": {
-      "lines": 18,
-      "covered": 18,
-      "branches": 58,
-      "branches_covered": 26
+      "lines": 25,
+      "covered": 25,
+      "branches": 78,
+      "branches_covered": 36
     },
     "nats_client.cpp": {
       "lines": 458,
@@ -407,7 +407,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 246
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 7,
