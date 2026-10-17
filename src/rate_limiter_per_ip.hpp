@@ -3,15 +3,22 @@
 
 #include "logger.hpp"
 #include "rate_limiter.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 class PerIPRateLimiter {
 public:
@@ -50,11 +57,10 @@ private:
     mutable std::mutex m_mutex;
   };
 
-  // Aggregate request/lifecycle counters.
-  struct Counters {
-    std::atomic<uint64_t> m_total_requests{0};
-    std::atomic<uint64_t> m_allowed_requests{0};
-    std::atomic<uint64_t> m_rejected_requests{0};
+  // Aggregate request/lifecycle counters. The request-outcome fields are shared
+  // with the global limiter (RateLimiterCounters); only the per-IP extras live
+  // here.
+  struct Counters : RateLimiterCounters {
     std::atomic<uint64_t> m_unique_ips{0};
     std::atomic<uint64_t> m_evictions{0};
   };
@@ -87,11 +93,11 @@ public:
   PerIPRateLimiter &operator=(PerIPRateLimiter &&) = delete;
 
   bool acquire(const std::string &client_ip) {
-    m_counters.m_total_requests.fetch_add(1, std::memory_order_relaxed);
+    m_counters.count_request();
 
     const std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
     if (!limiter) {
-      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.count_rejected();
       size_t tracked = 0;
       {
         const std::scoped_lock lock(m_cache.m_mutex);
@@ -106,10 +112,10 @@ public:
     }
 
     if (limiter->acquire()) {
-      m_counters.m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.count_allowed();
       return true;
     }
-    m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+    m_counters.count_rejected();
     record_rejection(client_ip);
     Logger::debug(
         "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
