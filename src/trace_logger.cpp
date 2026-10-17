@@ -345,10 +345,7 @@ void JaegerLogger::deliver_sentry_transactions(
   // forever). After the consecutive-failure threshold the breaker opens:
   // delivery is skipped for the exponential cooldown window (capped) and the
   // batch is shed instead of bombarding the dead target.
-  const uint64_t now_steady_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count();
+  const uint64_t now_steady_ms = TimeUtils::steady_ms();
   const uint64_t cooldown_until =
       m_breaker.m_sentry.m_cooldown_until_steady_ms.load();
   if (cooldown_until != 0 && now_steady_ms < cooldown_until) {
@@ -422,10 +419,7 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                  uint64_t end_us,
                                  const std::string &service_name,
                                  const nlohmann::json &attributes) {
-  uint64_t const now_us =
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count();
+  uint64_t const now_us = TimeUtils::steady_us();
   const auto outcome = m_delivery.m_span_queue.push(
       SpanData{trace_id, span_id, parent_id, name, service_name, start_us,
                end_us, now_us, attributes});
@@ -545,10 +539,7 @@ void JaegerLogger::sender_loop(const std::stop_token &st) {
 void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
                                          const std::stop_token &st) {
   const auto start_time = std::chrono::steady_clock::now();
-  uint64_t const now_us =
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count();
+  uint64_t const now_us = TimeUtils::steady_us();
   double avg_queue_time_s = 0.0;
   for (const auto &span : batch) {
     avg_queue_time_s +=

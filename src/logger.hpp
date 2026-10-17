@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "config.hpp"
+#include "time_utils.hpp"
 
 // Thread-local storage for correlation ID
 struct LogContext {
@@ -82,16 +83,12 @@ public:
               memory_buf_t &dest) override {
     nlohmann::json j;
 
-    // Timestamp in ISO 8601 format (UTC)
-    const auto now_s =
-        std::chrono::time_point_cast<std::chrono::seconds>(msg.time);
-
-    // Add milliseconds
-    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            msg.time.time_since_epoch())
-                            .count() %
-                        1000;
-    j["timestamp"] = std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", now_s, millis);
+    // Timestamp in ISO 8601 format (UTC); the same helper the tracing sender
+    // uses, so the RFC3339 rendering lives in one place.
+    j["timestamp"] = TimeUtils::format_rfc3339_us(static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            msg.time.time_since_epoch())
+            .count()));
 
     // Level - convert string_view to string properly
     const auto level_sv = spdlog::level::to_string_view(msg.level);

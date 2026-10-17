@@ -236,10 +236,10 @@
       "branches_covered": 397
     },
     "logger.hpp": {
-      "lines": 276,
-      "covered": 263,
-      "branches": 397,
-      "branches_covered": 221
+      "lines": 274,
+      "covered": 261,
+      "branches": 395,
+      "branches_covered": 220
     },
     "metrics_history.hpp": {
       "lines": 92,
@@ -407,7 +407,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 245
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 7,
@@ -446,8 +446,8 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 378,
-      "covered": 354,
+      "lines": 372,
+      "covered": 348,
       "branches": 803,
       "branches_covered": 456
     },
