@@ -3,6 +3,7 @@
 
 #include "httplib/httplib.h"
 #include "logger.hpp"
+#include <cstddef>
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,12 @@ struct ParsedUrl {
 inline constexpr const char *kHealthLivePath = "/health/live";
 inline constexpr const char *kHealthPath = "/health";
 inline constexpr const char *kHealthReadyPath = "/health/ready";
+
+// Liveness endpoints: the canonical path and its /health/live alias are both
+// answered with the same "alive" body by the proxy and the server.
+[[nodiscard]] inline bool is_liveness_path(std::string_view path) {
+  return path == kHealthLivePath || path == kHealthPath;
+}
 
 // Header-only URL parser (like normalize_path / extract_client_ip above) so
 // the pure routing helpers — including the SSRF-policy checks in l2_routing

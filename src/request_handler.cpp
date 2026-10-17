@@ -66,7 +66,7 @@ RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
 void RequestHandler::handle_get(const httplib::Request &req,
                                 httplib::Response &res) {
   // Liveness probe - just check if process is running
-  if (req.path == kHealthLivePath || req.path == kHealthPath) {
+  if (is_liveness_path(req.path)) {
     set_health_alive(res, "l2-proxy");
     return;
   }
