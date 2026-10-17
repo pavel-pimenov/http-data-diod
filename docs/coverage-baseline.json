@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 88,
+      "covered": 87,
       "branches": 95,
-      "branches_covered": 64
+      "branches_covered": 63
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -308,10 +308,10 @@
       "branches_covered": 88
     },
     "random_utils.hpp": {
-      "lines": 6,
-      "covered": 6,
-      "branches": 14,
-      "branches_covered": 8
+      "lines": 15,
+      "covered": 14,
+      "branches": 28,
+      "branches_covered": 18
     },
     "rate_limiter.hpp": {
       "lines": 53,
@@ -334,8 +334,8 @@
     "request_handler.cpp": {
       "lines": 446,
       "covered": 425,
-      "branches": 957,
-      "branches_covered": 524
+      "branches": 953,
+      "branches_covered": 521
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -386,10 +386,10 @@
       "branches_covered": 3
     },
     "sentry_client.cpp": {
-      "lines": 232,
-      "covered": 227,
-      "branches": 624,
-      "branches_covered": 327
+      "lines": 221,
+      "covered": 217,
+      "branches": 612,
+      "branches_covered": 319
     },
     "sentry_client.hpp": {
       "lines": 2,
@@ -400,8 +400,8 @@
     "server_handler.cpp": {
       "lines": 81,
       "covered": 80,
-      "branches": 246,
-      "branches_covered": 126
+      "branches": 238,
+      "branches_covered": 120
     },
     "stats_logger.cpp": {
       "lines": 88,
@@ -413,7 +413,7 @@
       "lines": 209,
       "covered": 206,
       "branches": 387,
-      "branches_covered": 246
+      "branches_covered": 245
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 85
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
@@ -452,10 +452,10 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 370,
-      "covered": 346,
-      "branches": 797,
-      "branches_covered": 452
+      "lines": 363,
+      "covered": 340,
+      "branches": 785,
+      "branches_covered": 444
     },
     "trace_logger.hpp": {
       "lines": 26,
@@ -470,10 +470,10 @@
       "branches_covered": 168
     },
     "url_utils.hpp": {
-      "lines": 67,
-      "covered": 67,
-      "branches": 164,
-      "branches_covered": 104
+      "lines": 69,
+      "covered": 69,
+      "branches": 168,
+      "branches_covered": 108
     },
     "worker_request_parser.hpp": {
       "lines": 18,

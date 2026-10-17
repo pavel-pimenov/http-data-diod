@@ -19,6 +19,7 @@
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -635,6 +636,17 @@ TEST_CASE("Random utils: between stays within the inclusive range",
     REQUIRE(v <= 7);
   }
   REQUIRE(RandomUtils::between(42, 42) == 42);
+}
+
+TEST_CASE("Random utils: hex_string yields lowercase hex of requested length",
+          "[random-utils]") {
+  for (const size_t len : {size_t{0}, size_t{1}, size_t{16}, size_t{32}}) {
+    const std::string hex = RandomUtils::hex_string(len);
+    REQUIRE(hex.size() == len);
+    for (const char c : hex) {
+      REQUIRE(((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')));
+    }
+  }
 }
 
 TEST_CASE("Schema validator: required fields, methods, paths, sizes",

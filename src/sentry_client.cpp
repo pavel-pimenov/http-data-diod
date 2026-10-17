@@ -10,7 +10,6 @@
 #include "time_utils.hpp"
 #include "logger.hpp"
 #include "httplib/httplib.h"
-#include <cstdint>
 #include <string>
 #include <cstddef>
 #include <optional>
@@ -19,26 +18,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-namespace {
-
-void append_hex_digits(uint64_t value, std::string &out) {
-  static constexpr std::string_view k_hex_digits = "0123456789abcdef";
-  for (size_t i = 0; i < 16; ++i) {
-    out.push_back(k_hex_digits[(value >> (4 * i)) & 0xF]);
-  }
-}
-
-std::string generate_event_id() {
-  std::string hex_id;
-  hex_id.reserve(32);
-  for (size_t i = 0; i < 2; ++i) {
-    append_hex_digits(RandomUtils::rng()(), hex_id);
-  }
-  return hex_id;
-}
-
-} // namespace
 
 namespace sentry {
 
@@ -188,7 +167,7 @@ nlohmann::json build_event_json(const SentryEvent &event,
                                 const std::string &environment,
                                 const std::string &release) {
   nlohmann::json root = nlohmann::json::object();
-  root["event_id"] = generate_event_id();
+  root["event_id"] = RandomUtils::hex_string(32);
   root["timestamp"] = TimeUtils::format_rfc3339();
   root["platform"] = "native";
   root["level"] = level_to_string(event.m_level);

@@ -6,6 +6,7 @@
 #include "prometheus/counter.h"
 #include "prometheus/gauge.h"
 #include "prometheus/histogram.h"
+#include "random_utils.hpp"
 #include "sentry_client.hpp"
 #include "nlohmann/json.hpp"
 #include "time_utils.hpp"
@@ -24,11 +25,10 @@
 #include <vector>
 #include <thread>
 
-// Thread-local random generator for fast ID generation (initialized once per
+// Thread-local random generator for sampling decisions (initialized once per
 // thread)
 static thread_local std::random_device g_rd;
 static thread_local std::mt19937_64 g_gen(g_rd());
-static thread_local std::uniform_int_distribution<uint64_t> g_dis;
 
 namespace {
 // Jaeger sender pool is deliberately tiny and short-timeout: spans are
@@ -472,22 +472,10 @@ void JaegerLogger::log_request(
                end_us, service_name, attrs);
 }
 
-// Fast random hex generation using pre-initialized thread-local generator
+// Thin wrapper: the hex generation itself lives in RandomUtils so trace/span
+// ids and Sentry event ids share one implementation.
 std::string JaegerLogger::random_hex_fast(size_t len) {
-  std::string res;
-  res.reserve(len);
-
-  static const std::string_view g_hex_chars = "0123456789abcdef";
-
-  // Generate 8 chars at a time (64 bits)
-  for (size_t i = 0; i < len; i += 16) {
-    uint64_t const val = g_dis(g_gen);
-    for (size_t j = 0; j < 16 && (i + j) < len; ++j) {
-      res += g_hex_chars[(val >> (j * 4)) & 0xF];
-    }
-  }
-
-  return res;
+  return RandomUtils::hex_string(len);
 }
 
 void JaegerLogger::sender_loop(const std::stop_token &st) {
