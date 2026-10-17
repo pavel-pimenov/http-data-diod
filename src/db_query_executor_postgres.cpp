@@ -5,6 +5,7 @@
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "pg_value_utils.hpp"
+#include "string_utils.hpp"
 #include "time_utils.hpp"
 #include <libpq-fe.h>
 #include <cstddef>
@@ -124,15 +125,7 @@ struct PostgresQueryExecutor::Impl {
   }
 
   static std::string trim_copy(const char *text) {
-    if (!text) {
-      return "";
-    }
-    std::string s(text);
-    while (!s.empty() &&
-           (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) {
-      s.pop_back();
-    }
-    return s;
+    return text == nullptr ? std::string() : trim_trailing(text, "\r\n ");
   }
 
   // Applies the per-query statement_timeout; returns "" on success, otherwise

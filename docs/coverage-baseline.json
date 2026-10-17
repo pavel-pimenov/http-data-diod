@@ -56,10 +56,10 @@
       "branches_covered": 7
     },
     "crash_utils.hpp": {
-      "lines": 32,
-      "covered": 31,
-      "branches": 34,
-      "branches_covered": 26
+      "lines": 30,
+      "covered": 29,
+      "branches": 28,
+      "branches_covered": 19
     },
     "db_gateway_routing.hpp": {
       "lines": 34,
@@ -98,10 +98,10 @@
       "branches_covered": 33
     },
     "db_query_executor_postgres.cpp": {
-      "lines": 215,
-      "covered": 202,
-      "branches": 330,
-      "branches_covered": 183
+      "lines": 208,
+      "covered": 196,
+      "branches": 318,
+      "branches_covered": 176
     },
     "db_query_handler.cpp": {
       "lines": 83,
@@ -416,16 +416,16 @@
       "branches_covered": 246
     },
     "string_utils.cpp": {
-      "lines": 7,
-      "covered": 6,
-      "branches": 6,
-      "branches_covered": 4
+      "lines": 12,
+      "covered": 11,
+      "branches": 16,
+      "branches_covered": 12
     },
     "thread_pool.hpp": {
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 83
+      "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,

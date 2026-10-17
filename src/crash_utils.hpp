@@ -1,12 +1,16 @@
 #ifndef CRASH_UTILS_HPP
 #define CRASH_UTILS_HPP
 
+#include "string_utils.hpp"
+
 #include <array>
 #include <cxxabi.h>
 #include <cstdlib>
 #include <memory>
 #include <signal.h>
 #include <string>
+#include <string_view>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace crash_utils {
@@ -28,11 +32,8 @@ inline const char *signal_name(int signum) {
   }
 }
 
-inline std::string trim_line(std::string s) {
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
-    s.pop_back();
-  }
-  return s;
+inline std::string trim_line(std::string_view s) {
+  return trim_trailing(s);
 }
 
 inline std::string demangle_symbol(const char *mangled) {
