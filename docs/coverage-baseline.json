@@ -200,10 +200,10 @@
       "branches_covered": 0
     },
     "json_response_utils.hpp": {
-      "lines": 24,
-      "covered": 24,
-      "branches": 34,
-      "branches_covered": 18
+      "lines": 30,
+      "covered": 30,
+      "branches": 40,
+      "branches_covered": 21
     },
     "json_schema_validator.hpp": {
       "lines": 102,
@@ -332,10 +332,10 @@
       "branches_covered": 27
     },
     "request_handler.cpp": {
-      "lines": 449,
-      "covered": 428,
-      "branches": 961,
-      "branches_covered": 526
+      "lines": 446,
+      "covered": 425,
+      "branches": 957,
+      "branches_covered": 524
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 85
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,

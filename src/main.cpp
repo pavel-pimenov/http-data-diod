@@ -300,10 +300,7 @@ void run_worker(AppContext &app_ctx) {
     app_ctx.m_worker.m_metrics->m_nats_connected.Set(ready ? 1.0 : 0.0);
     app_ctx.m_worker.m_metrics->m_health_ready.Set(ready ? 1.0 : 0.0);
     if (ready) {
-      res.status = 200;
-      res.set_content(
-          R"({"status": "ready", "service": "l2-worker", "messaging": "nats"})",
-          "application/json");
+      set_health_ready_nats(res, "l2-worker");
     } else {
       res.status = 503;
       res.set_content(

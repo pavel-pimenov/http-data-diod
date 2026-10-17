@@ -3,6 +3,8 @@
 
 #include "time_utils.hpp"
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -37,10 +39,10 @@ inline constexpr Buckets g_buckets = {
 // family itself does not remember them). Returned by reference from one static
 // so frequent observes do not rebuild the vector on every call.
 inline const std::vector<double> &latency_buckets_ms_to_10s() {
-  static const std::vector<double> buckets = {
+  static const std::vector<double> g_latency_buckets = {
       histogram_buckets::g_buckets.m_latency_ms_to_10s.begin(),
       histogram_buckets::g_buckets.m_latency_ms_to_10s.end()};
-  return buckets;
+  return g_latency_buckets;
 }
 
 namespace metrics_detail {

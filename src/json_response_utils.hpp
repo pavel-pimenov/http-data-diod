@@ -49,4 +49,17 @@ inline void set_health_ready(httplib::Response &res,
       "application/json");
 }
 
+// Readiness body for the NATS-backed services (worker/proxy): the same shape as
+// set_health_ready plus the "messaging": "nats" marker. Both readiness
+// endpoints used to inline the identical JSON template.
+inline void set_health_ready_nats(httplib::Response &res,
+                                  std::string_view service) {
+  res.status = 200;
+  res.set_content(
+      std::format(
+          R"({{"status": "ready", "service": "{}", "messaging": "nats"}})",
+          service),
+      "application/json");
+}
+
 #endif // JSON_RESPONSE_UTILS_HPP

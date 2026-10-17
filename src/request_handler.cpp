@@ -195,10 +195,7 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
   m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
 
   if (nats_healthy) {
-    res.status = 200;
-    res.set_content(
-        R"({"status": "ready", "service": "l2-proxy", "messaging": "nats"})",
-        "application/json");
+    set_health_ready_nats(res, "l2-proxy");
   } else {
     res.status = 503;
     nlohmann::json error_body;
