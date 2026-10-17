@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 87,
+      "covered": 88,
       "branches": 95,
-      "branches_covered": 63
+      "branches_covered": 64
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -314,8 +314,8 @@
       "branches_covered": 8
     },
     "rate_limiter.hpp": {
-      "lines": 44,
-      "covered": 43,
+      "lines": 53,
+      "covered": 52,
       "branches": 26,
       "branches_covered": 15
     },
@@ -386,8 +386,8 @@
       "branches_covered": 3
     },
     "sentry_client.cpp": {
-      "lines": 228,
-      "covered": 224,
+      "lines": 232,
+      "covered": 227,
       "branches": 624,
       "branches_covered": 327
     },
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
@@ -452,10 +452,10 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 372,
-      "covered": 348,
-      "branches": 803,
-      "branches_covered": 456
+      "lines": 370,
+      "covered": 346,
+      "branches": 797,
+      "branches_covered": 452
     },
     "trace_logger.hpp": {
       "lines": 26,

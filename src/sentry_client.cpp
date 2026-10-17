@@ -175,6 +175,14 @@ std::string envelope_item(const nlohmann::json &payload, std::string_view type,
   return item.dump() + "\n" + body;
 }
 
+nlohmann::json service_tags(const std::string &service_name) {
+  nlohmann::json tags = nlohmann::json::object();
+  if (!service_name.empty()) {
+    tags["service"] = service_name;
+  }
+  return tags;
+}
+
 nlohmann::json build_event_json(const SentryEvent &event,
                                 const std::string &service_name,
                                 const std::string &environment,
@@ -196,10 +204,7 @@ nlohmann::json build_event_json(const SentryEvent &event,
     root["transaction"] = event.m_transaction;
   }
 
-  nlohmann::json tags = nlohmann::json::object();
-  if (!service_name.empty()) {
-    tags["service"] = service_name;
-  }
+  nlohmann::json tags = service_tags(service_name);
   if (!event.m_request_id.empty()) {
     tags["request_id"] = event.m_request_id;
   }

@@ -56,6 +56,10 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
                            const std::string &release);
 std::string level_to_string(EventLevel level);
 
+// Sentry tags object seeded with the service name (omitted when empty) — the
+// shared opening of the transaction (trace logger) and error-event tag blocks.
+nlohmann::json service_tags(const std::string &service_name);
+
 // Envelope wire helpers shared by the error sender (SentryClient) and the
 // performance sender (JaegerLogger's transaction sink): both target the same
 // Sentry-compatible endpoint, so the URL/auth/header/item layout lives in one

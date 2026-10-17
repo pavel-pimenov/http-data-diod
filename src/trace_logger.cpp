@@ -268,10 +268,7 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     root["environment"] = environment;
   }
 
-  nlohmann::json tags = nlohmann::json::object();
-  if (!service_name.empty()) {
-    tags["service"] = service_name;
-  }
+  nlohmann::json tags = sentry::service_tags(service_name);
   if (!product.empty()) {
     tags["mode"] = product;
   }
