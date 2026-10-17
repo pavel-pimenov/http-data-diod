@@ -215,6 +215,22 @@ private:
   // Copy the live connection pointer under the mutex; marks the client
   // disconnected (with the operation name) when the connection is gone.
   natsConnection *acquire_connection(const std::string &operation);
+  // Created (header-carrying) message together with the live connection it must
+  // be sent on.
+  struct PreparedMessage {
+    natsConnection *m_conn = nullptr;
+    natsMsg *m_msg = nullptr;
+  };
+  // Shared prologue of request_impl()/publish_with_headers(): ensures a live
+  // connection, creates `data` as a message and applies `headers`. `operation`
+  // names the caller in connection-lost logs, `message_kind` completes the error
+  // strings ("message" / "request message"). On failure the error is recorded
+  // (set_msg_headers destroys the created message) and nullopt is returned.
+  std::optional<PreparedMessage>
+  prepare_message_with_headers(std::string_view subject, std::string_view data,
+                               const NatsHeaders &headers,
+                               const std::string &operation,
+                               const std::string &message_kind);
   // Shared request path used by request()/request_with_headers()
   std::optional<NatsReply>
   request_impl(std::string_view subject, std::string_view data,

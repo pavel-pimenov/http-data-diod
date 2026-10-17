@@ -442,39 +442,55 @@ std::optional<std::string> NatsClient::request(std::string_view subject,
   return reply->m_data;
 }
 
-std::optional<NatsReply>
-NatsClient::request_impl(std::string_view subject, std::string_view data,
-                         const NatsHeaders &headers,
-                         const std::vector<std::string> &reply_header_keys,
-                         int timeout_ms) {
+std::optional<NatsClient::PreparedMessage>
+NatsClient::prepare_message_with_headers(std::string_view subject,
+                                         std::string_view data,
+                                         const NatsHeaders &headers,
+                                         const std::string &operation,
+                                         const std::string &message_kind) {
   if (!ensure_connected()) {
     return std::nullopt;
   }
 
-  natsConnection *conn = acquire_connection("request");
+  natsConnection *conn = acquire_connection(operation);
   if (!conn) {
     return std::nullopt;
   }
 
   const std::string subject_str(subject);
   natsMsg *msg = nullptr;
-  natsStatus s = natsMsg_Create(&msg, subject_str.c_str(), nullptr, data.data(),
-                                 static_cast<int>(data.size()));
+  const natsStatus s = natsMsg_Create(&msg, subject_str.c_str(), nullptr,
+                                      data.data(),
+                                      static_cast<int>(data.size()));
   if (s != NATS_OK) {
-    set_error("Failed to create NATS request message for subject '" +
+    set_error("Failed to create NATS " + message_kind + " for subject '" +
               std::string(subject) + "'");
     return std::nullopt;
   }
 
-  if (!set_msg_headers(msg, headers, "NATS request message")) {
+  if (!set_msg_headers(msg, headers, "NATS " + message_kind)) {
+    return std::nullopt;
+  }
+
+  return PreparedMessage{.m_conn = conn, .m_msg = msg};
+}
+
+std::optional<NatsReply>
+NatsClient::request_impl(std::string_view subject, std::string_view data,
+                         const NatsHeaders &headers,
+                         const std::vector<std::string> &reply_header_keys,
+                         int timeout_ms) {
+  const auto prepared = prepare_message_with_headers(
+      subject, data, headers, "request", "request message");
+  if (!prepared) {
     return std::nullopt;
   }
 
   natsMsg *reply = nullptr;
-  s = natsConnection_RequestMsg(&reply, conn, msg,
-                                timeout_ms > 0 ? timeout_ms
-                                               : m_config.m_timeout_ms);
-  natsMsg_Destroy(msg);
+  natsStatus s = natsConnection_RequestMsg(
+      &reply, prepared->m_conn, prepared->m_msg,
+      timeout_ms > 0 ? timeout_ms : m_config.m_timeout_ms);
+  natsMsg_Destroy(prepared->m_msg);
 
   if (s != NATS_OK) {
     const auto error_text = nats_status_text(s);
@@ -701,31 +717,15 @@ bool NatsClient::set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
 bool NatsClient::publish_with_headers(std::string_view subject,
                                       std::string_view data,
                                       const NatsHeaders &headers) {
-  if (!ensure_connected()) {
+  const auto prepared = prepare_message_with_headers(
+      subject, data, headers, "publish_with_headers", "message");
+  if (!prepared) {
     return false;
   }
 
-  natsConnection *conn = acquire_connection("publish_with_headers");
-  if (!conn) {
-    return false;
-  }
-
-  const std::string subject_str(subject);
-  natsMsg *msg = nullptr;
-  natsStatus s = natsMsg_Create(&msg, subject_str.c_str(), nullptr, data.data(),
-                                 static_cast<int>(data.size()));
-  if (s != NATS_OK) {
-    set_error("Failed to create NATS message for subject '" +
-              std::string(subject) + "'");
-    return false;
-  }
-
-  if (!set_msg_headers(msg, headers, "NATS message")) {
-    return false;
-  }
-
-  s = natsConnection_PublishMsg(conn, msg);
-  natsMsg_Destroy(msg);
+  const natsStatus s =
+      natsConnection_PublishMsg(prepared->m_conn, prepared->m_msg);
+  natsMsg_Destroy(prepared->m_msg);
 
   if (s != NATS_OK) {
     mark_disconnected("publish_with_headers failed for subject '" +
