@@ -16,6 +16,7 @@
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "test_pg_diag.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -30,12 +31,10 @@
 #include <functional>
 #include <grp.h>
 #include <libpq-fe.h>
-#include <netinet/in.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <system_error>
@@ -45,30 +44,10 @@
 
 namespace {
 
-constexpr int kServerWaitTimeoutMs = 10000;
+using test_support::reserve_loopback_port;
+using test_support::wait_for_condition;
 
-[[nodiscard]] int reserve_loopback_port() {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    return 0;
-  }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  socklen_t len = sizeof(addr);
-  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  const int port = ntohs(addr.sin_port);
-  ::close(fd);
-  return port;
-}
+constexpr int kServerWaitTimeoutMs = 10000;
 
 // A bare TCP accept only proves the postmaster bound the port: right after the
 // start it still answers SQL connections with "the database system is starting
@@ -84,19 +63,6 @@ constexpr int kServerWaitTimeoutMs = 10000;
   const bool ok = PQstatus(conn) == CONNECTION_OK;
   PQfinish(conn);
   return ok;
-}
-
-[[nodiscard]] bool wait_for_condition(const std::function<bool()> &predicate,
-                                      int timeout_ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (predicate()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  return predicate();
 }
 
 // Unix user the server must run as: an existing non-root user (postgres, or the

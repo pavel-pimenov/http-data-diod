@@ -72,6 +72,8 @@ using test_support::attach_tracer;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
 using test_support::make_get;
+using test_support::reserve_loopback_port;
+using test_support::wait_for_condition;
 
 // Path of the nats-server binary COPYed into the builder image; empty when the
 // binary is not installed (tests then SKIP). Also consulted along PATH so the
@@ -110,29 +112,6 @@ std::string nats_binary_path() {
   return "";
 }
 
-[[nodiscard]] int reserve_loopback_port() {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    return 0;
-  }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  socklen_t len = sizeof(addr);
-  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  const int port = ntohs(addr.sin_port);
-  ::close(fd);
-  return port;
-}
-
 [[nodiscard]] bool tcp_probe(int port) {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -146,19 +125,6 @@ std::string nats_binary_path() {
                            sizeof(addr));
   ::close(fd);
   return rc == 0;
-}
-
-[[nodiscard]] bool wait_for_condition(const std::function<bool()> &predicate,
-                                      int timeout_ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  do {
-    if (predicate()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  } while (std::chrono::steady_clock::now() < deadline);
-  return predicate();
 }
 
 [[nodiscard]] bool wait_for_port(int port, bool want_open, int timeout_ms) {
@@ -1481,22 +1447,7 @@ namespace pgtest {
 
 constexpr int kPgWaitMs = 10000;
 
-[[nodiscard]] int pg_reserve_port() {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    return 0;
-  }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  if (::bind(fd, (const sockaddr*)&addr, sizeof(addr)) != 0) { ::close(fd); return 0; }
-  socklen_t len = sizeof(addr);
-  if (::getsockname(fd, (sockaddr*)&addr, &len) != 0) { ::close(fd); return 0; }
-  int const p = ntohs(addr.sin_port);
-  ::close(fd);
-  return p;
-}
+using test_support::reserve_loopback_port;
 
 // A bare TCP accept only means the postmaster bound the port: right after the
 // start it still answers SQL connections with "the database system is starting
@@ -1515,16 +1466,7 @@ constexpr int kPgWaitMs = 10000;
   return ok;
 }
 
-[[nodiscard]] bool pg_wait(const std::function<bool()>& pred, int ms) {
-  auto d = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-  while (std::chrono::steady_clock::now() < d) {
-    if (pred()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  return pred();
-}
+using test_support::wait_for_condition;
 
 struct PgTarget {
   bool m_ok = false, m_need = false;
@@ -1693,7 +1635,7 @@ private:
     if (!pg_test_diag::enough_free_space()) {
       return false;
     }
-    m_port=pg_reserve_port();
+    m_port=reserve_loopback_port();
     if (m_port <= 0) {
       pg_test_diag::fail("no free loopback port");
       return false;
@@ -1721,7 +1663,7 @@ private:
               serv_log, t);
     if (sp<0){ pg_test_diag::fail(std::format("fork postgres failed: {}", std::strerror(errno))); cleanup(); return false; }
     m_pid=sp;
-    if (!pg_wait([this]{ return pg_sql_probe(m_port)&&alive(); }, kPgWaitMs)){ pg_test_diag::fail(std::format("server at {} never became ready: {}", m_port, pg_test_diag::log_tail(serv_log))); stop(); cleanup(); return false; }
+    if (!wait_for_condition([this]{ return pg_sql_probe(m_port)&&alive(); }, kPgWaitMs)){ pg_test_diag::fail(std::format("server at {} never became ready: {}", m_port, pg_test_diag::log_tail(serv_log))); stop(); cleanup(); return false; }
     return true;
   }
   void cleanup(){ m_pid=-1; if (!m_datadir.empty()){ std::error_code ec; std::filesystem::remove_all(m_datadir,ec); m_datadir.clear(); } }

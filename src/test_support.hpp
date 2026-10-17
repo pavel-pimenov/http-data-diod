@@ -5,13 +5,19 @@
 #include "httplib/httplib.h"
 #include "trace_logger.hpp"
 
+#include <chrono>
 #include <cstdlib>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <netinet/in.h>
 #include <optional>
 #include <stdlib.h>
 #include <string>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -120,6 +126,49 @@ inline httplib::Request make_post(const std::string &path,
   req.path = path;
   req.body = body;
   return req;
+}
+
+// Reserve an ephemeral loopback TCP port: bind to port 0, read the port the
+// kernel picked, release it. The live-server fixtures (nats-server, postgres)
+// need a port that is free right now before they fork the real server onto it.
+[[nodiscard]] inline int reserve_loopback_port() {
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    return 0;
+  }
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
+    ::close(fd);
+    return 0;
+  }
+  socklen_t len = sizeof(addr);
+  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
+    ::close(fd);
+    return 0;
+  }
+  const int port = ntohs(addr.sin_port);
+  ::close(fd);
+  return port;
+}
+
+// Poll `predicate` every 50 ms until it returns true or `timeout_ms` elapses;
+// the predicate is checked once more after the deadline so a condition that
+// became true just as the timeout expired still counts. Keeps the live-test
+// waits bounded even when the server binary is missing or the broker hangs.
+[[nodiscard]] inline bool wait_for_condition(
+    const std::function<bool()> &predicate, int timeout_ms) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (predicate()) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  return predicate();
 }
 
 } // namespace test_support
