@@ -1,5 +1,6 @@
 #include "trace_logger.hpp"
 #include "http_client_pool.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
 #include "prometheus/counter.h"
 #include "prometheus/gauge.h"
@@ -274,15 +275,7 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
   if (!product.empty()) {
     tags["mode"] = product;
   }
-  if (attributes.is_object()) {
-    for (const auto &entry : attributes.items()) {
-      if (entry.value().is_string()) {
-        tags[entry.key()] = entry.value();
-      } else {
-        tags[entry.key()] = entry.value().dump();
-      }
-    }
-  }
+  merge_stringified_tags(tags, attributes);
   root["tags"] = std::move(tags);
 
   if (attributes.is_object() && !attributes.empty()) {
@@ -294,26 +287,18 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
 std::string JaegerLogger::sentry_envelope_url(const sentry::DsnData &dsn) {
   const std::string scheme = dsn.m_scheme.empty() ? "http" : dsn.m_scheme;
   return scheme + "://" + dsn.m_host + ":" + std::to_string(dsn.m_port) +
-         dsn.m_path_prefix + "/api/" + dsn.m_project_id + "/envelope/";
+         sentry::envelope_path(dsn);
 }
 
 std::string JaegerLogger::sentry_auth_header(const sentry::DsnData &dsn) {
-  std::string key = dsn.m_public_key;
-  if (!dsn.m_secret_key.empty()) {
-    key += "/" + dsn.m_secret_key;
-  }
-  return "Sentry sentry_version=7, sentry_key=" + key;
+  return sentry::auth_header(dsn);
 }
 
 std::string JaegerLogger::build_sentry_transaction_envelope(
     const nlohmann::json &event_json) {
   const std::string event_id = event_json.value("event_id", "");
-  const nlohmann::json header = {
-      {"event_id", event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-  const nlohmann::json item_header = {{"type", "transaction"}};
-  return header.dump() + "\n" + item_header.dump() + "\n" + event_json.dump();
+  return sentry::envelope_header(event_id).dump() + "\n" +
+         sentry::envelope_item(event_json, "transaction");
 }
 
 std::string JaegerLogger::build_sentry_envelope(
@@ -321,17 +306,12 @@ std::string JaegerLogger::build_sentry_envelope(
   if (events.empty()) {
     return "";
   }
-  std::string header_event_id = events.front().value("event_id", "");
-  const nlohmann::json header = {
-      {"event_id", header_event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-  std::string envelope = header.dump();
+  std::string envelope =
+      sentry::envelope_header(events.front().value("event_id", "")).dump();
   for (const auto &event : events) {
-    const std::string payload = event.dump();
-    const nlohmann::json item_header = {
-        {"type", "transaction"}, {"length", payload.size()}};
-    envelope += "\n" + item_header.dump() + "\n" + payload;
+    envelope += "\n" +
+                sentry::envelope_item(event, "transaction",
+                                      /*include_length=*/true);
   }
   return envelope;
 }

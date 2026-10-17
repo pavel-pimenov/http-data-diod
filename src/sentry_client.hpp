@@ -58,6 +58,25 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
                            const std::string &release);
 std::string level_to_string(EventLevel level);
 
+// Envelope wire helpers shared by the error sender (SentryClient) and the
+// performance sender (JaegerLogger's transaction sink): both target the same
+// Sentry-compatible endpoint, so the URL/auth/header/item layout lives in one
+// place.
+
+// Envelope endpoint path for a DSN ("{path_prefix}/api/{project}/envelope/").
+std::string envelope_path(const DsnData &dsn);
+
+// X-Sentry-Auth header value for a DSN.
+std::string auth_header(const DsnData &dsn);
+
+// Envelope header line object: event_id + sent_at + SDK identification.
+nlohmann::json envelope_header(const std::string &event_id);
+
+// One envelope item: the item header line ("type", optionally "length") plus
+// the payload line, newline-separated.
+std::string envelope_item(const nlohmann::json &payload, std::string_view type,
+                          bool include_length = false);
+
 } // namespace sentry
 
 // Asynchronous, non-blocking Sentry event sender. The hot path only enqueues;

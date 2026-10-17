@@ -1,5 +1,6 @@
 #include "sentry_client.hpp"
 
+#include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "prometheus/counter.h"
 #include "prometheus/gauge.h"
@@ -145,6 +146,35 @@ std::string level_to_string(EventLevel level) {
   return "error";
 }
 
+std::string envelope_path(const DsnData &dsn) {
+  return dsn.m_path_prefix + "/api/" + dsn.m_project_id + "/envelope/";
+}
+
+std::string auth_header(const DsnData &dsn) {
+  std::string key = dsn.m_public_key;
+  if (!dsn.m_secret_key.empty()) {
+    key += "/" + dsn.m_secret_key;
+  }
+  return "Sentry sentry_version=7, sentry_key=" + key;
+}
+
+nlohmann::json envelope_header(const std::string &event_id) {
+  return nlohmann::json{
+      {"event_id", event_id},
+      {"sent_at", TimeUtils::format_rfc3339()},
+      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
+}
+
+std::string envelope_item(const nlohmann::json &payload, std::string_view type,
+                          bool include_length) {
+  const std::string body = payload.dump();
+  nlohmann::json item = {{"type", std::string(type)}};
+  if (include_length) {
+    item["length"] = body.size();
+  }
+  return item.dump() + "\n" + body;
+}
+
 nlohmann::json build_event_json(const SentryEvent &event,
                                 const std::string &service_name,
                                 const std::string &environment,
@@ -173,13 +203,7 @@ nlohmann::json build_event_json(const SentryEvent &event,
   if (!event.m_request_id.empty()) {
     tags["request_id"] = event.m_request_id;
   }
-  for (const auto &entry : event.m_tags.items()) {
-    if (entry.value().is_string()) {
-      tags[entry.key()] = entry.value();
-    } else {
-      tags[entry.key()] = entry.value().dump();
-    }
-  }
+  merge_stringified_tags(tags, event.m_tags);
   if (!tags.empty()) {
     root["tags"] = tags;
   }
@@ -205,22 +229,16 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
                            const std::string &service_name,
                            const std::string &environment,
                            const std::string &release) {
+  (void)dsn;
   const nlohmann::json event_json =
       build_event_json(event, service_name, environment, release);
   const std::string event_id = event_json.value("event_id", "");
 
-  const nlohmann::json header = {
-      {"event_id", event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-
   // Modern Sentry-compatible servers (glitchtip >= 6) authenticate via the
   // X-Sentry-Auth HTTP header (added in send_envelope) and their Rust
   // envelope parser rejects the legacy in-body auth line, so it is omitted.
-  const nlohmann::json item_header = {{"type", "event"}};
-
-  return header.dump() + "\n" + item_header.dump() + "\n" +
-         event_json.dump();
+  return envelope_header(event_id).dump() + "\n" +
+         envelope_item(event_json, "event");
 }
 
 } // namespace sentry
@@ -355,18 +373,12 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   if (!m_config.m_dsn_data) {
     return false;
   }
-  const std::string path =
-      m_config.m_dsn_data->m_path_prefix + "/api/" +
-      m_config.m_dsn_data->m_project_id + "/envelope/";
+  const std::string path = sentry::envelope_path(*m_config.m_dsn_data);
   // Modern Sentry-compatible servers (glitchtip >= 6) authenticate the DSN
   // via the X-Sentry-Auth header, not the URL userinfo part. The public key
   // is required; the legacy secret key goes after the slash if present.
-  std::string sentry_key = m_config.m_dsn_data->m_public_key;
-  if (!m_config.m_dsn_data->m_secret_key.empty()) {
-    sentry_key += "/" + m_config.m_dsn_data->m_secret_key;
-  }
   httplib::Headers const headers{
-      {"X-Sentry-Auth", "Sentry sentry_version=7, sentry_key=" + sentry_key}};
+      {"X-Sentry-Auth", sentry::auth_header(*m_config.m_dsn_data)}};
   const int timeout_seconds = m_config.m_timeout_ms / 1000;
 
   httplib::Result res;

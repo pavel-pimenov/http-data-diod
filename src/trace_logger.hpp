@@ -2,6 +2,7 @@
 #define TRACE_LOGGER_HPP
 
 #include "nlohmann/json.hpp"
+#include "json_utils.hpp"
 #include "sentry_client.hpp"
 #include <atomic>
 #include <chrono>
@@ -171,13 +172,7 @@ public:
                                         const std::string &service_name,
                                         const nlohmann::json &attributes) {
     nlohmann::json tags = nlohmann::json::object();
-    for (const auto &el : attributes.items()) {
-      if (el.value().is_string()) {
-        tags[el.key()] = el.value();
-      } else {
-        tags[el.key()] = el.value().dump();
-      }
-    }
+    merge_stringified_tags(tags, attributes);
 
     nlohmann::json span = nlohmann::json::object();
     span["id"] = span_id;
