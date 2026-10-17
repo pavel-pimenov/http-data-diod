@@ -13,7 +13,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 #if __has_include(<flat_set>)
 #include <flat_set>
 #endif
@@ -49,7 +48,7 @@ inline const HeaderSet g_sensitive_headers = {
     "authentication"};
 // Substrings that mark a header name as sensitive even if it is not in the
 // exact list above (e.g. x-amz-security-token, x-datadog-api-key).
-inline const std::vector<std::string> g_sensitive_header_fragments = {
+inline constexpr std::array<std::string_view, 12> g_sensitive_header_fragments = {
     "auth",     "token",  "secret", "key",        "cookie", "session",
     "password", "passwd", "pwd",    "credential", "csrf",   "xsrf"};
 } // namespace header_utils
@@ -70,7 +69,7 @@ public:
     return header_utils::g_sensitive_headers;
   }
 
-  static const std::vector<std::string> &get_sensitive_header_fragments() {
+  static std::span<const std::string_view> get_sensitive_header_fragments() {
     return header_utils::g_sensitive_header_fragments;
   }
 
@@ -116,8 +115,12 @@ public:
         Logger::debug("{} - Skipping header: {}", log_context, name);
       } else {
         emit(name, value);
-        Logger::debug("{} - Forwarding header: {}: {}", log_context, name,
-                      redact_header_value(name, value));
+        // Redaction copies the value and scans the sensitive fragments, so it
+        // is built only when the debug level is actually enabled.
+        if (Logger::should_log(Logger::Level::DEBUG)) {
+          Logger::debug("{} - Forwarding header: {}: {}", log_context, name,
+                        redact_header_value(name, value));
+        }
       }
     });
   }

@@ -152,10 +152,10 @@
       "branches_covered": 0
     },
     "header_utils.hpp": {
-      "lines": 103,
-      "covered": 102,
-      "branches": 214,
-      "branches_covered": 131
+      "lines": 104,
+      "covered": 103,
+      "branches": 226,
+      "branches_covered": 134
     },
     "http_client.cpp": {
       "lines": 97,
@@ -236,8 +236,8 @@
       "branches_covered": 397
     },
     "logger.hpp": {
-      "lines": 275,
-      "covered": 262,
+      "lines": 276,
+      "covered": 263,
       "branches": 397,
       "branches_covered": 221
     },
@@ -419,7 +419,7 @@
       "lines": 60,
       "covered": 59,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 83
     },
     "thread_pool_wrapper.hpp": {
       "lines": 26,

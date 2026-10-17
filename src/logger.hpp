@@ -480,6 +480,12 @@ public:
     }
   }
 
+  // Cheap pre-check for callers that would otherwise build expensive log
+  // arguments: Logger::debug(...) formats its arguments at the call site, so a
+  // costly expression (redaction, JSON dump, string copy) runs even when the
+  // level is disabled. Guard such calls with this check.
+  static bool should_log(Level level) { return get_level() <= level; }
+
 private:
   static std::shared_ptr<spdlog::logger> s_logger;
   static bool s_initialized;
