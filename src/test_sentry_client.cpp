@@ -4,6 +4,7 @@
 // against a local loopback httplib::Server. No external network traffic.
 #include "httplib/httplib.h"
 #include "sentry_client.hpp"
+#include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <memory>
@@ -53,21 +54,12 @@ struct SentryTestMetrics {
   prometheus::Counter &m_failed_counter;
   prometheus::Gauge &m_queue_gauge;
   SentryTestMetrics()
-      : m_sent_counter(prometheus::BuildCounter()
-                         .Name("tst_sentry_sent")
-                         .Help("h")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_failed_counter(prometheus::BuildCounter()
-                           .Name("tst_sentry_failed")
-                           .Help("h")
-                           .Register(*m_registry)
-                           .Add({})),
-        m_queue_gauge(prometheus::BuildGauge()
-                        .Name("tst_sentry_queue")
-                        .Help("h")
-                        .Register(*m_registry)
-                        .Add({})) {}
+      : m_sent_counter(test_support::make_counter(
+          *m_registry, "tst_sentry_sent", "h")),
+        m_failed_counter(test_support::make_counter(
+            *m_registry, "tst_sentry_failed", "h")),
+        m_queue_gauge(test_support::make_gauge(
+            *m_registry, "tst_sentry_queue", "h")) {}
 };
 
 } // namespace

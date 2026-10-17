@@ -31,6 +31,7 @@
 #include "scoped_profiler.hpp"
 #include "stats_page.hpp"
 #include "string_utils.hpp"
+#include "test_metrics_support.hpp"
 #include "thread_pool_wrapper.hpp"
 #include "time_utils.hpp"
 #include "timed_task_queue.hpp"
@@ -113,11 +114,8 @@ TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
 TEST_CASE("ScopedMetrics: increments the counter on scope exit",
           "[scoped-metrics]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &counter = prometheus::BuildCounter()
-                      .Name("scoped_count")
-                      .Help("scoped test")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "scoped_count", "scoped test");
   {
     ScopedMetrics const guard(counter);
     REQUIRE(counter.Value() == 0.0);
@@ -132,11 +130,8 @@ TEST_CASE("ScopedMetrics: increments the counter on scope exit",
 TEST_CASE("ScopedProfiler: observes the duration histogram on scope exit",
           "[scoped-profiler]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &hist = prometheus::BuildHistogram()
-                   .Name("scoped_prof")
-                   .Help("scoped test")
-                   .Register(*registry)
-                   .Add({}, std::vector<double>{0.001, 1.0});
+  auto &hist = test_support::make_histogram(
+      *registry, "scoped_prof", "scoped test", std::vector<double>{0.001, 1.0});
   {
     ScopedProfiler const profiler(hist);
     REQUIRE(hist.Collect().histogram.sample_count == 0);
@@ -521,11 +516,8 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
   auto registry = std::make_shared<prometheus::Registry>();
   auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
   gauge.Set(1.0);
-  auto &counter = prometheus::BuildCounter()
-                      .Name("requests_total")
-                      .Help("requests")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "requests_total", "requests");
   counter.Increment();
 
   const std::string html =
@@ -653,11 +645,8 @@ TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
 TEST_CASE("Stats page: build_stats_html renders sparklines from history",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &counter = prometheus::BuildCounter()
-                      .Name("spark_requests_total")
-                      .Help("requests")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "spark_requests_total", "requests");
   counter.Increment();
   MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
   history.start();
@@ -727,19 +716,13 @@ TEST_CASE("Stats page: build_stats_html renders extra registry tiles",
   auto primary = std::make_shared<prometheus::Registry>();
   auto &p_gauge = MetricsManager::create_gauge(primary, "health_ready", "ready");
   p_gauge.Set(1.0);
-  auto &p_cnt = prometheus::BuildCounter()
-                    .Name("proxy_requests_total")
-                    .Help("proxy requests")
-                    .Register(*primary)
-                    .Add({});
+  auto &p_cnt = test_support::make_counter(
+      *primary, "proxy_requests_total", "proxy requests");
   p_cnt.Increment();
 
   auto extra = std::make_shared<prometheus::Registry>();
-  auto &t_cnt = prometheus::BuildCounter()
-                    .Name("l2_tracing_spans_sent_total")
-                    .Help("spans sent")
-                    .Register(*extra)
-                    .Add({});
+  auto &t_cnt = test_support::make_counter(
+      *extra, "l2_tracing_spans_sent_total", "spans sent");
   t_cnt.Increment();
   auto &s_gauge = MetricsManager::create_gauge(
       extra, "l2_worker_sentry_queue_size", "sentry queue");
@@ -788,11 +771,7 @@ TEST_CASE("Stats page: build_stats_html extra registry skips empty families",
 TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &cnt = prometheus::BuildCounter()
-                  .Name("mh_count")
-                  .Help("h")
-                  .Register(*registry)
-                  .Add({});
+  auto &cnt = test_support::make_counter(*registry, "mh_count", "h");
   cnt.Increment();
   auto &gauge =
       prometheus::BuildGauge().Name("mh_gau").Help("h").Register(*registry);
@@ -980,16 +959,8 @@ TEST_CASE("Common utils ext: log_request_received and log_response_sent",
 TEST_CASE("Common utils ext: increment_and_log_* bump counters",
           "[common-utils-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &recv = prometheus::BuildCounter()
-                   .Name("cu_recv")
-                   .Help("h")
-                   .Register(*registry)
-                   .Add({});
-  auto &sent = prometheus::BuildCounter()
-                   .Name("cu_sent")
-                   .Help("h")
-                   .Register(*registry)
-                   .Add({});
+  auto &recv = test_support::make_counter(*registry, "cu_recv", "h");
+  auto &sent = test_support::make_counter(*registry, "cu_sent", "h");
   REQUIRE(recv.Value() == 0.0);
   REQUIRE(sent.Value() == 0.0);
   increment_and_log_request_received(recv, "ctx", 10);
@@ -1002,31 +973,11 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
           "JSON errors to the dedicated counter",
           "[common-utils-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &inv = prometheus::BuildCounter()
-                  .Name("cu_total")
-                  .Help("h")
-                  .Register(*registry)
-                  .Add({});
-  auto &json_err = prometheus::BuildCounter()
-                       .Name("cu_json")
-                       .Help("h")
-                       .Register(*registry)
-                       .Add({});
-  auto &valid_err = prometheus::BuildCounter()
-                        .Name("cu_valid")
-                        .Help("h")
-                        .Register(*registry)
-                        .Add({});
-  auto &decomp_err = prometheus::BuildCounter()
-                         .Name("cu_decomp")
-                         .Help("h")
-                         .Register(*registry)
-                         .Add({});
-  auto &other_err = prometheus::BuildCounter()
-                        .Name("cu_other")
-                        .Help("h")
-                        .Register(*registry)
-                        .Add({});
+  auto &inv = test_support::make_counter(*registry, "cu_total", "h");
+  auto &json_err = test_support::make_counter(*registry, "cu_json", "h");
+  auto &valid_err = test_support::make_counter(*registry, "cu_valid", "h");
+  auto &decomp_err = test_support::make_counter(*registry, "cu_decomp", "h");
+  auto &other_err = test_support::make_counter(*registry, "cu_other", "h");
   ProcessingErrorMetrics metrics;
   metrics.m_total_errors = &inv;
   metrics.m_json_errors = &json_err;
@@ -1298,37 +1249,20 @@ struct JaegerTracerFixture {
 
   JaegerTracerFixture()
       : m_registry(std::make_shared<prometheus::Registry>()),
-        m_spans_sent(prometheus::BuildCounter()
-                         .Name("test_j_spans_sent")
-                         .Help("sent")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_spans_failed(prometheus::BuildCounter()
-                           .Name("test_j_spans_failed")
-                           .Help("failed")
-                           .Register(*m_registry)
-                           .Add({})),
-        m_queue_size(prometheus::BuildGauge()
-                         .Name("test_j_queue_size")
-                         .Help("queue")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_last_send_duration(prometheus::BuildGauge()
-                                 .Name("test_j_last_send_duration")
-                                 .Help("dur")
-                                 .Register(*m_registry)
-                                 .Add({})),
-        m_send_latency(
-            prometheus::BuildHistogram()
-                .Name("test_j_send_latency")
-                .Help("lat")
-                .Register(*m_registry)
-                .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})),
-        m_queue_time(prometheus::BuildHistogram()
-                         .Name("test_j_queue_time")
-                         .Help("qt")
-                         .Register(*m_registry)
-                         .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
+        m_spans_sent(test_support::make_counter(
+            *m_registry, "test_j_spans_sent", "sent")),
+        m_spans_failed(test_support::make_counter(
+            *m_registry, "test_j_spans_failed", "failed")),
+        m_queue_size(test_support::make_gauge(
+            *m_registry, "test_j_queue_size", "queue")),
+        m_last_send_duration(test_support::make_gauge(
+            *m_registry, "test_j_last_send_duration", "dur")),
+        m_send_latency(test_support::make_histogram(
+            *m_registry, "test_j_send_latency", "lat",
+            std::vector<double>{0.001, 0.01, 0.1, 1.0})),
+        m_queue_time(test_support::make_histogram(
+            *m_registry, "test_j_queue_time", "qt",
+            std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
     m_tracer = std::make_unique<JaegerLogger>(
         "http://localhost:19999", m_spans_sent, m_spans_failed, m_queue_size,
         m_last_send_duration, m_send_latency, m_queue_time,

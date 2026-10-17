@@ -10,6 +10,7 @@
 #include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "sentry_client.hpp"
+#include "test_metrics_support.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 
@@ -114,43 +115,20 @@ struct TraceLoggerEnv {
   explicit TraceLoggerEnv(const std::string &endpoint, size_t batch_size = 50,
                           int flush_interval_ms = 1000, double sample_rate = 1.0,
                           TracingBreakerSettings breaker_settings = {})
-      : m_spans_sent(
-            prometheus::BuildCounter()
-                .Name("l2_tracing_spans_sent_total")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_spans_failed(
-            prometheus::BuildCounter()
-                .Name("l2_tracing_spans_failed_total")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_queue_size(prometheus::BuildGauge()
-                         .Name("l2_tracing_queue_size")
-                         .Help("h")
-                         .Register(m_registry)
-                         .Add({})),
-        m_last_send_duration(
-            prometheus::BuildGauge()
-                .Name("l2_tracing_last_send_duration_seconds")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_send_latency(prometheus::BuildHistogram()
-                           .Name("l2_tracing_send_latency_seconds")
-                           .Help("h")
-                           .Register(m_registry)
-                           .Add({}, prometheus::Histogram::BucketBoundaries{
-                                       0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1,
-                                       5})),
-        m_queue_time(prometheus::BuildHistogram()
-                         .Name("l2_tracing_queue_time_seconds")
-                         .Help("h")
-                         .Register(m_registry)
-                         .Add({}, prometheus::Histogram::BucketBoundaries{
-                                     0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1,
-                                     5})),
+      : m_spans_sent(test_support::make_counter(
+          m_registry, "l2_tracing_spans_sent_total", "h")),
+        m_spans_failed(test_support::make_counter(
+            m_registry, "l2_tracing_spans_failed_total", "h")),
+        m_queue_size(test_support::make_gauge(
+            m_registry, "l2_tracing_queue_size", "h")),
+        m_last_send_duration(test_support::make_gauge(
+            m_registry, "l2_tracing_last_send_duration_seconds", "h")),
+        m_send_latency(test_support::make_histogram(
+            m_registry, "l2_tracing_send_latency_seconds", "h",
+            std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_queue_time(test_support::make_histogram(
+            m_registry, "l2_tracing_queue_time_seconds", "h",
+            std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
         m_logger(std::make_unique<JaegerLogger>(
             endpoint, m_spans_sent, m_spans_failed, m_queue_size,
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
@@ -179,54 +157,24 @@ struct SentryTracingEnv {
                    int flush_interval_ms = 100, double sample_rate = 1.0,
                    double sentry_sample_rate = 1.0,
                    TracingBreakerSettings breaker_settings = {})
-      : m_spans_sent(
-            prometheus::BuildCounter()
-                .Name("t_sentry_spans_sent")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_spans_failed(
-            prometheus::BuildCounter()
-                .Name("t_sentry_spans_failed")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_sentry_sent(
-            prometheus::BuildCounter()
-                .Name("t_sentry_transactions_sent")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_sentry_failed(
-            prometheus::BuildCounter()
-                .Name("t_sentry_transactions_failed")
-                .Help("h")
-                .Register(m_registry)
-                .Add({})),
-        m_queue_size(prometheus::BuildGauge()
-                         .Name("t_sentry_queue_size")
-                         .Help("h")
-                         .Register(m_registry)
-                         .Add({})),
-        m_last_send_duration(prometheus::BuildGauge()
-                                 .Name("t_sentry_last_send_duration")
-                                 .Help("h")
-                                 .Register(m_registry)
-                                 .Add({})),
-        m_send_latency(
-            prometheus::BuildHistogram()
-                .Name("t_sentry_send_latency")
-                .Help("h")
-                .Register(m_registry)
-                .Add({}, prometheus::Histogram::BucketBoundaries{
-                             0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
-        m_queue_time(
-            prometheus::BuildHistogram()
-                .Name("t_sentry_queue_time")
-                .Help("h")
-                .Register(m_registry)
-                .Add({}, prometheus::Histogram::BucketBoundaries{
-                             0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+      : m_spans_sent(test_support::make_counter(
+          m_registry, "t_sentry_spans_sent", "h")),
+        m_spans_failed(test_support::make_counter(
+            m_registry, "t_sentry_spans_failed", "h")),
+        m_sentry_sent(test_support::make_counter(
+            m_registry, "t_sentry_transactions_sent", "h")),
+        m_sentry_failed(test_support::make_counter(
+            m_registry, "t_sentry_transactions_failed", "h")),
+        m_queue_size(test_support::make_gauge(
+            m_registry, "t_sentry_queue_size", "h")),
+        m_last_send_duration(test_support::make_gauge(
+            m_registry, "t_sentry_last_send_duration", "h")),
+        m_send_latency(test_support::make_histogram(
+            m_registry, "t_sentry_send_latency", "h",
+            std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_queue_time(test_support::make_histogram(
+            m_registry, "t_sentry_queue_time", "h",
+            std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
         m_logger(std::make_unique<JaegerLogger>(
             jaeger_endpoint, m_spans_sent, m_spans_failed, m_queue_size,
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
@@ -1428,29 +1376,21 @@ TEST_CASE("TraceLogger: sentry delivery with null counters is safe",
           "[tracing][sentry]") {
   prometheus::Registry reg;
   auto &spans_sent =
-      prometheus::BuildCounter().Name("t_nc_spans_sent").Help("h").Register(reg).Add({});
+      test_support::make_counter(reg, "t_nc_spans_sent", "h");
   auto &spans_failed =
-      prometheus::BuildCounter().Name("t_nc_spans_failed").Help("h").Register(reg).Add({});
+      test_support::make_counter(reg, "t_nc_spans_failed", "h");
   auto &queue_size =
-      prometheus::BuildGauge().Name("t_nc_queue").Help("h").Register(reg).Add({});
+      test_support::make_gauge(reg, "t_nc_queue", "h");
   auto &last_duration =
-      prometheus::BuildGauge().Name("t_nc_last").Help("h").Register(reg).Add({});
+      test_support::make_gauge(reg, "t_nc_last", "h");
   auto &send_latency =
-      prometheus::BuildHistogram()
-          .Name("t_nc_latency")
-          .Help("h")
-          .Register(reg)
-          .Add({}, prometheus::Histogram::BucketBoundaries{0.001, 0.005, 0.01,
-                                                           0.05, 0.1, 0.5, 1,
-                                                           5});
+      test_support::make_histogram(
+          reg, "t_nc_latency", "h",
+          std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5});
   auto &queue_time =
-      prometheus::BuildHistogram()
-          .Name("t_nc_qtime")
-          .Help("h")
-          .Register(reg)
-          .Add({}, prometheus::Histogram::BucketBoundaries{0.001, 0.005, 0.01,
-                                                           0.05, 0.1, 0.5, 1,
-                                                           5});
+      test_support::make_histogram(
+          reg, "t_nc_qtime", "h",
+          std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5});
   // Sentry DSN set but the two sentry counters are deliberately null.
   auto logger = std::make_unique<JaegerLogger>(
       "http://127.0.0.1:1/api/traces", spans_sent, spans_failed, queue_size,

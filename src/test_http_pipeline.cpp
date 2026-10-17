@@ -5,6 +5,7 @@
 #include "http_client.hpp"
 #include "http_client_pool.hpp"
 #include "httplib/httplib.h"
+#include "test_metrics_support.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -269,11 +270,8 @@ TEST_CASE("HttpClientPool: respects max pool size", "[http-client-pool]") {
 TEST_CASE("HttpClientPool: acquire timeout throws and counts metric",
           "[http-client-pool]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &timeouts = prometheus::BuildCounter()
-                       .Name("test_pool_timeouts")
-                       .Help("http client pool acquisition timeouts")
-                       .Register(*registry)
-                       .Add({});
+  auto &timeouts = test_support::make_counter(
+      *registry, "test_pool_timeouts", "http client pool acquisition timeouts");
   PoolMetrics metrics;
   metrics.m_acquisition_timeouts = std::ref(timeouts);
 
@@ -328,11 +326,8 @@ TEST_CASE("HttpClientPool: release invalid connection destroys it",
 TEST_CASE("HttpClientPool: stale idle connection is evicted",
           "[http-client-pool]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &stale = prometheus::BuildCounter()
-                    .Name("test_pool_stale")
-                    .Help("http client pool stale evictions")
-                    .Register(*registry)
-                    .Add({});
+  auto &stale = test_support::make_counter(
+      *registry, "test_pool_stale", "http client pool stale evictions");
   PoolMetrics metrics;
   metrics.m_stale_evictions = std::ref(stale);
 
@@ -354,26 +349,14 @@ TEST_CASE("HttpClientPool: stale idle connection is evicted",
 TEST_CASE("HttpClientPool: metrics reflect active, available and counters",
           "[http-client-pool]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &active = prometheus::BuildGauge()
-                     .Name("test_pool_active")
-                     .Help("active pool clients")
-                     .Register(*registry)
-                     .Add({});
-  auto &available = prometheus::BuildGauge()
-                        .Name("test_pool_available")
-                        .Help("available pool clients")
-                        .Register(*registry)
-                        .Add({});
-  auto &acquisitions = prometheus::BuildCounter()
-                           .Name("test_pool_acquisitions")
-                           .Help("acquisitions")
-                           .Register(*registry)
-                           .Add({});
-  auto &releases = prometheus::BuildCounter()
-                       .Name("test_pool_releases")
-                       .Help("releases")
-                       .Register(*registry)
-                       .Add({});
+  auto &active = test_support::make_gauge(
+      *registry, "test_pool_active", "active pool clients");
+  auto &available = test_support::make_gauge(
+      *registry, "test_pool_available", "available pool clients");
+  auto &acquisitions = test_support::make_counter(
+      *registry, "test_pool_acquisitions", "acquisitions");
+  auto &releases = test_support::make_counter(
+      *registry, "test_pool_releases", "releases");
   auto &duration = prometheus::BuildHistogram()
                        .Name("test_pool_duration")
                        .Help("acquisition duration")
@@ -463,11 +446,8 @@ TEST_CASE("HttpClientPool: connection dropped without release returns its slot",
 TEST_CASE("HttpClientPool: dropped connection resets the active gauge",
           "[http-client-pool]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &active = prometheus::BuildGauge()
-                     .Name("test_pool_drop_active")
-                     .Help("active pool clients after a drop")
-                     .Register(*registry)
-                     .Add({});
+  auto &active = test_support::make_gauge(
+      *registry, "test_pool_drop_active", "active pool clients after a drop");
   PoolMetrics metrics;
   metrics.m_active_clients = std::ref(active);
 
