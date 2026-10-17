@@ -4,13 +4,11 @@
 #include "nlohmann/json.hpp"
 #include "json_utils.hpp"
 #include "sentry_client.hpp"
+#include "async_sender_queue.hpp"
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -96,14 +94,11 @@ private:
     nlohmann::json m_attributes;
   };
 
-  // ===== Span queue + its synchronization (guarded by m_mutex) and the sender
-  // thread draining it =====
+  // ===== Self-synchronized span queue and the sender thread draining it =====
   struct Delivery {
-    struct SpanQueue {
-      std::deque<SpanData> m_spans;
-      std::mutex m_mutex;
-      std::condition_variable_any m_cv;
-    } m_span_queue;
+    AsyncSenderQueue<SpanData> m_span_queue{
+        g_tracing_max_queue_size,
+        AsyncSenderQueue<SpanData>::OverflowPolicy::DropNewest};
     std::jthread m_sender_thread;
   } m_delivery;
 
@@ -282,7 +277,7 @@ public:
   // Simplified validation
   static bool validate_traceparent(std::string_view traceparent);
 
-  void sender_loop(std::stop_token st);
+  void sender_loop(const std::stop_token &st);
   bool send_span(const std::string &trace_id, const std::string &span_id,
                  const std::string &parent_id, const std::string &name,
                  uint64_t start_us, uint64_t end_us,

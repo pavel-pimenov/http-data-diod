@@ -1,4 +1,5 @@
 #include "trace_logger.hpp"
+#include "async_sender_queue.hpp"
 #include "http_client_pool.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -15,7 +16,6 @@
 #include <exception>
 #include <format>
 #include <memory>
-#include <mutex>
 #include <random>
 #include <string>
 #include <stop_token>
@@ -84,7 +84,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
 JaegerLogger::~JaegerLogger() {
   if (m_delivery.m_sender_thread.joinable()) {
     m_delivery.m_sender_thread.request_stop();
-    m_delivery.m_span_queue.m_cv.notify_all();
+    m_delivery.m_span_queue.notify_all();
     m_delivery.m_sender_thread.join();
   }
 }
@@ -422,23 +422,19 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                  uint64_t end_us,
                                  const std::string &service_name,
                                  const nlohmann::json &attributes) {
-  {
-    std::unique_lock const lock(m_delivery.m_span_queue.m_mutex);
-    if (m_delivery.m_span_queue.m_spans.size() >= g_tracing_max_queue_size) {
-      m_jaeger_metrics.m_spans_failed.Increment();
-      Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
-      return;
-    }
-    uint64_t const now_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count();
-    m_delivery.m_span_queue.m_spans.push_back({trace_id, span_id, parent_id, name,
-                                    service_name, start_us, end_us, now_us,
-                                    attributes});
-    m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
+  uint64_t const now_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count();
+  const auto outcome = m_delivery.m_span_queue.push(
+      SpanData{trace_id, span_id, parent_id, name, service_name, start_us,
+               end_us, now_us, attributes});
+  if (!outcome.m_accepted) {
+    m_jaeger_metrics.m_spans_failed.Increment();
+    Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
+    return;
   }
-  m_delivery.m_span_queue.m_cv.notify_one();
+  m_jaeger_metrics.m_queue_size.Set(static_cast<double>(outcome.m_size));
 }
 
 void JaegerLogger::log_request(
@@ -503,51 +499,31 @@ std::string JaegerLogger::random_hex_fast(size_t len) {
   return res;
 }
 
-void JaegerLogger::sender_loop(std::stop_token st) {
+void JaegerLogger::sender_loop(const std::stop_token &st) {
+  using TakeResult = AsyncSenderQueue<SpanData>::TakeResult;
   while (!st.stop_requested()) {
     std::vector<SpanData> batch;
-    batch.reserve(m_jaeger.m_batch_size);
-
-    {
-      std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
-      // Wait for work or stop — replaces poll sleep 100ms
-      if (m_delivery.m_span_queue.m_spans.empty()) {
-        m_delivery.m_span_queue.m_cv.wait_for(
-            lock, st,
-            std::chrono::milliseconds(m_jaeger.m_flush_interval_ms / 10),
-            [&] {
-              return st.stop_requested() || !m_delivery.m_span_queue.m_spans.empty();
-            });
-        if (st.stop_requested()) {
-          break;
-        }
-        if (m_delivery.m_span_queue.m_spans.empty()) {
-          continue;
-        }
-      }
-      while (!m_delivery.m_span_queue.m_spans.empty() &&
-             batch.size() < m_jaeger.m_batch_size) {
-        batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
-        m_delivery.m_span_queue.m_spans.pop_front();
-      }
-      m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
+    const auto result = m_delivery.m_span_queue.wait_and_take(
+        st, m_jaeger.m_flush_interval_ms / 10, m_jaeger.m_batch_size, false,
+        batch);
+    if (result == TakeResult::Stopped) {
+      break;
     }
-
+    if (result == TakeResult::Idle) {
+      continue;
+    }
+    m_jaeger_metrics.m_queue_size.Set(
+        static_cast<double>(m_delivery.m_span_queue.size()));
     if (!batch.empty()) {
       send_batch_with_retry(batch, st);
     }
+    m_delivery.m_span_queue.mark_processed(batch.size());
   }
 
   // Flush remaining spans on shutdown (quick, non-blocking)
   std::vector<SpanData> final_batch;
-  {
-    std::unique_lock const lock(m_delivery.m_span_queue.m_mutex);
-    while (!m_delivery.m_span_queue.m_spans.empty()) {
-      final_batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
-      m_delivery.m_span_queue.m_spans.pop_front();
-    }
-    m_jaeger_metrics.m_queue_size.Set(0);
-  }
+  m_delivery.m_span_queue.drain(final_batch);
+  m_jaeger_metrics.m_queue_size.Set(0);
 
   if (!final_batch.empty()) {
     Logger::debug("Flushing {} remaining spans on shutdown",

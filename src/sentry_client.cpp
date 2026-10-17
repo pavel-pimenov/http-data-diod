@@ -1,5 +1,6 @@
 #include "sentry_client.hpp"
 
+#include "async_sender_queue.hpp"
 #include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "prometheus/counter.h"
@@ -8,15 +9,13 @@
 #include "time_utils.hpp"
 #include "logger.hpp"
 #include "httplib/httplib.h"
-#include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <string>
 #include <cstddef>
 #include <optional>
 #include <stop_token>
-#include <mutex>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -257,23 +256,26 @@ SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
                timeout_ms,
                max_queue_size == 0 ? 1 : max_queue_size,
                transport},
-      m_metrics{events_sent, events_failed, queue_size} {
+      m_metrics{events_sent, events_failed, queue_size},
+      m_queue{m_config.m_max_queue_size,
+              AsyncSenderQueue<sentry::SentryEvent>::OverflowPolicy::
+                  DropOldest} {
   if (enabled()) {
     Logger::info("Sentry client enabled: host={} project={} service={}",
                  m_config.m_dsn_data->m_host,
                  m_config.m_dsn_data->m_project_id,
                  m_config.m_service_name);
-    m_queue.m_sender_thread = std::jthread([this](std::stop_token st) {
-      sender_loop(std::move(st));
+    m_sender_thread = std::jthread([this](const std::stop_token &st) {
+      sender_loop(st);
     });
   }
 }
 
 SentryClient::~SentryClient() {
-  if (m_queue.m_sender_thread.joinable()) {
-    m_queue.m_sender_thread.request_stop();
-    m_queue.m_cv.notify_all();
-    m_queue.m_sender_thread.join();
+  if (m_sender_thread.joinable()) {
+    m_sender_thread.request_stop();
+    m_queue.notify_all();
+    m_sender_thread.join();
   }
 }
 
@@ -283,19 +285,11 @@ void SentryClient::capture(const sentry::SentryEvent &event) {
   if (!enabled()) {
     return;
   }
-  {
-    std::scoped_lock const lock(m_queue.m_mutex);
-    if (m_queue.m_queue.size() >= m_config.m_max_queue_size) {
-      m_queue.m_queue.pop_front();
-      --m_queue.m_pending;
-      m_metrics.m_events_failed.Increment();
-    }
-    m_queue.m_queue.push_back(event);
-    ++m_queue.m_pending;
-    m_metrics.m_queue_size.Set(
-        static_cast<double>(m_queue.m_pending));
+  const auto outcome = m_queue.push(event);
+  if (outcome.m_dropped) {
+    m_metrics.m_events_failed.Increment();
   }
-  m_queue.m_cv.notify_one();
+  m_metrics.m_queue_size.Set(static_cast<double>(outcome.m_size));
 }
 
 void SentryClient::capture_message(
@@ -312,39 +306,22 @@ void SentryClient::flush() {
   if (!enabled()) {
     return;
   }
-  std::unique_lock<std::mutex> lock(m_queue.m_mutex);
-  m_queue.m_cv.wait(lock, [this] { return m_queue.m_pending.load() == 0; });
+  m_queue.flush();
 }
 
-// NOLINTNEXTLINE(performance-unnecessary-value-param) - cv.wait requires stop_token by value
-void SentryClient::sender_loop(std::stop_token st) {
+void SentryClient::sender_loop(const std::stop_token &st) {
   while (true) {
     std::vector<sentry::SentryEvent> batch;
-    {
-      std::unique_lock<std::mutex> lock(m_queue.m_mutex);
-      m_queue.m_cv.wait(lock, st,
-                        [this] { return !m_queue.m_queue.empty(); });
-      if (m_queue.m_queue.empty()) {
-        break;
-      }
-      const size_t to_take =
-          std::min(m_queue.m_queue.size(), size_t{8});
-      batch.reserve(to_take);
-      for (size_t i = 0; i < to_take; ++i) {
-        batch.push_back(std::move(m_queue.m_queue.front()));
-        m_queue.m_queue.pop_front();
-      }
+    const auto result = m_queue.wait_and_take(st, 0, 8, true, batch);
+    if (result ==
+        AsyncSenderQueue<sentry::SentryEvent>::TakeResult::Stopped) {
+      break;
     }
     for (const auto &event : batch) {
       process_event(event);
     }
-    {
-      std::scoped_lock const lock(m_queue.m_mutex);
-      m_queue.m_pending -= batch.size();
-      m_metrics.m_queue_size.Set(
-          static_cast<double>(m_queue.m_pending));
-      m_queue.m_cv.notify_all();
-    }
+    m_metrics.m_queue_size.Set(static_cast<double>(m_queue.size()));
+    m_queue.mark_processed(batch.size());
   }
   Logger::info("{}", "Sentry sender thread stopped");
 }
