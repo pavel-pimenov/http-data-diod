@@ -49,6 +49,7 @@ using test_support::attach_tracer;
 using test_support::EnvGuard;
 using test_support::make_get;
 using test_support::make_post;
+using test_support::ProxyHandler;
 
 // Proxy mode plus the fail-fast NATS setup described in the file header.
 class ProxyEnv {
@@ -239,9 +240,7 @@ TEST_CASE("RequestHandler: GET health, stats and debug endpoints",
           "[request-handler]") {
   const EnvGuard mode{{"MODE", "proxy"}};
   AppContext ctx;
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   {
     const httplib::Request req = make_get("/health/live");
@@ -314,9 +313,7 @@ TEST_CASE("RequestHandler: readiness with a configured NATS client",
   init_proxy_components(ctx);
   REQUIRE(ctx.m_nats_client != nullptr);
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   const httplib::Request req = make_get("/health/ready");
   httplib::Response res;
@@ -330,9 +327,7 @@ TEST_CASE("RequestHandler: POST without a backend answers 504",
           "[request-handler]") {
   const EnvGuard mode{{"MODE", "proxy"}};
   AppContext ctx;
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   {
     const httplib::Request req = make_post("/", "not json");
@@ -365,9 +360,7 @@ TEST_CASE("RequestHandler: global rate limiter rejects with 429",
   init_proxy_components(ctx);
   ctx.m_nats_client.reset();
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   {
     const httplib::Request req = make_post("/", R"({"value":1})");
@@ -403,9 +396,7 @@ TEST_CASE("RequestHandler: per-IP rate limiter rejects with 429",
   init_proxy_components(ctx);
   ctx.m_nats_client.reset();
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   {
     httplib::Request req = make_post("/", R"({"value":1})");
@@ -440,9 +431,7 @@ TEST_CASE("RequestHandler: duplicate POST is counted but still forwarded",
   init_proxy_components(ctx);
   ctx.m_nats_client.reset();
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   const std::string body = R"({"value":1})";
   {
@@ -483,9 +472,7 @@ TEST_CASE("RequestHandler: duplicate POST is rejected with 409",
   init_proxy_components(ctx);
   ctx.m_nats_client.reset();
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   const std::string body = R"({"value":3})";
   {
@@ -513,9 +500,7 @@ TEST_CASE("RequestHandler: DB gateway answers 404 when disabled",
   AppContext ctx;
   REQUIRE_FALSE(ctx.m_config.m_db_query.m_enabled);
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   const httplib::Request req = make_get("/v1/sql");
   httplib::Response res;
@@ -534,9 +519,7 @@ TEST_CASE("RequestHandler: DB gateway list, ping and query routing",
   REQUIRE(ctx.m_config.m_db_query.m_enabled);
   REQUIRE(ctx.m_config.m_db_query.m_databases.size() == 1);
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   {
     const httplib::Request req = make_get("/v1/sql");
@@ -643,9 +626,7 @@ TEST_CASE("RequestHandler: DB gateway maps a failed NATS round-trip to 503",
   init_proxy_components(ctx);
   REQUIRE(ctx.m_nats_client != nullptr);
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   const httplib::Request req = make_get("/v1/sql/postgres/ping");
   httplib::Response res;
@@ -663,9 +644,7 @@ TEST_CASE("RequestHandler: DB gateway round-trip span is traced",
   init_proxy_components(ctx);
   attach_tracer(ctx);
 
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   httplib::Request req = make_get("/v1/sql/postgres/ping");
   req.headers = {
@@ -681,9 +660,7 @@ TEST_CASE("RequestHandler: traced backend timeout records a proxy span",
   const EnvGuard mode{{"MODE", "proxy"}};
   AppContext ctx;
   attach_tracer(ctx);
-  std::atomic<bool> shutdown{false};
-  StatsLogger stats(ctx, shutdown);
-  RequestHandler handler(ctx, stats);
+  ProxyHandler handler(ctx);
 
   httplib::Request req = make_post("/", R"({"value":1})");
   req.headers = {

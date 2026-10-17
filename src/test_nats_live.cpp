@@ -25,7 +25,6 @@
 #include "nats_poll_service.hpp"
 #include "proxy_init.hpp"
 #include "request_handler.hpp"
-#include "stats_logger.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -72,6 +71,7 @@ using test_support::attach_tracer;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
 using test_support::make_get;
+using test_support::ProxyHandler;
 using test_support::reserve_loopback_port;
 using test_support::wait_for_condition;
 
@@ -994,9 +994,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     NatsResponder const responder(live_nats_cfg(subject, server.port()),
                                   subject, reply_fn);
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     const httplib::Request req = make_get("/v1/sql/postgres/ping");
     httplib::Response res;
     handler.handle_get(req, res);
@@ -1016,9 +1014,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     NatsResponder const responder(live_nats_cfg(subject, server.port()),
                                   subject, reply_fn);
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     const httplib::Request req = make_get("/v1/sql/postgres/ping");
     httplib::Response res;
     handler.handle_get(req, res);
@@ -1033,9 +1029,7 @@ TEST_CASE("RequestHandler: DB gateway 200, invalid envelope 502, silent 504",
     init_proxy_components(ctx);
     REQUIRE(ctx.m_nats_client->is_connected());
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     const httplib::Request req = make_get("/v1/sql/postgres/ping");
     httplib::Response res;
     handler.handle_get(req, res);
@@ -1073,9 +1067,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
     NatsResponder const responder(live_nats_cfg(subject, server.port()),
                                   subject, reply_fn);
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     const httplib::Request req = make_get("/api/v1/anything");
     httplib::Response res;
     handler.handle_get(req, res);
@@ -1096,9 +1088,7 @@ TEST_CASE("RequestHandler: generic backend 200 and invalid response over a live 
     NatsResponder const responder(live_nats_cfg(subject, server.port()),
                                   subject, reply_fn);
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     const httplib::Request req = make_get("/api/v1/anything");
     httplib::Response res;
     handler.handle_get(req, res);
@@ -1127,9 +1117,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     REQUIRE_FALSE(ctx.m_config.m_app.m_health_ready_allow_connect);
     REQUIRE(ctx.m_nats_client->is_connected());
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     httplib::Response res;
     handler.handle_get(make_get("/health/ready"), res);
     REQUIRE(res.status == 200);
@@ -1150,9 +1138,7 @@ TEST_CASE("RequestHandler: readiness 200 with a live broker", "[nats-live]") {
     init_proxy_components(ctx);
     REQUIRE(ctx.m_nats_client->is_connected());
 
-    std::atomic<bool> shutdown{false};
-    StatsLogger stats(ctx, shutdown);
-    RequestHandler handler(ctx, stats);
+    ProxyHandler handler(ctx);
     httplib::Response res;
     handler.handle_get(make_get("/health/ready"), res);
     REQUIRE(res.status == 200);

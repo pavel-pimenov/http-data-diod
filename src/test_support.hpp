@@ -3,8 +3,11 @@
 
 #include "app_context.hpp"
 #include "httplib/httplib.h"
+#include "request_handler.hpp"
+#include "stats_logger.hpp"
 #include "trace_logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <functional>
@@ -170,6 +173,30 @@ inline httplib::Request make_post(const std::string &path,
   }
   return predicate();
 }
+
+// The three objects every RequestHandler-driven test needs together: the
+// shutdown flag, the stats logger that borrows it and the handler that borrows
+// the logger. Declaration order is construction order and the handler is
+// destroyed first, so no reference outlives its target. The handle_* forwarders
+// let a test body keep calling them as if it held a RequestHandler directly.
+class ProxyHandler {
+public:
+  explicit ProxyHandler(AppContext &ctx)
+      : m_stats(ctx, m_shutdown), m_handler(ctx, m_stats) {}
+
+  void handle_get(const httplib::Request &req, httplib::Response &res) {
+    m_handler.handle_get(req, res);
+  }
+
+  void handle_post(const httplib::Request &req, httplib::Response &res) {
+    m_handler.handle_post(req, res);
+  }
+
+private:
+  std::atomic<bool> m_shutdown{false};
+  StatsLogger m_stats;
+  RequestHandler m_handler;
+};
 
 } // namespace test_support
 
