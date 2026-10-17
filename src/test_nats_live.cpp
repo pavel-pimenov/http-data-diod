@@ -1193,6 +1193,18 @@ TEST_CASE("NatsClient: constructor logs configured auth and TLS flags",
   REQUIRE_FALSE(client.is_connected());
 }
 
+namespace {
+
+// The auth/TLS sub-cases below all expect the same outcome: connect() reports
+// failure and records a reason instead of dialing.
+void expect_connect_failure(const NatsConfig &cfg) {
+  NatsClient client(cfg);
+  REQUIRE_FALSE(client.connect());
+  REQUIRE(client.get_last_error().has_value());
+}
+
+} // namespace
+
 TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
           "[nats-offline]") {
   const std::string subject = unique_subject("nats.authfail");
@@ -1215,9 +1227,7 @@ TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
     cfg.m_token = "token-1";
     cfg.m_enable_tls = true;
     cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
-    NatsClient client(cfg);
-    REQUIRE_FALSE(client.connect());
-    REQUIRE(client.get_last_error().has_value());
+    expect_connect_failure(cfg);
   }
 
   {
@@ -1227,9 +1237,7 @@ TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
     cfg.m_password = "pass-1";
     cfg.m_enable_tls = true;
     cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
-    NatsClient client(cfg);
-    REQUIRE_FALSE(client.connect());
-    REQUIRE(client.get_last_error().has_value());
+    expect_connect_failure(cfg);
   }
 
   {
@@ -1239,9 +1247,7 @@ TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
     cfg.m_credentials_file = creds_path;
     cfg.m_enable_tls = true;
     cfg.m_tls_ca_cert_file = "/nonexistent-test-ca.pem";
-    NatsClient client(cfg);
-    REQUIRE_FALSE(client.connect());
-    REQUIRE(client.get_last_error().has_value());
+    expect_connect_failure(cfg);
   }
 
   {
@@ -1251,9 +1257,7 @@ TEST_CASE("NatsClient: auth/TLS misconfiguration aborts connect before dialing",
     cfg.m_enable_tls = true;
     cfg.m_tls_cert_file = "/nonexistent-test-cert.pem";
     cfg.m_tls_key_file = "/nonexistent-test-key.pem";
-    NatsClient client(cfg);
-    REQUIRE_FALSE(client.connect());
-    REQUIRE(client.get_last_error().has_value());
+    expect_connect_failure(cfg);
   }
 
   std::remove(creds_path.c_str());

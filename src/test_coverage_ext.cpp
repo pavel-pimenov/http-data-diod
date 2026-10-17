@@ -531,10 +531,8 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
 TEST_CASE("Stats page: dense labeled family renders the +N more overflow row",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("dense_series")
-                     .Help("dense family")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "dense_series", "dense family");
   // kMaxSeriesPerTile is 6 in build_stats_html: 8 series must collapse to the
   // first 6 plus a "+2 more" overflow row.
   for (int i = 0; i < 8; ++i) {
@@ -629,10 +627,8 @@ TEST_CASE("Stats page: build_stats_html flags degraded when nats disconnected",
 TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("per_ip_requests")
-                     .Help("per ip")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "per_ip_requests", "per ip");
   for (int i = 0; i < 8; ++i) {
     family.Add({{"ip", "10.0.0." + std::to_string(i)}})
         .Set(static_cast<double>(i));
@@ -683,8 +679,7 @@ TEST_CASE("Stats page: build_sparkline_svg flat range uses unit range",
 TEST_CASE("Stats page: build_stats_html omits tile help when empty",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &plain =
-      prometheus::BuildGauge().Name("plain_gauge").Register(*registry);
+  auto &plain = test_support::make_gauge_family(*registry, "plain_gauge", "");
   plain.Add({}).Set(1.0);
   const std::string html =
       build_stats_html("proxy-test", registry, nullptr, 30);
@@ -696,10 +691,8 @@ TEST_CASE(
     "Stats page: build_stats_html renders labeled gauge sparklines raw",
     "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("spark_per_ip")
-                     .Help("per ip gauge")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "spark_per_ip", "per ip gauge");
   family.Add({{"ip", "0.0.0.1"}}).Set(100.0);
   family.Add({{"ip", "9.9.9.9"}}).Set(1.0);
   MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
@@ -773,8 +766,7 @@ TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
   auto registry = std::make_shared<prometheus::Registry>();
   auto &cnt = test_support::make_counter(*registry, "mh_count", "h");
   cnt.Increment();
-  auto &gauge =
-      prometheus::BuildGauge().Name("mh_gau").Help("h").Register(*registry);
+  auto &gauge = test_support::make_gauge_family(*registry, "mh_gau", "h");
   gauge.Add({{"ip", "1"}}).Set(2.0);
   gauge.Add({{"ip", "2"}}).Set(3.0);
   auto &sum = prometheus::BuildSummary()
@@ -1155,10 +1147,8 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges is a no-op before metrics set",
 TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active gauges",
           "[db-executor-base]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("db_pool")
-                     .Help("db pool state")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "db_pool", "db pool state");
   DbConfig cfg;
   cfg.m_name = "pg";
   cfg.m_query_timeout_ms = 1000;

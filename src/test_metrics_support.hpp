@@ -2,6 +2,7 @@
 #define TEST_METRICS_SUPPORT_HPP
 
 #include <prometheus/counter.h>
+#include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #include <prometheus/registry.h>
@@ -48,6 +49,20 @@ namespace test_support {
       .Help(help)
       .Register(registry)
       .Add({}, buckets);
+}
+
+// Families: same registration, but .Add() stays at the call site — the fixtures
+// grow the series one label set at a time.
+[[nodiscard]] inline prometheus::Family<prometheus::Counter> &
+make_counter_family(prometheus::Registry &registry, const std::string &name,
+                    const std::string &help) {
+  return prometheus::BuildCounter().Name(name).Help(help).Register(registry);
+}
+
+[[nodiscard]] inline prometheus::Family<prometheus::Gauge> &
+make_gauge_family(prometheus::Registry &registry, const std::string &name,
+                  const std::string &help) {
+  return prometheus::BuildGauge().Name(name).Help(help).Register(registry);
 }
 
 } // namespace test_support

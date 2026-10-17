@@ -10,6 +10,7 @@
 #include "db_query_utils.hpp"
 #include "prometheus/gauge.h"
 #include "json_utils.hpp"
+#include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <memory>
@@ -70,10 +71,8 @@ TEST_CASE("DbExecutorBase: set_pool_metrics triggers refresh",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   REQUIRE(ex.m_refresh_gauges_calls == 0);
   ex.set_pool_metrics(&family);
   REQUIRE(ex.m_refresh_gauges_calls == 1);
@@ -83,10 +82,8 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   ex.set_pool_metrics(&family);
   ex.set_db_pool_gauges(2.0, 3.0);
 
@@ -117,10 +114,8 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   ex.set_pool_metrics(&family);
   ex.set_pool_metrics(nullptr);
   ex.set_db_pool_gauges(5.0, 5.0);

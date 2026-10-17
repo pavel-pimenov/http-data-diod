@@ -16,6 +16,7 @@
 #include "prometheus/client_metric.h"
 #include "prometheus/registry.h"
 #include "random_utils.hpp"
+#include "test_metrics_support.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -1114,10 +1115,8 @@ TEST_CASE("Stats HTML: escape_html escapes markup", "[stats-page]") {
 TEST_CASE("MetricsHistory: ring buffer records a counter family",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildCounter()
-                     .Name("history_total")
-                     .Help("history test")
-                     .Register(*registry);
+  auto &family = test_support::make_counter_family(
+      *registry, "history_total", "history test");
   family.Add({{"app", "test"}}).Increment(3.5);
 
   MetricsHistory history(registry, std::chrono::seconds(15), 8, 240);

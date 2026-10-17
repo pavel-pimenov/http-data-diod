@@ -2414,6 +2414,18 @@ TEST_CASE("DedupCache: max_entries == 0 means unbounded (no eviction loop)",
 // CircuitBreaker tests
 // ============================================================================
 
+namespace {
+
+// Walks the breaker up to `count` recorded failures: the tests use it to reach
+// (or stop one short of) the trip threshold without re-spelling the loop.
+void record_failures(CircuitBreaker &breaker, int count) {
+  for (int i = 0; i < count; ++i) {
+    breaker.record_failure();
+  }
+}
+
+} // namespace
+
 TEST_CASE("CircuitBreaker: starts CLOSED and allows requests",
           "[circuit-breaker]") {
   CircuitBreaker cb;
@@ -2431,9 +2443,7 @@ TEST_CASE("CircuitBreaker: set_gauge mirrors state transitions",
   CircuitBreaker cb;
   cb.set_gauge(gauge);
   REQUIRE(gauge.Collect().gauge.value == 0.0); // CLOSED
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.allow_request() == false);
   REQUIRE(gauge.Collect().gauge.value == 1.0); // OPEN
   cb.record_success();                         // OPEN is a no-op
@@ -2456,15 +2466,11 @@ TEST_CASE("CircuitBreaker: opens after the failure threshold",
 TEST_CASE("CircuitBreaker: success in CLOSED resets the failure count",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold - 1);
   cb.record_success(); // resets failure_count
   REQUIRE(cb.state_name() == "CLOSED");
   // Still needs the full threshold again.
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold - 1);
   REQUIRE(cb.state_name() == "CLOSED");
   cb.record_failure();
   REQUIRE(cb.state_name() == "OPEN");
@@ -2474,9 +2480,7 @@ TEST_CASE("CircuitBreaker: failure opens immediately when in HALF_OPEN",
           "[circuit-breaker]") {
   CircuitBreaker cb;
   // Force OPEN via the threshold.
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   // Inject HALF_OPEN manually (simulate elapsed timeout).
   cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
@@ -2487,9 +2491,7 @@ TEST_CASE("CircuitBreaker: failure opens immediately when in HALF_OPEN",
 TEST_CASE("CircuitBreaker: HALF_OPEN closes after the success threshold",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
 
   // Inject HALF_OPEN (simulate timeout elapsed).
@@ -2505,9 +2507,7 @@ TEST_CASE("CircuitBreaker: HALF_OPEN closes after the success threshold",
 TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   REQUIRE(cb.allow_request() == false);
 
@@ -2522,9 +2522,7 @@ TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
 TEST_CASE("CircuitBreaker: failures in OPEN do not extend the open window",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   const uint64_t trip_us = cb.m_counters.m_last_failure_time_us.load();
 
