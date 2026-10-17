@@ -25,6 +25,7 @@
 #include <prometheus/exposer.h>
 
 #include "nlohmann/json.hpp"
+#include "prometheus/family.h"
 #include "prometheus/registry.h"
 #include "stats_page.hpp"
 
@@ -212,6 +213,20 @@ std::unique_ptr<StatsLogger> start_stats_logging(AppContext &app_ctx) {
   return sl;
 }
 
+// Response accounting shared by the proxy and server HTTP servers: every
+// answered request except the observability endpoints is counted into the
+// per-status family. The proxy additionally skips its /debug routes.
+void count_response_status(const httplib::Request &req,
+                           prometheus::Family<prometheus::Counter> &responses,
+                           int status, bool skip_debug) {
+  const auto &path = req.path;
+  if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
+      (skip_debug && path.rfind("/debug", 0) == 0)) {
+    return;
+  }
+  responses.Add({{"status", std::to_string(status)}}).Increment();
+}
+
 void run_proxy(AppContext &app_ctx) {
   // Proxy runtime components are initialized here (not in the ctor) so
   // AppContext stays constructible in unit tests without the NATS library.
@@ -255,14 +270,8 @@ void run_proxy(AppContext &app_ctx) {
   auto on_proxy_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
         app_ctx.m_proxy.m_metrics->m_in_flight_requests.Decrement();
-        const auto &path = req.path;
-        if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
-            path.rfind("/debug", 0) == 0) {
-          return;
-        }
-        app_ctx.m_proxy.m_metrics->m_responses_total
-            .Add({{"status", std::to_string(res.status)}})
-            .Increment();
+        count_response_status(req, app_ctx.m_proxy.m_metrics->m_responses_total,
+                              res.status, true);
       };
 
   // Proxy-only: measures how long each accepted request waits in the task
@@ -356,13 +365,8 @@ void run_l2_server(AppContext &app_ctx) {
 
   auto on_server_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
-        const auto &path = req.path;
-        if (path == "/metrics" || path.rfind("/health", 0) == 0) {
-          return;
-        }
-        app_ctx.m_server.m_metrics->m_responses_total
-            .Add({{"status", std::to_string(res.status)}})
-            .Increment();
+        count_response_status(req, app_ctx.m_server.m_metrics->m_responses_total,
+                              res.status, false);
       };
 
   // The L2 server has no external gating dependency (no NATS), so it is ready
