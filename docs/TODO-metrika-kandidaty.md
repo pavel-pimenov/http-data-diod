@@ -41,7 +41,7 @@
 | HTTP-пул (общий) | `l2_http_pool_active_clients`, `_available_clients`, `_client_acquisitions_total`, `_client_releases_total`, `_stale_evictions_total` |
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
-| worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_response_size_bytes`, `circuit_breaker_state` |
+| worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
 | tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size` |
 
 ---
@@ -82,18 +82,25 @@
 `db_pool_connections` + всплеск `exhausted_total`. Пул-сатурация заполняется из
 `PostgresQueryExecutor::Impl`; Oracle-исполнитель наследует no-op (его обсервабилити вне области).
 
-### 3. Типизированные ошибки (использовать уже готовый классификатор)
+### 3. Типизированные ошибки (использовать уже готовый классификатор) 🟡 частично (round 159: воркерная половина)
 `src/error_categorizer.hpp` уже различает `HttpErrorType`/`L2ErrorType`/`ProcessingErrorType`,
 но метрики `l2_proxy_client_request_errors_total` и `l2_worker_l2_errors_total` без метки причины —
 в алерте не отличить таймаут от TLS/протокольной ошибки.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
-| `l2_worker_l2_call_errors_total` | counter | `type` (`HttpErrorType`/`L2ErrorType`) | разбор ошибок вызова L2 по причине |
+| `l2_worker_l2_call_errors_total` ✅ | counter | `type` (`L2ErrorType`) | разбор ошибок вызова L2 по причине |
 | `l2_proxy_client_request_errors_total` (расширить) | counter | `type` (`HttpErrorType`) | разбор ошибок клиента к worker |
 
-Кардинальность: конечный enum (≤9 значений), безопасно. Регистрация: `app_context.cpp`;
-инкремент — там, где сейчас вызывается `error_type_to_string(...)`.
+Сделано в round 159: `l2_worker_l2_call_errors_total` рядом с неразмеченным
+`l2_worker_l2_errors_total` (инкремент в `src/l2_worker.cpp` там же, где сейчас считается общий
+счётчик; все пять серий `type` предсоздаются в `init_worker_metrics()` — в здоровом стеке ошибок
+нет, а prometheus-cpp отдаёт лейбл-семейство только после первого `Add()`).
+
+Остаток (следующий раунд): расширить `l2_proxy_client_request_errors_total` меткой `type`.
+Это не «плюс метрика», а смена типа семейства (`Counter` → `Family<Counter>`), поэтому в тот же
+раунд попадают четыре точки инкремента (`request_handler.cpp` ×3, `response_builder.cpp`),
+суммирование в `stats_logger` (у семейства нет `Value()`), панель и golden-check.
 
 ### 4. NATS-клиент: таймауты, реконнекты, подписки
 `connection_creates_total` смешивает первый коннект и реконнекты; явного счётчика таймаутов нет,

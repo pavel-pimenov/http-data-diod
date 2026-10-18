@@ -73,6 +73,7 @@ CATALOG = [
     "l2_worker_requests_processed_total",
     "l2_worker_l2_calls_total",
     "l2_worker_l2_errors_total",
+    "l2_worker_l2_call_errors_total",
     "l2_worker_bytes_received_total",
     "l2_worker_bytes_sent_total",
     "l2_worker_request_duration_seconds",

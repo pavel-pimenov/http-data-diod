@@ -1,4 +1,5 @@
 #include "app_context.hpp"
+#include "error_categorizer.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 // The AppContext destructor is defined out of line: its unique_ptr members
@@ -249,6 +250,9 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_l2_errors_total",
           "Total number of L2 server call errors in worker"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_l2_call_errors_total",
+          "L2 server call errors by categorized cause (type label)"),
       MetricsManager::create_counter(m_worker_registry,
                                      "l2_worker_bytes_received_total",
                                      "Total number of bytes received"),
@@ -342,6 +346,13 @@ void AppContext::init_worker_metrics() {
   cb_transitions.Add({{"to", "open"}});
   cb_transitions.Add({{"to", "half_open"}});
   cb_transitions.Add({{"to", "closed"}});
+
+  // Same reasoning for the categorized L2 call errors: a healthy stack never
+  // fails an L2 call, so every enum value gets its zero series up front.
+  auto &l2_call_errors = m_worker.m_metrics->m_l2_call_errors_total;
+  for (const char *type : error_categorizer::g_l2_error_names) {
+    l2_call_errors.Add({{"type", type}});
+  }
 }
 
 void AppContext::init_server_metrics() {

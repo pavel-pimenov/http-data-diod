@@ -1417,12 +1417,30 @@ def get_existing_dashboard_metrics(dashboard: Dict) -> List[str]:
     for panel in dashboard.get('dashboard', {}).get('panels', []):
         for target in panel.get('targets', []):
             expr = target.get('expr', '')
-            # Extract metric names from PromQL expressions
-            import re
-            # Match metric names (alphanumeric and underscore)
-            found = re.findall(r'\b(l2_[a-z_]+)\b', expr)
+            # Extract metric names from PromQL expressions.
+            # `0-9` matters: names like `l2_worker_l2_errors_total` carry a digit
+            # after the prefix, and `[a-z_]+` stops right before it, so the whole
+            # match failed on the trailing word boundary and the metric was
+            # invisible to the change detection (a target added for such a metric
+            # left the dashboard "up to date" and never reached Grafana).
+            found = re.findall(r'\b(l2_[a-z0-9_]+)\b', expr)
             metrics.extend(found)
     return list(set(metrics))
+
+
+def get_dashboard_exprs(dashboard: Dict) -> Set[str]:
+    """PromQL expressions of all panel targets.
+
+    The metric-name set is blind to a target rewritten for the *same* metric
+    (changed window, added label filter, added second series), so the update
+    decision compares the expressions as well."""
+    exprs: Set[str] = set()
+    for panel in dashboard.get('dashboard', {}).get('panels', []):
+        for target in panel.get('targets', []):
+            expr = (target.get('expr') or '').strip()
+            if expr:
+                exprs.add(expr)
+    return exprs
 
 
 def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, y: int) -> Optional[Dict]:  # noqa: E501
@@ -1472,8 +1490,6 @@ def create_metric_panel_for_new_metric(metric_name: str, panel_id: int, x: int, 
 def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str) -> bool:
     """Correct an existing dashboard by comparing with generated version with detailed diagnostics"""  # noqa: E501
     try:
-        import re
-
         # Get existing dashboard
         existing = api.get_dashboard(dashboard_uid)
         if not existing:
@@ -1489,6 +1505,13 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
         # Extract metrics from both versions
         existing_metrics = set(get_existing_dashboard_metrics(existing))
         new_metrics = set(get_existing_dashboard_metrics(new_dashboard))
+
+        # A target rewritten for the same metric keeps the metric-name set equal,
+        # so the expressions are compared as well (see get_dashboard_exprs).
+        existing_exprs = get_dashboard_exprs(existing)
+        new_exprs = get_dashboard_exprs(new_dashboard)
+        added_exprs = new_exprs - existing_exprs
+        removed_exprs = existing_exprs - new_exprs
 
         # Calculate differences
         added_metrics = new_metrics - existing_metrics
@@ -1547,7 +1570,19 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
 
             if common_metrics:
                 print(f"\n   ⚡ Unchanged metrics: {len(common_metrics)}")
-        else:
+
+        # Expression changes: the same metric may be queried differently
+        if added_exprs or removed_exprs:
+            print(f"\n📉 Expression Changes:")
+
+            for expr in sorted(added_exprs):
+                print(f"      + {expr}")
+
+            for expr in sorted(removed_exprs):
+                print(f"      - {expr}")
+
+        if not (added_metrics or removed_metrics or added_exprs or removed_exprs
+                or len(existing_panels) != len(new_panels)):
             print(f"\n✅ Dashboard is up to date")
             print(f"   Panels: {len(new_panels)} ({new_rows} rows + {new_visual_panels} visualizations)")  # noqa: E501
             print(f"   Metrics: {len(new_metrics)} total")
@@ -1555,7 +1590,7 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
         print(f"{'='*60}\n")
 
         # Determine if update is needed
-        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics)  # noqa: E501
+        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics) or (existing_exprs != new_exprs)  # noqa: E501
 
         if needs_update:
             if api.save_dashboard(new_dashboard):
@@ -2402,7 +2437,8 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_worker_l2_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"}  # noqa: E501
+            {"expr": "rate(l2_worker_l2_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"},  # noqa: E501
+            {"expr": "rate(l2_worker_l2_call_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с {{type}}", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8

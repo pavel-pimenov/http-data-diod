@@ -414,6 +414,10 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         handle_http_error(std::string(e.what()),
                           &m_ctx.m_worker.m_metrics->m_l2_errors,
                           "L2 server call", max_retries, url);
+        m_ctx.m_worker.m_metrics->m_l2_call_errors_total
+            .Add({{"type", l2_error_type_to_string(
+                              categorize_l2_error(std::string(e.what())))}})
+            .Increment();
         if (m_ctx.m_sentry) {
           m_ctx.m_sentry->capture_message(
               std::format(

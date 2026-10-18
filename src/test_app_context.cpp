@@ -94,3 +94,31 @@ TEST_CASE("AppContext: l2-server mode builds l2_common registry as well",
   REQUIRE(ctx.m_server.m_metrics != nullptr);
   REQUIRE(ctx.m_config.m_app.m_mode == "l2-server");
 }
+
+TEST_CASE("AppContext: worker pre-creates the L2 call error type series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "worker"}};
+
+  AppContext const ctx;
+
+  REQUIRE(has_family(ctx.m_worker_registry, "l2_worker_l2_call_errors_total"));
+  std::vector<std::string> types;
+  for (const auto &family : ctx.m_worker_registry->Collect()) {
+    if (family.name != "l2_worker_l2_call_errors_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "type") {
+          types.push_back(label.value);
+        }
+      }
+    }
+  }
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy stack never fails an L2 call, so all enum values must exist as 0.
+  std::ranges::sort(types);
+  REQUIRE(types == std::vector<std::string>{"CONNECTION_ERROR", "OTHER_ERROR",
+                                           "RESPONSE_ERROR", "RETRY_EXHAUSTED",
+                                           "TIMEOUT_ERROR"});
+}

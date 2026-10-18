@@ -589,6 +589,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_requests_processed_total` | counter | — | Обработано запросов воркером |
 | `l2_worker_l2_calls_total` | counter | — | Вызовы L2-сервера |
 | `l2_worker_l2_errors_total` | counter | — | Ошибки вызовов L2-сервера |
+| `l2_worker_l2_call_errors_total` | counter | `type` | Ошибки вызова L2 по причине (`L2ErrorType`: CONNECTION_ERROR / TIMEOUT_ERROR / RESPONSE_ERROR / RETRY_EXHAUSTED / OTHER_ERROR); серии всех причин предсозданы со значением 0 |
 | `l2_worker_bytes_received_total` | counter | — | Байт, получено воркером |
 | `l2_worker_bytes_sent_total` | counter | — | Байт, отправлено воркером |
 | `l2_worker_request_duration_seconds` | histogram | — | Длительность обработки запроса |
@@ -879,9 +880,9 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **94.36%** (15575/16506) |
-| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.14%** (30342/73759) |
-| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.38%** (7052/13212) |
+| `--fail-under-line` — строки по проекту | 90% | **94.38%** (15605/16534) |
+| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.15%** (30398/73875) |
+| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.35%** (7074/13260) |
 | пер-файловый гейт регрессии (см. ниже) | без снижения | 80 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
