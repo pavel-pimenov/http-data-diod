@@ -499,6 +499,15 @@ void JaegerLogger::sender_loop(const std::stop_token &st) {
       send_batch_with_retry(batch, st);
     }
     m_delivery.m_span_queue.mark_processed(batch.size());
+    // The enqueue side publishes the depth as well (enqueue_span), and the two
+    // stores race: a store from a concurrent enqueue that lands after the take
+    // above leaves the gauge stuck at a non-zero value until the *next* take,
+    // so an idle (empty) queue reports depth 1 forever -- and a test waiting
+    // for the queue to drain never sees 0. Re-publish after the batch is
+    // accounted for: this store is milliseconds behind the enqueue's store
+    // (it happens after the whole send), so the final value is the true depth.
+    m_jaeger_metrics.m_queue_size.Set(
+        static_cast<double>(m_delivery.m_span_queue.size()));
   }
 
   // Flush remaining spans on shutdown (quick, non-blocking)
