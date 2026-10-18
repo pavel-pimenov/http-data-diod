@@ -29,6 +29,11 @@
 
 namespace test_support {
 
+// W3C traceparent carrying a 32-hex trace id: tests that need "the caller
+// already started a trace" share this one value instead of repeating it.
+constexpr const char *k_traceparent =
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
 [[nodiscard]] inline std::optional<std::string> read_env(const char *name) {
   const char *value = std::getenv(name);
   if (value == nullptr) {

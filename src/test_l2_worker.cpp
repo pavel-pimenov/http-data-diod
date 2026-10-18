@@ -40,11 +40,6 @@ extern std::atomic<bool> g_shutdown_flag;
 
 namespace {
 
-// W3C traceparent carrying a 32-hex trace id, so the tracer branches of the
-// pipeline see a non-empty trace context.
-constexpr const char *kTraceparent =
-    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-
 // Scoped env-var overrides (EnvMapGuard/EnvVars) and the tracer stub are shared
 // via test_support.hpp; the values must be in place before the Config is loaded
 // by the AppContext ctor.
@@ -168,8 +163,8 @@ json make_worker_request(const std::string &request_id,
   request[NatsContract::kBody] = R"({"payload":"test"})";
   request[NatsContract::kClientIp] = "10.9.8.7";
   request[NatsContract::kProxyIp] = "10.9.8.1";
-  request[NatsContract::kTraceparent] = kTraceparent;
-  request[NatsContract::kProxyTraceparent] = kTraceparent;
+  request[NatsContract::kTraceparent] = test_support::k_traceparent;
+  request[NatsContract::kProxyTraceparent] = test_support::k_traceparent;
   request[NatsContract::kProxySpanId] = "proxy-inlet-span";
   request[NatsContract::kHeaders] = json{{"X-Real-IP", "10.9.8.7"},
                                          {"X-DataHub-Client-Id", "client-42"},
@@ -299,24 +294,25 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
       {"X-DataHub-Client-Id", "client-7"},
       {"User-Agent", "worker-test/1.0"}};
 
-  const HttpResponse post =
-      worker.call_l2_server("/api/value", R"({"q":1})", kTraceparent,
-                            forwarded_headers, "POST");
+  const HttpResponse post = worker.call_l2_server(
+      "/api/value", R"({"q":1})", test_support::k_traceparent,
+      forwarded_headers, "POST");
   REQUIRE(post.m_status == 200);
   REQUIRE(post.m_body.find("l2-span-1") != std::string::npos);
   REQUIRE(post.m_headers.count("X-L2-Server") == 1);
   REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(post.m_body) ==
           "l2-span-1");
 
-  const HttpResponse get =
-      worker.call_l2_server("/api/value", "", kTraceparent, {}, "GET");
+  const HttpResponse get = worker.call_l2_server(
+      "/api/value", "", test_support::k_traceparent, {}, "GET");
   REQUIRE(get.m_status == 200);
   REQUIRE(get.m_body.find("l2-span-2") != std::string::npos);
 
   // Query string is appended only to the actual HTTP call URL (logs/span URLs
   // stay clean).
   const HttpResponse with_query = worker.call_l2_server(
-      "/api/value", "", kTraceparent, {}, "GET", "", "", "filter=1");
+      "/api/value", "", test_support::k_traceparent, {}, "GET", "", "",
+      "filter=1");
   REQUIRE(with_query.m_status == 200);
   REQUIRE(with_query.m_body.find("l2-span-") != std::string::npos);
 

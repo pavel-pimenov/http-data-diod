@@ -61,9 +61,6 @@ extern std::atomic<bool> g_shutdown_flag;
 
 namespace {
 
-constexpr const char *kTraceparent =
-    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-
 // Scoped env-var overrides (EnvMapGuard/EnvVars) and the tracer/request stubs
 // are shared via test_support.hpp; the values must be in place before the
 // Config is loaded by the AppContext ctor.
@@ -371,8 +368,8 @@ json make_worker_request(const std::string &request_id,
   request[NatsContract::kBody] = R"({"payload":"test"})";
   request[NatsContract::kClientIp] = "10.9.8.7";
   request[NatsContract::kProxyIp] = "10.9.8.1";
-  request[NatsContract::kTraceparent] = kTraceparent;
-  request[NatsContract::kProxyTraceparent] = kTraceparent;
+  request[NatsContract::kTraceparent] = test_support::k_traceparent;
+  request[NatsContract::kProxyTraceparent] = test_support::k_traceparent;
   request[NatsContract::kProxySpanId] = "proxy-inlet-span";
   request[NatsContract::kHeaders] = json{{"X-Real-IP", "10.9.8.7"},
                                          {"X-DataHub-Client-Id", "client-42"},
