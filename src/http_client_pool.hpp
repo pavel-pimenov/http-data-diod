@@ -40,7 +40,7 @@ public:
 private:
   // Tunables controlling pool/Gateway behaviour. Mirrors the constructor
   // parameters (without connection metrics, which live in m_stats).
-  struct PoolConfig {
+  struct PoolConfig { //-V730
     size_t m_max_pool_size;
     int m_timeout_seconds;
     int m_acquire_timeout_seconds; // Timeout for waiting on available conn
@@ -67,7 +67,10 @@ private:
 
   PoolConfig m_config;
   ConnState m_state;
-  Counters m_counters;
+  // Shared with the release hook installed on every client, so a connection
+  // dropped by a throwing consumer can adjust its own accounting even if it
+  // outlives the pool object (the hook never touches the pool itself).
+  std::shared_ptr<Counters> m_counters{std::make_shared<Counters>()};
 
 
   PoolMetrics m_metrics;
@@ -91,8 +94,8 @@ public:
   void release_connection(std::unique_ptr<HttpClient> client);
 
   size_t available_count() const;
-  size_t total_clients() const { return m_counters.m_total_clients.load(); }
-  size_t active_clients() const { return m_counters.m_active_clients.load(); }
+  size_t total_clients() const { return m_counters->m_total_clients.load(); }
+  size_t active_clients() const { return m_counters->m_active_clients.load(); }
 
 private:
   void update_metrics();

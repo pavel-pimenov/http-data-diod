@@ -1,12 +1,17 @@
 #include "app_context.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
-#include "rate_limiter.hpp"
-#include "rate_limiter_per_ip.hpp"
-#include "duplicate_detector.hpp"
+// The AppContext destructor is defined out of line: its unique_ptr members
+// (see app_context.hpp) need complete types here, which include-cleaner cannot
+// see through the unique_ptr default deleter, so keep these includes.
+#include "rate_limiter.hpp"        // IWYU pragma: keep
+#include "rate_limiter_per_ip.hpp" // IWYU pragma: keep
+#include "duplicate_detector.hpp"  // IWYU pragma: keep
 #include "sentry_client.hpp"
-#include "trace_logger.hpp"
+#include "trace_logger.hpp" // IWYU pragma: keep
 #include <cstdlib>
+#include <memory>
+#include <prometheus/registry.h>
 
 ProxyContext::~ProxyContext() = default;
 
@@ -28,7 +33,7 @@ AppContext::~AppContext() {
   m_tracer.reset();
 }
 
-void AppContext::stop_stats_history() {
+void AppContext::stop_stats_history() const {
   for (auto *history : {m_proxy_stats_history.get(),
                         m_worker_stats_history.get(),
                         m_server_stats_history.get(),
@@ -194,13 +199,11 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_histogram_family(
           m_proxy_registry, "l2_proxy_db_request_duration_seconds",
           "Histogram of HTTP DB Gateway request processing duration in "
-          "seconds by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "seconds by database"),
       MetricsManager::create_histogram_family(
           m_proxy_registry, "l2_proxy_db_nats_request_duration_seconds",
           "Histogram of HTTP DB Gateway NATS round-trip duration in seconds "
-          "by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "by database"),
       MetricsManager::create_gauge(
           m_proxy_registry, "l2_proxy_in_flight_requests",
           "Current number of in-flight proxy HTTP requests"),
@@ -273,6 +276,13 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_gauge(
           m_worker_registry, "l2_worker_circuit_breaker_state",
           "Circuit breaker state (0=closed, 1=open, 2=half_open)"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_circuit_breaker_transitions_total",
+          "Total number of circuit breaker transitions by target state "
+          "(open/half_open/closed)"),
+      MetricsManager::create_counter(
+          m_worker_registry, "l2_worker_circuit_breaker_rejected_total",
+          "Total number of requests fast-failed by the open circuit breaker"),
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
@@ -282,8 +292,7 @@ void AppContext::init_worker_metrics() {
           "by database, type and HTTP status"),
       MetricsManager::create_histogram_family(
           m_worker_registry, "l2_worker_db_query_duration_seconds",
-          "Histogram of DB query execution duration in seconds by database",
-          histogram_buckets::g_buckets.m_latency_ms_to_10s),
+          "Histogram of DB query execution duration in seconds by database"),
       MetricsManager::create_gauge_family(
           m_worker_registry, "l2_worker_db_pool_connections",
           "Current number of DB pool connections by database and state "
@@ -312,6 +321,16 @@ void AppContext::init_worker_metrics() {
           m_worker_registry, "l2_worker_graceful_shutdown_seconds",
           "Last graceful-shutdown drain duration in seconds (time from "
           "SIGTERM to full shutdown, 0 while running)")});
+
+  // Materialize the breaker's bounded transition series up front: prometheus-cpp
+  // exports a labeled family only after the first Add(), and a healthy stack may
+  // never trip the breaker, so without this the family would be absent from
+  // /metrics (and the golden check) until the first transition.
+  auto &cb_transitions =
+      m_worker.m_metrics->m_circuit_breaker_transitions_total;
+  cb_transitions.Add({{"to", "open"}});
+  cb_transitions.Add({{"to", "half_open"}});
+  cb_transitions.Add({{"to", "closed"}});
 }
 
 void AppContext::init_server_metrics() {

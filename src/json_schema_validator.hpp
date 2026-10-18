@@ -13,6 +13,10 @@
 
 #include "json_utils.hpp"
 
+#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
+#include <flat_set>
+#endif
+
 // Request Validator
 // Validates L2 server requests
 //
@@ -67,7 +71,7 @@ public:
 
   bool validate(const json &request, std::string &error) const {
     for (const auto &field : m_allowed.m_required_fields) {
-      if (request.find(field) == request.end()) {
+      if (!request.contains(field)) {
         error = "Missing required field: " + field;
         return false;
       }
@@ -191,7 +195,7 @@ public:
         return false;
       }
 
-      const std::string &body_str = get_body_response_ref(response);
+      const auto &body_str = get_body_response_ref(response);
       if (body_str.length() > m_limits.m_max_body_size) {
         error = std::format("Response body too large: {} > {}",
                             body_str.length(), m_limits.m_max_body_size);

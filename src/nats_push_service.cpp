@@ -1,16 +1,20 @@
 #include "nats_push_service.hpp"
+#include "app_context.hpp"
+#include "common_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
-#include "nats_client.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include "tracing_helpers.hpp"
+#include <string>
+#include <cstdint>
 
 NatsPushService::NatsPushService(AppContext &ctx) : m_ctx(ctx) {}
 
 std::string NatsPushService::push_request(nlohmann::json request_data,
                                           const std::string &trace_id,
                                           const std::string &span_id,
-                                          const TraceContext &trace_ctx) {
+                                          const TraceContext &trace_ctx) const {
   const int64_t nats_push_start = TimeUtils::epoch_us();
   std::string op_span_id;
   if (request_data.contains(NatsContract::kProxySpanId)) {
@@ -38,7 +42,7 @@ std::string NatsPushService::push_request(nlohmann::json request_data,
   request_data[NatsContract::kProxyTraceId] = trace_id;
   if (m_ctx.m_tracer && !trace_id.empty() && !op_span_id.empty()) {
     request_data[NatsContract::kProxyTraceparent] =
-        m_ctx.m_tracer->generate_traceparent(trace_id, op_span_id, true);
+        JaegerLogger::generate_traceparent(trace_id, op_span_id, true);
   }
 
   std::string nats_request_json = request_data.dump();

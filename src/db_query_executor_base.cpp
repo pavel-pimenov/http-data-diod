@@ -1,6 +1,13 @@
 #include "db_query_executor_base.hpp"
+#include "config.hpp"
 #include "db_query_utils.hpp"
+#include "json_utils.hpp"
 #include "time_utils.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <string>
 #include <utility>
 
 DbExecutorBase::DbExecutorBase(DbConfig db) : m_db(std::move(db)) {}

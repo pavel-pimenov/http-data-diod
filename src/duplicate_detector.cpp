@@ -1,9 +1,16 @@
 #include "duplicate_detector.hpp"
 #include "logger.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 
@@ -18,7 +25,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
   const uint64_t now_ms = TimeUtils::steady_ms();
-  std::lock_guard lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   evict_expired_locked(now_ms);
 
   const std::string key(body_hash);
@@ -39,16 +46,15 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     return {false, 0};
   }
 
-  Entry &entry = it->second;
+  auto &entry = it->second;
   entry.m_count += 1;
   entry.m_last_seen_ms = now_ms;
   entry.m_client_ids.insert(std::string(client_id));
   if (entry.m_body.empty() && body.size() <= m_options.m_max_body_bytes) {
     entry.m_body = std::string(body);
   }
-  if (entry.m_count < 2) {
-    return {false, 0};
-  }
+  // An existing entry is created with m_count = 1 (see above) and incremented
+  // just now, so it is always >= 2 here.
   const std::string client_key(client_id);
   auto cit = m_state.m_per_client_count.find(client_key);
   if (cit == m_state.m_per_client_count.end()) {
@@ -59,7 +65,7 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
     cit = m_state.m_per_client_count.emplace(client_key, ClientCount{})
               .first;
   }
-  ClientCount &client_state = cit->second;
+  auto &client_state = cit->second;
   client_state.m_count += 1;
   client_state.m_last_seen_ms = now_ms;
   const size_t client_count = client_state.m_count;
@@ -75,18 +81,18 @@ std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
 }
 
 size_t DuplicateDetector::duplicate_bodies() const {
-  std::lock_guard lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   return static_cast<size_t>(std::ranges::count_if(
       m_state.m_entries, [](const auto &kv) { return kv.second.m_count >= 2; }));
 }
 
 size_t DuplicateDetector::per_client_count_size() const {
-  std::lock_guard lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   return m_state.m_per_client_count.size();
 }
 
 nlohmann::json DuplicateDetector::report() const {
-  std::lock_guard lock(m_state.m_mutex);
+  const std::scoped_lock lock(m_state.m_mutex);
   nlohmann::json result;
   result["enabled"] = m_options.m_enabled; //-V601 nlohmann::json handles bool
 
@@ -95,15 +101,25 @@ nlohmann::json DuplicateDetector::report() const {
   size_t same_client = 0;
   size_t cross_client = 0;
   // ranges::filter + ranges::to — C++23 сахар вместо ручного цикла
-  for (const auto &[hash, entry] : m_state.m_entries | std::views::filter([](const auto &kv){ return kv.second.m_count >= 2; })) {
+  auto duplicates_view =
+      m_state.m_entries | std::views::filter([](const auto &e) {
+        return e.second.m_count >= 2;
+      });
+  for (const auto &[hash, entry] : duplicates_view) {
     duplicates.push_back(&entry);
     duplicate_occurrences += entry.m_count - 1;
-    if (entry.m_client_ids.size() <= 1) ++same_client; else ++cross_client;
+    if (entry.m_client_ids.size() <= 1) {
+      ++same_client;
+    } else {
+      ++cross_client;
+    }
   }
 
   std::ranges::sort(duplicates,
             [](const Entry *a, const Entry *b) {
-              if (a->m_count != b->m_count) return a->m_count > b->m_count;
+              if (a->m_count != b->m_count) {
+                return a->m_count > b->m_count;
+              }
               return a->m_first_seen_ms < b->m_first_seen_ms;
             });
 
@@ -115,7 +131,7 @@ nlohmann::json DuplicateDetector::report() const {
   nlohmann::json top = nlohmann::json::array();
   const size_t n = std::min(duplicates.size(), m_options.m_top_n);
   for (size_t i = 0; i < n; ++i) {
-    const Entry &entry = *duplicates[i];
+    const auto &entry = *duplicates[i];
     nlohmann::json item;
     item["count"] = entry.m_count;
     item["type"] =

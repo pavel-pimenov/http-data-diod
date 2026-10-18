@@ -11,4 +11,11 @@
 // reporting the header line as uncovered).
 [[nodiscard]] std::string to_lower(std::string_view s);
 
+// Trims trailing characters (CR/LF by default) from `s`. Centralises the
+// identical byte loop that was duplicated in crash_utils::trim_line (addr2line
+// output cleanup) and the Postgres executor's trim_copy (libpq error text,
+// which also strips a trailing space).
+[[nodiscard]] std::string trim_trailing(std::string_view s,
+                                        std::string_view chars = "\r\n");
+
 #endif // STRING_UTILS_HPP

@@ -3,6 +3,8 @@
 
 #include "time_utils.hpp"
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -34,12 +36,29 @@ inline constexpr Buckets g_buckets = {
 } // namespace histogram_buckets
 
 // Histogram families need the bucket bounds on every Family::Add call (the
-// family itself does not remember them), so labeled call sites pass this
-// helper instead of rebuilding the vector inline.
-inline std::vector<double> latency_buckets_ms_to_10s() {
-  return {histogram_buckets::g_buckets.m_latency_ms_to_10s.begin(),
-          histogram_buckets::g_buckets.m_latency_ms_to_10s.end()};
+// family itself does not remember them). Returned by reference from one static
+// so frequent observes do not rebuild the vector on every call.
+inline const std::vector<double> &latency_buckets_ms_to_10s() {
+  static const std::vector<double> g_latency_buckets = {
+      histogram_buckets::g_buckets.m_latency_ms_to_10s.begin(),
+      histogram_buckets::g_buckets.m_latency_ms_to_10s.end()};
+  return g_latency_buckets;
 }
+
+namespace metrics_detail {
+// Maps a metric type to its prometheus-cpp builder, so the create_* wrappers
+// share one implementation instead of repeating the builder chain.
+template <typename Metric> struct Builder;
+template <> struct Builder<prometheus::Counter> {
+  [[nodiscard]] static auto of() { return prometheus::BuildCounter(); }
+};
+template <> struct Builder<prometheus::Gauge> {
+  [[nodiscard]] static auto of() { return prometheus::BuildGauge(); }
+};
+template <> struct Builder<prometheus::Histogram> {
+  [[nodiscard]] static auto of() { return prometheus::BuildHistogram(); }
+};
+} // namespace metrics_detail
 
 class MetricsManager {
 public:
@@ -58,7 +77,8 @@ public:
 
   // Labeled families: series are created lazily via Family::Add(labels) which
   // deduplicates by label set and is internally synchronized, so recording
-  // code can call Add() on every request without caching.
+  // code can call Add() on every request without caching. Bucket bounds are
+  // supplied per Add call (the family does not remember them).
   static prometheus::Family<prometheus::Counter> &
   create_counter_family(const std::shared_ptr<prometheus::Registry> &registry,
                         const std::string &name, const std::string &help);
@@ -69,18 +89,7 @@ public:
 
   static prometheus::Family<prometheus::Histogram> &
   create_histogram_family(const std::shared_ptr<prometheus::Registry> &registry,
-                          const std::string &name, const std::string &help,
-                          const std::vector<double> &buckets);
-
-  template <std::size_t N>
-  static prometheus::Family<prometheus::Histogram> &
-  create_histogram_family(const std::shared_ptr<prometheus::Registry> &registry,
-                          const std::string &name, const std::string &help,
-                          const std::array<double, N> &buckets) {
-    return create_histogram_family(
-        registry, name, help,
-        std::vector<double>(buckets.begin(), buckets.end()));
-  }
+                          const std::string &name, const std::string &help);
 
   template <std::size_t N>
   static prometheus::Histogram &
@@ -90,6 +99,26 @@ public:
     return create_histogram(
         registry, name, help,
         std::vector<double>(buckets.begin(), buckets.end()));
+  }
+
+private:
+  // Shared builder chains: counter/gauge singles and every labeled family use
+  // the same prometheus-cpp calls; only the histogram single differs (it adds
+  // with bucket bounds).
+  template <typename Metric>
+  static Metric &
+  create_single_metric(const std::shared_ptr<prometheus::Registry> &registry,
+                       const std::string &name, const std::string &help) {
+    return metrics_detail::Builder<Metric>::of().Name(name).Help(help).Register(
+        *registry).Add({});
+  }
+
+  template <typename Metric>
+  static prometheus::Family<Metric> &
+  create_metric_family(const std::shared_ptr<prometheus::Registry> &registry,
+                       const std::string &name, const std::string &help) {
+    return metrics_detail::Builder<Metric>::of().Name(name).Help(help).Register(
+        *registry);
   }
 };
 
@@ -113,6 +142,18 @@ inline void observe_db_request_duration(
     const std::string &db, uint64_t start_us, uint64_t end_us) {
   duration_family.Add({{"db", db}}, latency_buckets_ms_to_10s())
       .Observe(TimeUtils::duration_seconds(start_us, end_us));
+}
+
+// Mirrors NATS connectivity into the two gauges the /health/ready endpoint
+// updates: the connection state read by the availability panels and the
+// readiness flag itself. Both NATS-backed handlers (worker, proxy) set them
+// with the same ternary pair.
+inline void set_nats_readiness_gauges(prometheus::Gauge &nats_connected,
+                                      prometheus::Gauge &health_ready,
+                                      bool ready) {
+  const double value = ready ? 1.0 : 0.0;
+  nats_connected.Set(value);
+  health_ready.Set(value);
 }
 
 #endif // METRICS_MANAGER_HPP

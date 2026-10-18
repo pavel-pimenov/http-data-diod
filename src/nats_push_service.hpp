@@ -17,10 +17,10 @@ private:
 public:
   explicit NatsPushService(AppContext &ctx);
 
-  std::string push_request(nlohmann::json request_data,
-                           const std::string &trace_id,
-                           const std::string &span_id,
-                           const TraceContext &trace_ctx);
+  [[nodiscard]] std::string push_request(nlohmann::json request_data,
+                                         const std::string &trace_id,
+                                         const std::string &span_id,
+                                         const TraceContext &trace_ctx) const;
 };
 
 #endif // NATS_PUSH_SERVICE_HPP

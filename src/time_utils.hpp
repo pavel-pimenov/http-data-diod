@@ -66,8 +66,9 @@ public:
   static int64_t
   ms_until(const std::chrono::system_clock::time_point &deadline) {
     const auto now = std::chrono::system_clock::now();
-    if (deadline <= now)
+    if (deadline <= now) {
       return 0;
+    }
     return std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
         .count();
   }

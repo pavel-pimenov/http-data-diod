@@ -1,8 +1,27 @@
 #include "circuit_breaker.hpp"
+#include "logger.hpp"
+#include "time_utils.hpp"
+#include <cstdint>
+#include <prometheus/counter.h>
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
 
 void CircuitBreaker::set_gauge(prometheus::Gauge &gauge) {
   m_gauge = gauge;
   update_gauge();
+}
+
+void CircuitBreaker::set_counters(
+    prometheus::Family<prometheus::Counter> &transitions,
+    prometheus::Counter &rejected) {
+  m_transitions = transitions;
+  m_rejected = rejected;
+}
+
+void CircuitBreaker::record_transition(const char *to) {
+  if (m_transitions.has_value()) {
+    m_transitions->get().Add({{"to", to}}).Increment();
+  }
 }
 
 void CircuitBreaker::update_gauge() {
@@ -12,6 +31,7 @@ void CircuitBreaker::update_gauge() {
 }
 
 void CircuitBreaker::transition_to_open() {
+  record_transition("open");
   m_counters.m_last_failure_time_us.store(TimeUtils::steady_us());
   m_state.store(State::OPEN);
   m_counters.m_success_count.store(0);
@@ -32,10 +52,14 @@ bool CircuitBreaker::allow_request() {
   const uint64_t elapsed = now_us - m_counters.m_last_failure_time_us.load();
   if (elapsed >= g_open_timeout_us) {
     Logger::info("Circuit breaker: OPEN -> HALF_OPEN (timeout elapsed)");
+    record_transition("half_open");
     m_state.store(State::HALF_OPEN);
     m_counters.m_success_count.store(0);
     update_gauge();
     return true;
+  }
+  if (m_rejected.has_value()) {
+    m_rejected->get().Increment();
   }
   return false;
 }
@@ -47,6 +71,7 @@ void CircuitBreaker::record_success() {
     if (count >= g_half_open_success_threshold) {
       Logger::info("Circuit breaker: HALF_OPEN -> CLOSED (successes={})",
                    count);
+      record_transition("closed");
       m_state.store(State::CLOSED);
       m_counters.m_failure_count.store(0);
       m_counters.m_success_count.store(0);

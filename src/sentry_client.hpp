@@ -1,19 +1,17 @@
 #ifndef SENTRY_CLIENT_HPP
 #define SENTRY_CLIENT_HPP
 
-#include <condition_variable>
+#include "async_sender_queue.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <atomic>
-#include <mutex>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <string>
 #include <string_view>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -58,6 +56,29 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
                            const std::string &release);
 std::string level_to_string(EventLevel level);
 
+// Sentry tags object seeded with the service name (omitted when empty) — the
+// shared opening of the transaction (trace logger) and error-event tag blocks.
+nlohmann::json service_tags(const std::string &service_name);
+
+// Envelope wire helpers shared by the error sender (SentryClient) and the
+// performance sender (JaegerLogger's transaction sink): both target the same
+// Sentry-compatible endpoint, so the URL/auth/header/item layout lives in one
+// place.
+
+// Envelope endpoint path for a DSN ("{path_prefix}/api/{project}/envelope/").
+std::string envelope_path(const DsnData &dsn);
+
+// X-Sentry-Auth header value for a DSN.
+std::string auth_header(const DsnData &dsn);
+
+// Envelope header line object: event_id + sent_at + SDK identification.
+nlohmann::json envelope_header(const std::string &event_id);
+
+// One envelope item: the item header line ("type", optionally "length") plus
+// the payload line, newline-separated.
+std::string envelope_item(const nlohmann::json &payload, std::string_view type,
+                          bool include_length = false);
+
 } // namespace sentry
 
 // Asynchronous, non-blocking Sentry event sender. The hot path only enqueues;
@@ -77,7 +98,7 @@ public:
   SentryClient(const SentryClient &) = delete;
   SentryClient &operator=(const SentryClient &) = delete;
 
-  bool enabled() const;
+  [[nodiscard]] bool enabled() const;
 
   // Enqueues the event for asynchronous delivery. No-op when disabled.
   void capture(const sentry::SentryEvent &event);
@@ -89,7 +110,7 @@ public:
   void flush();
 
 private:
-  void sender_loop(std::stop_token st);
+  void sender_loop(const std::stop_token &st);
   void process_event(const sentry::SentryEvent &event);
   bool send_envelope(const std::string &envelope);
 
@@ -108,13 +129,8 @@ private:
     prometheus::Counter &m_events_failed;
     prometheus::Gauge &m_queue_size;
   } m_metrics;
-  struct QueueState {
-    std::mutex m_mutex;
-    std::condition_variable_any m_cv;
-    std::deque<sentry::SentryEvent> m_queue;
-    std::jthread m_sender_thread;
-    std::atomic<size_t> m_pending{0};
-  } m_queue;
+  AsyncSenderQueue<sentry::SentryEvent> m_queue;
+  std::jthread m_sender_thread;
 };
 
 #endif // SENTRY_CLIENT_HPP

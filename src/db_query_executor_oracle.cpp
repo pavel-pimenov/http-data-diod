@@ -1,4 +1,6 @@
 #include "db_query_executor_oracle.hpp"
+#include "config.hpp"
+#include "db_query_executor_base.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -6,10 +8,13 @@
 #include <base64.hpp>
 #include <dpi.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>
@@ -146,7 +151,7 @@ struct OracleQueryExecutor::Impl {
     }
   }
 
-  void update_pool_gauges() {
+  void update_pool_gauges() const {
     if (!m_pool) {
       return;
     }
@@ -161,7 +166,7 @@ struct OracleQueryExecutor::Impl {
     m_owner->set_db_pool_gauges(idle, active);
   }
 
-  void release_conn(dpiConn *conn) {
+  void release_conn(dpiConn *conn) const {
     if (!conn) {
       return;
     }
@@ -351,7 +356,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
                           &stmt_raw) < 0) {
     return make_db_sql_error(status_code, m_impl->describe_error());
   }
-  StmtGuard stmt_guard{stmt_raw};
+  const StmtGuard stmt_guard{stmt_raw};
 
   for (const auto &[name, value] : params.items()) {
     dpiData data{};
@@ -477,7 +482,7 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
           !data) {
         return make_db_sql_error(status_code, m_impl->describe_error());
       }
-      const ColumnPlan &column = columns[pos - 1];
+      const auto &column = columns[pos - 1];
       json value = nullptr;
       if (!data->isNull) {
         switch (column.m_native_type) {

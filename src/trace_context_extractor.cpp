@@ -1,6 +1,10 @@
 #include "trace_context_extractor.hpp"
+#include "common_utils.hpp"
 #include "logger.hpp"
+#include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
+#include <string>
+#include <tuple>
 
 TraceContext extract_trace_context(const httplib::Request &req,
                                    JaegerLogger *tracer,

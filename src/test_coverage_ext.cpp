@@ -5,18 +5,25 @@
 // compiled into the test_components target alongside the existing suites.
 
 #include "common_utils.hpp"
+#include "config.hpp"
 #include "crash_handler.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_base.hpp"
+#include "dynamic_labeled_family.hpp"
+#include "error_types.hpp"
 #include "exceptions.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
+#include "metrics_history.hpp"
+#include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "nlohmann/json.hpp"
 #include "pool_executor.hpp"
 #include "prometheus/counter.h"
 #include "prometheus/family.h"
 #include "prometheus/gauge.h"
 #include "prometheus/histogram.h"
+#include "prometheus/metric_type.h"
 #include "prometheus/registry.h"
 #include "prometheus/summary.h"
 #include "rate_limiter_per_ip.hpp"
@@ -24,19 +31,28 @@
 #include "scoped_profiler.hpp"
 #include "stats_page.hpp"
 #include "string_utils.hpp"
+#include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include "thread_pool_wrapper.hpp"
+#include "time_utils.hpp"
 #include "timed_task_queue.hpp"
 #include "trace_context_extractor.hpp"
 #include "tracing_helpers.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
+#include <map>
+#include <ctime>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -57,7 +73,9 @@ namespace {
 class ReadyExec final : public DbQueryExecutor {
 public:
   bool init() override { return true; }
-  bool is_ready() const override { return DbQueryExecutor::is_ready(); }
+  [[nodiscard]] bool is_ready() const override {
+    return DbQueryExecutor::is_ready();
+  }
   [[nodiscard]] int default_timeout_ms() const override { return 1000; }
   [[nodiscard]] int default_max_rows() const override { return 10; }
   [[nodiscard]] const std::string &db_name() const override {
@@ -85,7 +103,7 @@ TEST_CASE("DbQueryExecutor: default is_ready returns true", "[db-exec]") {
 
 TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
           "[exceptions]") {
-  L2ProxyException ex("boom");
+  L2ProxyException const ex("boom");
   REQUIRE_THROWS_AS(throw ex, std::runtime_error);
   REQUIRE(std::string(ex.what()) == "boom");
 }
@@ -97,13 +115,10 @@ TEST_CASE("Exceptions: L2ProxyException derives from runtime_error",
 TEST_CASE("ScopedMetrics: increments the counter on scope exit",
           "[scoped-metrics]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &counter = prometheus::BuildCounter()
-                      .Name("scoped_count")
-                      .Help("scoped test")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "scoped_count", "scoped test");
   {
-    ScopedMetrics guard(counter);
+    ScopedMetrics const guard(counter);
     REQUIRE(counter.Value() == 0.0);
   }
   REQUIRE(counter.Value() == 1.0);
@@ -116,13 +131,10 @@ TEST_CASE("ScopedMetrics: increments the counter on scope exit",
 TEST_CASE("ScopedProfiler: observes the duration histogram on scope exit",
           "[scoped-profiler]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &hist = prometheus::BuildHistogram()
-                   .Name("scoped_prof")
-                   .Help("scoped test")
-                   .Register(*registry)
-                   .Add({}, std::vector<double>{0.001, 1.0});
+  auto &hist = test_support::make_histogram(
+      *registry, "scoped_prof", "scoped test", std::vector<double>{0.001, 1.0});
   {
-    ScopedProfiler profiler(hist);
+    ScopedProfiler const profiler(hist);
     REQUIRE(hist.Collect().histogram.sample_count == 0);
   }
   const auto collected = hist.Collect();
@@ -132,7 +144,7 @@ TEST_CASE("ScopedProfiler: observes the duration histogram on scope exit",
 
 TEST_CASE("ScopedLabeledProfiler: null collector is a no-op",
           "[scoped-profiler]") {
-  ScopedLabeledProfiler profiler(nullptr, "client-1");
+  ScopedLabeledProfiler const profiler(nullptr, "client-1");
   REQUIRE_NOTHROW(ScopedLabeledProfiler(nullptr, "client-2"));
 }
 
@@ -144,7 +156,7 @@ TEST_CASE("ScopedLabeledProfiler: records under the label value",
           {"client_latency", "per client latency"}},
       {}, 0, 10, std::vector<double>{0.001, 1.0});
   {
-    ScopedLabeledProfiler profiler(&family, "alice");
+    ScopedLabeledProfiler const profiler(&family, "alice");
   }
   auto families = family.Collect();
   REQUIRE(families.size() == 1);
@@ -168,8 +180,8 @@ struct MockHttpClient {
   int m_last_status = 200;
   bool m_invalidated = false;
 
-  bool is_valid() const { return m_valid; }
-  int get_last_status_code() const { return m_last_status; }
+  [[nodiscard]] bool is_valid() const { return m_valid; }
+  [[nodiscard]] int get_last_status_code() const { return m_last_status; }
   void invalidate() { m_invalidated = true; }
 };
 
@@ -196,6 +208,24 @@ TEST_CASE("Pool executor: null pool throws", "[pool-executor]") {
       std::runtime_error);
 }
 
+TEST_CASE("Pool executor: pool returning no connection throws",
+          "[pool-executor]") {
+  // A pool that hands out nothing (all connections invalid/closed) must be a
+  // hard error rather than a null dereference in the caller.
+  struct NullPool {
+    using client_type = MockHttpClient;
+    static std::unique_ptr<MockHttpClient> acquire_connection() {
+      return nullptr;
+    }
+    void release_connection(std::unique_ptr<MockHttpClient>) {}
+  };
+  NullPool pool;
+  REQUIRE_THROWS_AS(
+      execute_http_command_with_status(
+          &pool, [](MockHttpClient *) { return std::string("never reached"); }),
+      std::runtime_error);
+}
+
 TEST_CASE("Pool executor: returns result and status code", "[pool-executor]") {
   MockPool pool;
   auto result = execute_http_command_with_status(&pool, [](MockHttpClient *c) {
@@ -213,7 +243,7 @@ TEST_CASE("Pool executor: invalid client is released and throws",
   struct InvalidPool {
     using client_type = MockHttpClient;
     int m_releases = 0;
-    std::unique_ptr<MockHttpClient> acquire_connection() {
+    static std::unique_ptr<MockHttpClient> acquire_connection() {
       auto c = std::make_unique<MockHttpClient>();
       c->m_valid = false;
       return c;
@@ -287,7 +317,7 @@ TEST_CASE("MetricsManager: family creators behave as collectables",
   REQUIRE(gfam.Collect().empty());
 
   auto &hfam = MetricsManager::create_histogram_family(
-      registry, "mm_hfam", "", std::vector<double>{0.1, 1.0});
+      registry, "mm_hfam", "");
   hfam.Add({{"db", "x"}}, std::vector<double>{0.1, 1.0}).Observe(0.2);
   auto hcollected = hfam.Collect();
   REQUIRE(hcollected.front().metric.size() == 1);
@@ -301,7 +331,7 @@ TEST_CASE("MetricsManager: array-arg creators forward bucket bounds",
       registry, "mm_hist_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_10s);
   hist.Observe(5.0);
   auto &fam = MetricsManager::create_histogram_family(
-      registry, "mm_hfam_arr", "", histogram_buckets::g_buckets.m_latency_ms_to_5s);
+      registry, "mm_hfam_arr", "");
   REQUIRE(fam.Collect().empty());
 }
 
@@ -345,7 +375,7 @@ TEST_CASE("MetricsManager: observe_db_request_duration observes seconds",
           "[metrics-manager]") {
   auto registry = std::make_shared<prometheus::Registry>();
   auto &fam = MetricsManager::create_histogram_family(
-      registry, "db_dur", "", latency_buckets_ms_to_10s());
+      registry, "db_dur", "");
   observe_db_request_duration(fam, "pg", 1'000'000, 1'100'000);
   auto collected = fam.Collect();
   REQUIRE(collected.front().metric.size() == 1);
@@ -377,7 +407,7 @@ TEST_CASE("Tracing helpers: resolve_trace_id uses context then generator",
   TraceContext ctx;
   ctx.m_trace_id = "known-trace";
   REQUIRE(resolve_trace_id(nullptr, ctx) == "known-trace");
-  TraceContext empty;
+  TraceContext const empty;
   REQUIRE(resolve_trace_id(nullptr, empty) == "");
 }
 
@@ -402,7 +432,7 @@ TEST_CASE(
     "Tracing helpers: set_traceparent_response_header sets when non-empty",
     "[tracing-helpers]") {
   httplib::Response res;
-  TraceContext empty;
+  TraceContext const empty;
   set_traceparent_response_header(res, empty);
   REQUIRE(res.get_header_value("traceparent") == "");
 
@@ -414,7 +444,7 @@ TEST_CASE(
 
 TEST_CASE("Tracing helpers: begin_request_trace with null tracer",
           "[tracing-helpers]") {
-  httplib::Headers headers;
+  httplib::Headers const headers;
   std::string inlet;
   const TraceContext ctx =
       begin_request_trace(nullptr, headers, "req-1", "/p", 1234, inlet);
@@ -489,11 +519,8 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
   auto registry = std::make_shared<prometheus::Registry>();
   auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
   gauge.Set(1.0);
-  auto &counter = prometheus::BuildCounter()
-                      .Name("requests_total")
-                      .Help("requests")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "requests_total", "requests");
   counter.Increment();
 
   const std::string html =
@@ -502,6 +529,23 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
   REQUIRE(html.find("proxy-test") != std::string::npos);
   REQUIRE(html.find("health_ready") != std::string::npos);
   REQUIRE(html.find("requests_total") != std::string::npos);
+}
+
+TEST_CASE("Stats page: dense labeled family renders the +N more overflow row",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = test_support::make_gauge_family(
+      *registry, "dense_series", "dense family");
+  // kMaxSeriesPerTile is 6 in build_stats_html: 8 series must collapse to the
+  // first 6 plus a "+2 more" overflow row.
+  for (int i = 0; i < 8; ++i) {
+    family.Add({{"shard", std::to_string(i)}}).Set(static_cast<double>(i));
+  }
+
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30);
+  REQUIRE(html.find("dense_series") != std::string::npos);
+  REQUIRE(html.find("+2 more") != std::string::npos);
 }
 
 TEST_CASE("Stats page: build_stats_html flags degraded when health not ready",
@@ -525,23 +569,23 @@ TEST_CASE("Stats page: escape_html escapes special characters",
 TEST_CASE(
     "Stats page: parse_stats_window handles absent/invalid/clamped values",
     "[stats-page-ext]") {
-  std::map<std::string, std::string> no_window;
+  std::map<std::string, std::string> const no_window;
   REQUIRE(parse_stats_window(no_window) == 30);
   REQUIRE(parse_stats_window(no_window, 60) == 60);
 
-  std::map<std::string, std::string> exact{{"window", "15"}};
+  std::map<std::string, std::string> const exact{{"window", "15"}};
   REQUIRE(parse_stats_window(exact) == 15);
 
-  std::map<std::string, std::string> invalid{{"window", "abc"}};
+  std::map<std::string, std::string> const invalid{{"window", "abc"}};
   REQUIRE(parse_stats_window(invalid) == 30);
 
-  std::map<std::string, std::string> clamped_high{{"window", "999"}};
+  std::map<std::string, std::string> const clamped_high{{"window", "999"}};
   REQUIRE(parse_stats_window(clamped_high) == 120);
 
-  std::map<std::string, std::string> clamped_low{{"window", "0"}};
+  std::map<std::string, std::string> const clamped_low{{"window", "0"}};
   REQUIRE(parse_stats_window(clamped_low) == 1);
 
-  std::map<std::string, std::string> partial{{"window", "7x"}};
+  std::map<std::string, std::string> const partial{{"window", "7x"}};
   REQUIRE(parse_stats_window(partial) == 7);
 }
 
@@ -586,10 +630,8 @@ TEST_CASE("Stats page: build_stats_html flags degraded when nats disconnected",
 TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("per_ip_requests")
-                     .Help("per ip")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "per_ip_requests", "per ip");
   for (int i = 0; i < 8; ++i) {
     family.Add({{"ip", "10.0.0." + std::to_string(i)}})
         .Set(static_cast<double>(i));
@@ -602,11 +644,8 @@ TEST_CASE("Stats page: build_stats_html caps dense families with more marker",
 TEST_CASE("Stats page: build_stats_html renders sparklines from history",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &counter = prometheus::BuildCounter()
-                      .Name("spark_requests_total")
-                      .Help("requests")
-                      .Register(*registry)
-                      .Add({});
+  auto &counter = test_support::make_counter(
+      *registry, "spark_requests_total", "requests");
   counter.Increment();
   MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
   history.start();
@@ -643,8 +682,7 @@ TEST_CASE("Stats page: build_sparkline_svg flat range uses unit range",
 TEST_CASE("Stats page: build_stats_html omits tile help when empty",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &plain =
-      prometheus::BuildGauge().Name("plain_gauge").Register(*registry);
+  auto &plain = test_support::make_gauge_family(*registry, "plain_gauge", "");
   plain.Add({}).Set(1.0);
   const std::string html =
       build_stats_html("proxy-test", registry, nullptr, 30);
@@ -656,10 +694,8 @@ TEST_CASE(
     "Stats page: build_stats_html renders labeled gauge sparklines raw",
     "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("spark_per_ip")
-                     .Help("per ip gauge")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "spark_per_ip", "per ip gauge");
   family.Add({{"ip", "0.0.0.1"}}).Set(100.0);
   family.Add({{"ip", "9.9.9.9"}}).Set(1.0);
   MetricsHistory history(registry, std::chrono::seconds(1), 8, 240);
@@ -676,19 +712,13 @@ TEST_CASE("Stats page: build_stats_html renders extra registry tiles",
   auto primary = std::make_shared<prometheus::Registry>();
   auto &p_gauge = MetricsManager::create_gauge(primary, "health_ready", "ready");
   p_gauge.Set(1.0);
-  auto &p_cnt = prometheus::BuildCounter()
-                    .Name("proxy_requests_total")
-                    .Help("proxy requests")
-                    .Register(*primary)
-                    .Add({});
+  auto &p_cnt = test_support::make_counter(
+      *primary, "proxy_requests_total", "proxy requests");
   p_cnt.Increment();
 
   auto extra = std::make_shared<prometheus::Registry>();
-  auto &t_cnt = prometheus::BuildCounter()
-                    .Name("l2_tracing_spans_sent_total")
-                    .Help("spans sent")
-                    .Register(*extra)
-                    .Add({});
+  auto &t_cnt = test_support::make_counter(
+      *extra, "l2_tracing_spans_sent_total", "spans sent");
   t_cnt.Increment();
   auto &s_gauge = MetricsManager::create_gauge(
       extra, "l2_worker_sentry_queue_size", "sentry queue");
@@ -737,14 +767,9 @@ TEST_CASE("Stats page: build_stats_html extra registry skips empty families",
 TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &cnt = prometheus::BuildCounter()
-                  .Name("mh_count")
-                  .Help("h")
-                  .Register(*registry)
-                  .Add({});
+  auto &cnt = test_support::make_counter(*registry, "mh_count", "h");
   cnt.Increment();
-  auto &gauge =
-      prometheus::BuildGauge().Name("mh_gau").Help("h").Register(*registry);
+  auto &gauge = test_support::make_gauge_family(*registry, "mh_gau", "h");
   gauge.Add({{"ip", "1"}}).Set(2.0);
   gauge.Add({{"ip", "2"}}).Set(3.0);
   auto &sum = prometheus::BuildSummary()
@@ -799,7 +824,7 @@ TEST_CASE("MetricsHistory: start is idempotent and null registry is tolerated",
 
 TEST_CASE("Trace context extractor: null tracer returns empty context",
           "[trace-context-extractor]") {
-  httplib::Request req;
+  httplib::Request const req;
   std::string backend_push_span_id;
   std::string traceparent_for_backend;
   const TraceContext ctx = extract_trace_context(
@@ -827,7 +852,7 @@ TEST_CASE("ScopedRequestContext: defaults client ip to unknown",
           "[scoped-request-context]") {
   httplib::Request req;
   req.remote_addr = "";
-  ScopedRequestContext ctx(req);
+  ScopedRequestContext const ctx(req);
   REQUIRE(ctx.client_ip() == "unknown");
 }
 
@@ -836,7 +861,7 @@ TEST_CASE("ScopedRequestContext: uses x-real-ip when present",
   httplib::Request req;
   req.remote_addr = "9.9.9.9";
   req.headers.emplace("x-real-ip", "1.2.3.4");
-  ScopedRequestContext ctx(req);
+  ScopedRequestContext const ctx(req);
   REQUIRE(ctx.client_ip() == "1.2.3.4");
 }
 
@@ -889,6 +914,16 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM queue_size reflects pending work",
   REQUIRE(pool.queue_size() <= 2);
 }
 
+TEST_CASE("ThreadPoolWrapper: unknown pool type is rejected on enqueue",
+          "[thread-pool-wrapper]") {
+  // The enum only carries CUSTOM/NONE; an out-of-range value must be refused
+  // instead of dereferencing a pool that was never constructed.
+  auto const unknown = static_cast<ThreadPoolWrapper::Type>(42);
+  ThreadPoolWrapper pool(unknown, 1);
+  REQUIRE(pool.queue_size() == 0);
+  REQUIRE_THROWS_AS(pool.enqueue([]() { return 1; }), std::runtime_error);
+}
+
 // ============================================================================
 // CrashHandler (crash_handler.hpp) — non-signal surface
 // ============================================================================
@@ -919,16 +954,8 @@ TEST_CASE("Common utils ext: log_request_received and log_response_sent",
 TEST_CASE("Common utils ext: increment_and_log_* bump counters",
           "[common-utils-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &recv = prometheus::BuildCounter()
-                   .Name("cu_recv")
-                   .Help("h")
-                   .Register(*registry)
-                   .Add({});
-  auto &sent = prometheus::BuildCounter()
-                   .Name("cu_sent")
-                   .Help("h")
-                   .Register(*registry)
-                   .Add({});
+  auto &recv = test_support::make_counter(*registry, "cu_recv", "h");
+  auto &sent = test_support::make_counter(*registry, "cu_sent", "h");
   REQUIRE(recv.Value() == 0.0);
   REQUIRE(sent.Value() == 0.0);
   increment_and_log_request_received(recv, "ctx", 10);
@@ -941,31 +968,11 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
           "JSON errors to the dedicated counter",
           "[common-utils-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &inv = prometheus::BuildCounter()
-                  .Name("cu_total")
-                  .Help("h")
-                  .Register(*registry)
-                  .Add({});
-  auto &json_err = prometheus::BuildCounter()
-                       .Name("cu_json")
-                       .Help("h")
-                       .Register(*registry)
-                       .Add({});
-  auto &valid_err = prometheus::BuildCounter()
-                        .Name("cu_valid")
-                        .Help("h")
-                        .Register(*registry)
-                        .Add({});
-  auto &decomp_err = prometheus::BuildCounter()
-                         .Name("cu_decomp")
-                         .Help("h")
-                         .Register(*registry)
-                         .Add({});
-  auto &other_err = prometheus::BuildCounter()
-                        .Name("cu_other")
-                        .Help("h")
-                        .Register(*registry)
-                        .Add({});
+  auto &inv = test_support::make_counter(*registry, "cu_total", "h");
+  auto &json_err = test_support::make_counter(*registry, "cu_json", "h");
+  auto &valid_err = test_support::make_counter(*registry, "cu_valid", "h");
+  auto &decomp_err = test_support::make_counter(*registry, "cu_decomp", "h");
+  auto &other_err = test_support::make_counter(*registry, "cu_other", "h");
   ProcessingErrorMetrics metrics;
   metrics.m_total_errors = &inv;
   metrics.m_json_errors = &json_err;
@@ -999,7 +1006,7 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
 TEST_CASE("Common utils ext: handle_processing_error_with_category tolerates "
           "null counters",
           "[common-utils-ext]") {
-  ProcessingErrorMetrics metrics;
+  ProcessingErrorMetrics const metrics;
   REQUIRE_NOTHROW(
       handle_processing_error_with_category("invalid json: boom", metrics));
 }
@@ -1099,7 +1106,9 @@ class BasePoolExecMock final : public DbExecutorBase {
 public:
   explicit BasePoolExecMock(DbConfig db) : DbExecutorBase(std::move(db)) {}
   bool init() override { return true; }
-  bool is_ready() const override { return DbExecutorBase::is_ready(); }
+  [[nodiscard]] bool is_ready() const override {
+    return DbExecutorBase::is_ready();
+  }
   json execute_query(const std::string &, const json &, int, int,
                      int &) override {
     return json::object();
@@ -1122,7 +1131,7 @@ TEST_CASE("DbExecutorBase: default getters read DbConfig",
   cfg.m_name = "oracle";
   cfg.m_query_timeout_ms = 3000;
   cfg.m_max_rows = 500;
-  BasePoolExecMock exec(cfg);
+  BasePoolExecMock const exec(cfg);
   REQUIRE(exec.default_timeout_ms() == 3000);
   REQUIRE(exec.default_max_rows() == 500);
   REQUIRE(exec.db_name() == "oracle");
@@ -1141,10 +1150,8 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges is a no-op before metrics set",
 TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active gauges",
           "[db-executor-base]") {
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("db_pool")
-                     .Help("db pool state")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "db_pool", "db pool state");
   DbConfig cfg;
   cfg.m_name = "pg";
   cfg.m_query_timeout_ms = 1000;
@@ -1235,37 +1242,20 @@ struct JaegerTracerFixture {
 
   JaegerTracerFixture()
       : m_registry(std::make_shared<prometheus::Registry>()),
-        m_spans_sent(prometheus::BuildCounter()
-                         .Name("test_j_spans_sent")
-                         .Help("sent")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_spans_failed(prometheus::BuildCounter()
-                           .Name("test_j_spans_failed")
-                           .Help("failed")
-                           .Register(*m_registry)
-                           .Add({})),
-        m_queue_size(prometheus::BuildGauge()
-                         .Name("test_j_queue_size")
-                         .Help("queue")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_last_send_duration(prometheus::BuildGauge()
-                                 .Name("test_j_last_send_duration")
-                                 .Help("dur")
-                                 .Register(*m_registry)
-                                 .Add({})),
-        m_send_latency(
-            prometheus::BuildHistogram()
-                .Name("test_j_send_latency")
-                .Help("lat")
-                .Register(*m_registry)
-                .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})),
-        m_queue_time(prometheus::BuildHistogram()
-                         .Name("test_j_queue_time")
-                         .Help("qt")
-                         .Register(*m_registry)
-                         .Add({}, std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
+        m_spans_sent(test_support::make_counter(
+            *m_registry, "test_j_spans_sent", "sent")),
+        m_spans_failed(test_support::make_counter(
+            *m_registry, "test_j_spans_failed", "failed")),
+        m_queue_size(test_support::make_gauge(
+            *m_registry, "test_j_queue_size", "queue")),
+        m_last_send_duration(test_support::make_gauge(
+            *m_registry, "test_j_last_send_duration", "dur")),
+        m_send_latency(test_support::make_histogram(
+            *m_registry, "test_j_send_latency", "lat",
+            std::vector<double>{0.001, 0.01, 0.1, 1.0})),
+        m_queue_time(test_support::make_histogram(
+            *m_registry, "test_j_queue_time", "qt",
+            std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
     m_tracer = std::make_unique<JaegerLogger>(
         "http://localhost:19999", m_spans_sent, m_spans_failed, m_queue_size,
         m_last_send_duration, m_send_latency, m_queue_time,
@@ -1278,7 +1268,7 @@ struct JaegerTracerFixture {
 TEST_CASE("Tracing helpers: resolve_trace_id generates when empty with real "
           "tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext empty;
   empty.m_trace_id = "";
   const auto tid = resolve_trace_id(fix.m_tracer.get(), empty);
@@ -1288,7 +1278,7 @@ TEST_CASE("Tracing helpers: resolve_trace_id generates when empty with real "
 
 TEST_CASE("Tracing helpers: resolve_trace_id returns existing when non-empty",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "known-trace-id";
   REQUIRE(resolve_trace_id(fix.m_tracer.get(), ctx) == "known-trace-id");
@@ -1297,7 +1287,7 @@ TEST_CASE("Tracing helpers: resolve_trace_id returns existing when non-empty",
 TEST_CASE("Tracing helpers: log_incoming_span returns non-empty span_id with "
           "real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "";
   ctx.m_parent_id = "parent-abc";
@@ -1310,7 +1300,7 @@ TEST_CASE("Tracing helpers: log_incoming_span returns non-empty span_id with "
 
 TEST_CASE("Tracing helpers: log_incoming_span with pre-existing trace_id",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   ctx.m_parent_id = "";
@@ -1322,7 +1312,7 @@ TEST_CASE("Tracing helpers: log_incoming_span with pre-existing trace_id",
 TEST_CASE("Tracing helpers: make_span_and_traceparent generates traceparent "
           "with real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "1234567890abcdef1234567890abcdef";
   ctx.m_traceparent_header = "";
@@ -1338,7 +1328,7 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent generates traceparent "
 TEST_CASE("Tracing helpers: make_span_and_traceparent generates span_id when "
           "hint is empty",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const auto [span_id, tp] = make_span_and_traceparent(fix.m_tracer.get(), ctx);
@@ -1350,7 +1340,7 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent generates span_id when "
 TEST_CASE("Tracing helpers: make_span_and_traceparent returns header when "
           "trace_id is empty",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "";
   ctx.m_traceparent_header = "00-aabb-ccdd-01";
@@ -1360,7 +1350,7 @@ TEST_CASE("Tracing helpers: make_span_and_traceparent returns header when "
 
 TEST_CASE("Tracing helpers: add_proxy_trace_fields fills JSON with real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   json request_data = nlohmann::json::object();
   TraceContext ctx;
   ctx.m_trace_id = "11111111111111111111111111111111";
@@ -1384,7 +1374,7 @@ TEST_CASE("Tracing helpers: add_proxy_trace_fields fills JSON with real tracer",
 TEST_CASE("Tracing helpers: add_proxy_trace_fields resolves trace_id from "
           "empty ctx",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   json request_data = nlohmann::json::object();
   TraceContext ctx;
   ctx.m_trace_id = "";
@@ -1397,7 +1387,7 @@ TEST_CASE("Tracing helpers: add_proxy_trace_fields resolves trace_id from "
 
 TEST_CASE("Tracing helpers: JaegerSpanLogger non-null tracer paths",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "22222222222222222222222222222222";
   ctx.m_span_id = "2222222222222222";
@@ -1424,7 +1414,7 @@ TEST_CASE("Tracing helpers: JaegerSpanLogger non-null tracer paths",
 TEST_CASE("Tracing helpers: BackendErrorSpanLogger non-null tracer with "
           "empty and non-empty detail",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   TraceContext ctx;
   ctx.m_trace_id = "44444444444444444444444444444444";
   ctx.m_span_id = "4444444444444444";
@@ -1441,7 +1431,7 @@ TEST_CASE("Tracing helpers: BackendErrorSpanLogger non-null tracer with "
 
 TEST_CASE("Tracing helpers: RateLimitSpanLogger non-null tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
 
   RateLimitSpanLogger::log_rate_limit_rejection(
       fix.m_tracer.get(), "too many requests", "10.0.0.1", "", "10", "0");
@@ -1453,7 +1443,7 @@ TEST_CASE("Tracing helpers: RateLimitSpanLogger non-null tracer",
 TEST_CASE("Tracing helpers: log_worker_span with real tracer and non-empty "
           "trace_id",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   const auto now = TimeUtils::epoch_us();
   REQUIRE_NOTHROW(log_worker_span(
       fix.m_tracer.get(), "POST", "/query", 200, now, now + 1000, "worker",
@@ -1463,7 +1453,7 @@ TEST_CASE("Tracing helpers: log_worker_span with real tracer and non-empty "
 TEST_CASE("Tracing helpers: log_worker_span no-ops with empty trace_id even "
           "with real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   REQUIRE_NOTHROW(log_worker_span(fix.m_tracer.get(), "POST", "/query", 200, 1,
                                   2, "worker", "req-ws2", "", "", ""));
 }
@@ -1471,7 +1461,7 @@ TEST_CASE("Tracing helpers: log_worker_span no-ops with empty trace_id even "
 TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
           "non-empty traceparent and real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   const TraceContext ctx = TraceContextHelper::extract_from_raw(
       "00-88888888888888888888888888888888-aaaaaaaaaaaaaaaa-01",
       fix.m_tracer.get(), "test-ctx");
@@ -1484,7 +1474,7 @@ TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
 TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
           "empty traceparent and real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   const TraceContext ctx = TraceContextHelper::extract_from_raw(
       "", fix.m_tracer.get(), "test-empty");
   REQUIRE_FALSE(ctx.m_trace_id.empty());
@@ -1495,7 +1485,7 @@ TEST_CASE("Tracing helpers: TraceContextHelper extract_from_raw with "
 TEST_CASE("Tracing helpers: TraceContextHelper extract_and_validate with "
           "headers",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   httplib::Headers hdrs;
   hdrs.emplace("traceparent",
                "00-99999999999999999999999999999999-bbbbbbbbbbbbbbbb-01");
@@ -1508,7 +1498,7 @@ TEST_CASE("Tracing helpers: TraceContextHelper extract_and_validate with "
 
 TEST_CASE("Tracing helpers: begin_request_trace with real tracer",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
+  JaegerTracerFixture const fix;
   httplib::Headers hdrs;
   hdrs.emplace("traceparent",
                "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cccccccccccccccc-01");
@@ -1524,8 +1514,8 @@ TEST_CASE("Tracing helpers: begin_request_trace with real tracer",
 TEST_CASE("Tracing helpers: begin_request_trace generates trace_id when "
           "no traceparent",
           "[tracing-helpers][non-null]") {
-  JaegerTracerFixture fix;
-  httplib::Headers hdrs;
+  JaegerTracerFixture const fix;
+  httplib::Headers const hdrs;
   std::string inlet_span_id;
   const TraceContext ctx =
       begin_request_trace(fix.m_tracer.get(), hdrs, "req-brt2", "/ping",
@@ -1646,29 +1636,24 @@ struct TaskQueueFixture {
                                        "queue wait", latency_buckets_ms_to_10s());
 };
 
+// The timed-task-queue tests watch an atomic flag that flips within
+// microseconds, so they poll the shared waiter every 1 ms instead of its 50 ms
+// default.
 bool wait_for_tasks(const std::atomic<int> &done, int expected,
                     std::chrono::milliseconds timeout) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (done.load() >= expected) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  return done.load() >= expected;
+  return test_wait_support::wait_for_condition(
+      [&] { return done.load() >= expected; },
+      static_cast<int>(timeout.count()), std::chrono::milliseconds(1));
 }
 
 bool wait_for_flag(std::mutex &mutex, bool &flag,
                    std::chrono::milliseconds timeout) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (std::lock_guard lock(mutex); flag) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  std::lock_guard lock(mutex);
-  return flag;
+  return test_wait_support::wait_for_condition(
+      [&] {
+        std::scoped_lock const lock(mutex);
+        return flag;
+      },
+      static_cast<int>(timeout.count()), std::chrono::milliseconds(1));
 }
 
 } // namespace
@@ -1708,7 +1693,7 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
 
   REQUIRE(queue.enqueue([&]() {
     {
-      std::lock_guard lock(gate);
+      std::scoped_lock const lock(gate);
       started = true;
     }
     gate_cv.notify_all();
@@ -1721,7 +1706,7 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
   REQUIRE_FALSE(queue.enqueue([&done]() { done.fetch_add(1); }));
 
   {
-    std::lock_guard lock(gate);
+    std::scoped_lock const lock(gate);
     release = true;
   }
   gate_cv.notify_all();

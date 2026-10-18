@@ -1,16 +1,34 @@
 #include "trace_logger.hpp"
+#include "async_sender_queue.hpp"
 #include "http_client_pool.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/gauge.h"
+#include "prometheus/histogram.h"
+#include "random_utils.hpp"
+#include "sentry_client.hpp"
+#include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
+#include <cstdint>
+#include <cstddef>
+#include <chrono>
+#include <exception>
 #include <format>
+#include <memory>
 #include <random>
+#include <string>
+#include <stop_token>
+#include <string_view>
+#include <utility>
+#include <vector>
+#include <thread>
 
-// Thread-local random generator for fast ID generation (initialized once per
+// Thread-local random generator for sampling decisions (initialized once per
 // thread)
 static thread_local std::random_device g_rd;
 static thread_local std::mt19937_64 g_gen(g_rd());
-static thread_local std::uniform_int_distribution<uint64_t> g_dis;
 
 namespace {
 // Jaeger sender pool is deliberately tiny and short-timeout: spans are
@@ -66,7 +84,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
 JaegerLogger::~JaegerLogger() {
   if (m_delivery.m_sender_thread.joinable()) {
     m_delivery.m_sender_thread.request_stop();
-    m_delivery.m_span_queue.m_cv.notify_all();
+    m_delivery.m_span_queue.notify_all();
     m_delivery.m_sender_thread.join();
   }
 }
@@ -85,16 +103,19 @@ std::string JaegerLogger::generate_traceparent(std::string_view trace_id,
 // Simplified validation - check key positions only
 bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   // Format: 00-{32hex}-{16hex}-{2hex} = 55 chars
-  if (traceparent.size() != 55)
+  if (traceparent.size() != 55) {
     return false;
+  }
 
   // Check version prefix
-  if (traceparent[0] != '0' || traceparent[1] != '0' || traceparent[2] != '-')
+  if (traceparent[0] != '0' || traceparent[1] != '0' || traceparent[2] != '-') {
     return false;
+  }
 
   // Check separators at key positions
-  if (traceparent[35] != '-' || traceparent[52] != '-')
+  if (traceparent[35] != '-' || traceparent[52] != '-') {
     return false;
+  }
 
   // Quick hex validation at sample positions (not all for performance)
   const auto is_hex = [](char c) {
@@ -102,20 +123,25 @@ bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   };
 
   // Check trace_id start and end
-  if (!is_hex(traceparent[3]) || !is_hex(traceparent[34]))
+  if (!is_hex(traceparent[3]) || !is_hex(traceparent[34])) {
     return false;
+  }
   // Check span_id start and end
-  if (!is_hex(traceparent[36]) || !is_hex(traceparent[51]))
+  if (!is_hex(traceparent[36]) || !is_hex(traceparent[51])) {
     return false;
+  }
   // Check flags
-  if (!is_hex(traceparent[53]) || !is_hex(traceparent[54]))
+  if (!is_hex(traceparent[53]) || !is_hex(traceparent[54])) {
     return false;
+  }
 
   // Validate flags (must be 00 or 01)
-  if (traceparent[53] != '0')
+  if (traceparent[53] != '0') {
     return false;
-  if (traceparent[54] != '0' && traceparent[54] != '1')
+  }
+  if (traceparent[54] != '0' && traceparent[54] != '1') {
     return false;
+  }
 
   return true;
 }
@@ -144,10 +170,12 @@ bool JaegerLogger::parse_traceparent(std::string_view traceparent,
 }
 
 bool JaegerLogger::should_sample() const {
-  if (m_jaeger.m_sample_rate >= 1.0)
+  if (m_jaeger.m_sample_rate >= 1.0) {
     return true;
-  if (m_jaeger.m_sample_rate <= 0.0)
+  }
+  if (m_jaeger.m_sample_rate <= 0.0) {
     return false;
+  }
 
   // Thread-local generator for sampling decision
   thread_local std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -156,8 +184,9 @@ bool JaegerLogger::should_sample() const {
 
 bool JaegerLogger::should_sample(bool is_error) const {
   // Always sample error spans for debugging
-  if (is_error)
+  if (is_error) {
     return true;
+  }
 
   // Apply normal sampling for non-error spans
   return should_sample();
@@ -239,22 +268,11 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     root["environment"] = environment;
   }
 
-  nlohmann::json tags = nlohmann::json::object();
-  if (!service_name.empty()) {
-    tags["service"] = service_name;
-  }
+  nlohmann::json tags = sentry::service_tags(service_name);
   if (!product.empty()) {
     tags["mode"] = product;
   }
-  if (attributes.is_object()) {
-    for (const auto &entry : attributes.items()) {
-      if (entry.value().is_string()) {
-        tags[entry.key()] = entry.value();
-      } else {
-        tags[entry.key()] = entry.value().dump();
-      }
-    }
-  }
+  merge_stringified_tags(tags, attributes);
   root["tags"] = std::move(tags);
 
   if (attributes.is_object() && !attributes.empty()) {
@@ -264,28 +282,22 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
 }
 
 std::string JaegerLogger::sentry_envelope_url(const sentry::DsnData &dsn) {
-  const std::string scheme = dsn.m_scheme.empty() ? "http" : dsn.m_scheme;
-  return scheme + "://" + dsn.m_host + ":" + std::to_string(dsn.m_port) +
-         dsn.m_path_prefix + "/api/" + dsn.m_project_id + "/envelope/";
+  const std::string_view scheme = dsn.m_scheme.empty()
+                                      ? std::string_view{"http"}
+                                      : std::string_view{dsn.m_scheme};
+  return std::format("{}://{}:{}{}", scheme, dsn.m_host, dsn.m_port,
+                     sentry::envelope_path(dsn));
 }
 
 std::string JaegerLogger::sentry_auth_header(const sentry::DsnData &dsn) {
-  std::string key = dsn.m_public_key;
-  if (!dsn.m_secret_key.empty()) {
-    key += "/" + dsn.m_secret_key;
-  }
-  return "Sentry sentry_version=7, sentry_key=" + key;
+  return sentry::auth_header(dsn);
 }
 
 std::string JaegerLogger::build_sentry_transaction_envelope(
     const nlohmann::json &event_json) {
   const std::string event_id = event_json.value("event_id", "");
-  const nlohmann::json header = {
-      {"event_id", event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-  const nlohmann::json item_header = {{"type", "transaction"}};
-  return header.dump() + "\n" + item_header.dump() + "\n" + event_json.dump();
+  return sentry::envelope_header(event_id).dump() + "\n" +
+         sentry::envelope_item(event_json, "transaction");
 }
 
 std::string JaegerLogger::build_sentry_envelope(
@@ -293,19 +305,33 @@ std::string JaegerLogger::build_sentry_envelope(
   if (events.empty()) {
     return "";
   }
-  std::string header_event_id = events.front().value("event_id", "");
-  const nlohmann::json header = {
-      {"event_id", header_event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-  std::string envelope = header.dump();
+  std::string envelope =
+      sentry::envelope_header(events.front().value("event_id", "")).dump();
   for (const auto &event : events) {
-    const std::string payload = event.dump();
-    const nlohmann::json item_header = {
-        {"type", "transaction"}, {"length", payload.size()}};
-    envelope += "\n" + item_header.dump() + "\n" + payload;
+    envelope += "\n" +
+                sentry::envelope_item(event, "transaction",
+                                      /*include_length=*/true);
   }
   return envelope;
+}
+
+// Opens the sink's breaker once consecutive failures reach the threshold: the
+// cooldown window doubles per opening (base << failures-1), clamped to the
+// configured maximum. Both the Jaeger and Sentry/GlitchTip sinks share it.
+void JaegerLogger::record_sink_failure(ExponentialBreaker &breaker,
+                                       uint64_t now_steady_ms,
+                                       std::string_view sink_name) const {
+  ++breaker.m_consecutive_failures;
+  if (breaker.m_consecutive_failures <
+      m_breaker.m_settings.m_failure_threshold) {
+    return;
+  }
+  const uint64_t cooldown_ms = std::min<uint64_t>(
+      static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_base_ms)
+          << (std::min(breaker.m_consecutive_failures.load(), 20) - 1),
+      static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_max_ms));
+  breaker.m_cooldown_until_steady_ms = now_steady_ms + cooldown_ms;
+  Logger::warn("{} breaker opened, shedding for {}ms", sink_name, cooldown_ms);
 }
 
 void JaegerLogger::deliver_sentry_transactions(
@@ -318,10 +344,7 @@ void JaegerLogger::deliver_sentry_transactions(
   // forever). After the consecutive-failure threshold the breaker opens:
   // delivery is skipped for the exponential cooldown window (capped) and the
   // batch is shed instead of bombarding the dead target.
-  const uint64_t now_steady_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
-          .count();
+  const uint64_t now_steady_ms = TimeUtils::steady_ms();
   const uint64_t cooldown_until =
       m_breaker.m_sentry.m_cooldown_until_steady_ms.load();
   if (cooldown_until != 0 && now_steady_ms < cooldown_until) {
@@ -357,13 +380,9 @@ void JaegerLogger::deliver_sentry_transactions(
   // transaction of the batch.
   const std::string envelope = build_sentry_envelope(events);
   try {
+    // acquire_connection() throws on pool exhaustion (it never returns a null
+    // client), so a timeout lands in the catch below and is accounted there.
     auto client = m_pools.m_sentry_client_pool->acquire_connection();
-    if (!client) {
-      if (m_sentry_metrics.m_spans_failed) {
-        m_sentry_metrics.m_spans_failed->Increment(event_count);
-      }
-      return;
-    }
     client->post_no_response(
         url, envelope, "",
         httplib::Headers{{"X-Sentry-Auth", auth}},
@@ -377,20 +396,7 @@ void JaegerLogger::deliver_sentry_transactions(
   } catch (const std::exception &e) {
     Logger::error(
         "Sentry transaction delivery failed (non-critical): {}", e.what());
-    m_breaker.m_sentry.m_consecutive_failures++;
-    if (m_breaker.m_sentry.m_consecutive_failures >=
-        m_breaker.m_settings.m_failure_threshold) {
-      uint64_t cooldown_ms =
-          std::min<uint64_t>(
-              (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
-                               20) -
-                      1),
-              (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.m_cooldown_until_steady_ms =
-          now_steady_ms + cooldown_ms;
-      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
-    }
+    record_sink_failure(m_breaker.m_sentry, now_steady_ms, "Sentry");
     if (m_sentry_metrics.m_spans_failed) {
       m_sentry_metrics.m_spans_failed->Increment(event_count);
     }
@@ -398,20 +404,7 @@ void JaegerLogger::deliver_sentry_transactions(
     Logger::error(
         "Sentry transaction delivery failed with unknown error "
         "(non-critical)");
-    m_breaker.m_sentry.m_consecutive_failures++;
-    if (m_breaker.m_sentry.m_consecutive_failures >=
-        m_breaker.m_settings.m_failure_threshold) {
-      uint64_t cooldown_ms =
-          std::min<uint64_t>(
-              (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                  << (std::min(m_breaker.m_sentry.m_consecutive_failures.load(),
-                               20) -
-                      1),
-              (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-      m_breaker.m_sentry.m_cooldown_until_steady_ms =
-          now_steady_ms + cooldown_ms;
-      Logger::warn("Sentry breaker opened, shedding for {}ms", cooldown_ms);
-    }
+    record_sink_failure(m_breaker.m_sentry, now_steady_ms, "Sentry");
     if (m_sentry_metrics.m_spans_failed) {
       m_sentry_metrics.m_spans_failed->Increment(event_count);
     }
@@ -425,22 +418,16 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                                  uint64_t end_us,
                                  const std::string &service_name,
                                  const nlohmann::json &attributes) {
-  {
-    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
-    if (m_delivery.m_span_queue.m_spans.size() >= g_tracing_max_queue_size) {
-      m_jaeger_metrics.m_spans_failed.Increment();
-      Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
-      return;
-    }
-    uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                          std::chrono::steady_clock::now().time_since_epoch())
-                          .count();
-    m_delivery.m_span_queue.m_spans.push_back({trace_id, span_id, parent_id, name,
-                                    service_name, start_us, end_us, now_us,
-                                    attributes});
-    m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
+  uint64_t const now_us = TimeUtils::steady_us();
+  const auto outcome = m_delivery.m_span_queue.push(
+      SpanData{trace_id, span_id, parent_id, name, service_name, start_us,
+               end_us, now_us, attributes});
+  if (!outcome.m_accepted) {
+    m_jaeger_metrics.m_spans_failed.Increment();
+    Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
+    return;
   }
-  m_delivery.m_span_queue.m_cv.notify_one();
+  m_jaeger_metrics.m_queue_size.Set(static_cast<double>(outcome.m_size));
 }
 
 void JaegerLogger::log_request(
@@ -451,7 +438,7 @@ void JaegerLogger::log_request(
     const nlohmann::json &additional_attributes,
     const std::string &name_override) {
   // Apply sampling - always sample errors (4xx and 5xx status codes)
-  bool is_error = (status_code >= 400);
+  bool const is_error = (status_code >= 400);
   if (!should_sample(is_error)) {
     return;
   }
@@ -487,65 +474,37 @@ void JaegerLogger::log_request(
                end_us, service_name, attrs);
 }
 
-// Fast random hex generation using pre-initialized thread-local generator
+// Thin wrapper: the hex generation itself lives in RandomUtils so trace/span
+// ids and Sentry event ids share one implementation.
 std::string JaegerLogger::random_hex_fast(size_t len) {
-  std::string res;
-  res.reserve(len);
-
-  static const char g_hex_chars[] = "0123456789abcdef";
-
-  // Generate 8 chars at a time (64 bits)
-  for (size_t i = 0; i < len; i += 16) {
-    uint64_t val = g_dis(g_gen);
-    for (size_t j = 0; j < 16 && (i + j) < len; ++j) {
-      res += g_hex_chars[(val >> (j * 4)) & 0xF];
-    }
-  }
-
-  return res;
+  return RandomUtils::hex_string(len);
 }
 
-void JaegerLogger::sender_loop(std::stop_token st) {
+void JaegerLogger::sender_loop(const std::stop_token &st) {
+  using TakeResult = AsyncSenderQueue<SpanData>::TakeResult;
   while (!st.stop_requested()) {
     std::vector<SpanData> batch;
-    batch.reserve(m_jaeger.m_batch_size);
-
-    {
-      std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
-      // Wait for work or stop — replaces poll sleep 100ms
-      if (m_delivery.m_span_queue.m_spans.empty()) {
-        m_delivery.m_span_queue.m_cv.wait_for(
-            lock, st,
-            std::chrono::milliseconds(m_jaeger.m_flush_interval_ms / 10),
-            [&] {
-              return st.stop_requested() || !m_delivery.m_span_queue.m_spans.empty();
-            });
-        if (st.stop_requested()) break;
-        if (m_delivery.m_span_queue.m_spans.empty()) continue;
-      }
-      while (!m_delivery.m_span_queue.m_spans.empty() &&
-             batch.size() < m_jaeger.m_batch_size) {
-        batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
-        m_delivery.m_span_queue.m_spans.pop_front();
-      }
-      m_jaeger_metrics.m_queue_size.Set(m_delivery.m_span_queue.m_spans.size());
+    const auto result = m_delivery.m_span_queue.wait_and_take(
+        st, m_jaeger.m_flush_interval_ms / 10, m_jaeger.m_batch_size, false,
+        batch);
+    if (result == TakeResult::Stopped) {
+      break;
     }
-
+    if (result == TakeResult::Idle) {
+      continue;
+    }
+    m_jaeger_metrics.m_queue_size.Set(
+        static_cast<double>(m_delivery.m_span_queue.size()));
     if (!batch.empty()) {
       send_batch_with_retry(batch, st);
     }
+    m_delivery.m_span_queue.mark_processed(batch.size());
   }
 
   // Flush remaining spans on shutdown (quick, non-blocking)
   std::vector<SpanData> final_batch;
-  {
-    std::unique_lock lock(m_delivery.m_span_queue.m_mutex);
-    while (!m_delivery.m_span_queue.m_spans.empty()) {
-      final_batch.push_back(std::move(m_delivery.m_span_queue.m_spans.front()));
-      m_delivery.m_span_queue.m_spans.pop_front();
-    }
-    m_jaeger_metrics.m_queue_size.Set(0);
-  }
+  m_delivery.m_span_queue.drain(final_batch);
+  m_jaeger_metrics.m_queue_size.Set(0);
 
   if (!final_batch.empty()) {
     Logger::debug("Flushing {} remaining spans on shutdown",
@@ -567,9 +526,7 @@ void JaegerLogger::sender_loop(std::stop_token st) {
 void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
                                          const std::stop_token &st) {
   const auto start_time = std::chrono::steady_clock::now();
-  uint64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
+  uint64_t const now_us = TimeUtils::steady_us();
   double avg_queue_time_s = 0.0;
   for (const auto &span : batch) {
     avg_queue_time_s +=
@@ -595,7 +552,7 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
         batch.size());
     deliver_sentry_transactions(batch);
     const auto end_time = std::chrono::steady_clock::now();
-    double duration =
+    double const duration =
         std::chrono::duration<double>(end_time - start_time).count();
     m_jaeger_metrics.m_last_send_duration.Set(duration);
     m_jaeger_metrics.m_send_latency.Observe(duration);
@@ -609,22 +566,9 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
       m_breaker.m_jaeger.m_cooldown_until_steady_ms = 0;
     } else {
       retries++;
-      m_breaker.m_jaeger.m_consecutive_failures++;
       Logger::warn("Jaeger batch send failed, retry {}/{} in {}ms", retries,
                    g_tracing_max_retries, delay_ms);
-      if (m_breaker.m_jaeger.m_consecutive_failures >=
-          m_breaker.m_settings.m_failure_threshold) {
-        uint64_t cooldown_ms =
-            std::min<uint64_t>(
-                (uint64_t)m_breaker.m_settings.m_cooldown_base_ms
-                    << (std::min(m_breaker.m_jaeger.m_consecutive_failures.load(),
-                                 20) -
-                        1),
-                (uint64_t)m_breaker.m_settings.m_cooldown_max_ms);
-        m_breaker.m_jaeger.m_cooldown_until_steady_ms =
-            now_ms + cooldown_ms;
-        Logger::warn("Jaeger breaker opened, shedding for {}ms", cooldown_ms);
-      }
+      record_sink_failure(m_breaker.m_jaeger, now_ms, "Jaeger");
       if (retries < g_tracing_max_retries) {
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         delay_ms *= 2;
@@ -647,15 +591,16 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   deliver_sentry_transactions(batch);
 
   const auto end_time = std::chrono::steady_clock::now();
-  double duration =
+  double const duration =
       std::chrono::duration<double>(end_time - start_time).count();
   m_jaeger_metrics.m_last_send_duration.Set(duration);
   m_jaeger_metrics.m_send_latency.Observe(duration);
 }
 
 bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
-  if (batch.empty())
+  if (batch.empty()) {
     return true;
+  }
 
   nlohmann::json batch_json = nlohmann::json::array();
 
@@ -673,13 +618,10 @@ bool JaegerLogger::send_batch(const std::vector<SpanData> &batch) {
   // Counter is incremented only by the caller (sender_loop / flush) to avoid
   // double-counting: send_batch returns false and the caller decides.
   try {
-    // Use very short timeout for tracing (don't block on Jaeger issues)
+    // Use very short timeout for tracing (don't block on Jaeger issues).
+    // acquire_connection() throws on pool exhaustion instead of returning a
+    // null client, so timeouts are handled by the catch below.
     auto client = m_pools.m_http_client_pool->acquire_connection();
-    if (!client) {
-      // Pool exhausted - drop spans silently (tracing is not critical)
-      return false;
-    }
-
     // Send with very short timeout - tracing should never block
     client->post_no_response(m_jaeger.m_url, payload_str, "");
     m_pools.m_http_client_pool->release_connection(std::move(client));
@@ -717,12 +659,9 @@ bool JaegerLogger::send_span(const std::string &trace_id,
 
   // Fire-and-forget: never block main logic
   try {
+    // acquire_connection() throws on pool exhaustion instead of returning a
+    // null client, so timeouts are handled by the catch below.
     auto client = m_pools.m_http_client_pool->acquire_connection();
-    if (!client) {
-      m_jaeger_metrics.m_spans_failed.Increment();
-      return false;
-    }
-
     client->post_no_response(m_jaeger.m_url, payload_str, "");
     m_pools.m_http_client_pool->release_connection(std::move(client));
     return true;

@@ -115,3 +115,17 @@ jobs:
       # files fail the job, pre-existing style warnings are non-blocking.
       - name: Run clang-tidy over all project C++ files
         run: bash scripts/run-clang-tidy.sh --all
+
+  cppcheck:
+    name: cppcheck (full sweep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Builder image contains cppcheck + NATS headers; error/warning/performance/
+      # portability findings in project files fail the job, bundled third-party
+      # headers are suppressed via src/cppcheck-suppressions.txt.
+      - name: Run cppcheck over all project C++ files
+        run: bash scripts/run-cppcheck.sh --all

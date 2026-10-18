@@ -22,16 +22,20 @@ public:
     m_state.m_current_delay_ms = m_config.m_initial_delay_ms;
   }
 
-  int get_consecutive_failures() const { return m_state.m_consecutive_failures; }
-  int get_current_delay_ms() const { return m_state.m_current_delay_ms; }
+  [[nodiscard]] int get_consecutive_failures() const {
+    return m_state.m_consecutive_failures;
+  }
+  [[nodiscard]] int get_current_delay_ms() const {
+    return m_state.m_current_delay_ms;
+  }
 
 private:
-  struct Config {
+  struct Config { //-V730
     int m_initial_delay_ms;
     int m_max_delay_ms;
   } m_config;
 
-  struct State {
+  struct State { //-V730
     int m_current_delay_ms;
     int m_consecutive_failures = 0;
   } m_state;

@@ -1,6 +1,16 @@
 #include "http_client.hpp"
 #include "common_utils.hpp"
+#include "http_setup.hpp"
 #include "logger.hpp"
+#include "url_utils.hpp"
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 std::atomic<int> HttpClient::g_instance_count{0};
 std::atomic<uint64_t> HttpClient::g_total_created{0};
@@ -24,8 +34,17 @@ HttpClient::HttpClient(const int timeout_seconds,
                 timeout_seconds);
 }
 
+void HttpClient::set_pool_release_hook(std::function<void(bool)> hook) {
+  m_pool_release_hook = std::move(hook);
+}
+
 HttpClient::~HttpClient() {
   try {
+    // A consumer may drop the client without releasing it (e.g. an HTTP call
+    // that threw): the pool hook then returns the slot instead of leaking it.
+    if (m_pool_release_hook) {
+      m_pool_release_hook(m_pool_leased.load());
+    }
     --g_instance_count;
     ++g_total_destroyed;
     Logger::debug("delete HttpClient (active: {}, created: {}, destroyed: {})",
@@ -38,10 +57,9 @@ HttpClient::~HttpClient() {
 }
 
 void HttpClient::setup_client(const ParsedUrl &parsed_url) {
-  // Validate host and port before creating client
-  if (parsed_url.m_host.empty()) {
-    throw std::runtime_error("Invalid URL: host is empty");
-  }
+  // parse_url() (the only producer of ParsedUrl) rejects an empty host and an
+  // out-of-range port, so here only the port bound is re-checked: the host is
+  // guaranteed non-empty.
   if (parsed_url.m_port <= 0 || parsed_url.m_port > 65535) {
     throw std::runtime_error("Invalid URL: port out of range");
   }
@@ -126,7 +144,7 @@ HttpResponse HttpClient::post(const std::string &url, const std::string &body,
                               const httplib::Headers &additional_headers) {
   Logger::debug("Calling setup_httplib_post for POST request to: {}", url);
   touch();
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, body, traceparent, additional_headers);
   return execute_request(req, body, "POST");
 }
@@ -136,7 +154,7 @@ HttpResponse HttpClient::get(const std::string &url,
                              const httplib::Headers &additional_headers) {
   Logger::debug("Calling setup_httplib_get for GET request to: {}", url);
   touch();
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, "", traceparent, additional_headers);
   return execute_request(req, "", "GET");
 }
@@ -146,7 +164,7 @@ void HttpClient::post_no_response(const std::string &url,
                                   const std::string &traceparent,
                                   const httplib::Headers &additional_headers,
                                   const std::string &content_type) {
-  PreparedRequest req =
+  const PreparedRequest req =
       prepare_request(url, body, traceparent, additional_headers);
   execute_request(req, body, "POST", content_type);
 }

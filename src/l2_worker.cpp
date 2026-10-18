@@ -1,14 +1,27 @@
 #include "l2_worker.hpp"
+#include "app_context.hpp"
+#include "error_types.hpp"
 #include "header_utils.hpp"
+#include "http_client_pool.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
 #include "l2_routing.hpp"
+#include "nats_client.hpp"
+#include "pool_executor.hpp"
 #include "time_utils.hpp"
 #include "worker_request_parser.hpp"
 #include <base64.hpp>
+#include <cstdint>
 #include <cstring>
+#include <exception>
+#include <expected>
 #include <format>
+#include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
+#include <stop_token>
+#include <stdexcept>
+#include <utility>
 #if __has_include(<generator>)
 #include <generator>
 #endif
@@ -17,12 +30,10 @@
 #include "http_client.hpp"
 #include "logger.hpp"
 #include "retry_utils.hpp"
-#include "scoped_profiler.hpp"
 #include "sentry_client.hpp"
 #include "thread_pool_wrapper.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
-#include <algorithm>
 #include <chrono>
 #include <tuple>
 #include <cstdlib>
@@ -100,6 +111,9 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
       static_cast<size_t>(m_ctx.m_config.m_worker.m_queue_size));
 
   m_circuit_breaker.set_gauge(m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
+  m_circuit_breaker.set_counters(
+      m_ctx.m_worker.m_metrics->m_circuit_breaker_transitions_total,
+      m_ctx.m_worker.m_metrics->m_circuit_breaker_rejected_total);
 
   Logger::info("L2Worker initialized successfully");
 }
@@ -225,8 +239,7 @@ HttpResponse L2Worker::call_l2_server(
 
   if (m_ctx.m_tracer && !l2_trace_ctx.m_trace_id.empty()) {
     const auto end_us = get_current_timestamp_us();
-    const int span_status =
-        success ? static_cast<int>(http_response.m_status) : 500;
+    const int span_status = success ? http_response.m_status : 500;
     nlohmann::json attrs;
     if (!success) {
       // Expose how many L2 server attempts were made before giving up so the
@@ -278,14 +291,14 @@ void L2Worker::run() {
                drain_seconds.count());
 }
 
-void L2Worker::update_queue_size_metric() {
+void L2Worker::update_queue_size_metric() const {
   if (m_clients.m_thread_pool) {
     m_ctx.m_worker.m_metrics->m_queue_size.Set(
         static_cast<double>(m_clients.m_thread_pool->queue_size()));
   }
 }
 
-void L2Worker::record_bytes_sent(size_t bytes) {
+void L2Worker::record_bytes_sent(size_t bytes) const {
   m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
       static_cast<double>(bytes));
 }
@@ -312,7 +325,9 @@ bool L2Worker::is_nats_connected() const {
 // demonstrates coroutine-based backpressure — no vector allocation, frame
 // suspends between attempts, composes with ranges::filter/take.
 std::generator<int> attempt_sequence(int max) {
-  for (int i = 1; i <= max; ++i) co_yield i;
+  for (int i = 1; i <= max; ++i) {
+    co_yield i;
+  }
   co_return;
 }
 #endif
@@ -355,9 +370,8 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
             if (method == "POST") {
               return client->post(request_url, body, traceparent,
                                   forwarded_headers);
-            } else {
-              return client->get(request_url, traceparent, forwarded_headers);
             }
+            return client->get(request_url, traceparent, forwarded_headers);
           });
 
       size_t response_size = http_response.m_body.size();
@@ -418,7 +432,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
                   url, max_retries, last_error.what()));
 }
 
-void L2Worker::record_l2_call_metrics(uint64_t start_us) {
+void L2Worker::record_l2_call_metrics(uint64_t start_us) const {
   const uint64_t end_us = get_current_timestamp_us();
   const double duration_seconds = TimeUtils::duration_seconds(start_us, end_us);
   try {
@@ -438,14 +452,14 @@ void L2Worker::record_l2_call_metrics(uint64_t start_us) {
 // ============================================================================
 
 bool L2Worker::parse_request_data(const std::string &request_json,
-                                  json &request_data) {
+                                  json &request_data) const {
   // C++23 expected monadic: and_then chains JSON parse → schema validation
   auto validated = validate_and_parse_json(request_json, "Worker")
                        .and_then([&](json j) -> std::expected<json, std::string> {
                          std::string parse_error;
-                         static RequestValidator validator =
+                         static RequestValidator const g_validator =
                              create_standard_request_validator();
-                         if (!validator.validate(j, parse_error)) {
+                         if (!g_validator.validate(j, parse_error)) {
                            Logger::error("Worker request validation failed: {}",
                                          parse_error);
                            handle_processing_error_with_category(
@@ -486,22 +500,12 @@ bool L2Worker::parse_request_data(const std::string &request_json,
 }
 
 L2Worker::RequestData
-L2Worker::extract_request_metadata(const json &request_data) {
-  const worker_request_parser::WorkerRequestData decoded =
-      worker_request_parser::decode_nats_request(request_data);
-
+L2Worker::extract_request_metadata(const json &request_data) const {
   RequestData metadata;
-  metadata.m_request_id = decoded.m_request_id;
-  metadata.m_path = decoded.m_path;
-  metadata.m_query = decoded.m_query;
-  metadata.m_method = decoded.m_method;
-  metadata.m_body = decoded.m_body;
-  metadata.m_client_ip = decoded.m_client_ip;
-  metadata.m_proxy_ip = decoded.m_proxy_ip;
-  metadata.m_traceparent = decoded.m_traceparent;
-  metadata.m_proxy_traceparent = decoded.m_proxy_traceparent;
-  metadata.m_proxy_span_id = decoded.m_proxy_span_id;
-  metadata.m_forwarded_headers = decoded.m_forwarded_headers;
+  // Fill the shared-contract fields in one move instead of copying them
+  // field by field; the base subobject is assigned in place.
+  static_cast<worker_request_parser::WorkerRequestData &>(metadata) =
+      worker_request_parser::decode_nats_request(request_data);
 
   const auto effective_traceparent =
       !metadata.m_proxy_traceparent.empty() ? metadata.m_proxy_traceparent
@@ -520,13 +524,13 @@ L2Worker::extract_request_metadata(const json &request_data) {
 
 L2Worker::TracingSpans
 L2Worker::create_tracing_spans(const TraceContext &parent_trace_ctx,
-                               const std::string &op_parent_span_id) {
+                               const std::string &op_parent_span_id) const {
   TracingSpans spans;
 
   spans.m_worker_process_parent_id = op_parent_span_id;
 
   if (m_ctx.m_tracer && !parent_trace_ctx.m_trace_id.empty()) {
-    spans.m_worker_process_span_id = m_ctx.m_tracer->generate_span_id();
+    spans.m_worker_process_span_id = JaegerLogger::generate_span_id();
     Logger::debug("Worker processing span created: {} parent: {}",
                   spans.m_worker_process_span_id,
                   spans.m_worker_process_parent_id);

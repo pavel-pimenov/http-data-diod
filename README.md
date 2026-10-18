@@ -587,6 +587,8 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_processing_validation_errors_total` | counter | — | Ошибки валидации запроса |
 | `l2_worker_l2_response_size_bytes` | histogram | — | Размер ответа L2 |
 | `l2_worker_circuit_breaker_state` | gauge | — | Состояние CB (0=closed,1=open,2=half-open) |
+| `l2_worker_circuit_breaker_transitions_total` | counter | `to` | Переходы CB по целевому состоянию (open/half_open/closed) |
+| `l2_worker_circuit_breaker_rejected_total` | counter | — | Запросы, отброшенные открытым CB (fast-fail) |
 | `l2_worker_duplicate_requests_total` | counter | — | Ответы из кэша дедупликации |
 | `l2_worker_db_requests_total` | counter | `db`,`type`,`status` | Запросы DB Gateway (воркер) |
 | `l2_worker_db_query_duration_seconds` | histogram | `db` | Длительность SQL-запроса (воркер) |
@@ -803,7 +805,7 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 | `sentry_client.cpp` | `test_sentry_client.cpp` | DSN-парсинг, envelope-доставка, все уровни, транспортный flush |
 | `http_client.cpp` | `test_http_pipeline.cpp` | HTTPS-путь, pool.acquire timeout, stale eviction, invalid release |
 | `common_utils.cpp` | `test_components.cpp`, `test_coverage_ext.cpp` | error categorizer, log_body_preview, MetricsHistory, escape_html, sparkline SVG |
-| `circuit_breaker.cpp` | `test_components.cpp` | set_gauge, state transitions |
+| `circuit_breaker.cpp` | `test_components.cpp` | set_gauge, set_counters, state transitions |
 | `rate_limiter_per_ip.hpp` | `test_components.cpp` | per-IP burst, LRU-вытеснение, TTL-cleanup, get_per_ip_stats |
 | `config.cpp` | `test_components.cpp` | Env-parsing, validations |
 | `db_query_executor_postgres.cpp` | `test_db_live.cpp` | init/ping/select, DDL, типы, параметры, timeout, pool-exhaustion, broken-conn |
@@ -815,6 +817,19 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 ./scripts/run-clang-tidy.sh              # lint только изменённых файлов
 ./scripts/run-clang-tidy.sh --all        # весь проект (медленно, ~20 мин)
 ```
+
+Запуск cppcheck (после изменений):
+
+```bash
+./scripts/run-cppcheck.sh                # только изменённые файлы
+./scripts/run-cppcheck.sh --all          # весь проект
+```
+
+Гейтится по severity `error/warning/performance/portability` в проектных файлах.
+Находки в вендорных заголовках (`httplib`, `base64`, `nats`, `odpi`, `json`,
+`prometheus-cpp`) подавляются списком `src/cppcheck-suppressions.txt`. Оба
+инструмента автоматически запускаются в pre-commit (пропуск:
+`SKIP_CLANG_TIDY=1` / `SKIP_CPPCHECK=1`) и в CI (джобы `clang-tidy` и `cppcheck`).
 
 ---
 
@@ -906,7 +921,7 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 | `sentry_client.cpp` | 94.3% | HTTP-доставка, DSN, все уровни |
 | `http_client.cpp` | 95.7% | HTTPS/SSL-ветка, connection pool |
 | `common_utils.cpp` | 96.2% | Error categorizer, trace context, MetricsHistory |
-| `circuit_breaker.cpp` | 98.3% | set_gauge, state transitions |
+| `circuit_breaker.cpp` | 98.3% | set_gauge, set_counters, state transitions |
 | `request_data_preparer.cpp` | 94.7% | |
 | `config.cpp` | 97.1% | |
 | `nats_client.cpp` | 84.2% | live-брокер (test_nats_live.cpp): request/reply, headers, reconnect, fail-fast; auth/TLS-ветки setup_options, connect-до-появления-брокера; флакает только 1 racing warn-строка |

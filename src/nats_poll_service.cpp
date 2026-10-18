@@ -1,13 +1,18 @@
 #include "nats_poll_service.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
-#include "json_utils.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"
+#include "retry_handler.hpp"
 #include "time_utils.hpp"
 #include "tracing_helpers.hpp"
 #include <chrono>
+#include <string>
+#include <cstdint>
+#include <exception>
 #include <thread>
 #include <tuple>
+#include <utility>
 
 NatsPollService::NatsPollService(AppContext &ctx) : m_ctx(ctx) {}
 
@@ -192,7 +197,7 @@ bool NatsPollService::poll_ensure_connected(const std::string &request_id,
 
 void NatsPollService::poll_notify_resend(const std::string &request_id,
                                          bool &first_attempt,
-                                         bool &resend_logged) {
+                                         bool &resend_logged) const {
   if (first_attempt) {
     first_attempt = false;
     return;
@@ -231,7 +236,7 @@ void NatsPollService::poll_delay_for_empty_reply(
   }
 }
 
-void NatsPollService::poll_sleep_backoff(int delay_ms) {
+void NatsPollService::poll_sleep_backoff(int delay_ms) const {
   m_ctx.m_proxy.m_metrics->m_nats_poll_retry_wait_seconds.Observe(
       static_cast<double>(delay_ms) / 1000.0);
   std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));

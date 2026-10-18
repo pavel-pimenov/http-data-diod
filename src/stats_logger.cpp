@@ -1,6 +1,12 @@
 #include "stats_logger.hpp"
+#include "app_context.hpp"
 #include "duplicate_detector.hpp"
 #include "logger.hpp"
+#include <atomic>
+#include <cstdint>
+#include <stop_token>
+#include <chrono>
+#include <mutex>
 
 StatsLogger::StatsLogger(AppContext &context, std::atomic<bool> &shutdown_flag,
                          int log_interval_seconds)
@@ -16,7 +22,7 @@ StatsLogger::~StatsLogger() {
 }
 
 void StatsLogger::increment_active_clients() {
-  uint64_t current = m_counters.m_active_clients.fetch_add(1) + 1;
+  uint64_t const current = m_counters.m_active_clients.fetch_add(1) + 1;
   uint64_t max = m_counters.m_max_clients.load(std::memory_order_relaxed);
   // Single CAS attempt — slightly stale max is acceptable for stats
   m_counters.m_max_clients.compare_exchange_weak(max, current, std::memory_order_relaxed);

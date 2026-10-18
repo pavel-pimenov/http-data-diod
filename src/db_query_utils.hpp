@@ -31,7 +31,7 @@ inline std::string strip_sql_comments(const std::string &sql) {
     }
     if (i + 1 < n && sql[i] == '/' && sql[i + 1] == '*') {
       i += 2;
-      while (i + 1 < n && !(sql[i] == '*' && sql[i + 1] == '/')) {
+      while (i + 1 < n && (sql[i] != '*' || sql[i + 1] != '/')) {
         ++i;
       }
       i = std::min(i + 2, n);
@@ -54,7 +54,7 @@ inline std::string next_word_lower(const std::string &s, size_t &pos) {
          !std::isspace(static_cast<unsigned char>(s[pos]))) {
     ++pos;
   }
-  std::string word = s.substr(start, pos - start);
+  const std::string word = s.substr(start, pos - start);
   return to_lower(word);
 }
 
@@ -94,7 +94,7 @@ parse_db_query_request(const json &j) {
   req.m_type = JsonUtils::safe_get_string(j, DbQueryContract::kType);
   if (req.m_type != DbQueryContract::kTypeQuery &&
       req.m_type != DbQueryContract::kTypePing) {
-    return std::unexpected("type must be \"query\" or \"ping\"");
+    return std::unexpected(R"(type must be "query" or "ping")");
   }
   req.m_request_id =
       JsonUtils::safe_get_string(j, DbQueryContract::kRequestId);
@@ -112,7 +112,7 @@ parse_db_query_request(const json &j) {
   }
 
   if (j.contains(DbQueryContract::kParams)) {
-    const json &params = j[DbQueryContract::kParams];
+    const auto &params = j[DbQueryContract::kParams];
     if (params.is_null()) {
       req.m_params = json::object();
     } else if (params.is_object()) {
@@ -261,11 +261,11 @@ public:
   }
 
   json take_rows() { return std::move(m_state.m_rows); }
-  size_t size() const { return m_state.m_rows.size(); }
-  bool truncated() const { return m_state.m_truncated; }
+  [[nodiscard]] size_t size() const { return m_state.m_rows.size(); }
+  [[nodiscard]] bool truncated() const { return m_state.m_truncated; }
 
 private:
-  struct State {
+  struct State { //-V730
     size_t m_max_rows;
     json m_rows = json::array();
     bool m_truncated = false;

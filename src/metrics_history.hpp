@@ -85,15 +85,15 @@ public:
   };
 
   bool has_family(const std::string &family) const {
-    std::lock_guard lk(m_store.m_mutex);
-    return m_store.m_data.find(family) != m_store.m_data.end();
+    const std::scoped_lock lk(m_store.m_mutex);
+    return m_store.m_data.contains(family);
   }
 
   // Returns up to `limit` series (insertion order) for a metric family.
   std::vector<Series> get_series(const std::string &family,
                                  std::size_t limit) const {
     std::vector<Series> out;
-    std::lock_guard lk(m_store.m_mutex);
+    const std::scoped_lock lk(m_store.m_mutex);
     const auto it = m_store.m_data.find(family);
     if (it == m_store.m_data.end()) {
       return out;
@@ -113,12 +113,16 @@ public:
 #if __has_include(<generator>)
   // C++23 generator: lazy iteration over series, no vector allocation until consumed
   std::generator<Series> series_view(const std::string &family, std::size_t limit) const {
-    std::lock_guard lk(m_store.m_mutex);
+    const std::scoped_lock lk(m_store.m_mutex);
     const auto it = m_store.m_data.find(family);
-    if (it == m_store.m_data.end()) co_return;
+    if (it == m_store.m_data.end()) {
+      co_return;
+    }
     std::size_t n = 0;
     for (const auto &kv : it->second) {
-      if (n++ >= limit) break;
+      if (n++ >= limit) {
+        break;
+      }
       Series s;
       s.m_labels = kv.first;
       s.m_points.assign(kv.second.begin(), kv.second.end());
@@ -145,15 +149,15 @@ private:
     const auto families = m_config.m_registry->Collect();
     const std::time_t now = std::time(nullptr);
     // span<const MetricFamily> — non-owning view над families, 0 копий
-    std::span<const prometheus::MetricFamily> fam_view(families);
-    std::lock_guard lk(m_store.m_mutex);
+    const std::span<const prometheus::MetricFamily> fam_view(families);
+    const std::scoped_lock lk(m_store.m_mutex);
     for (const auto &family : fam_view) {
       if (family.metric.empty()) {
         continue;
       }
       auto &smap = m_store.m_data[family.name];
       std::size_t stored = 0;
-      std::span<const prometheus::ClientMetric> view(family.metric);
+      const std::span<const prometheus::ClientMetric> view(family.metric);
       for (const auto &metric : view) {
         if (stored >= m_config.m_max_series_per_family) {
           break;

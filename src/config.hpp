@@ -64,6 +64,10 @@ public:
     std::string m_tls_ca_cert_file;
     bool m_enable_tls = false;
     int m_timeout_ms{30000};
+    // Separate, smaller timeout for the connection/socket handshake so a
+    // black-hole host (SYN dropped) cannot stall connect() for the full request
+    // timeout. Request timeouts are passed explicitly and are unaffected.
+    int m_connect_timeout_ms{5000};
   };
 
   // Distributed-tracing to Jaeger (OTLP/HTTP spans) with the outage
@@ -220,7 +224,7 @@ public:
   Config() = default;
   void load_from_env();
   [[nodiscard]] bool validate(bool log_issues = true) const;
-  NatsConfig create_nats_config() const;
+  [[nodiscard]] NatsConfig create_nats_config() const;
 
   // Env helpers are static and used by both Config loading and early
   // components (e.g. Logger::init reads LOG_FORMAT before Config exists).

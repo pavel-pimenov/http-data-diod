@@ -9,148 +9,46 @@
 // server still pass. The coverage image runs ./test_components, so all
 // synchronisation is bounded — nothing may hang the docker build.
 
+#include "config.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_postgres.hpp"
 #include "db_query_handler.hpp"
-#include "db_query_utils.hpp"
+#include "json_utils.hpp"
 #include "logger.hpp"
+#include "test_pg_diag.hpp"
+#include "test_support.hpp"
 
-#include <arpa/inet.h>
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
-#include <cstdint>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <format>
-#include <functional>
-#include <grp.h>
 #include <libpq-fe.h>
-#include <memory>
-#include <netinet/in.h>
-#include <pwd.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string>
-#include <sys/socket.h>
-#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 namespace {
 
-constexpr int kServerWaitTimeoutMs = 30000;
+using pg_test_diag::drop_privileges;
+using pg_test_diag::postgres_sql_probe;
+using pg_test_diag::redirect_to;
+using pg_test_diag::resolve_server_user;
+using pg_test_diag::ServerUser;
+using test_support::reserve_loopback_port;
+using test_support::wait_for_condition;
 
-[[nodiscard]] int reserve_loopback_port() {
-  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    return 0;
-  }
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  if (::bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  socklen_t len = sizeof(addr);
-  if (::getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
-    ::close(fd);
-    return 0;
-  }
-  const int port = ntohs(addr.sin_port);
-  ::close(fd);
-  return port;
-}
-
-// A real libpq round-trip ('SELECT 1'), not just a TCP probe: postgres can
-// briefly refuse a connection in the last microseconds of startup even though
-// the listener socket is already bound, so the readiness check must confirm an
-// actual query succeeds.
-[[nodiscard]] bool pg_ready(int port) {
-  const std::string conninfo = std::format(
-      "host=127.0.0.1 port={} dbname=postgres user=postgres connect_timeout=2",
-      port);
-  PGconn *conn = PQconnectdb(conninfo.c_str());
-  if (conn == nullptr) {
-    return false;
-  }
-  bool ok = PQstatus(conn) == CONNECTION_OK;
-  if (ok) {
-    PGresult *res = PQexec(conn, "SELECT 1");
-    ok = res != nullptr && PQresultStatus(res) == PGRES_TUPLES_OK;
-    if (res != nullptr) {
-      PQclear(res);
-    }
-  }
-  PQfinish(conn);
-  return ok;
-}
-
-[[nodiscard]] bool wait_for_condition(const std::function<bool()> &predicate,
-                                      int timeout_ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (predicate()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  return predicate();
-}
-
-// Unix user the server must run as: an existing non-root user (postgres, or the
-// current user when the test already runs unprivileged). Root is refused by
-// postgres.
-struct TargetUser {
-  bool m_ok = false;
-  bool m_need_switch = false;
-  uid_t m_uid = 0;
-  gid_t m_gid = 0;
-  std::string m_name;
-};
-
-[[nodiscard]] TargetUser resolve_target_user() {
-  if (::geteuid() != 0) {
-    return TargetUser{true, false, ::geteuid(), ::getegid(), ""};
-  }
-  const struct passwd *pw = ::getpwnam("postgres");
-  if (pw == nullptr) {
-    Logger::warn("pg live test: no 'postgres' user in this image, skipping");
-    return TargetUser{};
-  }
-  return TargetUser{true,  true,  pw->pw_uid,
-                    pw->pw_gid, std::string(pw->pw_name)};
-}
-
-[[nodiscard]] bool drop_privileges(const TargetUser &target) {
-  if (!target.m_need_switch) {
-    return true;
-  }
-  if (::setgid(target.m_gid) != 0) {
-    return false;
-  }
-  if (::initgroups(target.m_name.c_str(), target.m_gid) != 0) {
-    return false;
-  }
-  return ::setuid(target.m_uid) == 0;
-}
-
-[[nodiscard]] bool redirect_to(const char *path) {
-  const int fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-  if (fd < 0) {
-    return false;
-  }
-  ::dup2(fd, 1);
-  ::dup2(fd, 2);
-  if (fd > 2) {
-    ::close(fd);
-  }
-  return true;
-}
+constexpr int kServerWaitTimeoutMs = 10000;
 
 [[nodiscard]] std::string postgres_bin_dir() {
   const auto has = [](const std::string &dir) {
@@ -171,11 +69,11 @@ struct TargetUser {
       versions.push_back(entry.path().filename().string());
     }
   }
-  std::sort(versions.begin(), versions.end(),
+  std::ranges::sort(versions,
             [](const std::string &a, const std::string &b) {
               return std::stoi(a) > std::stoi(b);
             });
-  for (const std::string &version : versions) {
+  for (const auto &version : versions) {
     const std::string dir = "/usr/lib/postgresql/" + version + "/bin";
     if (has(dir)) {
       return dir;
@@ -200,10 +98,10 @@ public:
       if (alive()) {
         return true;
       }
-      // The server process died on its own (OOM/crash under load): the stale
-      // pid must not keep reporting "started", otherwise every later live test
-      // fails with "connection refused". Drop the dead pid and datadir and let
-      // start() spin up a fresh cluster below.
+      // The server exited behind our back (crash, OOM, external kill): the
+      // port is stale, so drop the datadir and bring a fresh cluster up.
+      Logger::warn("pg live test: shared server died, restarting");
+      m_pid = -1;
       cleanup_datadir();
     }
     if (m_failed) {
@@ -233,6 +131,7 @@ public:
       ::waitpid(m_pid, &status, 0);
     }
     m_pid = -1;
+    cleanup_datadir();
   }
 
 private:
@@ -244,20 +143,19 @@ private:
     return ::waitpid(m_pid, &status, WNOHANG) == 0;
   }
 
-  [[nodiscard]] bool run_wait(const std::string &exe,
-                              const std::vector<std::string> &args,
-                              const std::string &logfile,
-                              const TargetUser &target) const {
+  [[nodiscard]] static bool run_wait(const std::string &exe,
+                                     const std::vector<std::string> &args,
+                                     const std::string &logfile,
+                                     const ServerUser &target) {
     const pid_t pid = ::fork();
     if (pid == 0) {
-      if (!drop_privileges(target)) {
+      if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
         _exit(127);
       }
-      redirect_to(logfile.c_str());
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
-      for (const std::string &arg : args) {
+      for (const auto &arg : args) {
         argv.push_back(arg.c_str());
       }
       argv.push_back(nullptr);
@@ -265,33 +163,35 @@ private:
       _exit(127);
     }
     if (pid < 0) {
-      Logger::warn("pg live test: fork failed for {}", exe);
+      pg_test_diag::fail(
+          std::format("fork {} failed: {}", exe, std::strerror(errno)));
       return false;
     }
     int status = 0;
     while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-      Logger::warn("pg live test: '{}' failed (see {})", exe, logfile);
+      pg_test_diag::fail(std::format("'{}' failed (rc={}): {}", exe,
+                                     WEXITSTATUS(status),
+                                     pg_test_diag::log_tail(logfile)));
       return false;
     }
     return true;
   }
 
-  [[nodiscard]] pid_t spawn_server(const std::string &exe,
-                                   const std::vector<std::string> &args,
-                                   const std::string &logfile,
-                                   const TargetUser &target) const {
+  [[nodiscard]] static pid_t spawn_server(const std::string &exe,
+                                          const std::vector<std::string> &args,
+                                          const std::string &logfile,
+                                          const ServerUser &target) {
     const pid_t pid = ::fork();
     if (pid == 0) {
-      if (!drop_privileges(target)) {
+      if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
         _exit(127);
       }
-      redirect_to(logfile.c_str());
       std::vector<const char *> argv;
       argv.reserve(args.size() + 2);
       argv.push_back(exe.c_str());
-      for (const std::string &arg : args) {
+      for (const auto &arg : args) {
         argv.push_back(arg.c_str());
       }
       argv.push_back(nullptr);
@@ -309,14 +209,20 @@ private:
         return false;
       }
     }
-    const TargetUser target = resolve_target_user();
+    const ServerUser target = resolve_server_user();
     if (!target.m_ok) {
+      return false;
+    }
+
+    // A full /tmp is the classic silent killer here: initdb fails, the tests
+    // SKIP and the coverage gate fails without naming the cause.
+    if (!pg_test_diag::enough_free_space()) {
       return false;
     }
 
     m_port = reserve_loopback_port();
     if (m_port <= 0) {
-      Logger::warn("pg live test: no free loopback port");
+      pg_test_diag::fail("no free loopback port");
       return false;
     }
 
@@ -325,14 +231,15 @@ private:
     dir_tmpl.push_back('\0');
     char *dir = ::mkdtemp(dir_tmpl.data());
     if (dir == nullptr) {
-      Logger::warn("pg live test: mkdtemp failed");
+      pg_test_diag::fail(std::format("mkdtemp failed: {}", std::strerror(errno)));
       return false;
     }
     m_datadir = dir;
 
     if (target.m_need_switch &&
         ::chown(m_datadir.c_str(), target.m_uid, target.m_gid) != 0) {
-      Logger::warn("pg live test: chown datadir failed");
+      pg_test_diag::fail(std::format("chown datadir failed: {}",
+                                     std::strerror(errno)));
       cleanup_datadir();
       return false;
     }
@@ -342,6 +249,8 @@ private:
                   {"-D", m_datadir, "-U", "postgres", "-A", "trust",
                    "--no-locale", "-E", "UTF8"},
                   init_log, target)) {
+      pg_test_diag::fail(
+          std::format("initdb failed: {}", pg_test_diag::log_tail(init_log)));
       cleanup_datadir();
       return false;
     }
@@ -353,17 +262,19 @@ private:
          "-k", "/tmp"},
         server_log, target);
     if (server_pid < 0) {
-      Logger::warn("pg live test: fork postgres failed");
+      pg_test_diag::fail(
+          std::format("fork postgres failed: {}", std::strerror(errno)));
       cleanup_datadir();
       return false;
     }
     m_pid = server_pid;
 
     const bool ready = wait_for_condition(
-        [this] { return alive() && pg_ready(m_port); },
-        kServerWaitTimeoutMs);
+        [this] { return postgres_sql_probe(m_port) && alive(); }, kServerWaitTimeoutMs);
     if (!ready) {
-      Logger::warn("pg live test: server at {} never became ready", m_port);
+      pg_test_diag::fail(std::format(
+          "server at {} never became ready: {}",
+          m_port, pg_test_diag::log_tail(server_log)));
       stop();
       cleanup_datadir();
       return false;
@@ -466,7 +377,7 @@ void create_types_table(PqConn &conn) {
   conn.exec("INSERT INTO pg_types VALUES ("
             "true, 1, 2, 3, 4, 1.5, 2.5, 12345.6789, "
             "'hello', 'vc', 'bp'::bpchar, 'c'::\"char\", 'myname', "
-            "'\\x0102'::bytea, '{\"a\":1}'::json, '{\"b\":2}'::jsonb, "
+            "'\\x01ab'::bytea, '{\"a\":1}'::json, '{\"b\":2}'::jsonb, "
             "'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, "
             "'2024-05-06', '10:11:12', '2024-05-06 10:11:12', "
             "'2024-05-06 10:11:12+03', '10:11:12+03')");
@@ -527,7 +438,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(resp[DbResponseContract::kRows].size() == 2);
   REQUIRE(resp[DbResponseContract::kColumns].size() == 22);
 
-  const json &cols = resp[DbResponseContract::kColumns];
+  const auto &cols = resp[DbResponseContract::kColumns];
   const auto col = [&cols](size_t i) {
     return json{{DbResponseContract::kName, cols[i][DbResponseContract::kName]},
                 {DbResponseContract::kType, cols[i][DbResponseContract::kType]}};
@@ -550,7 +461,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(col(21) == json{{DbResponseContract::kName, "c_timetz"},
                           {DbResponseContract::kType, "TIMETZ"}});
 
-  const json &full = resp[DbResponseContract::kRows][0];
+  const auto &full = resp[DbResponseContract::kRows][0];
   REQUIRE(full[0] == true);
   REQUIRE(full[1] == 1);
   REQUIRE(full[2] == 2);
@@ -561,7 +472,7 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(full[7] == 12345.6789);
   REQUIRE(full[8] == "hello");
   REQUIRE(full[9] == "vc");
-  REQUIRE(full[13] == "AQI=");
+  REQUIRE(full[13] == "Aas=");
   REQUIRE(full[16] == "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
   REQUIRE(full[17] == "2024-05-06");
   REQUIRE(full[18] == "10:11:12");
@@ -570,8 +481,8 @@ TEST_CASE("PostgresQueryExecutor: value and column-type conversions",
   REQUIRE(full[20].get<std::string>().find("11:12") != std::string::npos);
   REQUIRE(full[21].get<std::string>().find("11:12") != std::string::npos);
 
-  const json &nulls = resp[DbResponseContract::kRows][1];
-  for (const json &value : nulls) {
+  const auto &nulls = resp[DbResponseContract::kRows][1];
+  for (const auto &value : nulls) {
     REQUIRE(value.is_null());
   }
 }
@@ -589,7 +500,7 @@ TEST_CASE("PostgresQueryExecutor: positional parameter binding", "[db-live]") {
                        "$4::float8 AS n, $5::int AS v",
                        params, -1, 10, status);
   REQUIRE(status == 200);
-  const json &row = resp[DbResponseContract::kRows][0];
+  const auto &row = resp[DbResponseContract::kRows][0];
   REQUIRE(row[0] == 7);
   REQUIRE(row[1] == "str");
   REQUIRE(row[2] == true);
@@ -647,8 +558,8 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
 
   int slow_status = 0;
   std::thread slow([&ex, &slow_status] {
-    json body = ex.execute_query("SELECT pg_sleep(0.4), 1", json::object(), -1,
-                                 1, slow_status);
+    json const body = ex.execute_query("SELECT pg_sleep(0.4), 1",
+                                       json::object(), -1, 1, slow_status);
     (void)body;
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -659,6 +570,50 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
   REQUIRE(resp[DbResponseContract::kError][DbResponseContract::kCode] ==
           "DB_UNAVAILABLE");
   slow.join();
+}
+
+TEST_CASE("PostgresQueryExecutor: zero-column result set is a SQL error",
+          "[db-live]") {
+  REQUIRE_PG();
+  {
+    // PostgreSQL accepts zero-column tables, and SELECT * FROM one yields
+    // PGRES_TUPLES_OK with no fields at all.
+    PqConn conn(shared_pg());
+    conn.exec("CREATE TABLE IF NOT EXISTS pg_zero_col ()");
+  }
+  PostgresQueryExecutor ex(make_pg_cfg(shared_pg()));
+  REQUIRE(ex.init());
+
+  int status = 0;
+  const json resp = ex.execute_query("SELECT * FROM pg_zero_col",
+                                     json::object(), -1, 10, status);
+  REQUIRE(status == 422);
+  REQUIRE(resp[DbResponseContract::kStatus] ==
+          DbResponseContract::kStatusError);
+  REQUIRE(resp[DbResponseContract::kError][DbResponseContract::kMessage] ==
+          "Statement returned no result set");
+}
+
+TEST_CASE("PostgresQueryExecutor: ping fails on a terminated backend",
+          "[db-live]") {
+  REQUIRE_PG();
+  PostgresQueryExecutor ex(make_pg_cfg(shared_pg(), /*pool_max=*/1));
+  REQUIRE(ex.init());
+
+  int status = 0;
+  REQUIRE(ex.execute_query("SELECT 1", json::object(), -1, 1, status)
+              [DbResponseContract::kStatus] == DbResponseContract::kStatusOk);
+
+  // Kill the backend behind the pooled connection: the connection object stays
+  // alive locally, so the next command on it can no longer reach PostgreSQL.
+  PqConn killer(shared_pg());
+  killer.exec("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+              "WHERE datname = 'postgres' AND pid <> pg_backend_pid()");
+
+  REQUIRE_FALSE(ex.ping(500));
+  // The pool dropped the dead connection, so a fresh one is created and the
+  // executor recovers on the next ping.
+  REQUIRE(ex.ping(500));
 }
 
 TEST_CASE("PostgresQueryExecutor: handles a connection lost mid-pool",
@@ -740,10 +695,33 @@ TEST_CASE("DbQueryHandler: routes live postgres query and ping", "[db-live]") {
           "BAD_REQUEST");
 }
 
+TEST_CASE("DbQueryHandler: re-init keeps already ready executors", "[db-live]") {
+  REQUIRE_PG();
+  DbQueryHandler handler;
+  REQUIRE(handler.init({make_pg_cfg(shared_pg())}));
+  REQUIRE(handler.all_configured());
+  REQUIRE(handler.ready_databases() == std::vector<std::string>{"pg"});
+
+  // Second init with the same database name: the existing executor is kept
+  // (the loop skips it) instead of being rebuilt.
+  REQUIRE(handler.init({make_pg_cfg(shared_pg())}));
+  REQUIRE(handler.ready_databases() == std::vector<std::string>{"pg"});
+
+  const json query{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                   {DbQueryContract::kRequestId, "req-reinit"},
+                   {DbQueryContract::kDb, "pg"},
+                   {DbQueryContract::kSql, "SELECT 9 AS x"}};
+  int status = 0;
+  json body;
+  handler.handle_request(query, status, body);
+  REQUIRE(status == 200);
+  REQUIRE(body[DbResponseContract::kRows] == json::array({json::array({9})}));
+}
+
 TEST_CASE("DbQueryHandler: partial init leaves the reachable database ready",
           "[db-live]") {
   REQUIRE_PG();
-  DbConfig reachable = make_pg_cfg(shared_pg());
+  DbConfig const reachable = make_pg_cfg(shared_pg());
   DbConfig unreachable;
   unreachable.m_name = "other";
   unreachable.m_driver = "postgres";
@@ -793,7 +771,7 @@ TEST_CASE("DbQueryHandler: partial init leaves the reachable database ready",
 TEST_CASE("DbQueryHandler: empty db with multiple executors is 404",
           "[db-live]") {
   REQUIRE_PG();
-  DbConfig first = make_pg_cfg(shared_pg());
+  DbConfig const first = make_pg_cfg(shared_pg());
   DbConfig second = first;
   second.m_name = "pg2";
 
@@ -831,4 +809,62 @@ TEST_CASE("DbQueryHandler: empty db with multiple executors is 404",
   handler.handle_request(ping, status, body);
   REQUIRE(status == 200);
   REQUIRE(body[DbResponseContract::kDb] == "pg2");
+}
+
+TEST_CASE("DbQueryHandler: rejects malformed requests before dispatch",
+          "[db]") {
+  // No init()/live PG needed: parse_db_query_request fails before the executor
+  // lookup, so these cover the DbQueryContract validation branches offline.
+  DbQueryHandler handler;
+
+  struct MalformedRequest {
+    json m_request;
+    std::string m_expect;
+  };
+  const std::vector<MalformedRequest> cases = {
+      {json::array({1}), "must be a JSON object"},
+      {json{{DbQueryContract::kType, "upsert"},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"}},
+       "type must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"}},
+       "sql must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "DELETE FROM t"}},
+       "only read-only"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kParams, json::array({1})}},
+       "params must be an object"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kParams, json{{"x", json::array({1})}}}},
+       "only scalar"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kTimeoutMs, 0}},
+       "timeout_ms must be"},
+      {json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+            {DbQueryContract::kRequestId, "r"},
+            {DbQueryContract::kSql, "SELECT 1"},
+            {DbQueryContract::kMaxRows, 0}},
+       "max_rows must be"},
+  };
+
+  for (const auto &c : cases) {
+    int status = 0;
+    json body;
+    handler.handle_request(c.m_request, status, body);
+    REQUIRE(status == 400);
+    REQUIRE(body[DbResponseContract::kStatus] ==
+            DbResponseContract::kStatusError);
+    const std::string message =
+        body[DbResponseContract::kError][DbResponseContract::kMessage];
+    CHECK(message.find(c.m_expect) != std::string::npos);
+  }
 }

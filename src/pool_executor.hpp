@@ -30,8 +30,8 @@ inline auto execute_http_command_with_status(HttpClientPoolType *pool,
   }
 
   try {
-    ReturnType result = std::forward<Func>(func)(http_client.get());
-    int status_code = http_client->get_last_status_code();
+    ReturnType const result = std::forward<Func>(func)(http_client.get());
+    int const status_code = http_client->get_last_status_code();
     pool->release_connection(std::move(http_client));
     return std::make_pair(result, status_code);
   } catch (...) {

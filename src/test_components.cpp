@@ -1,5 +1,6 @@
 // Unit tests for RateLimiter, InFlightTracker, Config, base64, JsonUtils,
 // JsonSchemaValidator, RetryUtils, TimeUtils, ThreadPool, DbQueryUtils
+#include "app_context.hpp"
 #include "base64_utils.hpp"
 #include "circuit_breaker.hpp"
 #include "common_utils.hpp"
@@ -7,10 +8,16 @@
 #include "db_query_utils.hpp"
 #include "dedup_cache.hpp"
 #include "duplicate_detector.hpp"
+#include "header_utils.hpp"
+#include "http_setup.hpp"
+#include "error_types.hpp"
 #include "in_flight_tracker.hpp"
+#include "json_response_utils.hpp"
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
 #include "nats_client.hpp"
+#include "nlohmann/json.hpp"
+#include "prometheus/gauge.h"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "request_id_generator.hpp"
@@ -18,12 +25,17 @@
 #include "response_builder.hpp"
 #include "retry_handler.hpp"
 #include "retry_utils.hpp"
+#include "string_utils.hpp"
+#include "test_support.hpp"
 #include "thread_pool.hpp"
 #include "time_utils.hpp"
 #include "trace_logger.hpp"
+#include "url_utils.hpp"
 #include "worker_request_parser.hpp"
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cstdint>
@@ -32,6 +44,12 @@
 #include <future>
 #include <prometheus/counter.h>
 #include <regex>
+#include <stdlib.h>
+#include <stdexcept>
+#include <spdlog/formatter.h>
+#include <spdlog/common.h>
+#include <spdlog/common-inl.h>
+#include <string>
 #include <unordered_set>
 #include <prometheus/registry.h>
 #include <set>
@@ -73,7 +91,7 @@ TEST_CASE("RateLimiter: Refills tokens over time", "[rate-limiter]") {
 }
 
 TEST_CASE("RateLimiter: accessors report configured values", "[rate-limiter]") {
-  RateLimiter limiter(50, 7);
+  RateLimiter const limiter(50, 7);
   REQUIRE(limiter.max_tokens() == 50);
   REQUIRE(limiter.refill_rate() == 7);
   REQUIRE(limiter.available_tokens() <= 50);
@@ -83,9 +101,9 @@ TEST_CASE("RateLimiter: accessors report configured values", "[rate-limiter]") {
 TEST_CASE("RateLimiter: available_tokens decreases with acquire",
           "[rate-limiter]") {
   RateLimiter limiter(10, 0);
-  uint64_t before = limiter.available_tokens();
+  uint64_t const before = limiter.available_tokens();
   limiter.acquire();
-  uint64_t after = limiter.available_tokens();
+  uint64_t const after = limiter.available_tokens();
   REQUIRE(after == before - 1);
 }
 
@@ -170,10 +188,12 @@ TEST_CASE("PerIPRateLimiter: expired entries are cleaned up by TTL",
   REQUIRE(limiter.get_stats().m_tracked_ips == 2);
 
   // TTL = 1с; ждём очистки (фоновая нить или ручной вызов — оба удаляют)
-  for (int i = 0; i < 40 && limiter.get_stats().m_tracked_ips > 0; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    limiter.cleanup_expired_ips();
-  }
+  REQUIRE(test_support::wait_for_condition(
+      [&] {
+        limiter.cleanup_expired_ips();
+        return limiter.get_stats().m_tracked_ips == 0;
+      },
+      4000, std::chrono::milliseconds(100)));
 
   const auto stats = limiter.get_stats();
   REQUIRE(stats.m_tracked_ips == 0);
@@ -224,7 +244,8 @@ TEST_CASE("InFlightTracker: Waits for completion", "[in-flight]") {
     completed = true;
   });
 
-  bool result = tracker.wait_for_completion(std::chrono::seconds(2), false);
+  // log_issues=true (the default) so the "completed" log line is exercised.
+  bool const result = tracker.wait_for_completion(std::chrono::seconds(2));
   t.join();
 
   REQUIRE(result == true);
@@ -248,7 +269,8 @@ TEST_CASE("InFlightTracker: Timeout works", "[in-flight]") {
   while (!started.load()) {
     std::this_thread::yield();
   }
-  bool result = tracker.wait_for_completion(std::chrono::seconds(1), false);
+  // Default log_issues=true so the timeout warn line is exercised too.
+  bool const result = tracker.wait_for_completion(std::chrono::seconds(1));
   t.join();
 
   REQUIRE(result == false);
@@ -256,36 +278,36 @@ TEST_CASE("InFlightTracker: Timeout works", "[in-flight]") {
 }
 
 TEST_CASE("Config: Default config validates successfully", "[config]") {
-  Config config;
-  bool valid = config.validate(false);
+  Config const config;
+  bool const valid = config.validate(false);
   REQUIRE(valid == true);
 }
 
 TEST_CASE("Config: Invalid mode fails validation", "[config]") {
   Config config;
   config.m_app.m_mode = "invalid_mode";
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Invalid NATS port fails validation", "[config]") {
   Config config;
   config.m_nats.m_port = 99999;
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Missing NATS host fails validation", "[config]") {
   Config config;
   config.m_nats.m_host = "";
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Invalid tracing sample rate fails validation", "[config]") {
   Config config;
   config.m_tracing.m_sample_rate = -0.1;
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
@@ -293,7 +315,7 @@ TEST_CASE("Config: Invalid tracing outage failure threshold fails validation",
           "[config]") {
   Config config;
   config.m_tracing.m_outage_failure_threshold = 0;
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
@@ -301,7 +323,7 @@ TEST_CASE("Config: Invalid tracing outage cooldown base fails validation",
           "[config]") {
   Config config;
   config.m_tracing.m_outage_cooldown_base_ms = -5;
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
@@ -310,12 +332,12 @@ TEST_CASE("Config: Tracing outage cooldown max below base fails validation",
   Config config;
   config.m_tracing.m_outage_cooldown_max_ms = 100;
   config.m_tracing.m_outage_cooldown_base_ms = 5000;
-  bool valid = config.validate(false);
+  bool const valid = config.validate(false);
   REQUIRE(valid == false);
 }
 
 TEST_CASE("Config: Tracing outage breaker defaults validate", "[config]") {
-  Config config;
+  Config const config;
   REQUIRE(config.m_tracing.m_outage_failure_threshold == 3);
   REQUIRE(config.m_tracing.m_outage_cooldown_base_ms == 1000);
   REQUIRE(config.m_tracing.m_outage_cooldown_max_ms == 30000);
@@ -323,7 +345,7 @@ TEST_CASE("Config: Tracing outage breaker defaults validate", "[config]") {
 }
 
 TEST_CASE("Config: HTTP pool idle timeout default validates", "[config]") {
-  Config config;
+  Config const config;
   REQUIRE(config.m_proxy.m_http_pool_idle_timeout_seconds == 300);
   REQUIRE(config.validate(false) == true);
 }
@@ -489,6 +511,12 @@ TEST_CASE("Config: zero NATS timeout fails validation", "[config]") {
   REQUIRE(config.validate(false) == false);
 }
 
+TEST_CASE("Config: zero NATS connect timeout fails validation", "[config]") {
+  Config config;
+  config.m_nats.m_connect_timeout_ms = 0;
+  REQUIRE(config.validate(false) == false);
+}
+
 TEST_CASE("Config: empty NATS subject fails validation", "[config]") {
   Config config;
   config.m_nats.m_subject = "";
@@ -646,30 +674,15 @@ TEST_CASE("Config: DB invalid pool range fails validation", "[config]") {
   REQUIRE(config.validate(false) == false);
 }
 
-namespace {
-
-class EnvVarGuard {
-public:
-  EnvVarGuard(const char *name, const char *value) : m_name(name) {
-    if (value == nullptr) {
-      unsetenv(m_name.c_str());
-    } else {
-      setenv(m_name.c_str(), value, 1);
-    }
-  }
-  ~EnvVarGuard() { unsetenv(m_name.c_str()); }
-
-private:
-  std::string m_name;
-};
-
-} // namespace
+// Scoped env-var overrides come from test_support.hpp (EnvGuard restores the
+// previous value on scope exit).
+using test_support::EnvGuard;
 
 TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
-  EnvVarGuard mode("MODE", "proxy");
-  EnvVarGuard host("L2_SERVER_HOST", "10.0.0.5");
-  EnvVarGuard port("L2_SERVER_PORT", "9090");
-  EnvVarGuard proto("L2_SERVER_PROTOCOL", "http");
+  EnvGuard const mode{{"MODE", "proxy"}};
+  EnvGuard const host{{"L2_SERVER_HOST", "10.0.0.5"}};
+  EnvGuard const port{{"L2_SERVER_PORT", "9090"}};
+  EnvGuard const proto{{"L2_SERVER_PROTOCOL", "http"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "proxy");
@@ -680,11 +693,11 @@ TEST_CASE("Config: load_from_env reads string and int env vars", "[config]") {
 }
 
 TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
-  EnvVarGuard dsn("SENTRY_DSN", "https://key@host/42");
-  EnvVarGuard rel("SENTRY_RELEASE", "v1.0");
-  EnvVarGuard env("SENTRY_ENVIRONMENT", "prod");
-  EnvVarGuard timeout("SENTRY_TIMEOUT_MS", "5000");
-  EnvVarGuard qsize("SENTRY_MAX_QUEUE_SIZE", "512");
+  EnvGuard const dsn{{"SENTRY_DSN", "https://key@host/42"}};
+  EnvGuard const rel{{"SENTRY_RELEASE", "v1.0"}};
+  EnvGuard const env{{"SENTRY_ENVIRONMENT", "prod"}};
+  EnvGuard const timeout{{"SENTRY_TIMEOUT_MS", "5000"}};
+  EnvGuard const qsize{{"SENTRY_MAX_QUEUE_SIZE", "512"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_sentry.m_dsn == "https://key@host/42");
@@ -695,8 +708,8 @@ TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
 }
 
 TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
-  EnvVarGuard urls("L2_SERVER_URLS",
-                   R"(["http://host1:8088","http://host2:8089"])");
+  EnvGuard const urls{{"L2_SERVER_URLS",
+                       R"(["http://host1:8088","http://host2:8089"])"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 2);
@@ -706,7 +719,7 @@ TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
 
 TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
           "[config]") {
-  EnvVarGuard urls("L2_SERVER_URLS", "not-json");
+  EnvGuard const urls{{"L2_SERVER_URLS", "not-json"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 1);
@@ -715,7 +728,7 @@ TEST_CASE("Config: L2_SERVER_URLS invalid JSON falls back to single URL",
 
 TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
           "[config]") {
-  EnvVarGuard urls("L2_SERVER_URLS", R"("just-a-string")");
+  EnvGuard const urls{{"L2_SERVER_URLS", R"("just-a-string")"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_urls.size() == 1);
@@ -723,7 +736,7 @@ TEST_CASE("Config: L2_SERVER_URLS non-array JSON falls back to single URL",
 }
 
 TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
-  EnvVarGuard mode("MODE", "l2-server");
+  EnvGuard const mode{{"MODE", "l2-server"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "l2-server");
@@ -733,8 +746,8 @@ TEST_CASE("Config: l2-server mode clears L2 server URLs", "[config]") {
 }
 
 TEST_CASE("Config: worker mode loads NATS config", "[config]") {
-  EnvVarGuard mode("MODE", "worker");
-  EnvVarGuard subj("NATS_SUBJECT", "svc.worker");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const subj{{"NATS_SUBJECT", "svc.worker"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_app.m_mode == "worker");
@@ -744,91 +757,92 @@ TEST_CASE("Config: worker mode loads NATS config", "[config]") {
 
 TEST_CASE("Config: get_env_bool parses all true/false forms", "[config]") {
   for (const char *v : {"true", "1", "yes", "on", "TRUE", "Yes"}) {
-    EnvVarGuard e("TEST_BOOL", v);
+    EnvGuard const e{{"TEST_BOOL", v}};
     REQUIRE(Config::get_env_bool("TEST_BOOL", false) == true);
   }
   for (const char *v : {"false", "0", "no", "off", "FALSE", "No"}) {
-    EnvVarGuard e("TEST_BOOL", v);
+    EnvGuard const e{{"TEST_BOOL", v}};
     REQUIRE(Config::get_env_bool("TEST_BOOL", true) == false);
   }
-  EnvVarGuard e("TEST_BOOL", "maybe");
+  EnvGuard const e{{"TEST_BOOL", "maybe"}};
   REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
 }
 
 TEST_CASE("Config: get_env_bool returns default when unset", "[config]") {
-  EnvVarGuard e("TEST_BOOL", nullptr);
+  EnvGuard const e{{"TEST_BOOL", nullptr}};
   REQUIRE(Config::get_env_bool("TEST_BOOL", true) == true);
   REQUIRE(Config::get_env_bool("TEST_BOOL", false) == false);
 }
 
 TEST_CASE("Config: get_env_int parses valid value", "[config]") {
-  EnvVarGuard e("TEST_INT", "42");
+  EnvGuard const e{{"TEST_INT", "42"}};
   REQUIRE(Config::get_env_int("TEST_INT", 1) == 42);
 }
 
 TEST_CASE("Config: get_env_int negative falls back to default", "[config]") {
-  EnvVarGuard e("TEST_INT", "-5");
+  EnvGuard const e{{"TEST_INT", "-5"}};
   REQUIRE(Config::get_env_int("TEST_INT", 10) == 10);
 }
 
 TEST_CASE("Config: get_env_int non-numeric falls back to default", "[config]") {
-  EnvVarGuard e("TEST_INT", "abc");
+  EnvGuard const e{{"TEST_INT", "abc"}};
   REQUIRE(Config::get_env_int("TEST_INT", 7) == 7);
 }
 
 TEST_CASE("Config: get_env_int unset returns default", "[config]") {
-  EnvVarGuard e("TEST_INT", nullptr);
+  EnvGuard const e{{"TEST_INT", nullptr}};
   REQUIRE(Config::get_env_int("TEST_INT", 3) == 3);
 }
 
 TEST_CASE("Config: get_env_double parses and validates range", "[config]") {
-  EnvVarGuard e("TEST_DBL", "0.5");
+  EnvGuard const e{{"TEST_DBL", "0.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 0.5);
-  EnvVarGuard e2("TEST_DBL", "1.5");
+  EnvGuard const e2{{"TEST_DBL", "1.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 1.0) == 1.0);
-  EnvVarGuard e3("TEST_DBL", "abc");
+  EnvGuard const e3{{"TEST_DBL", "abc"}};
   REQUIRE(Config::get_env_double("TEST_DBL", 0.7) == 0.7);
 }
 
 TEST_CASE("Config: get_env_double honours a custom range", "[config]") {
-  EnvVarGuard e("TEST_DBL_CUSTOM", "0.5");
+  EnvGuard const e{{"TEST_DBL_CUSTOM", "0.5"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 0.5);
-  EnvVarGuard e2("TEST_DBL_CUSTOM", "15.0");
+  EnvGuard const e2{{"TEST_DBL_CUSTOM", "15.0"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 1.0, 0.0, 10.0) == 1.0);
-  EnvVarGuard e3("TEST_DBL_CUSTOM", "-2.0");
+  EnvGuard const e3{{"TEST_DBL_CUSTOM", "-2.0"}};
   REQUIRE(Config::get_env_double("TEST_DBL_CUSTOM", 3.0, -5.0, 5.0) == -2.0);
 }
 
 TEST_CASE("Config: get_env_string and silent variants", "[config]") {
-  EnvVarGuard e("TEST_STR", "hello");
+  EnvGuard const e{{"TEST_STR", "hello"}};
   REQUIRE(Config::get_env_string("TEST_STR", "d") == "hello");
   REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "hello");
-  EnvVarGuard e2("TEST_STR", nullptr);
+  EnvGuard const e2{{"TEST_STR", nullptr}};
   REQUIRE(Config::get_env_string("TEST_STR", "d") == "d");
   REQUIRE(Config::get_env_string_silent("TEST_STR", "d") == "d");
 }
 
 TEST_CASE("Config: get_env_protocol validates http/https", "[config]") {
-  EnvVarGuard e("TEST_PROTO", "https");
+  EnvGuard const e{{"TEST_PROTO", "https"}};
   REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "https");
-  EnvVarGuard e2("TEST_PROTO", "ftp");
+  EnvGuard const e2{{"TEST_PROTO", "ftp"}};
   REQUIRE(Config::get_env_protocol("TEST_PROTO", "http") == "http");
 }
 
 TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
-  EnvVarGuard host("NATS_HOST", "nats.example");
-  EnvVarGuard port("NATS_PORT", "4223");
-  EnvVarGuard subj("NATS_SUBJECT", "svc.in");
-  EnvVarGuard qg("NATS_QUEUE_GROUP", "grp");
-  EnvVarGuard tm("NATS_TIMEOUT_MS", "5000");
-  EnvVarGuard user("NATS_USERNAME", "user");
-  EnvVarGuard pass("NATS_PASSWORD", "pass");
-  EnvVarGuard tok("NATS_TOKEN", "tok");
-  EnvVarGuard cred("NATS_CREDENTIALS_FILE", "/cred");
-  EnvVarGuard tls("NATS_ENABLE_TLS", "true");
-  EnvVarGuard cert("NATS_TLS_CERT_FILE", "/cert.pem");
-  EnvVarGuard key("NATS_TLS_KEY_FILE", "/key.pem");
-  EnvVarGuard ca("NATS_TLS_CA_CERT_FILE", "/ca.pem");
+  EnvGuard const host{{"NATS_HOST", "nats.example"}};
+  EnvGuard const port{{"NATS_PORT", "4223"}};
+  EnvGuard const subj{{"NATS_SUBJECT", "svc.in"}};
+  EnvGuard const qg{{"NATS_QUEUE_GROUP", "grp"}};
+  EnvGuard const tm{{"NATS_TIMEOUT_MS", "5000"}};
+  EnvGuard const ct{{"NATS_CONNECT_TIMEOUT_MS", "2500"}};
+  EnvGuard const user{{"NATS_USERNAME", "user"}};
+  EnvGuard const pass{{"NATS_PASSWORD", "pass"}};
+  EnvGuard const tok{{"NATS_TOKEN", "tok"}};
+  EnvGuard const cred{{"NATS_CREDENTIALS_FILE", "/cred"}};
+  EnvGuard const tls{{"NATS_ENABLE_TLS", "true"}};
+  EnvGuard const cert{{"NATS_TLS_CERT_FILE", "/cert.pem"}};
+  EnvGuard const key{{"NATS_TLS_KEY_FILE", "/key.pem"}};
+  EnvGuard const ca{{"NATS_TLS_CA_CERT_FILE", "/ca.pem"}};
   Config config;
   config.load_from_env();
   NatsConfig nc = config.create_nats_config();
@@ -837,6 +851,7 @@ TEST_CASE("Config: create_nats_config maps NATS fields", "[config]") {
   REQUIRE(nc.m_subject == "svc.in");
   REQUIRE(nc.m_queue_group == "grp");
   REQUIRE(nc.m_timeout_ms == 5000);
+  REQUIRE(nc.m_connect_timeout_ms == 2500);
   REQUIRE(nc.m_username == "user");
   REQUIRE(nc.m_password == "pass");
   REQUIRE(nc.m_token == "tok");
@@ -851,14 +866,14 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
           "[config]") {
   // Full connection config (host/user/password/pool) is loaded only in worker
   // mode, which owns the driver connection pools.
-  EnvVarGuard mode("MODE", "worker");
-  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
-  EnvVarGuard host("DB_POSTGRES_HOST", "pg.example");
-  EnvVarGuard port("DB_POSTGRES_PORT", "5433");
-  EnvVarGuard db("DB_POSTGRES_DB", "mydb");
-  EnvVarGuard user("DB_POSTGRES_USER", "alice");
-  EnvVarGuard pass("DB_POSTGRES_PASSWORD", "secret");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
+  EnvGuard const host{{"DB_POSTGRES_HOST", "pg.example"}};
+  EnvGuard const port{{"DB_POSTGRES_PORT", "5433"}};
+  EnvGuard const db{{"DB_POSTGRES_DB", "mydb"}};
+  EnvGuard const user{{"DB_POSTGRES_USER", "alice"}};
+  EnvGuard const pass{{"DB_POSTGRES_PASSWORD", "secret"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_enabled == true);
@@ -878,10 +893,10 @@ TEST_CASE("Config: DB_QUERY with postgres enabled registers database",
 
 TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
           "[config]") {
-  EnvVarGuard mode("MODE", "worker");
-  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard oe("DB_ORACLE_ENABLED", "true");
-  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
+  EnvGuard const mode{{"MODE", "worker"}};
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const oe{{"DB_ORACLE_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_databases.size() == 2);
@@ -892,10 +907,10 @@ TEST_CASE("Config: DB_QUERY with both drivers registers both databases",
 TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
   // Proxy registers DB names/drivers for /v1/sql/* listing & validation, but
   // reads no connection fields (host/user/password) — those belong to worker.
-  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
-  EnvVarGuard pe("DB_POSTGRES_ENABLED", "true");
-  EnvVarGuard host("DB_POSTGRES_HOST", "pg.example");
-  EnvVarGuard user("DB_POSTGRES_USER", "alice");
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
+  EnvGuard const pe{{"DB_POSTGRES_ENABLED", "true"}};
+  EnvGuard const host{{"DB_POSTGRES_HOST", "pg.example"}};
+  EnvGuard const user{{"DB_POSTGRES_USER", "alice"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_databases.size() == 1);
@@ -910,7 +925,7 @@ TEST_CASE("Config: proxy mode registers DB for routing only", "[config]") {
 
 TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
           "[config]") {
-  EnvVarGuard qe("DB_QUERY_ENABLED", "true");
+  EnvGuard const qe{{"DB_QUERY_ENABLED", "true"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_db_query.m_enabled == true);
@@ -919,9 +934,9 @@ TEST_CASE("Config: DB_QUERY enabled but no driver registers no databases",
 
 TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
           "[config]") {
-  EnvVarGuard proto("PROXY_PROTOCOL", "https");
-  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "/cert.pem");
-  EnvVarGuard key("SSL_SERVER_KEY_FILE", "/key.pem");
+  EnvGuard const proto{{"PROXY_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", "/cert.pem"}};
+  EnvGuard const key{{"SSL_SERVER_KEY_FILE", "/key.pem"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_proxy.m_protocol == "https");
@@ -930,8 +945,8 @@ TEST_CASE("Config: SSL warning branch loads HTTPS protocol config",
 }
 
 TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
-  EnvVarGuard proto("PROXY_PROTOCOL", "https");
-  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "");
+  EnvGuard const proto{{"PROXY_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", ""}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_proxy.m_protocol == "https");
@@ -939,10 +954,10 @@ TEST_CASE("Config: HTTPS without cert file logs warning", "[config]") {
 }
 
 TEST_CASE("Config: L2 server HTTPS protocol loads SSL config", "[config]") {
-  EnvVarGuard mode("MODE", "proxy");
-  EnvVarGuard proto("L2_SERVER_PROTOCOL", "https");
-  EnvVarGuard cert("SSL_SERVER_CERT_FILE", "/l2cert.pem");
-  EnvVarGuard key("SSL_SERVER_KEY_FILE", "/l2key.pem");
+  EnvGuard const mode{{"MODE", "proxy"}};
+  EnvGuard const proto{{"L2_SERVER_PROTOCOL", "https"}};
+  EnvGuard const cert{{"SSL_SERVER_CERT_FILE", "/l2cert.pem"}};
+  EnvGuard const key{{"SSL_SERVER_KEY_FILE", "/l2key.pem"}};
   Config config;
   config.load_from_env();
   REQUIRE(config.m_server.m_protocol == "https");
@@ -1146,21 +1161,21 @@ TEST_CASE("JsonUtils: try_parse empty string", "[json-utils]") {
 }
 
 TEST_CASE("JsonUtils: safe_get_string", "[json-utils]") {
-  json j = {{"key", "value"}, {"num", 42}};
+  json const j = {{"key", "value"}, {"num", 42}};
   REQUIRE(JsonUtils::safe_get_string(j, "key") == "value");
   REQUIRE(JsonUtils::safe_get_string(j, "missing", "default") == "default");
   REQUIRE(JsonUtils::safe_get_string(j, "num", "default") == "default");
 }
 
 TEST_CASE("JsonUtils: safe_get_int", "[json-utils]") {
-  json j = {{"key", 42}, {"str", "hello"}};
+  json const j = {{"key", 42}, {"str", "hello"}};
   REQUIRE(JsonUtils::safe_get_int(j, "key") == 42);
   REQUIRE(JsonUtils::safe_get_int(j, "missing", -1) == -1);
   REQUIRE(JsonUtils::safe_get_int(j, "str", -1) == -1);
 }
 
 TEST_CASE("JsonUtils: safe_get_bool", "[json-utils]") {
-  json j = {{"flag", true}, {"num", 1}};
+  json const j = {{"flag", true}, {"num", 1}};
   REQUIRE(JsonUtils::safe_get_bool(j, "flag") == true);
   REQUIRE(JsonUtils::safe_get_bool(j, "missing", true) == true);
   REQUIRE(JsonUtils::safe_get_bool(j, "num", true) == true);
@@ -1168,7 +1183,7 @@ TEST_CASE("JsonUtils: safe_get_bool", "[json-utils]") {
 
 
 TEST_CASE("JsonUtils: has_key", "[json-utils]") {
-  json j = {{"key", "value"}, {"null_key", nullptr}};
+  json const j = {{"key", "value"}, {"null_key", nullptr}};
   REQUIRE(JsonUtils::has_key(j, "key") == true);
   REQUIRE(JsonUtils::has_key(j, "missing") == false);
   REQUIRE(JsonUtils::has_key(j, "null_key") == false);
@@ -1187,7 +1202,7 @@ TEST_CASE("JsonUtils: build_nats_response_envelope full fields", "[json-utils]")
       headers, "traceparent-value");
   REQUIRE(env[NatsResponseContract::kStatus] == 200);
   REQUIRE(env[NatsResponseContract::kHeaders] == headers);
-  const json &body = env[NatsResponseContract::kBody];
+  const auto &body = env[NatsResponseContract::kBody];
   REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-123");
   REQUIRE(body[NatsResponseContract::kBodyResponse] == "response body");
   REQUIRE(body[NatsResponseContract::kBodyTimestamp] == 1234567890);
@@ -1202,7 +1217,7 @@ TEST_CASE("JsonUtils: build_nats_response_envelope optional fields omitted",
                                           json::object(), "");
   REQUIRE(env[NatsResponseContract::kStatus] == 500);
   REQUIRE_FALSE(env.contains(NatsResponseContract::kHeaders));
-  const json &body = env[NatsResponseContract::kBody];
+  const auto &body = env[NatsResponseContract::kBody];
   REQUIRE(body[NatsResponseContract::kBodyRequestId] == "req-2");
   REQUIRE(body[NatsResponseContract::kBodyResponse] == "boom");
   REQUIRE(body[NatsResponseContract::kBodyIsBinary] == true);
@@ -1211,9 +1226,9 @@ TEST_CASE("JsonUtils: build_nats_response_envelope optional fields omitted",
 
 TEST_CASE("JsonUtils: get_body_* navigate the response envelope",
           "[json-utils]") {
-  json env = build_nats_response_envelope(
-      200, "req-9", "resp", 1000, false, "application/json", json::object(),
-      "");
+  json const env =
+      build_nats_response_envelope(200, "req-9", "resp", 1000, false,
+                                   "application/json", json::object(), "");
   REQUIRE(get_body_response_ref(env) == "resp");
   REQUIRE(get_body_bool(env, NatsResponseContract::kBodyIsBinary) == false);
   REQUIRE(get_body_string(env, NatsResponseContract::kBodyContentType,
@@ -1225,7 +1240,7 @@ TEST_CASE("JsonUtils: get_body_* navigate the response envelope",
 
 TEST_CASE("ResponseBuilder: envelope without status_code -> HTTP 500, no throw",
           "[response-builder]") {
-  EnvVarGuard mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = json::object(
@@ -1243,7 +1258,7 @@ TEST_CASE("ResponseBuilder: envelope without status_code -> HTTP 500, no throw",
 
 TEST_CASE("ResponseBuilder: envelope status_code passthrough",
           "[response-builder]") {
-  EnvVarGuard mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = build_nats_response_envelope(
@@ -1258,7 +1273,7 @@ TEST_CASE("ResponseBuilder: envelope status_code passthrough",
 
 TEST_CASE("ResponseBuilder: non-object payload -> HTTP 500 error envelope",
           "[response-builder]") {
-  EnvVarGuard mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const json env = json::array({1, 2, 3});
@@ -1274,7 +1289,7 @@ TEST_CASE("ResponseBuilder: non-object payload -> HTTP 500 error envelope",
 
 TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
           "[response-builder]") {
-  EnvVarGuard mode("MODE", "proxy");
+  EnvGuard const mode{{"MODE", "proxy"}};
   AppContext ctx;
   httplib::Response res;
   const std::string raw_binary("\x00\x01\x02\xff\xfe", 5);
@@ -1291,7 +1306,7 @@ TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
 }
 
 TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {
-  json env;
+  json const env;
   REQUIRE(get_response_body(env).empty());
   REQUIRE(get_body_response_ref(env) == "");
   REQUIRE(get_body_string(env, "x", "def") == "def");
@@ -1315,7 +1330,7 @@ TEST_CASE("RequestValidator: Missing required field fails", "[validator]") {
   RequestValidator v;
   v.add_required_field("method").add_required_field("path");
 
-  json req = {{"method", "GET"}};
+  json const req = {{"method", "GET"}};
   std::string error;
   REQUIRE_FALSE(v.validate(req, error));
   REQUIRE(error.find("path") != std::string::npos);
@@ -1325,7 +1340,7 @@ TEST_CASE("RequestValidator: Disallowed method fails", "[validator]") {
   RequestValidator v;
   v.add_allowed_method("GET").add_allowed_method("POST");
 
-  json req = {{"method", "DELETE"}, {"path", "/api"}};
+  json const req = {{"method", "DELETE"}, {"path", "/api"}};
   std::string error;
   REQUIRE_FALSE(v.validate(req, error));
   REQUIRE(error.find("DELETE") != std::string::npos);
@@ -1335,7 +1350,7 @@ TEST_CASE("RequestValidator: Path too long fails", "[validator]") {
   RequestValidator v;
   v.set_max_path_length(10);
 
-  json req = {{"method", "GET"}, {"path", "/this/path/is/very/long"}};
+  json const req = {{"method", "GET"}, {"path", "/this/path/is/very/long"}};
   std::string error;
   REQUIRE_FALSE(v.validate(req, error));
   REQUIRE(error.find("too long") != std::string::npos);
@@ -1345,7 +1360,7 @@ TEST_CASE("RequestValidator: Path not in allowed list fails", "[validator]") {
   RequestValidator v;
   v.add_allowed_path("/api");
 
-  json req = {{"method", "GET"}, {"path", "/admin"}};
+  json const req = {{"method", "GET"}, {"path", "/admin"}};
   std::string error;
   REQUIRE_FALSE(v.validate(req, error));
   REQUIRE(error.find("not allowed") != std::string::npos);
@@ -1355,7 +1370,7 @@ TEST_CASE("RequestValidator: Path with allowed prefix passes", "[validator]") {
   RequestValidator v;
   v.add_allowed_path("/api");
 
-  json req = {{"method", "GET"}, {"path", "/api/users"}};
+  json const req = {{"method", "GET"}, {"path", "/api/users"}};
   std::string error;
   REQUIRE(v.validate(req, error));
 }
@@ -1364,7 +1379,7 @@ TEST_CASE("RequestValidator: Body too large fails", "[validator]") {
   RequestValidator v;
   v.set_max_body_size(10);
 
-  json req = {{"body", std::string(100, 'x')}};
+  json const req = {{"body", std::string(100, 'x')}};
   std::string error;
   REQUIRE_FALSE(v.validate(req, error));
   REQUIRE(error.find("too large") != std::string::npos);
@@ -1375,7 +1390,7 @@ TEST_CASE("RequestValidator: validate_or_throw throws on invalid",
   RequestValidator v;
   v.add_required_field("method");
 
-  json req = {};
+  json const req = {};
   REQUIRE_THROWS_AS(v.validate_or_throw(req), std::invalid_argument);
 }
 
@@ -1384,7 +1399,7 @@ TEST_CASE("RequestValidator: validate_or_throw passes on valid",
   RequestValidator v;
   v.add_required_field("method");
 
-  json req = {{"method", "GET"}};
+  json const req = {{"method", "GET"}};
   REQUIRE_NOTHROW(v.validate_or_throw(req));
 }
 
@@ -1392,7 +1407,7 @@ TEST_CASE("ResponseValidator: Disallowed status code fails", "[validator]") {
   ResponseValidator v;
   v.add_allowed_status_code(200).add_allowed_status_code(201);
 
-  json resp = {{"status_code", 500}};
+  json const resp = {{"status_code", 500}};
   std::string error;
   REQUIRE_FALSE(v.validate(resp, error));
   REQUIRE(error.find("500") != std::string::npos);
@@ -1402,7 +1417,7 @@ TEST_CASE("ResponseValidator: Required body missing fails", "[validator]") {
   ResponseValidator v;
   v.require_body(true);
 
-  json resp = {{"status_code", 200}};
+  json const resp = {{"status_code", 200}};
   std::string error;
   REQUIRE_FALSE(v.validate(resp, error));
   REQUIRE(error.find("required") != std::string::npos);
@@ -1411,12 +1426,12 @@ TEST_CASE("ResponseValidator: Required body missing fails", "[validator]") {
 TEST_CASE("ResponseValidator: Standard validators created correctly",
           "[validator]") {
   auto rv = create_standard_request_validator();
-  json req = {{"method", "GET"}, {"path", "/api"}, {"request_id", "123"}};
+  json const req = {{"method", "GET"}, {"path", "/api"}, {"request_id", "123"}};
   std::string error;
   REQUIRE(rv.validate(req, error));
 
   auto resp_v = create_standard_response_validator();
-  json resp = {{"status_code", 200}, {"body", {{"response", "ok"}}}};
+  json const resp = {{"status_code", 200}, {"body", {{"response", "ok"}}}};
   REQUIRE(resp_v.validate(resp, error));
 }
 
@@ -1440,7 +1455,7 @@ TEST_CASE("RetryUtils: calculate_retry_delay_with_jitter", "[retry-utils]") {
 
 TEST_CASE("RetryUtils: calculate_jitter_delay bounds", "[retry-utils]") {
   for (int i = 0; i < 100; ++i) {
-    int delay = calculate_jitter_delay(1000, 50);
+    int const delay = calculate_jitter_delay(1000, 50);
     REQUIRE(delay >= 1000);
     REQUIRE(delay <= 1499);
   }
@@ -1474,8 +1489,9 @@ TEST_CASE("RetryUtils: execute_with_retry fails then succeeds",
   auto result = execute_with_retry<int>(
       [&calls]() {
         calls++;
-        if (calls < 3)
+        if (calls < 3) {
           throw std::runtime_error("fail");
+        }
         return 42;
       },
       "test", 3, 1, 10, 1);
@@ -1688,7 +1704,6 @@ TEST_CASE("ThreadPool: shutdown drains queued tasks", "[thread-pool]") {
 
 #include "logger.hpp"
 #include <spdlog/details/log_msg.h>
-#include <sstream>
 #include <unordered_map>
 
 TEST_CASE("Logger: LogContext thread-local fields", "[logger]") {
@@ -1719,7 +1734,7 @@ std::string format_via_formatter(spdlog::formatter &formatter,
                                  const char *logger_name,
                                  const char *payload) {
   spdlog::memory_buf_t buf;
-  spdlog::details::log_msg msg(loc, logger_name, lvl, payload);
+  spdlog::details::log_msg const msg(loc, logger_name, lvl, payload);
   formatter.format(msg, buf);
   return std::string(buf.data(), buf.size());
 }
@@ -1756,7 +1771,7 @@ TEST_CASE("Logger: JsonFormatter emits structured fields from context",
 TEST_CASE("Logger: JsonFormatter clone and service fallback", "[logger]") {
   Logger::clear_correlation_context();
   Logger::set_service_name("");
-  spdlog::custom::JsonFormatter formatter;
+  spdlog::custom::JsonFormatter const formatter;
   const auto clone = formatter.clone();
   REQUIRE(clone != nullptr);
 
@@ -1836,8 +1851,8 @@ TEST_CASE("Logger: get_level/set_level mapping and set_level_from_string",
 
 TEST_CASE("TraceLogger: build_span_json emits Zipkin v2 parentId",
           "[tracing]") {
-  nlohmann::json attributes = {{"http.method", "POST"},
-                               {"http.status_code", 200}};
+  nlohmann::json const attributes = {{"http.method", "POST"},
+                                     {"http.status_code", 200}};
   const auto span = JaegerLogger::build_span_json(
       "0123456789abcdef0123456789abcdef", "0123456789abcdef",
       "fedcba9876543210", "POST /", 1000, 2000, "l2-proxy", attributes);
@@ -2186,6 +2201,57 @@ TEST_CASE(
   REQUIRE(detector.per_client_count_size() == 1);
 }
 
+TEST_CASE(
+    "DuplicateDetector: bodies with equal counts evict by the first-seen "
+    "tie-break",
+    "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_max_entries = 2;
+  DuplicateDetector detector(options);
+
+  // Two bodies seen exactly once each: their counts tie at 1, so the eviction
+  // has to fall through to the first-seen comparison to pick a victim.
+  REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})")
+              .first == false);
+  REQUIRE(detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})")
+              .first == false);
+  REQUIRE(detector.record("client-c", "10.0.0.3", "hash-3", R"({"v":3})")
+              .first == false);
+
+  // Both bodies were seen once (equal counts), so picking the victim has to
+  // fall back to the first-seen timestamps. The container is unordered, so
+  // either equal-count body may be dropped, but exactly one of them must be
+  // gone: the one still tracked is a duplicate, the evicted one starts over.
+  const bool first_tracked = detector.record("client-a", "10.0.0.1", "hash-1",
+                                             R"({"v":1})")
+                                 .first;
+  const bool second_tracked = detector.record("client-b", "10.0.0.2", "hash-2",
+                                              R"({"v":2})")
+                                  .first;
+  REQUIRE(first_tracked != second_tracked);
+}
+
+TEST_CASE(
+    "DuplicateDetector: per-client bound evicts the least recently seen client",
+    "[duplicate-detector]") {
+  DuplicateDetector::Options options;
+  options.m_per_client_max_entries = 2;
+  DuplicateDetector detector(options);
+
+  for (int i = 0; i < 2; ++i) {
+    detector.record("client-a", "10.0.0.1", "hash-a", R"({"a":1})");
+    detector.record("client-b", "10.0.0.2", "hash-b", R"({"b":1})");
+  }
+  REQUIRE(detector.per_client_count_size() == 2);
+
+  // Overflow with two tracked clients: the victim is chosen by comparing the
+  // per-client last-seen timestamps.
+  for (int i = 0; i < 2; ++i) {
+    detector.record("client-c", "10.0.0.3", "hash-c", R"({"c":1})");
+  }
+  REQUIRE(detector.per_client_count_size() == 2);
+}
+
 TEST_CASE("DuplicateDetector: idle per-client counters expire after TTL",
           "[duplicate-detector]") {
   DuplicateDetector::Options options;
@@ -2252,7 +2318,7 @@ TEST_CASE("DedupCache: store then find returns the response",
 }
 
 TEST_CASE("DedupCache: missing key returns nullopt", "[dedup-cache]") {
-  DedupCache cache;
+  DedupCache const cache;
   REQUIRE_FALSE(cache.find("no-such").has_value());
 }
 
@@ -2282,6 +2348,18 @@ TEST_CASE("DedupCache: bounded size evicts the oldest entry",
   REQUIRE_FALSE(cache.find("a").has_value());
   REQUIRE(cache.find("b").has_value());
   REQUIRE(cache.find("c").has_value());
+}
+
+TEST_CASE("DedupCache: store reaps expired entries before inserting",
+          "[dedup-cache]") {
+  // store() runs evict_expired_locked() first, so a stale entry is dropped
+  // even if nobody calls find() on it in between.
+  DedupCache cache(true, 16, 20);
+  cache.store("req-1", "v1");
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  cache.store("req-2", "v2");
+  REQUIRE_FALSE(cache.find("req-1").has_value());
+  REQUIRE(cache.find("req-2").has_value());
 }
 
 TEST_CASE("DedupCache: refresh moves entry to the back (LRU order)",
@@ -2338,6 +2416,18 @@ TEST_CASE("DedupCache: max_entries == 0 means unbounded (no eviction loop)",
 // CircuitBreaker tests
 // ============================================================================
 
+namespace {
+
+// Walks the breaker up to `count` recorded failures: the tests use it to reach
+// (or stop one short of) the trip threshold without re-spelling the loop.
+void record_failures(CircuitBreaker &breaker, int count) {
+  for (int i = 0; i < count; ++i) {
+    breaker.record_failure();
+  }
+}
+
+} // namespace
+
 TEST_CASE("CircuitBreaker: starts CLOSED and allows requests",
           "[circuit-breaker]") {
   CircuitBreaker cb;
@@ -2355,13 +2445,47 @@ TEST_CASE("CircuitBreaker: set_gauge mirrors state transitions",
   CircuitBreaker cb;
   cb.set_gauge(gauge);
   REQUIRE(gauge.Collect().gauge.value == 0.0); // CLOSED
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.allow_request() == false);
   REQUIRE(gauge.Collect().gauge.value == 1.0); // OPEN
   cb.record_success();                         // OPEN is a no-op
   REQUIRE(gauge.Collect().gauge.value == 1.0);
+}
+
+TEST_CASE("CircuitBreaker: transition and rejection counters",
+          "[circuit-breaker]") {
+  prometheus::Registry registry;
+  auto &transitions = prometheus::BuildCounter()
+                          .Name("cb_test_transitions_total")
+                          .Help("h")
+                          .Register(registry);
+  auto &rejected = prometheus::BuildCounter()
+                       .Name("cb_test_rejected_total")
+                       .Help("h")
+                       .Register(registry)
+                       .Add({});
+  CircuitBreaker cb;
+  cb.set_counters(transitions, rejected);
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
+  REQUIRE(transitions.Add({{"to", "open"}}).Collect().counter.value == 1.0);
+  REQUIRE(rejected.Collect().counter.value == 0.0);
+  // OPEN fast-fails: the rejection counter picks it up.
+  REQUIRE(cb.allow_request() == false);
+  REQUIRE(rejected.Collect().counter.value == 1.0);
+  // OPEN -> HALF_OPEN once the open window has elapsed (no real sleep).
+  cb.m_counters.m_last_failure_time_us.store(
+      TimeUtils::steady_us() - CircuitBreaker::g_open_timeout_us - 1);
+  REQUIRE(cb.allow_request() == true);
+  REQUIRE(transitions.Add({{"to", "half_open"}}).Collect().counter.value ==
+          1.0);
+  // HALF_OPEN -> OPEN on a failed test request.
+  cb.record_failure();
+  REQUIRE(transitions.Add({{"to", "open"}}).Collect().counter.value == 2.0);
+  // HALF_OPEN -> CLOSED after the success threshold.
+  cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
+  cb.record_success();
+  cb.record_success();
+  REQUIRE(transitions.Add({{"to", "closed"}}).Collect().counter.value == 1.0);
 }
 
 TEST_CASE("CircuitBreaker: opens after the failure threshold",
@@ -2380,15 +2504,11 @@ TEST_CASE("CircuitBreaker: opens after the failure threshold",
 TEST_CASE("CircuitBreaker: success in CLOSED resets the failure count",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold - 1);
   cb.record_success(); // resets failure_count
   REQUIRE(cb.state_name() == "CLOSED");
   // Still needs the full threshold again.
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold - 1; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold - 1);
   REQUIRE(cb.state_name() == "CLOSED");
   cb.record_failure();
   REQUIRE(cb.state_name() == "OPEN");
@@ -2398,9 +2518,7 @@ TEST_CASE("CircuitBreaker: failure opens immediately when in HALF_OPEN",
           "[circuit-breaker]") {
   CircuitBreaker cb;
   // Force OPEN via the threshold.
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   // Inject HALF_OPEN manually (simulate elapsed timeout).
   cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
@@ -2411,9 +2529,7 @@ TEST_CASE("CircuitBreaker: failure opens immediately when in HALF_OPEN",
 TEST_CASE("CircuitBreaker: HALF_OPEN closes after the success threshold",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
 
   // Inject HALF_OPEN (simulate timeout elapsed).
@@ -2429,9 +2545,7 @@ TEST_CASE("CircuitBreaker: HALF_OPEN closes after the success threshold",
 TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   REQUIRE(cb.allow_request() == false);
 
@@ -2446,9 +2560,7 @@ TEST_CASE("CircuitBreaker: allow_request reopens after timeout in OPEN",
 TEST_CASE("CircuitBreaker: failures in OPEN do not extend the open window",
           "[circuit-breaker]") {
   CircuitBreaker cb;
-  for (int i = 0; i < CircuitBreaker::g_failure_threshold; ++i) {
-    cb.record_failure();
-  }
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
   REQUIRE(cb.state_name() == "OPEN");
   const uint64_t trip_us = cb.m_counters.m_last_failure_time_us.load();
 
@@ -2602,7 +2714,7 @@ TEST_CASE("Fuzz: Config get_env_* parsers survive garbage values", "[fuzz]") {
   Xorshift64 rng(0xFEEDBEEF);
   for (int i = 0; i < 5000; ++i) {
     const std::string value = random_ascii_string(rng, 64);
-    EnvVarGuard env("FUZZ_VALUE", value.c_str());
+    EnvGuard const env{{"FUZZ_VALUE", value.c_str()}};
     (void)Config::get_env_int("FUZZ_VALUE", 42);
     (void)Config::get_env_double("FUZZ_VALUE", 0.5);
     (void)Config::get_env_bool("FUZZ_VALUE", true);
@@ -2735,7 +2847,7 @@ TEST_CASE("Common utils: parse_json valid and invalid", "[common-utils]") {
 
 TEST_CASE("Common utils: parse_json truncates long body preview",
           "[common-utils]") {
-  std::string big_body(500, 'x');
+  std::string const big_body(500, 'x');
   auto result = parse_json(big_body);
   REQUIRE_FALSE(result.has_value());
   // Only the first 100 bytes are kept in the preview.
@@ -2786,7 +2898,7 @@ TEST_CASE("Common utils: set_json_error_response omits request_id when empty",
 
 TEST_CASE("Common utils: send_json_response", "[common-utils]") {
   httplib::Response res;
-  json payload = {{"ok", true}, {"rows", 3}};
+  json const payload = {{"ok", true}, {"rows", 3}};
   send_json_response(res, 200, payload);
   REQUIRE(res.status == 200);
   REQUIRE(res.get_header_value("Content-Type") == "application/json");
@@ -2876,7 +2988,7 @@ TEST_CASE("Common utils: handle_http_error tolerates null counter",
 
 TEST_CASE("Common utils: handle_trace_context with null tracer",
           "[common-utils]") {
-  TraceContext ctx = handle_trace_context("00-abc-def-01", nullptr);
+  TraceContext const ctx = handle_trace_context("00-abc-def-01", nullptr);
   REQUIRE(ctx.m_trace_id.empty());
   REQUIRE(ctx.m_span_id.empty());
   REQUIRE(ctx.m_parent_id.empty());
@@ -3051,10 +3163,10 @@ TEST_CASE("Common utils: setup_ssl_client tolerates a missing CA bundle",
 }
 
 TEST_CASE("RetryHandler: starts at the initial delay", "[retry-handler]") {
-  RetryHandler backoff(50, 2000);
+  RetryHandler const backoff(50, 2000);
   REQUIRE(backoff.get_current_delay_ms() == 50);
   REQUIRE(backoff.get_consecutive_failures() == 0);
-  RetryHandler defaults;
+  RetryHandler const defaults;
   REQUIRE(defaults.get_current_delay_ms() == 100);
   REQUIRE(defaults.get_consecutive_failures() == 0);
 }
@@ -3200,51 +3312,53 @@ TEST_CASE("[db-query-utils] parse_db_query_request validates contract",
   mutating[DbQueryContract::kSql] = "UPDATE t SET a=1";
   REQUIRE_FALSE(parse_db_query_request(mutating).has_value());
 
-  json ping_ok = json{{DbQueryContract::kType, DbQueryContract::kTypePing},
-                      {DbQueryContract::kRequestId, "p-1"},
-                      {DbQueryContract::kDb, "oracle"}};
+  json const ping_ok =
+      json{{DbQueryContract::kType, DbQueryContract::kTypePing},
+           {DbQueryContract::kRequestId, "p-1"},
+           {DbQueryContract::kDb, "oracle"}};
   REQUIRE(parse_db_query_request(ping_ok).has_value());
 }
 
 TEST_CASE("[db-query-utils] parse_db_query_request validates params/limits",
           "[db-query-utils]") {
-  json bad_params = json{
-      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
-      {DbQueryContract::kSql, "SELECT 1"},
-      {DbQueryContract::kParams, json::array()}};
+  json const bad_params =
+      json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+           {DbQueryContract::kSql, "SELECT 1"},
+           {DbQueryContract::kParams, json::array()}};
   REQUIRE_FALSE(parse_db_query_request(bad_params).has_value());
 
-  json nested_params = json{
-      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
-      {DbQueryContract::kSql, "SELECT 1"},
-      {DbQueryContract::kParams, json{{"arr", json::array()}}}};
+  json const nested_params =
+      json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+           {DbQueryContract::kSql, "SELECT 1"},
+           {DbQueryContract::kParams, json{{"arr", json::array()}}}};
   REQUIRE_FALSE(parse_db_query_request(nested_params).has_value());
 
-  json null_params = json{
-      {DbQueryContract::kType, DbQueryContract::kTypeQuery},
-      {DbQueryContract::kSql, "SELECT 1"},
-      {DbQueryContract::kParams, nullptr}};
+  json const null_params =
+      json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+           {DbQueryContract::kSql, "SELECT 1"},
+           {DbQueryContract::kParams, nullptr}};
   const auto parsed = parse_db_query_request(null_params);
   REQUIRE(parsed.has_value());
   REQUIRE(parsed->m_params.empty());
 
   for (const int bad_timeout : {0, -2}) {
-    json j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
-                  {DbQueryContract::kSql, "SELECT 1"},
-                  {DbQueryContract::kTimeoutMs, bad_timeout}};
+    json const j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                        {DbQueryContract::kSql, "SELECT 1"},
+                        {DbQueryContract::kTimeoutMs, bad_timeout}};
     REQUIRE_FALSE(parse_db_query_request(j).has_value());
   }
   for (const int bad_rows : {0, -3}) {
-    json j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
-                  {DbQueryContract::kSql, "SELECT 1"},
-                  {DbQueryContract::kMaxRows, bad_rows}};
+    json const j = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                        {DbQueryContract::kSql, "SELECT 1"},
+                        {DbQueryContract::kMaxRows, bad_rows}};
     REQUIRE_FALSE(parse_db_query_request(j).has_value());
   }
 
-  json limited = json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
-                      {DbQueryContract::kSql, "SELECT 1"},
-                      {DbQueryContract::kTimeoutMs, 5000},
-                      {DbQueryContract::kMaxRows, 100}};
+  json const limited =
+      json{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+           {DbQueryContract::kSql, "SELECT 1"},
+           {DbQueryContract::kTimeoutMs, 5000},
+           {DbQueryContract::kMaxRows, 100}};
   const auto limited_parsed = parse_db_query_request(limited);
   REQUIRE(limited_parsed.has_value());
   REQUIRE(limited_parsed->m_timeout_ms == 5000);

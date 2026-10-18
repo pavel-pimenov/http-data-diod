@@ -4,12 +4,18 @@
 // that only implements the pure-virtual surface. Linked into test_components
 // alongside db_query_executor_base.cpp.
 
+#include "config.hpp"
 #include "db_query_executor_base.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_utils.hpp"
+#include "prometheus/gauge.h"
+#include "json_utils.hpp"
+#include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <memory>
 #include <prometheus/registry.h>
+#include <string>
 
 namespace {
 
@@ -19,7 +25,7 @@ public:
 
   bool init() override { return true; }
 
-  bool is_ready() const override { return true; }
+  [[nodiscard]] bool is_ready() const override { return true; }
 
   json execute_query(const std::string & /*sql*/, const json & /*params*/,
                      int /*timeout_ms*/, int /*max_rows*/,
@@ -55,7 +61,7 @@ DbConfig make_db() {
 
 TEST_CASE("DbExecutorBase: configured defaults are exposed",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   REQUIRE(ex.default_timeout_ms() == 1234);
   REQUIRE(ex.default_max_rows() == 111);
   REQUIRE(ex.db_name() == "pg-test");
@@ -65,10 +71,8 @@ TEST_CASE("DbExecutorBase: set_pool_metrics triggers refresh",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   REQUIRE(ex.m_refresh_gauges_calls == 0);
   ex.set_pool_metrics(&family);
   REQUIRE(ex.m_refresh_gauges_calls == 1);
@@ -78,10 +82,8 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   ex.set_pool_metrics(&family);
   ex.set_db_pool_gauges(2.0, 3.0);
 
@@ -89,7 +91,7 @@ TEST_CASE("DbExecutorBase: set_db_pool_gauges publishes idle/active",
   REQUIRE(collected.front().metric.size() == 2);
   double idle = 0.0;
   double active = 0.0;
-  for (const prometheus::ClientMetric &m : collected.front().metric) {
+  for (const auto &m : collected.front().metric) {
     REQUIRE(m.label.size() == 2);
     const bool is_idle = m.label[1].value == "idle";
     if (is_idle) {
@@ -112,10 +114,8 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
           "[db-executor-base]") {
   StubExecutor ex(make_db());
   auto registry = std::make_shared<prometheus::Registry>();
-  auto &family = prometheus::BuildGauge()
-                     .Name("l2_worker_db_pool_connections")
-                     .Help("test")
-                     .Register(*registry);
+  auto &family = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_connections", "test");
   ex.set_pool_metrics(&family);
   ex.set_pool_metrics(nullptr);
   ex.set_db_pool_gauges(5.0, 5.0);
@@ -124,7 +124,7 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
 
 TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   DbRowCollector rows(10);
   rows.try_add(json::array({1, "a"}));
   rows.try_add(json::array({2, "b"}));
@@ -142,7 +142,7 @@ TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",
 
 TEST_CASE("DbExecutorBase: build_query_response marks truncation",
           "[db-executor-base]") {
-  StubExecutor ex(make_db());
+  StubExecutor const ex(make_db());
   DbRowCollector rows(1);
   REQUIRE(rows.try_add(json::array({1})));
   REQUIRE_FALSE(rows.try_add(json::array({2})));

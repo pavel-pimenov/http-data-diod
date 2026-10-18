@@ -1,156 +1,22 @@
 #include "db_query_executor_postgres.hpp"
+#include "config.hpp"
+#include "db_query_executor_base.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "pg_value_utils.hpp"
+#include "string_utils.hpp"
 #include "time_utils.hpp"
-#include <base64.hpp>
 #include <libpq-fe.h>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-
-namespace {
-// PostgreSQL built-in type OIDs used for JSON value conversion and column
-// metadata. Taken from pg_type.h of the stock server.
-constexpr Oid kPgBoolOid = 16;
-constexpr Oid kPgByteaOid = 17;
-constexpr Oid kPgCharOid = 18;
-constexpr Oid kPgNameOid = 19;
-constexpr Oid kPgInt8Oid = 20;
-constexpr Oid kPgInt2Oid = 21;
-constexpr Oid kPgInt4Oid = 23;
-constexpr Oid kPgTextOid = 25;
-constexpr Oid kPgOidOid = 26;
-constexpr Oid kPgFloat4Oid = 700;
-constexpr Oid kPgFloat8Oid = 701;
-constexpr Oid kPgBpcharOid = 1042;
-constexpr Oid kPgVarcharOid = 1043;
-constexpr Oid kPgDateOid = 1082;
-constexpr Oid kPgTimeOid = 1083;
-constexpr Oid kPgTimestampOid = 1114;
-constexpr Oid kPgTimestamptzOid = 1184;
-constexpr Oid kPgTimetzOid = 1266;
-constexpr Oid kPgNumericOid = 1700;
-constexpr Oid kPgJsonOid = 114;
-constexpr Oid kPgJsonbOid = 3802;
-constexpr Oid kPgUuidOid = 2950;
-
-std::string pg_type_name(Oid oid) {
-  switch (oid) {
-  case kPgBoolOid:
-    return "BOOLEAN";
-  case kPgByteaOid:
-    return "BYTEA";
-  case kPgCharOid:
-    return "CHAR";
-  case kPgNameOid:
-    return "NAME";
-  case kPgInt2Oid:
-    return "SMALLINT";
-  case kPgInt4Oid:
-    return "INTEGER";
-  case kPgInt8Oid:
-    return "BIGINT";
-  case kPgTextOid:
-    return "TEXT";
-  case kPgOidOid:
-    return "OID";
-  case kPgFloat4Oid:
-    return "REAL";
-  case kPgFloat8Oid:
-    return "DOUBLE PRECISION";
-  case kPgBpcharOid:
-    return "BPCHAR";
-  case kPgVarcharOid:
-    return "VARCHAR";
-  case kPgDateOid:
-    return "DATE";
-  case kPgTimeOid:
-    return "TIME";
-  case kPgTimestampOid:
-    return "TIMESTAMP";
-  case kPgTimestamptzOid:
-    return "TIMESTAMPTZ";
-  case kPgTimetzOid:
-    return "TIMETZ";
-  case kPgNumericOid:
-    return "NUMERIC";
-  case kPgJsonOid:
-    return "JSON";
-  case kPgJsonbOid:
-    return "JSONB";
-  case kPgUuidOid:
-    return "UUID";
-  default:
-    return std::format("UNKNOWN({})", static_cast<uint32_t>(oid));
-  }
-}
-
-// Decodes PostgreSQL hex bytea output ("\x....") into raw bytes.
-std::string hex_to_bytes(const std::string &hex) {
-  const size_t start = (!hex.empty() && hex[0] == '\\' && hex.size() > 1 &&
-                        hex[1] == 'x')
-                           ? 2
-                           : 0;
-  const auto nibble = [](char c) -> unsigned char {
-    if (c >= '0' && c <= '9') {
-      return static_cast<unsigned char>(c - '0');
-    }
-    if (c >= 'a' && c <= 'f') {
-      return static_cast<unsigned char>(c - 'a' + 10);
-    }
-    if (c >= 'A' && c <= 'F') {
-      return static_cast<unsigned char>(c - 'A' + 10);
-    }
-    return 0;
-  };
-  std::string out;
-  out.reserve((hex.size() - start) / 2);
-  for (size_t i = start; i + 1 < hex.size(); i += 2) {
-    out.push_back(static_cast<char>((nibble(hex[i]) << 4) | nibble(hex[i + 1])));
-  }
-  return out;
-}
-
-// Converts a text-format value to the JSON value matching the column type.
-json pg_value(Oid oid, const char *text, int len) {
-  std::string s(text, len);
-  switch (oid) {
-  case kPgBoolOid:
-    return len > 0 && text[0] == 't';
-  case kPgInt2Oid:
-  case kPgInt4Oid:
-  case kPgInt8Oid:
-  case kPgOidOid:
-    try {
-      return std::stoll(s);
-    } catch (const std::exception &e) {
-      Logger::debug("Non-numeric int8/oid value '{}', keeping raw string: {}",
-                    s, e.what());
-      return s;
-    }
-  case kPgFloat4Oid:
-  case kPgFloat8Oid:
-  case kPgNumericOid:
-    try {
-      return std::stod(s);
-    } catch (const std::exception &e) {
-      Logger::debug("Non-numeric float/numeric value '{}', keeping raw "
-                    "string: {}",
-                    s, e.what());
-      return s;
-    }
-  case kPgByteaOid:
-    return base64::to_base64(hex_to_bytes(s));
-  default:
-    return s;
-  }
-}
-} // namespace
 
 struct PostgresQueryExecutor::Impl {
   const DbConfig &m_db;
@@ -168,7 +34,7 @@ struct PostgresQueryExecutor::Impl {
       : m_db(db), m_owner(owner) {}
 
   ~Impl() {
-    std::lock_guard lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     for (PGconn *conn : m_idle) {
       PQfinish(conn);
     }
@@ -184,7 +50,7 @@ struct PostgresQueryExecutor::Impl {
   }
 
   void update_pool_gauges() const {
-    std::lock_guard lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     update_pool_gauges_locked();
   }
 
@@ -203,7 +69,7 @@ struct PostgresQueryExecutor::Impl {
 
   std::optional<PGconn *> acquire_conn() {
     {
-      std::lock_guard lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (!m_idle.empty()) {
         PGconn *conn = m_idle.back();
         m_idle.pop_back();
@@ -219,7 +85,7 @@ struct PostgresQueryExecutor::Impl {
     }
     PGconn *conn = create_conn();
     if (!conn) {
-      std::lock_guard lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
@@ -230,7 +96,7 @@ struct PostgresQueryExecutor::Impl {
       Logger::warn("DB executor '{}': connect failed: {}", m_db.m_name,
                    trim_copy(PQerrorMessage(conn)));
       PQfinish(conn);
-      std::lock_guard lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
@@ -246,28 +112,20 @@ struct PostgresQueryExecutor::Impl {
     }
     if (PQstatus(conn) != CONNECTION_OK) {
       PQfinish(conn);
-      std::lock_guard lock(m_mutex);
+      const std::scoped_lock lock(m_mutex);
       if (m_total > 0) {
         --m_total;
       }
       update_pool_gauges_locked();
       return;
     }
-    std::lock_guard lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     m_idle.push_back(conn);
     update_pool_gauges_locked();
   }
 
   static std::string trim_copy(const char *text) {
-    if (!text) {
-      return "";
-    }
-    std::string s(text);
-    while (!s.empty() &&
-           (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) {
-      s.pop_back();
-    }
-    return s;
+    return text == nullptr ? std::string() : trim_trailing(text, "\r\n ");
   }
 
   // Applies the per-query statement_timeout; returns "" on success, otherwise
@@ -400,9 +258,9 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
         row.push_back(nullptr);
         continue;
       }
-      const Oid oid = PQftype(res, c);
-      row.push_back(
-          pg_value(oid, PQgetvalue(res, r, c), PQgetlength(res, r, c)));
+      const auto oid = static_cast<uint32_t>(PQftype(res, c));
+      row.push_back(pg_value_utils::pg_value(
+          oid, PQgetvalue(res, r, c), PQgetlength(res, r, c)));
     }
     if (!rows.try_add(std::move(row))) {
       break;
@@ -412,7 +270,9 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   std::vector<std::pair<std::string, std::string>> name_type;
   name_type.reserve(num_fields);
   for (int c = 0; c < num_fields; ++c) {
-    name_type.emplace_back(PQfname(res, c), pg_type_name(PQftype(res, c)));
+    name_type.emplace_back(
+        PQfname(res, c),
+        pg_value_utils::pg_type_name(static_cast<uint32_t>(PQftype(res, c))));
   }
   const json columns_json = make_db_columns_json(name_type);
   PQclear(res);

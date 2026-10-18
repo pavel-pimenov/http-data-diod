@@ -7,7 +7,7 @@
 class IConnectableClient {
 public:
   virtual ~IConnectableClient() = default;
-  virtual bool is_connected() const = 0;
+  [[nodiscard]] virtual bool is_connected() const = 0;
 };
 
 #endif // INTERFACES_HPP

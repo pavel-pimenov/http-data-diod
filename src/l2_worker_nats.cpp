@@ -1,21 +1,32 @@
 #include "common_utils.hpp"
 #include "db_gateway_routing.hpp"
+#include "db_query_handler.hpp"
 #include "db_query_utils.hpp"
+#include "http_client.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "nats_client.hpp"
+#include "prometheus/gauge.h"
+#include "prometheus/family.h"
+#include "prometheus/counter.h"
 #include "retry_utils.hpp"
 #include "sentry_client.hpp"
-#include "time_utils.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
-#include <base64.hpp>
 #include <algorithm>
+#include <atomic>
+#include <base64.hpp>
 #include <chrono>
+#include <cstdint>
+#include <exception>
 #include <format>
+#include <memory>
 #include <nlohmann/json.hpp>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 // Logs the final worker response span with the terminal HTTP status when
@@ -53,7 +64,7 @@ void log_nats_consume_span(JaegerLogger *tracer, const std::string &request_id,
   if (!tracer || trace_id.empty()) {
     return;
   }
-  nlohmann::json attrs = {
+  nlohmann::json const attrs = {
       {"messaging.system", "nats"},
       {"messaging.operation", "consume"},
       {"messaging.destination", destination},
@@ -403,7 +414,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
     const auto &worker_parent_span_id = nats_consume_span_id;
 
-    TracingSpans spans =
+    TracingSpans const spans =
         create_tracing_spans(metadata.m_trace_ctx, worker_parent_span_id);
 
     task.m_activity.m_status = send_l2_response(metadata, spans, reply_to,
@@ -426,15 +437,15 @@ int L2Worker::send_l2_response(const RequestData &metadata,
                                const std::string &reply_to,
                                const std::string &nats_consume_span_id,
                                uint64_t start_us) {
-  L2Response l2_response = execute_l2_call(metadata, spans);
+  L2Response const l2_response = execute_l2_call(metadata, spans);
 
-  ResponseData response_data = prepare_response_data(l2_response, spans);
+  ResponseData const response_data = prepare_response_data(l2_response, spans);
 
   HttpResponse http_response;
   http_response.m_body = l2_response.m_body;
   http_response.m_headers = l2_response.m_headers;
   http_response.m_status = l2_response.m_status_code;
-  json response_headers_json = prepare_response_headers(http_response);
+  json const response_headers_json = prepare_response_headers(http_response);
 
   std::string l2_response_stored = l2_response.m_body;
   if (response_data.m_is_binary) {
@@ -486,7 +497,7 @@ void L2Worker::send_nats_response(const std::string &reply_to,
 
 void L2Worker::send_nats_response_impl(const std::string &reply_to,
                                        const std::string &response_json,
-                                       const NatsHeaders *headers) {
+                                       const NatsHeaders *headers) const {
   constexpr int max_retries = 3;
   constexpr int retry_delay_ms = 100;
 
@@ -497,9 +508,10 @@ void L2Worker::send_nats_response_impl(const std::string &reply_to,
     }
 
     try {
-      bool success = headers ? m_clients.m_nats_client->publish_with_headers(
-                                   reply_to, response_json, *headers)
-                             : m_clients.m_nats_client->publish(reply_to, response_json);
+      bool const success =
+          headers ? m_clients.m_nats_client->publish_with_headers(
+                        reply_to, response_json, *headers)
+                  : m_clients.m_nats_client->publish(reply_to, response_json);
       if (success) {
         Logger::debug("NATS response sent to: {}, size: {}", reply_to,
                       response_json.size());
@@ -589,13 +601,10 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   send_db_query_response(reply_to, status, body, consume_span_id, request_data);
 }
 
-void L2Worker::observe_db_query_outcome(const json &request_data, int status,
-                                        const json &body,
-                                        uint64_t db_start_us,
-                                        uint64_t db_end_us,
-                                        const TraceContext &trace_ctx,
-                                        const std::string &request_id,
-                                        const std::string &consume_span_id) {
+void L2Worker::observe_db_query_outcome(
+    const json &request_data, int status, const json &body,
+    uint64_t db_start_us, uint64_t db_end_us, const TraceContext &trace_ctx,
+    const std::string &request_id, const std::string &consume_span_id) const {
   const std::string db_name =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =
@@ -629,7 +638,7 @@ void L2Worker::observe_db_query_outcome(const json &request_data, int status,
   if (m_ctx.m_tracer && !trace_ctx.m_trace_id.empty()) {
     const std::string db_span_id =
         JaegerSpanLogger::generate_span_id(m_ctx.m_tracer.get());
-    nlohmann::json attrs = {
+    nlohmann::json const attrs = {
         {"db.name", db_name},
         {"db.operation",
          JsonUtils::safe_get_string(request_data, DbQueryContract::kType)},
@@ -665,12 +674,12 @@ void L2Worker::publish_db_gateway_ready_metric() {
   if (!m_db_query_handler) {
     return;
   }
-  prometheus::Family<prometheus::Gauge> &ready_gauge =
+  auto &ready_gauge =
       m_ctx.m_worker.m_metrics->m_db_gateway_ready;
   const std::vector<std::string> ready = m_db_query_handler->ready_databases();
-  for (const std::string &db : m_db_query_handler->configured_databases()) {
+  for (const auto &db : m_db_query_handler->configured_databases()) {
     const bool is_ready =
-        std::find(ready.begin(), ready.end(), db) != ready.end();
+        std::ranges::find(ready, db) != ready.end();
     ready_gauge.Add({{"db", db}}).Set(is_ready ? 1.0 : 0.0);
   }
 }

@@ -1,8 +1,13 @@
 #include "http_client_pool.hpp"
+#include "http_client.hpp"
 #include "logger.hpp"
 #include <chrono>
+#include <cstddef>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
-#include <thread>
+#include <string>
+#include <utility>
 
 HttpClientPool::HttpClientPool(size_t max_pool_size, int timeout_seconds,
                                int acquire_timeout_seconds,
@@ -16,8 +21,7 @@ HttpClientPool::HttpClientPool(size_t max_pool_size, int timeout_seconds,
                enable_ssl_server_certificate_verification,
                enable_ssl_server_hostname_verification, ssl_ca_cert_path,
                std::chrono::seconds(max_idle_timeout_seconds)},
-      m_state{},
-      m_counters{} {
+      m_state{} {
   Logger::debug("HttpClientPool created: max_size={} timeout={}s "
                 "acquire_timeout={}s reuse={} idle_timeout={}s",
                 m_config.m_max_pool_size, m_config.m_timeout_seconds, m_config.m_acquire_timeout_seconds,
@@ -31,7 +35,7 @@ void HttpClientPool::set_metrics(const PoolMetrics &metrics) {
 void HttpClientPool::update_metrics() {
   if (m_metrics.m_active_clients) {
     m_metrics.m_active_clients->get().Set(
-        static_cast<double>(m_counters.m_active_clients.load()));
+        static_cast<double>(m_counters->m_active_clients.load()));
   }
   if (m_metrics.m_available_clients) {
     m_metrics.m_available_clients->get().Set(
@@ -50,7 +54,7 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
   }
 
   // Check if we can create a new connection
-  if (m_counters.m_total_clients >= m_config.m_max_pool_size) {
+  if (m_counters->m_total_clients >= m_config.m_max_pool_size) {
     // Wait for a connection with timeout (no recursion!)
     Logger::debug("HttpClientPool: pool full, waiting for available connection "
                   "(timeout={}s)",
@@ -64,7 +68,7 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
       // Timeout - log and throw
       Logger::error(
           "HttpClientPool: acquire timeout after {}s (max_size={}, total={})",
-          m_config.m_acquire_timeout_seconds, m_config.m_max_pool_size, m_counters.m_total_clients.load());
+          m_config.m_acquire_timeout_seconds, m_config.m_max_pool_size, m_counters->m_total_clients.load());
 
       if (m_metrics.m_acquisition_timeouts) {
         m_metrics.m_acquisition_timeouts->get().Increment();
@@ -83,7 +87,7 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
 
   // Create new connection (pool not full or connections were invalid)
   Logger::debug("HttpClientPool: creating new connection (total={}/{})",
-                m_counters.m_total_clients.load() + 1, m_config.m_max_pool_size);
+                m_counters->m_total_clients.load() + 1, m_config.m_max_pool_size);
 
   auto client = std::make_unique<HttpClient>(
       m_config.m_timeout_seconds,
@@ -91,8 +95,29 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
       m_config.m_enable_ssl_server_certificate_verification,
       m_config.m_enable_ssl_server_hostname_verification, m_config.m_ssl_ca_cert_path);
 
-  m_counters.m_total_clients++;
-  m_counters.m_active_clients++;
+  m_counters->m_total_clients++;
+  m_counters->m_active_clients++;
+  client->set_pool_leased(true);
+
+  // A consumer may drop the connection without releasing it (e.g. the HTTP
+  // call threw): the hook then frees the slot, otherwise a burst of failures
+  // would exhaust the pool for good.
+  auto counters = m_counters;
+  const PoolMetrics metrics = m_metrics;
+  client->set_pool_release_hook([counters, metrics](bool leased) {
+    if (!leased) {
+      return; // idle connections are accounted for by the pool itself
+    }
+    counters->m_total_clients--;
+    counters->m_active_clients--;
+    if (metrics.m_active_clients) {
+      metrics.m_active_clients->get().Set(
+          static_cast<double>(counters->m_active_clients.load()));
+    }
+    Logger::debug("HttpClientPool: connection dropped without release, slot "
+                  "returned (active={})",
+                  counters->m_active_clients.load());
+  });
 
   update_metrics();
 
@@ -111,33 +136,34 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
     // Check if connection is stale (idle too long)
     if (client && std::chrono::steady_clock::now() - client->get_last_used() >
                       m_config.m_max_idle_time) {
-      m_counters.m_total_clients--;
-      m_counters.m_stale_evictions++;
+      m_counters->m_total_clients--;
+      m_counters->m_stale_evictions++;
       if (m_metrics.m_stale_evictions) {
         m_metrics.m_stale_evictions->get().Increment();
       }
       Logger::warn("HttpClientPool: evicting stale connection (idle > {}s), "
                    "stale_evictions={}",
-                   m_config.m_max_idle_time.count(), m_counters.m_stale_evictions.load());
+                   m_config.m_max_idle_time.count(), m_counters->m_stale_evictions.load());
       continue;
     }
 
-    m_counters.m_active_clients++;
+    m_counters->m_active_clients++;
 
     update_metrics();
 
     // Validate the connection
     if (client && client->is_valid()) {
+      client->set_pool_leased(true);
       record_acquisition(start_time);
 
       Logger::debug("HttpClientPool: acquired connection from pool (active={})",
-                    m_counters.m_active_clients.load());
+                    m_counters->m_active_clients.load());
       return client;
     }
 
     // Connection invalid - destroy it and continue
-    m_counters.m_total_clients--;
-    m_counters.m_active_clients--;
+    m_counters->m_total_clients--;
+    m_counters->m_active_clients--;
     Logger::warn("HttpClientPool: invalid connection in pool, discarding");
   }
 
@@ -145,23 +171,27 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
 }
 
 void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
-  if (!client)
+  if (!client) {
     return;
+  }
 
   // Decrement active count first
-  m_counters.m_active_clients--;
+  m_counters->m_active_clients--;
+  // The connection is back under the pool's control: a later destroy here is
+  // accounted for explicitly below instead of by the release hook.
+  client->set_pool_leased(false);
 
   if (!client->is_valid()) {
-    std::lock_guard lock(m_state.m_pool_mutex);
-    m_counters.m_total_clients--;
+    const std::scoped_lock lock(m_state.m_pool_mutex);
+    m_counters->m_total_clients--;
     Logger::warn(
         "HttpClientPool: released invalid connection, destroying (active={})",
-        m_counters.m_active_clients.load());
+        m_counters->m_active_clients.load());
     update_metrics();
     return;
   }
 
-  std::lock_guard lock(m_state.m_pool_mutex);
+  const std::scoped_lock lock(m_state.m_pool_mutex);
 
   if (m_state.m_available_connections.size() < m_config.m_max_pool_size) {
     client->touch();
@@ -169,13 +199,13 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
     m_state.m_condition.notify_one();
     Logger::debug(
         "HttpClientPool: connection released to pool (active={}, available={})",
-        m_counters.m_active_clients.load(), m_state.m_available_connections.size());
+        m_counters->m_active_clients.load(), m_state.m_available_connections.size());
   } else {
     // Pool is full - destroy the connection
-    m_counters.m_total_clients--;
+    m_counters->m_total_clients--;
     Logger::debug(
         "HttpClientPool: pool full, released connection destroyed (active={})",
-        m_counters.m_active_clients.load());
+        m_counters->m_active_clients.load());
   }
 
   update_metrics();
@@ -186,7 +216,7 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 }
 
 size_t HttpClientPool::available_count() const {
-  std::lock_guard lock(m_state.m_pool_mutex);
+  const std::scoped_lock lock(m_state.m_pool_mutex);
   return m_state.m_available_connections.size();
 }
 

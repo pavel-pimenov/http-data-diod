@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -56,10 +57,19 @@ public:
                         const std::string &traceparent = "",
                         const httplib::Headers &additional_headers = {},
                         const std::string &content_type = "application/json");
-  bool is_valid() const;
+
+  // Installed by HttpClientPool: runs from the destructor with `leased` telling
+  // whether the connection was still checked out, so a client dropped by a
+  // throwing consumer returns its pool slot instead of leaking it forever.
+  void set_pool_release_hook(std::function<void(bool leased)> hook);
+  // Pool bookkeeping: true while checked out, false when idle in the pool (the
+  // idle case is accounted for by the pool's own eviction/destroy paths).
+  void set_pool_leased(bool leased) { m_pool_leased.store(leased); }
+
+  [[nodiscard]] bool is_valid() const;
   void invalidate();
-  int get_last_status_code() const;
-  std::chrono::steady_clock::time_point get_last_used() const;
+  [[nodiscard]] int get_last_status_code() const;
+  [[nodiscard]] std::chrono::steady_clock::time_point get_last_used() const;
   void touch();
 
 private:
@@ -84,6 +94,11 @@ private:
     bool m_is_valid;
     std::chrono::steady_clock::time_point m_last_used;
   } m_state;
+  // Pool bookkeeping: the release hook (installed by HttpClientPool) and the
+  // checked-out flag it receives. Both are inert for clients the pool did not
+  // create (e.g. standalone clients in tests).
+  std::function<void(bool)> m_pool_release_hook;
+  std::atomic<bool> m_pool_leased{false};
   void setup_client(const ParsedUrl &parsed_url);
   PreparedRequest prepare_request(const std::string &url,
                                   const std::string &body,

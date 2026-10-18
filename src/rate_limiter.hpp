@@ -2,8 +2,10 @@
 #define RATE_LIMITER_HPP
 
 #include "logger.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 
 // Token Bucket Rate Limiter
@@ -16,6 +18,26 @@
 //   } else {
 //       // Return 429 Too Many Requests
 //   }
+
+// Request-outcome counters shared by the global (RateLimiter) and the per-IP
+// (PerIPRateLimiter) limiters. Relaxed order is deliberate: these counters feed
+// Prometheus gauges only and synchronise nothing, so the increment idiom lives
+// here instead of being repeated at every call site.
+struct RateLimiterCounters {
+  std::atomic<uint64_t> m_total_requests{0};
+  std::atomic<uint64_t> m_allowed_requests{0};
+  std::atomic<uint64_t> m_rejected_requests{0};
+
+  void count_request() {
+    m_total_requests.fetch_add(1, std::memory_order_relaxed);
+  }
+  void count_allowed() {
+    m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
+  }
+  void count_rejected() {
+    m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+  }
+};
 
 class RateLimiter {
 private:
@@ -38,16 +60,9 @@ private:
     std::mutex m_mutex;
   };
 
-  // Request outcome counters.
-  struct Stats {
-    std::atomic<uint64_t> m_total_requests{0};
-    std::atomic<uint64_t> m_allowed_requests{0};
-    std::atomic<uint64_t> m_rejected_requests{0};
-  };
-
   Config m_config;
   BucketState m_bucket;
-  Stats m_stats;
+  RateLimiterCounters m_stats;
 
 public:
   RateLimiter(uint64_t max_tokens, uint64_t refill_tokens_per_second)
@@ -59,7 +74,7 @@ public:
 
   // Returns true if request is allowed, false if rate limited
   bool acquire() {
-    m_stats.m_total_requests.fetch_add(1, std::memory_order_relaxed);
+    m_stats.count_request();
 
     refill();
 
@@ -67,12 +82,12 @@ public:
     while (expected > 0) {
       if (m_bucket.m_tokens.compare_exchange_weak(
               expected, expected - 1, std::memory_order_acq_rel)) {
-        m_stats.m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
+        m_stats.count_allowed();
         return true;
       }
     }
 
-    m_stats.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+    m_stats.count_rejected();
     return false;
   }
 
@@ -94,7 +109,7 @@ public:
 
 private:
   void refill() {
-    std::lock_guard lock(m_bucket.m_mutex);
+    const std::scoped_lock lock(m_bucket.m_mutex);
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                              now - m_bucket.m_last_refill)
@@ -108,10 +123,8 @@ private:
       uint64_t cur = m_bucket.m_tokens.load(std::memory_order_relaxed);
       uint64_t desired = 0;
       do {
-        uint64_t new_tokens = cur + tokens_to_add;
-        if (new_tokens > m_config.m_max_tokens) {
-          new_tokens = m_config.m_max_tokens;
-        }
+        const uint64_t new_tokens =
+            std::min(cur + tokens_to_add, m_config.m_max_tokens);
         desired = new_tokens;
       } while (!m_bucket.m_tokens.compare_exchange_weak(
           cur, desired, std::memory_order_acq_rel, std::memory_order_relaxed));

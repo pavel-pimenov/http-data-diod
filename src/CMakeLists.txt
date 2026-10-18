@@ -515,8 +515,10 @@ if(BUILD_TESTS)
         test_http_pipeline.cpp
         test_coverage_ext.cpp
         test_db_executor_base.cpp
+        test_pg_value_utils.cpp
         test_sentry_client.cpp
         test_trace_logger.cpp
+        test_async_sender_queue.cpp
         test_crash_utils.cpp
         test_app_context.cpp
         test_proxy_handlers.cpp

@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "config.hpp"
+#include "time_utils.hpp"
 
 // Thread-local storage for correlation ID
 struct LogContext {
@@ -75,30 +76,23 @@ private:
 };
 
 // Custom JSON formatter for structured logging
-namespace spdlog {
-namespace custom {
+namespace spdlog::custom {
 class JsonFormatter : public formatter {
 public:
-  JsonFormatter() : m_include_location(true) {}
-
   void format(const spdlog::details::log_msg &msg,
               memory_buf_t &dest) override {
     nlohmann::json j;
 
-    // Timestamp in ISO 8601 format (UTC)
-    const auto now_s =
-        std::chrono::time_point_cast<std::chrono::seconds>(msg.time);
-
-    // Add milliseconds
-    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            msg.time.time_since_epoch())
-                            .count() %
-                        1000;
-    j["timestamp"] = std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", now_s, millis);
+    // Timestamp in ISO 8601 format (UTC); the same helper the tracing sender
+    // uses, so the RFC3339 rendering lives in one place.
+    j["timestamp"] = TimeUtils::format_rfc3339_us(static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            msg.time.time_since_epoch())
+            .count()));
 
     // Level - convert string_view to string properly
     const auto level_sv = spdlog::level::to_string_view(msg.level);
-    std::string level_str(level_sv.data(), level_sv.size());
+    const std::string level_str(level_sv.data(), level_sv.size());
     j["level"] = level_str;
 
     // Service name (from thread-local context)
@@ -111,7 +105,7 @@ public:
     }
 
     // Message - convert from fmt::memory_buffer to string properly
-    std::string msg_str(msg.payload.begin(), msg.payload.end());
+    const std::string msg_str(msg.payload.begin(), msg.payload.end());
     j["message"] = msg_str;
 
     // Correlation IDs (from thread-local context)
@@ -141,12 +135,12 @@ public:
     dest.push_back('\n');
   }
 
-  std::unique_ptr<formatter> clone() const override {
+  [[nodiscard]] std::unique_ptr<formatter> clone() const override {
     return spdlog::details::make_unique<JsonFormatter>(*this);
   }
 
 private:
-  bool m_include_location;
+  bool m_include_location = true;
 };
 
 // Text formatter used instead of the built-in pattern so that every line can
@@ -171,7 +165,7 @@ public:
 
     // Level (optionally colored in a real terminal)
     const auto level_sv = spdlog::level::to_string_view(msg.level);
-    std::string level_str(level_sv.data(), level_sv.size());
+    const std::string level_str(level_sv.data(), level_sv.size());
     if (m_use_colors) {
       append(dest, level_color(msg.level));
     }
@@ -221,7 +215,7 @@ public:
     dest.push_back('\n');
   }
 
-  std::unique_ptr<formatter> clone() const override {
+  [[nodiscard]] std::unique_ptr<formatter> clone() const override {
     return spdlog::details::make_unique<TextFormatter>(m_use_colors);
   }
 
@@ -249,8 +243,7 @@ private:
     }
   }
 };
-} // namespace custom
-} // namespace spdlog
+} // namespace spdlog::custom
 
 // spdlog-based Logger wrapper for backward compatibility
 // Usage: Logger::info("message") or spdlog::info("message")
@@ -276,7 +269,7 @@ public:
       // runs inside std::call_once, so it must not trigger any logging.
       const auto log_format =
           Config::get_env_string_silent("LOG_FORMAT", "text");
-      bool use_json_format = log_format == "json" || log_format == "JSON";
+      const bool use_json_format = log_format == "json" || log_format == "JSON";
 
       // ANSI colors are only enabled on a real terminal (TTY). Docker logs and
       // piped output get plain text so they don't contain escape sequences.
@@ -330,8 +323,7 @@ public:
       if (log_level_env) {
         auto log_level = std::string(log_level_env);
         // Convert to uppercase for comparison
-        std::transform(log_level.begin(), log_level.end(), log_level.begin(),
-                       ::toupper);
+        std::ranges::transform(log_level, log_level.begin(), ::toupper);
 
         spdlog::level::level_enum spdlog_level = spdlog::level::info; // default
 
@@ -484,6 +476,12 @@ public:
       return ERROR;
     }
   }
+
+  // Cheap pre-check for callers that would otherwise build expensive log
+  // arguments: Logger::debug(...) formats its arguments at the call site, so a
+  // costly expression (redaction, JSON dump, string copy) runs even when the
+  // level is disabled. Guard such calls with this check.
+  static bool should_log(Level level) { return get_level() <= level; }
 
 private:
   static std::shared_ptr<spdlog::logger> s_logger;

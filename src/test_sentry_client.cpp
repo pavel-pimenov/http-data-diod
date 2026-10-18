@@ -4,12 +4,16 @@
 // against a local loopback httplib::Server. No external network traffic.
 #include "httplib/httplib.h"
 #include "sentry_client.hpp"
+#include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/registry.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -50,21 +54,12 @@ struct SentryTestMetrics {
   prometheus::Counter &m_failed_counter;
   prometheus::Gauge &m_queue_gauge;
   SentryTestMetrics()
-      : m_sent_counter(prometheus::BuildCounter()
-                         .Name("tst_sentry_sent")
-                         .Help("h")
-                         .Register(*m_registry)
-                         .Add({})),
-        m_failed_counter(prometheus::BuildCounter()
-                           .Name("tst_sentry_failed")
-                           .Help("h")
-                           .Register(*m_registry)
-                           .Add({})),
-        m_queue_gauge(prometheus::BuildGauge()
-                        .Name("tst_sentry_queue")
-                        .Help("h")
-                        .Register(*m_registry)
-                        .Add({})) {}
+      : m_sent_counter(test_support::make_counter(
+          *m_registry, "tst_sentry_sent", "h")),
+        m_failed_counter(test_support::make_counter(
+            *m_registry, "tst_sentry_failed", "h")),
+        m_queue_gauge(test_support::make_gauge(
+            *m_registry, "tst_sentry_queue", "h")) {}
 };
 
 } // namespace
@@ -175,7 +170,7 @@ TEST_CASE("Sentry event JSON: omits optional fields when empty",
 
 TEST_CASE("Sentry event JSON: every level maps to its Sentry string",
           "[sentry-client]") {
-  sentry::SentryEvent event;
+  sentry::SentryEvent const event;
   const auto level = [&](sentry::EventLevel lv) {
     sentry::SentryEvent e;
     e.m_message = "m";
@@ -198,6 +193,8 @@ TEST_CASE("Sentry event JSON: every level maps to its Sentry string",
     REQUIRE(json["level"] == "fatal");
     REQUIRE(json["exception"]["values"][0]["value"] == "fatal boom");
   }
+  // Out-of-range enum values fall back to the last-resort "error" level.
+  REQUIRE(level(static_cast<sentry::EventLevel>(99)) == "error");
 }
 
 TEST_CASE("Sentry event JSON: transaction and non-string tags are kept",

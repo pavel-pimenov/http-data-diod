@@ -24,6 +24,7 @@
 #include "base64_utils.hpp"
 #include "error_types.hpp"
 #include "header_utils.hpp"
+#include "http_setup.hpp"
 #include "json_response_utils.hpp"
 #include "pool_executor.hpp"
 #include "retry_handler.hpp"
@@ -58,7 +59,7 @@ public:
     }
     Logger::set_client_ip(m_state.m_client_ip);
   }
-  const std::string &client_ip() const { return m_state.m_client_ip; }
+  [[nodiscard]] const std::string &client_ip() const { return m_state.m_client_ip; }
 
 private:
   struct State {
@@ -159,7 +160,7 @@ public:
                 .m_counter = ScopedMetrics(counter),
                 .m_start_us = get_current_timestamp_us()} {}
 
-  uint64_t start_us() const { return m_state.m_start_us; }
+  [[nodiscard]] uint64_t start_us() const { return m_state.m_start_us; }
 
 private:
   struct State {
@@ -171,28 +172,5 @@ private:
 
 std::string format_http_error(httplib::Error error, int timeout_seconds,
                               const std::string &operation);
-
-void setup_ssl_client(httplib::SSLClient &client, int timeout_seconds,
-                      bool enable_cert_verification,
-                      bool enable_hostname_verification,
-                      const std::string &ca_cert_path,
-                      bool enable_connection_reuse);
-
-// Applies the connection-wide timeouts and keep-alive tuning shared by the
-// plaintext httplib::Client and the SSLClient. setup_ssl_client augments this
-// with certificate/hostname verification. Both classes share these setters via
-// ClientImpl, so a single template avoids hand-writing the identical block in
-// the SSL and plaintext setup paths.
-template <typename ClientT>
-void setup_http_connection(ClientT &client, int timeout_seconds,
-                           bool enable_connection_reuse) {
-  client.set_connection_timeout(5, 0);
-  client.set_read_timeout(timeout_seconds, 0);
-  client.set_write_timeout(timeout_seconds, 0);
-  if (enable_connection_reuse) {
-    client.set_keep_alive(true);
-    client.set_tcp_nodelay(true);
-  }
-}
 
 #endif // COMMON_UTILS_HPP

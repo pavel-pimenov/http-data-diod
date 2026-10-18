@@ -25,6 +25,9 @@ struct NatsConfig {
   std::string m_subject;
   std::string m_queue_group;
   int m_timeout_ms = 30000;
+  // Separate, smaller timeout for the connection handshake so an unreachable
+  // host cannot stall connect() for the full request timeout.
+  int m_connect_timeout_ms = 5000;
   std::string m_username;
   std::string m_password;
   std::string m_token;
@@ -66,11 +69,20 @@ struct NatsErrorState {
 // NATS client for request/response messaging pattern
 class NatsClient : public IConnectableClient {
 public:
+  // Default number of natsConnection_Connect attempts performed by connect().
+  static constexpr int kDefaultConnectAttempts = 3;
+
   explicit NatsClient(const NatsConfig &cfg);
 
   ~NatsClient() override;
 
-  [[nodiscard]] bool connect();
+  // Establishes the connection. max_attempts bounds the number of
+  // natsConnection_Connect attempts (>= 1). It is bounded so a caller
+  // (publish/request/subscribe/health check) can never block indefinitely when
+  // the broker is unreachable; callers that need long-term recovery retry on
+  // their own schedule. Setup-option failures (e.g. a bad TLS CA bundle) abort
+  // immediately without consuming attempts.
+  [[nodiscard]] bool connect(int max_attempts = kDefaultConnectAttempts);
 
   void disconnect();
 
@@ -203,6 +215,22 @@ private:
   // Copy the live connection pointer under the mutex; marks the client
   // disconnected (with the operation name) when the connection is gone.
   natsConnection *acquire_connection(const std::string &operation);
+  // Created (header-carrying) message together with the live connection it must
+  // be sent on.
+  struct PreparedMessage {
+    natsConnection *m_conn = nullptr;
+    natsMsg *m_msg = nullptr;
+  };
+  // Shared prologue of request_impl()/publish_with_headers(): ensures a live
+  // connection, creates `data` as a message and applies `headers`. `operation`
+  // names the caller in connection-lost logs, `message_kind` completes the error
+  // strings ("message" / "request message"). On failure the error is recorded
+  // (set_msg_headers destroys the created message) and nullopt is returned.
+  std::optional<PreparedMessage>
+  prepare_message_with_headers(std::string_view subject, std::string_view data,
+                               const NatsHeaders &headers,
+                               const std::string &operation,
+                               const std::string &message_kind);
   // Shared request path used by request()/request_with_headers()
   std::optional<NatsReply>
   request_impl(std::string_view subject, std::string_view data,

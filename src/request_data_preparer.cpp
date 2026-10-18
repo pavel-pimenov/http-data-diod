@@ -1,9 +1,11 @@
 #include "request_data_preparer.hpp"
-#include "common_utils.hpp"
 #include "header_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
-#include <algorithm>
+#include "nlohmann/json.hpp"
+#include "url_utils.hpp"
+#include <string>
+#include <utility>
 
 nlohmann::json
 prepare_request_data(const std::string &request_id, const std::string &method,

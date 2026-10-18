@@ -1,11 +1,16 @@
 #ifndef CRASH_UTILS_HPP
 #define CRASH_UTILS_HPP
 
+#include "string_utils.hpp"
+
+#include <array>
 #include <cxxabi.h>
 #include <cstdlib>
 #include <memory>
 #include <signal.h>
 #include <string>
+#include <string_view>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace crash_utils {
@@ -27,16 +32,13 @@ inline const char *signal_name(int signum) {
   }
 }
 
-inline std::string trim_line(std::string s) {
-  while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
-    s.pop_back();
-  }
-  return s;
+inline std::string trim_line(std::string_view s) {
+  return trim_trailing(s);
 }
 
 inline std::string demangle_symbol(const char *mangled) {
   int status = 0;
-  std::unique_ptr<char, decltype(&std::free)> demangled(
+  std::unique_ptr<char, decltype(&std::free)> const demangled(
       abi::__cxa_demangle(mangled, nullptr, nullptr, &status), &std::free);
   if (status == 0 && demangled) {
     return std::string(demangled.get());
@@ -50,13 +52,14 @@ inline std::string base_name(const std::string &path) {
 }
 
 inline std::string self_exe_path() {
-  char buf[4096];
-  const ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  std::array<char, 4096> buf{};
+  const ssize_t len =
+      readlink("/proc/self/exe", buf.data(), buf.size() - 1);
   if (len <= 0) {
     return "";
   }
   buf[len] = '\0';
-  return std::string(buf);
+  return std::string(buf.data());
 }
 
 } // namespace crash_utils

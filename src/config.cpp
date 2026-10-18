@@ -5,11 +5,11 @@
 #include "nlohmann/json.hpp"
 #include "string_utils.hpp"
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
+#include <exception>
 #include <format>
 #include <initializer_list>
-#include <sstream>
+#include <string>
 
 // Defined in version.cpp (kept in its own TU so version bumps recompile only
 // that file, not the heavy config/main translation units).
@@ -27,9 +27,11 @@ bool get_env_raw(const std::string &env_name, std::string &out_value) {
 }
 
 // Logs the fallback when an env var is not set. Shared by all get_env_*
-// overloads so the message stays consistent.
-void log_env_default(const std::string &env_name,
-                     const std::string &default_val) {
+// overloads so the message stays consistent; templated on the default value so
+// numeric defaults are formatted by the logger instead of being stringified at
+// the call site first.
+template <typename T>
+void log_env_default(const std::string &env_name, const T &default_val) {
   Logger::info("Using default {}: {} (override with {} environment variable)",
                env_name, default_val, env_name);
 }
@@ -171,8 +173,11 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
     check(!cfg.m_nats.m_host.empty(), "NATS host cannot be empty");
     check(!cfg.m_nats.m_subject.empty(), "NATS subject cannot be empty");
     check(positive(cfg.m_nats.m_timeout_ms),
-          std::format("Invalid NATS timeout: {} (must be > 0)",
+          std::format("Invalid NATS_TIMEOUT_MS: {} (must be > 0)",
                       cfg.m_nats.m_timeout_ms));
+    check(positive(cfg.m_nats.m_connect_timeout_ms),
+          std::format("Invalid NATS_CONNECT_TIMEOUT_MS: {} (must be > 0)",
+                      cfg.m_nats.m_connect_timeout_ms));
 
     // NATS TLS
     if (cfg.m_nats.m_enable_tls) {
@@ -550,6 +555,8 @@ void Config::load_nats_config() {
   m_nats.m_subject = get_env_string("NATS_SUBJECT", m_nats.m_subject);
   m_nats.m_queue_group = get_env_string("NATS_QUEUE_GROUP", m_nats.m_queue_group);
   m_nats.m_timeout_ms = get_env_int("NATS_TIMEOUT_MS", m_nats.m_timeout_ms);
+  m_nats.m_connect_timeout_ms =
+      get_env_int("NATS_CONNECT_TIMEOUT_MS", m_nats.m_connect_timeout_ms);
 
   m_nats.m_username = get_env_string("NATS_USERNAME", m_nats.m_username);
   m_nats.m_password = get_env_string("NATS_PASSWORD", m_nats.m_password);
@@ -685,7 +692,7 @@ bool Config::get_env_bool(const std::string &env_name, bool default_val) {
 int Config::get_env_int(const std::string &env_name, int default_val) {
   std::string value;
   if (!get_env_raw(env_name, value)) {
-    log_env_default(env_name, std::to_string(default_val));
+    log_env_default(env_name, default_val);
     return default_val;
   }
   try {
@@ -693,11 +700,10 @@ int Config::get_env_int(const std::string &env_name, int default_val) {
     if (val >= 0) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
-    } else {
-      Logger::warn("{} must be non-negative, using default {}", env_name,
-                   default_val);
-      return default_val;
     }
+    Logger::warn("{} must be non-negative, using default {}", env_name,
+                 default_val);
+    return default_val;
   } catch (const std::exception &e) {
     Logger::warn("Invalid {} value '{}' using default {}", env_name, value,
                  default_val);
@@ -744,7 +750,7 @@ double Config::get_env_double(const std::string &env_name, double default_val,
                               double min_val, double max_val) {
   std::string value;
   if (!get_env_raw(env_name, value)) {
-    log_env_default(env_name, std::to_string(default_val));
+    log_env_default(env_name, default_val);
     return default_val;
   }
   try {
@@ -752,11 +758,10 @@ double Config::get_env_double(const std::string &env_name, double default_val,
     if (val >= min_val && val <= max_val) {
       Logger::info("{} overridden: {}", env_name, val);
       return val;
-    } else {
-      Logger::warn("{} must be between {} and {}, using default {}", env_name,
-                   min_val, max_val, default_val);
-      return default_val;
     }
+    Logger::warn("{} must be between {} and {}, using default {}", env_name,
+                 min_val, max_val, default_val);
+    return default_val;
   } catch (const std::exception &e) {
     Logger::warn("{} parse error: {}, using default {}", env_name, e.what(),
                  default_val);
@@ -786,6 +791,7 @@ NatsConfig Config::create_nats_config() const {
   cfg.m_subject = m_nats.m_subject;
   cfg.m_queue_group = m_nats.m_queue_group;
   cfg.m_timeout_ms = m_nats.m_timeout_ms;
+  cfg.m_connect_timeout_ms = m_nats.m_connect_timeout_ms;
   cfg.m_username = m_nats.m_username;
   cfg.m_password = m_nats.m_password;
   cfg.m_token = m_nats.m_token;

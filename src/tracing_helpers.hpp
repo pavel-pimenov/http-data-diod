@@ -102,8 +102,9 @@ public:
               const std::string &parent_span_id,
               const std::string &request_id = "",
               const nlohmann::json &attrs = nlohmann::json::object()) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, url, status_code, start_us, end_us,
                         proxy_service_name(mode) + "-call-l2-server",
@@ -116,8 +117,9 @@ public:
       int status_code, uint64_t start_us, uint64_t end_us,
       const TraceContext &trace_ctx, const std::string &mode,
       const std::string &span_id, const std::string &request_id) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, path, status_code, start_us, end_us,
                         proxy_service_name(mode) + "-process-request",
@@ -132,8 +134,9 @@ public:
                                  const TraceContext &trace_ctx,
                                  const std::string &mode,
                                  const std::string &request_id) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     tracer->log_request(method, path, status_code, start_us, end_us,
                         proxy_service_name(mode), request_id,
@@ -142,7 +145,7 @@ public:
   }
 
   static std::string generate_span_id(JaegerLogger *tracer) {
-    return tracer ? tracer->generate_span_id() : "";
+    return tracer ? JaegerLogger::generate_span_id() : "";
   }
 
   static void
@@ -151,8 +154,9 @@ public:
                 const std::string &trace_id, const std::string &span_id,
                 const std::string &parent_id, int64_t start_us,
                 const nlohmann::json &extra_attrs = nlohmann::json::object()) {
-    if (!tracer)
+    if (!tracer) {
       return;
+    }
 
     const int64_t end_us = TimeUtils::epoch_us();
     nlohmann::json attrs = extra_attrs;
@@ -246,7 +250,7 @@ inline std::string resolve_trace_id(JaegerLogger *tracer,
   if (!ctx.m_trace_id.empty()) {
     return ctx.m_trace_id;
   }
-  return tracer ? tracer->generate_trace_id() : "";
+  return tracer ? JaegerLogger::generate_trace_id() : "";
 }
 
 // Generates a fresh span id (or reuses span_id_hint) plus the traceparent
@@ -264,7 +268,7 @@ make_span_and_traceparent(JaegerLogger *tracer, const TraceContext &ctx,
     return {span_id, ctx.m_traceparent_header};
   }
   return {span_id,
-          tracer->generate_traceparent(ctx.m_trace_id, span_id, sampled)};
+          JaegerLogger::generate_traceparent(ctx.m_trace_id, span_id, sampled)};
 }
 
 // Logs the proxy INCOMING span and returns the generated inlet span id. Shared
@@ -279,7 +283,7 @@ inline std::string log_incoming_span(JaegerLogger *tracer,
     return "";
   }
   const std::string trace_id = resolve_trace_id(tracer, trace_ctx);
-  const std::string span_id = tracer->generate_span_id();
+  const std::string span_id = JaegerLogger::generate_span_id();
   tracer->log_request("INCOMING", path, 200, start_us, start_us,
                       "l2-proxy-proxy", request_id, trace_id, span_id,
                       trace_ctx.m_parent_id, nlohmann::json({}));
@@ -302,7 +306,7 @@ inline void add_proxy_trace_fields(json &request_data, JaegerLogger *tracer,
   request_data[NatsContract::kProxySpanId] = span_id;
   request_data[NatsContract::kProxyInletSpanId] = inlet_span_id;
   request_data[NatsContract::kProxyTraceparent] =
-      tracer->generate_traceparent(trace_id, span_id, sampled);
+      JaegerLogger::generate_traceparent(trace_id, span_id, sampled);
 }
 
 // Sets the "traceparent" response header from the request's trace context.

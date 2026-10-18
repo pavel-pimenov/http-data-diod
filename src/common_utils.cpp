@@ -1,19 +1,25 @@
 #include "common_utils.hpp"
-#include "base64_utils.hpp"
 #include "error_types.hpp"
-#include "header_utils.hpp"
+#include "http_setup.hpp"
 #include "json_utils.hpp"
-#include "url_utils.hpp"
+#include "prometheus/counter.h"
+#include "logger.hpp"
+#include "nlohmann/json.hpp"
 #include <array>
+#include <cstddef>
+#include <expected>
+#include <cstdint>
 #include <format>
 #include <openssl/sha.h>
-#include <span>
+#include <string>
 #include <string_view>
+#include <utility>
 
 std::string compute_sha256_hex(std::string_view data) {
-  static constexpr char g_hex[] = "0123456789abcdef";
-  unsigned char hash[SHA256_DIGEST_LENGTH];
-  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(), hash);
+  static constexpr std::string_view g_hex = "0123456789abcdef";
+  std::array<unsigned char, SHA256_DIGEST_LENGTH> hash{};
+  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
+         hash.data());
   std::string result;
   result.reserve(SHA256_DIGEST_LENGTH * 2);
   for (const unsigned char byte : hash) {
@@ -51,12 +57,12 @@ TraceContext handle_trace_context(std::string_view traceparent_raw,
   ctx.m_sampled = true;
 
   if (!traceparent_raw.empty() && tracer &&
-      tracer->parse_traceparent(traceparent_raw, ctx.m_trace_id,
-                                ctx.m_parent_id, ctx.m_sampled)) {
-    ctx.m_span_id = tracer->generate_span_id();
+      JaegerLogger::parse_traceparent(traceparent_raw, ctx.m_trace_id,
+                                      ctx.m_parent_id, ctx.m_sampled)) {
+    ctx.m_span_id = JaegerLogger::generate_span_id();
   } else if (tracer) {
-    ctx.m_trace_id = tracer->generate_trace_id();
-    ctx.m_span_id = tracer->generate_span_id();
+    ctx.m_trace_id = JaegerLogger::generate_trace_id();
+    ctx.m_span_id = JaegerLogger::generate_span_id();
     ctx.m_parent_id = "";
   } else {
     ctx.m_trace_id = "";
@@ -68,7 +74,7 @@ TraceContext handle_trace_context(std::string_view traceparent_raw,
 
   // Both traced branches converge here: rebuild the traceparent from the
   // freshly generated span id so the downstream span links to the log records.
-  ctx.m_traceparent_header = tracer->generate_traceparent(
+  ctx.m_traceparent_header = JaegerLogger::generate_traceparent(
       ctx.m_trace_id, ctx.m_span_id, ctx.m_sampled);
 
   return ctx;

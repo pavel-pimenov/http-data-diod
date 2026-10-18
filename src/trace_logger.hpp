@@ -2,14 +2,13 @@
 #define TRACE_LOGGER_HPP
 
 #include "nlohmann/json.hpp"
+#include "json_utils.hpp"
 #include "sentry_client.hpp"
+#include "async_sender_queue.hpp"
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -95,14 +94,11 @@ private:
     nlohmann::json m_attributes;
   };
 
-  // ===== Span queue + its synchronization (guarded by m_mutex) and the sender
-  // thread draining it =====
+  // ===== Self-synchronized span queue and the sender thread draining it =====
   struct Delivery {
-    struct SpanQueue {
-      std::deque<SpanData> m_spans;
-      std::mutex m_mutex;
-      std::condition_variable_any m_cv;
-    } m_span_queue;
+    AsyncSenderQueue<SpanData> m_span_queue{
+        g_tracing_max_queue_size,
+        AsyncSenderQueue<SpanData>::OverflowPolicy::DropNewest};
     std::jthread m_sender_thread;
   } m_delivery;
 
@@ -142,7 +138,6 @@ private:
   };
   BreakerState m_breaker;
 
-private:
   bool send_batch(const std::vector<SpanData> &batch);
   // Sends one batch with retries and records timing/queue/counter metrics.
   void send_batch_with_retry(const std::vector<SpanData> &batch,
@@ -151,6 +146,12 @@ private:
   // (one multi-item envelope per batch). Fire-and-forget, never blocks the
   // request path; per-span outcome lands in m_sentry_metrics.m_spans_sent/_failed.
   void deliver_sentry_transactions(const std::vector<SpanData> &batch);
+  // Records one delivery failure against a sink and opens its exponential
+  // breaker once the consecutive-failure threshold is reached: subsequent
+  // batches are then shed for the cooldown window instead of hammering the
+  // dead target. Shared by the Jaeger and Sentry/GlitchTip sinks.
+  void record_sink_failure(ExponentialBreaker &breaker, uint64_t now_steady_ms,
+                           std::string_view sink_name) const;
 
   // Fast random hex generation (thread-local, no re-initialization)
   static std::string random_hex_fast(size_t len);
@@ -166,13 +167,7 @@ public:
                                         const std::string &service_name,
                                         const nlohmann::json &attributes) {
     nlohmann::json tags = nlohmann::json::object();
-    for (const auto &el : attributes.items()) {
-      if (el.value().is_string()) {
-        tags[el.key()] = el.value();
-      } else {
-        tags[el.key()] = el.value().dump();
-      }
-    }
+    merge_stringified_tags(tags, attributes);
 
     nlohmann::json span = nlohmann::json::object();
     span["id"] = span_id;
@@ -250,13 +245,13 @@ public:
                TracingBreakerSettings breaker_settings = {});
   ~JaegerLogger();
 
-  std::string generate_trace_id();
-  std::string generate_span_id();
+  static std::string generate_trace_id();
+  static std::string generate_span_id();
 
   // W3C Trace Context helpers
-  std::string generate_traceparent(std::string_view trace_id,
-                                   std::string_view span_id,
-                                   bool sampled = true);
+  static std::string generate_traceparent(std::string_view trace_id,
+                                          std::string_view span_id,
+                                          bool sampled = true);
 
   // Parse traceparent header: "00-{trace-id}-{parent-id}-{flags}"
   static bool parse_traceparent(std::string_view traceparent,
@@ -282,18 +277,18 @@ public:
   // Simplified validation
   static bool validate_traceparent(std::string_view traceparent);
 
-  void sender_loop(std::stop_token st);
+  void sender_loop(const std::stop_token &st);
   bool send_span(const std::string &trace_id, const std::string &span_id,
                  const std::string &parent_id, const std::string &name,
                  uint64_t start_us, uint64_t end_us,
                  const std::string &service_name,
                  const nlohmann::json &attributes = {});
 
-  bool should_sample() const;
+  [[nodiscard]] bool should_sample() const;
 
   // Check if sampling should be applied (with error flag - always sample
   // errors)
-  bool should_sample(bool is_error) const;
+  [[nodiscard]] bool should_sample(bool is_error) const;
 };
 
 #endif // TRACE_LOGGER_HPP

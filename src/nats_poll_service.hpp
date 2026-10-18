@@ -16,14 +16,14 @@ private:
                              RetryHandler &reconnect_backoff,
                              bool &reconnect_logged);
   void poll_notify_resend(const std::string &request_id, bool &first_attempt,
-                          bool &resend_logged);
+                          bool &resend_logged) const;
   void poll_delay_for_empty_reply(const std::string &request_id,
                                   const std::string &last_error,
                                   bool &no_responders_logged);
   // Backoff sleep between poll attempts; records the delay in
   // l2_proxy_nats_poll_retry_wait_seconds so retry cost is visible next to
   // the pure NATS attempt latency.
-  void poll_sleep_backoff(int delay_ms);
+  void poll_sleep_backoff(int delay_ms) const;
 
 public:
   explicit NatsPollService(AppContext &ctx);

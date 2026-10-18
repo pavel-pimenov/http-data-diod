@@ -1,8 +1,23 @@
 #include "request_handler.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
+#include "config.hpp"
 #include "crash_handler.hpp"
 #include "db_gateway_routing.hpp"
-#include <execinfo.h>
+#include "stats_logger.hpp"
+#include "url_utils.hpp"
+#include "json_response_utils.hpp"
+#include <cstddef>
+#include <exception>
+#include "dynamic_labeled_family.hpp"
+#include <cstdint>
+#include "trace_context_extractor.hpp"
+#include "response_builder.hpp"
+#include "request_data_preparer.hpp"
+#include "header_utils.hpp"
+#include "time_utils.hpp"
+#include <memory>
+#include <utility>
 #if __has_include(<stacktrace>)
 #include <stacktrace>
 #endif
@@ -14,7 +29,7 @@
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
-#include "nats_client.hpp"
+#include "nats_client.hpp" // IWYU pragma: keep (NatsClient via shared_ptr needs complete type)
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
 #include "sentry_client.hpp"
@@ -51,7 +66,7 @@ RequestHandler::RequestHandler(AppContext &ctx, StatsLogger &stats_logger)
 void RequestHandler::handle_get(const httplib::Request &req,
                                 httplib::Response &res) {
   // Liveness probe - just check if process is running
-  if (req.path == kHealthLivePath || req.path == kHealthPath) {
+  if (is_liveness_path(req.path)) {
     set_health_alive(res, "l2-proxy");
     return;
   }
@@ -98,7 +113,7 @@ void RequestHandler::handle_get(const httplib::Request &req,
 }
 
 void RequestHandler::handle_crash_test(const httplib::Request &req,
-                                       httplib::Response &res) {
+                                       httplib::Response &res) const {
   // Intentionally crashes the process to test the crash handler. Guarded
   // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
   // not remotely SIGSEGV the proxy.
@@ -176,25 +191,18 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
     nats_healthy = false;
   }
 
-  m_ctx.m_proxy.m_metrics->m_nats_connected.Set(nats_healthy ? 1.0 : 0.0);
-  m_ctx.m_proxy.m_metrics->m_health_ready.Set(nats_healthy ? 1.0 : 0.0);
+  set_nats_readiness_gauges(m_ctx.m_proxy.m_metrics->m_nats_connected,
+                            m_ctx.m_proxy.m_metrics->m_health_ready,
+                            nats_healthy);
 
   if (nats_healthy) {
-    res.status = 200;
-    res.set_content(
-        R"({"status": "ready", "service": "l2-proxy", "messaging": "nats"})",
-        "application/json");
+    set_health_ready_nats(res, "l2-proxy");
   } else {
-    res.status = 503;
-    nlohmann::json error_body;
-    error_body["status"] = "not_ready";
-    error_body["service"] = "l2-proxy";
-    error_body["error"] = error_msg;
-    send_json_response(res, res.status, error_body);
+    set_health_not_ready_nats(res, "l2-proxy", error_msg);
   }
 }
 
-void RequestHandler::handle_duplicates(httplib::Response &res) {
+void RequestHandler::handle_duplicates(httplib::Response &res) const {
   // Simple report of duplicate POST requests detected from clients. When the
   // detector is absent (non-proxy mode) or disabled this endpoint answers 404
   // so callers can distinguish "not supported here" from "empty report".
@@ -212,7 +220,7 @@ void RequestHandler::handle_duplicates(httplib::Response &res) {
 
 void RequestHandler::handle_post(const httplib::Request &req,
                                  httplib::Response &res) {
-  const std::string &body = req.body;
+  const auto &body = req.body;
   increment_and_log_request_received(m_ctx.m_proxy.m_metrics->m_bytes_received,
                                      "Proxy", body.size());
 
@@ -298,7 +306,7 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
 // ============================================================================
 bool RequestHandler::record_and_maybe_reject_duplicate(
     const std::string &client_id, const std::string &client_ip,
-    const std::string &body, httplib::Response &res) {
+    const std::string &body, httplib::Response &res) const {
   if (!m_ctx.m_proxy.m_duplicate_detector) {
     return false;
   }
@@ -343,7 +351,7 @@ bool RequestHandler::fail_backend_request(
     httplib::Response &res, const std::string &method, const std::string &path,
     int status, const std::string &message, const std::string &category,
     const std::string &detail, uint64_t start_us, const TraceContext &trace_ctx,
-    const std::string &request_id) {
+    const std::string &request_id) const {
   BackendErrorSpanLogger::log_backend_error(
       m_ctx.m_tracer.get(), method, path, status, start_us, trace_ctx,
       m_ctx.m_config.m_app.m_mode, request_id, category, detail);
@@ -363,7 +371,7 @@ bool RequestHandler::reject_rate_limited(
     httplib::Response &res, const std::string &client_ip,
     const std::string &client_id, const std::string &traceparent_raw,
     const std::string &reason, prometheus::Counter &rejected_counter,
-    const std::string &message, uint64_t limit, uint64_t remaining) {
+    const std::string &message, uint64_t limit, uint64_t remaining) const {
   rejected_counter.Increment();
   increment_per_client_metric(m_ctx.m_proxy.m_per_client_id_metrics_collector,
                               client_id, 1);
@@ -383,7 +391,8 @@ bool RequestHandler::reject_rate_limited(
 TraceContext RequestHandler::setup_tracing(
     const httplib::Request &req, const std::string &request_id,
     long long start_us, std::string &inlet_span_id,
-    std::string &backend_push_span_id, std::string &traceparent_for_backend) {
+    std::string &backend_push_span_id,
+    std::string &traceparent_for_backend) const {
   const TraceContext trace_ctx = extract_trace_context(
       req, m_ctx.m_tracer.get(), backend_push_span_id, traceparent_for_backend);
 
@@ -400,7 +409,7 @@ TraceContext RequestHandler::setup_tracing(
 std::string RequestHandler::push_to_backend(
     nlohmann::json request_data, const std::string &request_id,
     const std::string &trace_id, const std::string &backend_push_span_id,
-    const TraceContext &trace_ctx) {
+    const TraceContext &trace_ctx) const {
   Logger::debug("Proxy queueing request via NATS: request_id={} size={}",
                 request_id, request_data.size());
 
@@ -464,7 +473,7 @@ void RequestHandler::process_request(const std::string &method,
       m_ctx.m_proxy.m_metrics->m_client_requests);
 
   // RAII: decrement active clients on exit
-  ActiveClientTracker tracker(m_stats_logger);
+  ActiveClientTracker const tracker(m_stats_logger);
 
   Logger::debug("Proxy received request.path: {}", req.path);
   Logger::debug("Proxy received request body ({} bytes): {}", req.body.size(),
@@ -497,7 +506,7 @@ void RequestHandler::process_request(const std::string &method,
 
   // Add proxy span info for tracing chain
   if (m_ctx.m_tracer) {
-    const auto nats_push_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_push_span_id = JaegerLogger::generate_span_id();
     add_proxy_trace_fields(request_data, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_push_span_id);
   }
@@ -558,8 +567,8 @@ void RequestHandler::handle_request(const httplib::Request &req,
   // Correlate every log line of this request via the thread-local context.
   // request_id/trace_id are set later in process_request once they exist;
   // the scope restores the previous values on exit (covers keep-alive reuse).
-  ScopedRequestContext req_ctx(req);
-  const std::string &client_ip = req_ctx.client_ip();
+  ScopedRequestContext const req_ctx(req);
+  const auto &client_ip = req_ctx.client_ip();
 
   // Per-client distribution metric: X-DataHub-Client-Id header tells apart
   // clients that share one IP (e.g. behind NAT) in Grafana.
@@ -589,7 +598,7 @@ void RequestHandler::handle_request(const httplib::Request &req,
     return;
   }
 
-  const std::string &path = req.path;
+  const auto &path = req.path;
 
   // Phase 2: Process request (push to backend, poll, cache)
   process_request(method, path, body, req, res, client_ip);
@@ -605,7 +614,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   const uint64_t start_us = get_current_timestamp_us();
   const auto request_id = m_services.m_id_generator.generate_uuid();
 
-  ScopedRequestContext req_ctx(req);
+  ScopedRequestContext const req_ctx(req);
   Logger::set_request_id(request_id);
   std::string inlet_span_id;
   const TraceContext trace_ctx = begin_request_trace(
@@ -618,7 +627,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!m_ctx.m_tracer) {
       return;
     }
-    const auto nats_db_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_db_span_id = JaegerLogger::generate_span_id();
     add_proxy_trace_fields(request_json, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_db_span_id,
                            trace_ctx.m_sampled);
@@ -733,7 +742,7 @@ void RequestHandler::send_db_gateway_error(
     httplib::Response &res, int status, const std::string &code,
     const std::string &message, const std::string &method,
     const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
-    const std::string &request_id) {
+    const std::string &request_id) const {
   if (m_ctx.m_tracer) {
     JaegerSpanLogger::log_proxy_response(
         m_ctx.m_tracer.get(), method, path, status, start_us,

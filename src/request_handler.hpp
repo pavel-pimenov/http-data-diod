@@ -31,7 +31,7 @@ private:
   // NATS push/poll services bound to m_ctx).
   struct Services {
     explicit Services(AppContext &ctx)
-        : m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
+        : m_push_service(ctx), m_poll_service(ctx) {}
 
     RequestIdGenerator m_id_generator;
     NatsPushService m_push_service;
@@ -58,15 +58,15 @@ private:
                              const std::string &request_id, long long start_us,
                              std::string &inlet_span_id,
                              std::string &backend_push_span_id,
-                             std::string &traceparent_for_backend);
+                             std::string &traceparent_for_backend) const;
 
   // Phase 3b: Push request to backend (NATS)
   // Returns the serialized request JSON for use in poll_for_response()
-  std::string push_to_backend(nlohmann::json request_data,
-                              const std::string &request_id,
-                              const std::string &trace_id,
-                              const std::string &backend_push_span_id,
-                              const TraceContext &trace_ctx);
+  [[nodiscard]] std::string push_to_backend(nlohmann::json request_data,
+                                            const std::string &request_id,
+                                            const std::string &trace_id,
+                                            const std::string &backend_push_span_id,
+                                            const TraceContext &trace_ctx) const;
 
   // Phase 3c: Poll for response from backend
   std::string poll_for_response(const std::string &request_id,
@@ -89,7 +89,7 @@ private:
                             const std::string &category,
                             const std::string &detail, uint64_t start_us,
                             const TraceContext &trace_ctx,
-                            const std::string &request_id);
+                            const std::string &request_id) const;
 
   // HTTP 429 rejection shared by the global and per-IP rate limiters:
   // increments the rejection counters, sets Retry-After + X-RateLimit-*
@@ -101,28 +101,29 @@ private:
                            const std::string &reason,
                            prometheus::Counter &rejected_counter,
                            const std::string &message, uint64_t limit,
-                           uint64_t remaining);
+                           uint64_t remaining) const;
 
   // Records a duplicate POST (by SHA-256 of the body) and, when
   // DUPLICATE_REJECT_ENABLED, writes a 409 and returns true so the caller
   // stops processing. Returns false to continue with the request.
-bool record_and_maybe_reject_duplicate(const std::string &client_id,
-                                          const std::string &client_ip,
-                                          const std::string &body,
-                                          httplib::Response &res);
+  bool record_and_maybe_reject_duplicate(const std::string &client_id,
+                                         const std::string &client_ip,
+                                         const std::string &body,
+                                         httplib::Response &res) const;
 
   // Increments a per-client-id counter bucket (request counts, duplicate or
   // rate-limit rejections) when the dynamic-labeled collector is set.
-  void increment_per_client_metric(
+  static void increment_per_client_metric(
       const std::shared_ptr<DynamicLabeledFamily<prometheus::Counter>>
           &collector,
       const std::string &client_id, uint64_t bucket);
 
   // Admin/debug GET endpoints; dispatch helpers for handle_get.
-  void handle_crash_test(const httplib::Request &req, httplib::Response &res);
-  void handle_stacktrace(httplib::Response &res);
+  void handle_crash_test(const httplib::Request &req,
+                         httplib::Response &res) const;
+  static void handle_stacktrace(httplib::Response &res);
   void handle_health_ready(httplib::Response &res);
-  void handle_duplicates(httplib::Response &res);
+  void handle_duplicates(httplib::Response &res) const;
 
 public:
   explicit RequestHandler(AppContext &ctx, StatsLogger &stats_logger);
@@ -142,7 +143,7 @@ private:
                              const std::string &message,
                              const std::string &method, const std::string &path,
                              uint64_t start_us, const TraceContext &trace_ctx,
-                             const std::string &request_id);
+                             const std::string &request_id) const;
   // GET /v1/sql listing: 405 for non-GET, otherwise the configured databases
   // as a JSON array (pure config + HTTP, no NATS round-trip).
   void handle_db_gateway_list(httplib::Response &res,

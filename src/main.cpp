@@ -1,15 +1,21 @@
+#include "config.hpp"
 #include "crash_handler.hpp"
+#include "error_types.hpp"
+#include "json_response_utils.hpp"
 #include "logger.hpp"
+#include "metrics_manager.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdlib>
+#include <exception>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 
@@ -19,6 +25,8 @@
 #include <prometheus/exposer.h>
 
 #include "nlohmann/json.hpp"
+#include "prometheus/family.h"
+#include "prometheus/registry.h"
 #include "stats_page.hpp"
 
 #include "app_context.hpp"
@@ -28,8 +36,7 @@
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
 #include "timed_task_queue.hpp"
-
-extern const char *g_l2_proxy_version;
+#include "trace_logger.hpp"
 
 using json = nlohmann::json;
 
@@ -92,7 +99,7 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
     Logger::info("{} server thread started, listening on port {}", server_name,
                  port);
     try {
-      bool listen_result = server.listen("0.0.0.0", port);
+      bool const listen_result = server.listen("0.0.0.0", port);
       if (!listen_result) {
         Logger::error(
             "{} server.listen() returned false - port binding failed!",
@@ -204,6 +211,20 @@ std::unique_ptr<StatsLogger> start_stats_logging(AppContext &app_ctx) {
   return sl;
 }
 
+// Response accounting shared by the proxy and server HTTP servers: every
+// answered request except the observability endpoints is counted into the
+// per-status family. The proxy additionally skips its /debug routes.
+void count_response_status(const httplib::Request &req,
+                           prometheus::Family<prometheus::Counter> &responses,
+                           int status, bool skip_debug) {
+  const auto &path = req.path;
+  if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
+      (skip_debug && path.rfind("/debug", 0) == 0)) {
+    return;
+  }
+  responses.Add({{"status", std::to_string(status)}}).Increment();
+}
+
 void run_proxy(AppContext &app_ctx) {
   // Proxy runtime components are initialized here (not in the ctor) so
   // AppContext stays constructible in unit tests without the NATS library.
@@ -247,14 +268,8 @@ void run_proxy(AppContext &app_ctx) {
   auto on_proxy_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
         app_ctx.m_proxy.m_metrics->m_in_flight_requests.Decrement();
-        const std::string &path = req.path;
-        if (path == "/metrics" || path.rfind("/health", 0) == 0 ||
-            path.rfind("/debug", 0) == 0) {
-          return;
-        }
-        app_ctx.m_proxy.m_metrics->m_responses_total
-            .Add({{"status", std::to_string(res.status)}})
-            .Increment();
+        count_response_status(req, app_ctx.m_proxy.m_metrics->m_responses_total,
+                              res.status, true);
       };
 
   // Proxy-only: measures how long each accepted request waits in the task
@@ -290,18 +305,12 @@ void run_worker(AppContext &app_ctx) {
   health_server.Get("/health/ready", [&worker, &app_ctx](const httplib::Request & /*req*/,
                                                  httplib::Response &res) {
     const bool ready = worker.is_nats_connected();
-    app_ctx.m_worker.m_metrics->m_nats_connected.Set(ready ? 1.0 : 0.0);
-    app_ctx.m_worker.m_metrics->m_health_ready.Set(ready ? 1.0 : 0.0);
+    set_nats_readiness_gauges(app_ctx.m_worker.m_metrics->m_nats_connected,
+                              app_ctx.m_worker.m_metrics->m_health_ready, ready);
     if (ready) {
-      res.status = 200;
-      res.set_content(
-          R"({"status": "ready", "service": "l2-worker", "messaging": "nats"})",
-          "application/json");
+      set_health_ready_nats(res, "l2-worker");
     } else {
-      res.status = 503;
-      res.set_content(
-          R"({"status": "not_ready", "service": "l2-worker", "error": "NATS not connected"})",
-          "application/json");
+      set_health_not_ready_nats(res, "l2-worker", "NATS not connected");
     }
   });
 
@@ -354,13 +363,8 @@ void run_l2_server(AppContext &app_ctx) {
 
   auto on_server_response =
       [&app_ctx](const httplib::Request &req, const httplib::Response &res) {
-        const std::string &path = req.path;
-        if (path == "/metrics" || path.rfind("/health", 0) == 0) {
-          return;
-        }
-        app_ctx.m_server.m_metrics->m_responses_total
-            .Add({{"status", std::to_string(res.status)}})
-            .Increment();
+        count_response_status(req, app_ctx.m_server.m_metrics->m_responses_total,
+                              res.status, false);
       };
 
   // The L2 server has no external gating dependency (no NATS), so it is ready
@@ -464,7 +468,8 @@ int main() { // NOLINT(bugprone-exception-escape)
       {
         const char *dir =
             crash_dump_dir ? crash_dump_dir : g_default_crash_dump_dir;
-        std::string test_file = std::string(dir) + "/crash_test_marker.txt";
+        std::string const test_file =
+            std::string(dir) + "/crash_test_marker.txt";
         std::ofstream f(test_file);
         if (f.is_open()) {
           f << "crash handler test marker\n";

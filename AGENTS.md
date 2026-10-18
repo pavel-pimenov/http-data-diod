@@ -4,6 +4,7 @@
 * не предлагай переводить внешние либы и другие либы на git submodule
 * redis ветка отключена и не используется в проекте - проводи анализ только для режима рабты в NATS
 * l2-server — не продакшен-режим (тестовый стаб для worker): метрики/stats/дашборды/алерты для него не развивать, новых per-mode панелей и отдельного /stats не делать; общий реестр l2_common туда только подмешивается как есть.
+* Oracle-исполнитель (`src/db_query_executor_oracle.cpp`) тестами не покрывать: live Oracle в юнит-тестах не поднимаем (профиль `oracle` запускается по demand), покрытие/ветви по нему не гнать и baseline по нему не улучшать. Покрытие DB-слоя развиваем только по PostgreSQL.
 * Все изменения проверяй через сборку в контейнерах - для этого запускай скрипт ./rebuild-and-run.sh
 * После запуска контейнеров тест корректной работы сервисов проверяется через запуск python3 message_counter.py --iterations 1 --concurrent 1
 * Запускать отдельные команды сборки на локальной машине не нужно - на нем нет такого окружения.
@@ -13,6 +14,7 @@
   - `lcov --capture --directory <gcda_dir> --base-directory <repo_root> --substitute 's|/app|<абс. repo>/src|' --ignore-errors source,empty,unused,inconsistent -o cov.info`, затем `lcov --extract cov.info '<repo>/src/*' -o proj.info` и `genhtml proj.info -o html/`.
   - `gcovr --object-directory <gcda_dir> --root <repo>/src --filter 'src/.*' --html --html-details -o coverage.html --gcov-ignore-errors=all`.
 * Используй clang-tidy
+* Используй cppcheck (`./scripts/run-cppcheck.sh`; вендорные заголовки гасятся `src/cppcheck-suppressions.txt`)
 * Правила наименования C++
   - Для членов класс используй в имени префикс m_
   - Для глобальных или статических перемых используй в имени префикс g_

@@ -1,31 +1,23 @@
 #include "sentry_client.hpp"
 
+#include "async_sender_queue.hpp"
+#include "http_setup.hpp"
+#include "json_utils.hpp"
+#include "nlohmann/json.hpp"
+#include "prometheus/counter.h"
+#include "prometheus/gauge.h"
 #include "random_utils.hpp"
 #include "time_utils.hpp"
 #include "logger.hpp"
 #include "httplib/httplib.h"
-#include <algorithm>
-#include <atomic>
-
-namespace {
-
-void append_hex_digits(uint64_t value, std::string &out) {
-  static constexpr char k_hex_digits[] = "0123456789abcdef";
-  for (size_t i = 0; i < 16; ++i) {
-    out.push_back(k_hex_digits[(value >> (4 * i)) & 0xF]);
-  }
-}
-
-std::string generate_event_id() {
-  std::string hex_id;
-  hex_id.reserve(32);
-  for (size_t i = 0; i < 2; ++i) {
-    append_hex_digits(RandomUtils::rng()(), hex_id);
-  }
-  return hex_id;
-}
-
-} // namespace
+#include <string>
+#include <cstddef>
+#include <optional>
+#include <stop_token>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace sentry {
 
@@ -72,10 +64,9 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
       last_slash == rest.size() - 1) {
     return std::nullopt;
   }
+  // The check above rejects a trailing slash, so at least one character always
+  // follows it and the project id is never empty.
   const std::string project_id(rest.substr(last_slash + 1));
-  if (project_id.empty()) {
-    return std::nullopt;
-  }
   const std::string host_and_path(rest.substr(0, last_slash));
   const size_t first_slash = host_and_path.find('/');
   const std::string host_port =
@@ -89,7 +80,7 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
     return std::nullopt;
   }
   int port = scheme == "https" ? 443 : 80;
-  if (port_sep != std::string::npos && port_sep + 1 < host_port.size()) {
+  if (port_sep != std::string::npos && port_sep + 1 < host_port.size()) { //-V1051
     const std::string_view port_str =
         std::string_view(host_port).substr(port_sep + 1);
     if (port_str.empty() ||
@@ -108,11 +99,10 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
   std::string path_prefix = first_slash == std::string::npos
                                 ? ""
                                 : host_and_path.substr(first_slash);
+  // Stripping trailing slashes also turns a bare "/" into "", so no separate
+  // "/"-case is needed here.
   while (!path_prefix.empty() && path_prefix.back() == '/') {
     path_prefix.pop_back();
-  }
-  if (path_prefix == "/") {
-    path_prefix.clear();
   }
 
   return DsnData{scheme, host, port, path_prefix, public_key, secret_key,
@@ -135,12 +125,49 @@ std::string level_to_string(EventLevel level) {
   return "error";
 }
 
+std::string envelope_path(const DsnData &dsn) {
+  return dsn.m_path_prefix + "/api/" + dsn.m_project_id + "/envelope/";
+}
+
+std::string auth_header(const DsnData &dsn) {
+  std::string key = dsn.m_public_key;
+  if (!dsn.m_secret_key.empty()) {
+    key += "/" + dsn.m_secret_key;
+  }
+  return "Sentry sentry_version=7, sentry_key=" + key;
+}
+
+nlohmann::json envelope_header(const std::string &event_id) {
+  return nlohmann::json{
+      {"event_id", event_id},
+      {"sent_at", TimeUtils::format_rfc3339()},
+      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
+}
+
+std::string envelope_item(const nlohmann::json &payload, std::string_view type,
+                          bool include_length) {
+  const std::string body = payload.dump();
+  nlohmann::json item = {{"type", std::string(type)}};
+  if (include_length) {
+    item["length"] = body.size();
+  }
+  return item.dump() + "\n" + body;
+}
+
+nlohmann::json service_tags(const std::string &service_name) {
+  nlohmann::json tags = nlohmann::json::object();
+  if (!service_name.empty()) {
+    tags["service"] = service_name;
+  }
+  return tags;
+}
+
 nlohmann::json build_event_json(const SentryEvent &event,
                                 const std::string &service_name,
                                 const std::string &environment,
                                 const std::string &release) {
   nlohmann::json root = nlohmann::json::object();
-  root["event_id"] = generate_event_id();
+  root["event_id"] = RandomUtils::hex_string(32);
   root["timestamp"] = TimeUtils::format_rfc3339();
   root["platform"] = "native";
   root["level"] = level_to_string(event.m_level);
@@ -156,20 +183,11 @@ nlohmann::json build_event_json(const SentryEvent &event,
     root["transaction"] = event.m_transaction;
   }
 
-  nlohmann::json tags = nlohmann::json::object();
-  if (!service_name.empty()) {
-    tags["service"] = service_name;
-  }
+  nlohmann::json tags = service_tags(service_name);
   if (!event.m_request_id.empty()) {
     tags["request_id"] = event.m_request_id;
   }
-  for (const auto &entry : event.m_tags.items()) {
-    if (entry.value().is_string()) {
-      tags[entry.key()] = entry.value();
-    } else {
-      tags[entry.key()] = entry.value().dump();
-    }
-  }
+  merge_stringified_tags(tags, event.m_tags);
   if (!tags.empty()) {
     root["tags"] = tags;
   }
@@ -195,22 +213,16 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
                            const std::string &service_name,
                            const std::string &environment,
                            const std::string &release) {
+  (void)dsn;
   const nlohmann::json event_json =
       build_event_json(event, service_name, environment, release);
   const std::string event_id = event_json.value("event_id", "");
 
-  const nlohmann::json header = {
-      {"event_id", event_id},
-      {"sent_at", TimeUtils::format_rfc3339()},
-      {"sdk", {{"name", "http-data-diod"}, {"version", "0"}}}};
-
   // Modern Sentry-compatible servers (glitchtip >= 6) authenticate via the
   // X-Sentry-Auth HTTP header (added in send_envelope) and their Rust
   // envelope parser rejects the legacy in-body auth line, so it is omitted.
-  const nlohmann::json item_header = {{"type", "event"}};
-
-  return header.dump() + "\n" + item_header.dump() + "\n" +
-         event_json.dump();
+  return envelope_header(event_id).dump() + "\n" +
+         envelope_item(event_json, "event");
 }
 
 } // namespace sentry
@@ -229,23 +241,26 @@ SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
                timeout_ms,
                max_queue_size == 0 ? 1 : max_queue_size,
                transport},
-      m_metrics{events_sent, events_failed, queue_size} {
+      m_metrics{events_sent, events_failed, queue_size},
+      m_queue{m_config.m_max_queue_size,
+              AsyncSenderQueue<sentry::SentryEvent>::OverflowPolicy::
+                  DropOldest} {
   if (enabled()) {
     Logger::info("Sentry client enabled: host={} project={} service={}",
                  m_config.m_dsn_data->m_host,
                  m_config.m_dsn_data->m_project_id,
                  m_config.m_service_name);
-    m_queue.m_sender_thread = std::jthread([this](std::stop_token st) {
-      sender_loop(std::move(st));
+    m_sender_thread = std::jthread([this](const std::stop_token &st) {
+      sender_loop(st);
     });
   }
 }
 
 SentryClient::~SentryClient() {
-  if (m_queue.m_sender_thread.joinable()) {
-    m_queue.m_sender_thread.request_stop();
-    m_queue.m_cv.notify_all();
-    m_queue.m_sender_thread.join();
+  if (m_sender_thread.joinable()) {
+    m_sender_thread.request_stop();
+    m_queue.notify_all();
+    m_sender_thread.join();
   }
 }
 
@@ -255,19 +270,11 @@ void SentryClient::capture(const sentry::SentryEvent &event) {
   if (!enabled()) {
     return;
   }
-  {
-    std::lock_guard<std::mutex> lock(m_queue.m_mutex);
-    if (m_queue.m_queue.size() >= m_config.m_max_queue_size) {
-      m_queue.m_queue.pop_front();
-      --m_queue.m_pending;
-      m_metrics.m_events_failed.Increment();
-    }
-    m_queue.m_queue.push_back(event);
-    ++m_queue.m_pending;
-    m_metrics.m_queue_size.Set(
-        static_cast<double>(m_queue.m_pending));
+  const auto outcome = m_queue.push(event);
+  if (outcome.m_dropped) {
+    m_metrics.m_events_failed.Increment();
   }
-  m_queue.m_cv.notify_one();
+  m_metrics.m_queue_size.Set(static_cast<double>(outcome.m_size));
 }
 
 void SentryClient::capture_message(
@@ -284,39 +291,22 @@ void SentryClient::flush() {
   if (!enabled()) {
     return;
   }
-  std::unique_lock<std::mutex> lock(m_queue.m_mutex);
-  m_queue.m_cv.wait(lock, [this] { return m_queue.m_pending.load() == 0; });
+  m_queue.flush();
 }
 
-// NOLINTNEXTLINE(performance-unnecessary-value-param) - cv.wait requires stop_token by value
-void SentryClient::sender_loop(std::stop_token st) {
+void SentryClient::sender_loop(const std::stop_token &st) {
   while (true) {
     std::vector<sentry::SentryEvent> batch;
-    {
-      std::unique_lock<std::mutex> lock(m_queue.m_mutex);
-      m_queue.m_cv.wait(lock, st,
-                        [this] { return !m_queue.m_queue.empty(); });
-      if (m_queue.m_queue.empty()) {
-        break;
-      }
-      const size_t to_take =
-          std::min(m_queue.m_queue.size(), size_t{8});
-      batch.reserve(to_take);
-      for (size_t i = 0; i < to_take; ++i) {
-        batch.push_back(std::move(m_queue.m_queue.front()));
-        m_queue.m_queue.pop_front();
-      }
+    const auto result = m_queue.wait_and_take(st, 0, 8, true, batch);
+    if (result ==
+        AsyncSenderQueue<sentry::SentryEvent>::TakeResult::Stopped) {
+      break;
     }
     for (const auto &event : batch) {
       process_event(event);
     }
-    {
-      std::lock_guard<std::mutex> lock(m_queue.m_mutex);
-      m_queue.m_pending -= batch.size();
-      m_metrics.m_queue_size.Set(
-          static_cast<double>(m_queue.m_pending));
-      m_queue.m_cv.notify_all();
-    }
+    m_metrics.m_queue_size.Set(static_cast<double>(m_queue.size()));
+    m_queue.mark_processed(batch.size());
   }
   Logger::info("{}", "Sentry sender thread stopped");
 }
@@ -345,36 +335,25 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   if (!m_config.m_dsn_data) {
     return false;
   }
-  const std::string path =
-      m_config.m_dsn_data->m_path_prefix + "/api/" +
-      m_config.m_dsn_data->m_project_id + "/envelope/";
+  const std::string path = sentry::envelope_path(*m_config.m_dsn_data);
   // Modern Sentry-compatible servers (glitchtip >= 6) authenticate the DSN
   // via the X-Sentry-Auth header, not the URL userinfo part. The public key
   // is required; the legacy secret key goes after the slash if present.
-  std::string sentry_key = m_config.m_dsn_data->m_public_key;
-  if (!m_config.m_dsn_data->m_secret_key.empty()) {
-    sentry_key += "/" + m_config.m_dsn_data->m_secret_key;
-  }
-  httplib::Headers headers{
-      {"X-Sentry-Auth",
-       "Sentry sentry_version=7, sentry_key=" + sentry_key}};
+  httplib::Headers const headers{
+      {"X-Sentry-Auth", sentry::auth_header(*m_config.m_dsn_data)}};
   const int timeout_seconds = m_config.m_timeout_ms / 1000;
 
   httplib::Result res;
   if (m_config.m_dsn_data->m_scheme == "https") {
     httplib::SSLClient client(m_config.m_dsn_data->m_host,
                               m_config.m_dsn_data->m_port);
-    client.set_connection_timeout(5, 0);
-    client.set_read_timeout(timeout_seconds, 0);
-    client.set_write_timeout(timeout_seconds, 0);
+    setup_http_connection(client, timeout_seconds, false);
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   } else {
     httplib::Client client(m_config.m_dsn_data->m_host,
                            m_config.m_dsn_data->m_port);
-    client.set_connection_timeout(5, 0);
-    client.set_read_timeout(timeout_seconds, 0);
-    client.set_write_timeout(timeout_seconds, 0);
+    setup_http_connection(client, timeout_seconds, false);
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   }

@@ -58,7 +58,7 @@ private:
     uint64_t m_nats_requests = 0;
     uint64_t m_nats_errors = 0;
   };
-  ModeStats collect_mode_stats() const;
+  [[nodiscard]] ModeStats collect_mode_stats() const;
 };
 
 #endif // STATS_LOGGER_HPP

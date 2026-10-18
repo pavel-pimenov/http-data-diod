@@ -3,15 +3,22 @@
 
 #include "logger.hpp"
 #include "rate_limiter.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 class PerIPRateLimiter {
 public:
@@ -50,11 +57,10 @@ private:
     mutable std::mutex m_mutex;
   };
 
-  // Aggregate request/lifecycle counters.
-  struct Counters {
-    std::atomic<uint64_t> m_total_requests{0};
-    std::atomic<uint64_t> m_allowed_requests{0};
-    std::atomic<uint64_t> m_rejected_requests{0};
+  // Aggregate request/lifecycle counters. The request-outcome fields are shared
+  // with the global limiter (RateLimiterCounters); only the per-IP extras live
+  // here.
+  struct Counters : RateLimiterCounters {
     std::atomic<uint64_t> m_unique_ips{0};
     std::atomic<uint64_t> m_evictions{0};
   };
@@ -87,14 +93,14 @@ public:
   PerIPRateLimiter &operator=(PerIPRateLimiter &&) = delete;
 
   bool acquire(const std::string &client_ip) {
-    m_counters.m_total_requests.fetch_add(1, std::memory_order_relaxed);
+    m_counters.count_request();
 
-    std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
+    const std::shared_ptr<RateLimiter> limiter = get_or_create_limiter(client_ip);
     if (!limiter) {
-      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.count_rejected();
       size_t tracked = 0;
       {
-        std::lock_guard lock(m_cache.m_mutex);
+        const std::scoped_lock lock(m_cache.m_mutex);
         tracked = m_cache.m_ip_entries.size();
       }
       Logger::warn(
@@ -106,26 +112,25 @@ public:
     }
 
     if (limiter->acquire()) {
-      m_counters.m_allowed_requests.fetch_add(1, std::memory_order_relaxed);
+      m_counters.count_allowed();
       return true;
-    } else {
-      m_counters.m_rejected_requests.fetch_add(1, std::memory_order_relaxed);
-      record_rejection(client_ip);
-      Logger::debug(
-          "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
-          "empty: max_tokens_per_ip={} burst, refill={}/s). Exceeded sustained "
-          "per-IP request rate. If this is legitimate traffic, increase "
-          "PER_IP_MAX_TOKENS (burst capacity) or PER_IP_REFILL_RATE "
-          "(sustained req/s per IP)",
-          client_ip, m_config.m_max_tokens_per_ip,
-          m_config.m_refill_tokens_per_second_per_ip);
-      return false;
     }
+    m_counters.count_rejected();
+    record_rejection(client_ip);
+    Logger::debug(
+        "PerIPRateLimiter: rate limit exceeded for IP {} (per-IP bucket "
+        "empty: max_tokens_per_ip={} burst, refill={}/s). Exceeded sustained "
+        "per-IP request rate. If this is legitimate traffic, increase "
+        "PER_IP_MAX_TOKENS (burst capacity) or PER_IP_REFILL_RATE "
+        "(sustained req/s per IP)",
+        client_ip, m_config.m_max_tokens_per_ip,
+        m_config.m_refill_tokens_per_second_per_ip);
+    return false;
   }
 
   std::shared_ptr<RateLimiter>
   get_or_create_limiter(const std::string &client_ip) {
-    std::lock_guard lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
 
     auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
@@ -183,9 +188,9 @@ public:
   }
 
   Stats get_stats() const {
-    uint64_t total = m_counters.m_total_requests.load();
-    uint64_t rejected = m_counters.m_rejected_requests.load();
-    std::lock_guard lock(m_cache.m_mutex);
+    const uint64_t total = m_counters.m_total_requests.load();
+    const uint64_t rejected = m_counters.m_rejected_requests.load();
+    const std::scoped_lock lock(m_cache.m_mutex);
     return Stats{total,
                  m_counters.m_allowed_requests.load(),
                  rejected,
@@ -200,13 +205,15 @@ public:
   // Capped to 1000 most-recent IPs to bound Prometheus scrape time and lock
   // hold (p99 mitigation for max_ips=10000, see M4).
   std::vector<std::pair<std::string, IPStats>> get_per_ip_stats() const {
-    std::lock_guard lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     constexpr size_t kMaxExpose = 1000;
     std::vector<std::pair<std::string, IPStats>> result;
     result.reserve(std::min(m_cache.m_ip_entries.size(), kMaxExpose));
     size_t count = 0;
-    for (const std::string &ip : std::views::reverse(m_cache.m_lru_list)) {
-      if (count >= kMaxExpose) break;
+    for (const auto &ip : std::views::reverse(m_cache.m_lru_list)) {
+      if (count >= kMaxExpose) {
+        break;
+      }
       const auto entry_it = m_cache.m_ip_entries.find(ip);
       if (entry_it != m_cache.m_ip_entries.end()) {
         result.emplace_back(
@@ -221,13 +228,13 @@ public:
   }
 
   size_t cleanup_expired_ips() {
-    std::lock_guard lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     return do_cleanup_expired();
   }
 
 private:
   void record_rejection(const std::string &client_ip) {
-    std::lock_guard lock(m_cache.m_mutex);
+    const std::scoped_lock lock(m_cache.m_mutex);
     const auto it = m_cache.m_ip_entries.find(client_ip);
     if (it != m_cache.m_ip_entries.end()) {
       it->second.m_rejected.fetch_add(1, std::memory_order_relaxed);
@@ -243,9 +250,13 @@ private:
         for (int i = 0; i < cleanup_every_seconds && !st.stop_requested();
              ++i) {
           std::this_thread::sleep_for(std::chrono::seconds(1));
-          if (st.stop_requested()) break;
+          if (st.stop_requested()) {
+            break;
+          }
         }
-        if (st.stop_requested()) break;
+        if (st.stop_requested()) {
+          break;
+        }
         cleanup_expired_ips();
       }
       Logger::debug("PerIPRateLimiter: background cleanup thread stopped");
@@ -291,7 +302,7 @@ private:
   void evict_oldest_ips(size_t count) {
     size_t removed = 0;
     for (size_t i = 0; i < count && !m_cache.m_lru_list.empty(); ++i) {
-      const std::string &oldest_ip = m_cache.m_lru_list.front();
+      const auto &oldest_ip = m_cache.m_lru_list.front();
       m_cache.m_ip_entries.erase(oldest_ip);
       m_cache.m_lru_list.pop_front();
       removed++;

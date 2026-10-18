@@ -130,6 +130,24 @@ public:
   static bool is_array(const json &j) { return j.is_array(); }
 };
 
+// Copies the key/value pairs of `source` into `dest` as strings: string values
+// verbatim, everything else via dump(). Flat string maps are required on the
+// wire (Sentry rejects non-string tag values), so the Jaeger span tags and the
+// Sentry event/transaction tags all funnel through this helper. A non-object
+// source is ignored, matching the previous per-caller is_object() guards.
+inline void merge_stringified_tags(json &dest, const json &source) {
+  if (!source.is_object()) {
+    return;
+  }
+  for (const auto &entry : source.items()) {
+    if (entry.value().is_string()) {
+      dest[entry.key()] = entry.value();
+    } else {
+      dest[entry.key()] = entry.value().dump();
+    }
+  }
+}
+
 // Builds the worker->proxy NATS response envelope (the JSON contract in
 // NatsResponseContract). Centralises the 30-line JSON assembly from the
 // l2_worker response path so the shape stays in one, testable place.
@@ -143,7 +161,7 @@ inline json build_nats_response_envelope(
   if (!headers_json.empty()) {
     envelope[NatsResponseContract::kHeaders] = headers_json;
   }
-  json &body = envelope[NatsResponseContract::kBody];
+  auto &body = envelope[NatsResponseContract::kBody];
   body[NatsResponseContract::kBodyRequestId] = request_id;
   body[NatsResponseContract::kBodyResponse] = response;
   body[NatsResponseContract::kBodyTimestamp] = timestamp_us;

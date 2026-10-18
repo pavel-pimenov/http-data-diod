@@ -2,6 +2,7 @@
 #define STATS_PAGE_HPP
 
 #include <algorithm>
+#include <array>
 #include <ctime>
 #include <memory>
 #include <ranges>
@@ -105,9 +106,8 @@ inline std::string build_sparkline_svg(
     for (size_t i = 1; i < pts.size(); ++i) {
       const auto dt = static_cast<double>(pts[i].first - pts[i - 1].first);
       double r = (pts[i].second - pts[i - 1].second) / (dt > 0.0 ? dt : 1.0);
-      if (r < 0.0) {
-        r = 0.0; // counter reset between samples
-      }
+      // counter reset between samples
+      r = std::max(r, 0.0);
       vals.push_back(r);
     }
   } else {
@@ -118,12 +118,8 @@ inline std::string build_sparkline_svg(
   double min_v = vals[0];
   double max_v = vals[0];
   for (const double v : vals) {
-    if (v < min_v) {
-      min_v = v;
-    }
-    if (v > max_v) {
-      max_v = v;
-    }
+    min_v = std::min(min_v, v);
+    max_v = std::max(max_v, v);
   }
   const double range = (max_v - min_v) > 1e-12 ? (max_v - min_v) : 1.0;
   const auto w = static_cast<double>(width);
@@ -137,9 +133,9 @@ inline std::string build_sparkline_svg(
     pts_attr << (i ? " " : "") << x << "," << y;
   }
   std::ostringstream svg;
-  svg << "<svg class=\"spark\" viewBox=\"0 0 " << width << " " << height
-      << "\" preserveAspectRatio=\"none\" width=\"100%\" height=\"" << height
-      << "\"><polyline fill=\"none\" stroke=\"#79c0ff\" stroke-width=\"1.5\" points=\""
+  svg << R"(<svg class="spark" viewBox="0 0 )" << width << " " << height
+      << R"(" preserveAspectRatio="none" width="100%" height=")" << height
+      << R"("><polyline fill="none" stroke="#79c0ff" stroke-width="1.5" points=")"
       << pts_attr.str() << "\"/></svg>";
   return svg.str();
 }
@@ -166,7 +162,7 @@ inline std::string build_stats_html(
     const std::shared_ptr<prometheus::Registry> &extra_registry = nullptr,
     const MetricsHistory *extra_history = nullptr) {
   const auto families = registry->Collect();
-  std::span<const prometheus::MetricFamily> fam_view(families);
+  std::span<const prometheus::MetricFamily> const fam_view(families);
 
   // Derive an overall readiness banner from the *_health_ready gauges and the
   // *_nats_connected gauge when present.
@@ -175,15 +171,19 @@ inline std::string build_stats_html(
   bool nats_ok = true;
   bool has_nats = false;
   for (const auto &family : fam_view) {
-    std::span<const prometheus::ClientMetric> mview(family.metric);
+    std::span<const prometheus::ClientMetric> const mview(family.metric);
     for (const auto &metric : mview) {
       if (family.name.find("health_ready") != std::string::npos) {
         has_health = true;
-        if (metric.gauge.value != 1.0) ready = false;
+        if (metric.gauge.value != 1.0) {
+          ready = false;
+        }
       }
       if (family.name.find("nats_connected") != std::string::npos) {
         has_nats = true;
-        if (metric.gauge.value != 1.0) nats_ok = false;
+        if (metric.gauge.value != 1.0) {
+          nats_ok = false;
+        }
       }
     }
   }
@@ -199,8 +199,8 @@ inline std::string build_stats_html(
   html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   html << "<title>" << escape_html(service_name) << " — status</title>\n";
   const std::time_t now = std::time(nullptr);
-  char tsbuf[64];
-  std::strftime(tsbuf, sizeof(tsbuf), "%Y-%m-%d %H:%M:%S UTC",
+  std::array<char, 64> tsbuf{};
+  std::strftime(tsbuf.data(), tsbuf.size(), "%Y-%m-%d %H:%M:%S UTC",
                 std::gmtime(&now));
 
   html << "<style>\n";
@@ -236,8 +236,8 @@ inline std::string build_stats_html(
    html << ".spark{display:block;width:100%;}\n";
    html << "</style>\n</head>\n<body>\n";
   html << "<div class=\"banner\"><span>" << banner_text << " — "
-       << escape_html(service_name) << "</span><span class=\"ts\">" << tsbuf
-       << " · 5s</span></div>\n";
+       << escape_html(service_name) << "</span><span class=\"ts\">"
+       << tsbuf.data() << " · 5s</span></div>\n";
   html << "<div class=\"grid\">\n";
 
   // Cap series per tile so labeled/dense families (per-IP, per-client-id) don't
@@ -257,13 +257,13 @@ inline std::string build_stats_html(
                << "</div>\n";
         }
         html << "<div class=\"vals\">\n";
-        std::span<const prometheus::ClientMetric> mview(family.metric);
+        std::span<const prometheus::ClientMetric> const mview(family.metric);
         const std::size_t shown =
             std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
         // ranges::views::take — C++23 сахар вместо ручного min+for
         for (const auto &metric : mview | std::views::take(shown)) {
           const std::string labels = format_labels(metric.label);
-          html << "<div class=\"vrow\"><span class=\"labels\">"
+          html << R"(<div class="vrow"><span class="labels">)"
                << escape_html(labels) << "</span> <span class=\"val\">"
                << escape_html(format_metric_value(metric, family.type))
                << "</span></div>\n";
@@ -300,7 +300,7 @@ inline std::string build_stats_html(
             const std::string svg =
                 build_sparkline_svg(repr->m_points, as_rate, window_minutes);
             if (!svg.empty()) {
-              html << "<div class=\"sparkwrap\"><div class=\"cap\">last "
+              html << R"(<div class="sparkwrap"><div class="cap">last )"
                    << window_minutes << "m</div>" << svg << "</div>\n";
             }
           }

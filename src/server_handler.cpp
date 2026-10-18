@@ -1,18 +1,19 @@
 #include "server_handler.hpp"
+#include "app_context.hpp"
 #include "common_utils.hpp"
 #include "httplib/httplib.h"
+#include "json_response_utils.hpp"
 #include "logger.hpp"
-#include "prometheus/counter.h"
 #include "prometheus/registry.h"
-#include "scoped_profiler.hpp"
 #include "sentry_client.hpp"
 #include "tracing_helpers.hpp"
+#include "url_utils.hpp"
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <random>
 #include <thread>
-#include <unistd.h>
 
 namespace {
 // Minimal valid 1x1 32-bit ICO file (70 bytes): ICONDIR + ICONDIRENTRY +
@@ -41,7 +42,7 @@ constexpr std::array<unsigned char, 70> g_favicon_ico = {
 // Marker header sent by message_counter.py to opt in to the correlation-test
 // echo (req_id + req_hash). Regular production clients do not send it, so the
 // l2-server stays a plain value-echo backend without per-request SHA-256 cost.
-constexpr char g_correlation_test_header[] = "X-Correlation-Test";
+constexpr const char *g_correlation_test_header = "X-Correlation-Test";
 
 } // namespace
 
@@ -50,7 +51,7 @@ ServerHandler::ServerHandler(AppContext &ctx) : m_ctx(ctx) {}
 void ServerHandler::send_response_with_trace(const httplib::Request &req,
                                              httplib::Response &res,
                                              json response_json,
-                                             uint64_t start_us) {
+                                             uint64_t start_us) const {
   const TraceContext trace_ctx = TraceContextHelper::extract_and_validate(
       req.headers, m_ctx.m_tracer.get(), "ServerHandler");
 
@@ -88,13 +89,13 @@ void ServerHandler::handle_post(const httplib::Request &req,
                 req.params.size());
 
   // Correlate log lines for this request via the thread-local context
-  ScopedRequestContext req_ctx(req);
+  ScopedRequestContext const req_ctx(req);
 
   const RequestScopedTiming request_timing(
       m_ctx.m_server.m_metrics->m_request_duration_seconds,
       m_ctx.m_server.m_metrics->m_requests);
 
-  const std::string &body = req.body;
+  const auto &body = req.body;
   increment_and_log_request_received(m_ctx.m_server.m_metrics->m_bytes_received,
                                      "Server", body.size());
 
@@ -133,7 +134,7 @@ void ServerHandler::handle_post(const httplib::Request &req,
   send_response_with_trace(req, res, response_json, request_timing.start_us());
 }
 
-void ServerHandler::handle_favicon(httplib::Response &res) const {
+void ServerHandler::handle_favicon(httplib::Response &res) {
   res.set_content(
       std::string(reinterpret_cast<const char *>(g_favicon_ico.data()),
                   g_favicon_ico.size()),
@@ -158,7 +159,7 @@ void ServerHandler::handle_get(const httplib::Request &req,
                                httplib::Response &res) {
   Logger::debug("ServerHandler::handle_get called - request received");
 
-  if (req.path == kHealthLivePath || req.path == kHealthPath) {
+  if (is_liveness_path(req.path)) {
     set_health_alive(res, "l2-server");
     return;
   }
@@ -175,7 +176,7 @@ void ServerHandler::handle_get(const httplib::Request &req,
   }
 
   // Correlate log lines for this request via the thread-local context
-  ScopedRequestContext req_ctx(req);
+  ScopedRequestContext const req_ctx(req);
 
   const RequestScopedTiming request_timing(
       m_ctx.m_server.m_metrics->m_request_duration_seconds,

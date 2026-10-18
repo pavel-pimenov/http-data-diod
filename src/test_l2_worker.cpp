@@ -13,20 +13,24 @@
 // l2_worker.hpp declares a friend of L2Worker.
 
 #include "app_context.hpp"
+#include "common_utils.hpp"
 #include "db_query_utils.hpp"
+#include "http_client.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "retry_handler.hpp"
-#include "trace_logger.hpp"
+#include "test_support.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdlib.h>
 #include <string>
 #include <thread>
 #include <utility>
@@ -36,54 +40,12 @@ extern std::atomic<bool> g_shutdown_flag;
 
 namespace {
 
-// W3C traceparent carrying a 32-hex trace id, so the tracer branches of the
-// pipeline see a non-empty trace context.
-constexpr const char *kTraceparent =
-    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-
-// RAII override of several env vars; nullopt unsets the variable. The values
-// must be in place before the Config is loaded by the AppContext ctor.
-class EnvGuard {
-public:
-  explicit EnvGuard(const std::map<std::string, std::optional<std::string>>
-                        &vars) {
-    m_vars.reserve(vars.size());
-    for (const auto &[name, value] : vars) {
-      m_vars.emplace_back(name, read_env(name.c_str()));
-      if (value.has_value()) {
-        setenv(name.c_str(), value->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  ~EnvGuard() {
-    for (const auto &[name, previous] : m_vars) {
-      if (previous.has_value()) {
-        setenv(name.c_str(), previous->c_str(), 1);
-      } else {
-        unsetenv(name.c_str());
-      }
-    }
-  }
-
-  EnvGuard(const EnvGuard &) = delete;
-  EnvGuard &operator=(const EnvGuard &) = delete;
-  EnvGuard(EnvGuard &&) = delete;
-  EnvGuard &operator=(EnvGuard &&) = delete;
-
-private:
-  static std::optional<std::string> read_env(const char *name) {
-    const char *value = std::getenv(name);
-    if (value == nullptr) {
-      return std::nullopt;
-    }
-    return std::string(value);
-  }
-
-  std::vector<std::pair<std::string, std::optional<std::string>>> m_vars;
-};
+// Scoped env-var overrides (EnvMapGuard/EnvVars) and the tracer stub are shared
+// via test_support.hpp; the values must be in place before the Config is loaded
+// by the AppContext ctor.
+using test_support::attach_tracer;
+using test_support::EnvMapGuard;
+using test_support::EnvVars;
 
 // Loopback stand-in for the L2 backend: covers the success, retry, binary and
 // content-type-less response paths of the worker call pipeline.
@@ -159,12 +121,10 @@ L2BackendServer &g_l2_backend() {
 // L2_SERVER_URLS as a JSON array: the loopback backend plus a dead address
 // used by the connection-failure and circuit-breaker paths.
 std::string l2_server_urls() {
-  json urls = json::array({g_l2_backend().api_url(),
-                           std::string("http://127.0.0.1:1/dead")});
+  json const urls = json::array(
+      {g_l2_backend().api_url(), std::string("http://127.0.0.1:1/dead")});
   return urls.dump();
 }
-
-using EnvVars = std::map<std::string, std::optional<std::string>>;
 
 // Worker mode plus the fail-fast NATS setup described in the file header.
 // THREAD_POOL_TYPE=none makes the ctor take the "force CUSTOM for worker"
@@ -194,18 +154,6 @@ EnvVars worker_env(const std::string &urls) {
   return vars;
 }
 
-// Attaches a tracer whose sender thread never flushes during the test (batch
-// and interval far above what a single test produces): the spans are enqueued
-// and dropped with the context, but every tracer branch of the worker runs.
-void attach_tracer(AppContext &ctx) {
-  auto &metrics = *ctx.m_tracing_metrics;
-  ctx.m_tracer = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", metrics.m_spans_sent,
-      metrics.m_spans_failed, metrics.m_queue_size, metrics.m_last_send_duration,
-      metrics.m_send_latency, metrics.m_queue_time,
-      /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
-}
-
 json make_worker_request(const std::string &request_id,
                          const std::string &path) {
   json request;
@@ -215,8 +163,8 @@ json make_worker_request(const std::string &request_id,
   request[NatsContract::kBody] = R"({"payload":"test"})";
   request[NatsContract::kClientIp] = "10.9.8.7";
   request[NatsContract::kProxyIp] = "10.9.8.1";
-  request[NatsContract::kTraceparent] = kTraceparent;
-  request[NatsContract::kProxyTraceparent] = kTraceparent;
+  request[NatsContract::kTraceparent] = test_support::k_traceparent;
+  request[NatsContract::kProxyTraceparent] = test_support::k_traceparent;
   request[NatsContract::kProxySpanId] = "proxy-inlet-span";
   request[NatsContract::kHeaders] = json{{"X-Real-IP", "10.9.8.7"},
                                          {"X-DataHub-Client-Id", "client-42"},
@@ -250,23 +198,20 @@ public:
     return worker.validate_l2_server_access(path, selected_url);
   }
 
-  static std::string extract_l2_server_span_id(L2Worker &worker,
-                                               const std::string &body) {
-    return worker.extract_l2_server_span_id(body);
+  static std::string extract_l2_server_span_id(const std::string &body) {
+    return L2Worker::extract_l2_server_span_id(body);
   }
 
-  static json prepare_response_headers(L2Worker &worker,
-                                       const HttpResponse &response) {
-    return worker.prepare_response_headers(response);
+  static json prepare_response_headers(const HttpResponse &response) {
+    return L2Worker::prepare_response_headers(response);
   }
 
-  static json prepare_response_data(L2Worker &worker,
-                                    const httplib::Headers &headers) {
+  static json prepare_response_data(const httplib::Headers &headers) {
     L2Worker::L2Response l2_response;
     l2_response.m_headers = headers;
-    L2Worker::TracingSpans spans;
+    L2Worker::TracingSpans const spans;
     const L2Worker::ResponseData data =
-        worker.prepare_response_data(l2_response, spans);
+        L2Worker::prepare_response_data(l2_response, spans);
     return json{{"content_type", data.m_content_type},
                 {"is_binary", data.m_is_binary},
                 {"timestamp_us", data.m_timestamp_us}};
@@ -335,7 +280,7 @@ public:
 
 TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
           "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -349,19 +294,27 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
       {"X-DataHub-Client-Id", "client-7"},
       {"User-Agent", "worker-test/1.0"}};
 
-  const HttpResponse post =
-      worker.call_l2_server("/api/value", R"({"q":1})", kTraceparent,
-                            forwarded_headers, "POST");
+  const HttpResponse post = worker.call_l2_server(
+      "/api/value", R"({"q":1})", test_support::k_traceparent,
+      forwarded_headers, "POST");
   REQUIRE(post.m_status == 200);
   REQUIRE(post.m_body.find("l2-span-1") != std::string::npos);
   REQUIRE(post.m_headers.count("X-L2-Server") == 1);
-  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(worker, post.m_body) ==
+  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(post.m_body) ==
           "l2-span-1");
 
-  const HttpResponse get =
-      worker.call_l2_server("/api/value", "", kTraceparent, {}, "GET");
+  const HttpResponse get = worker.call_l2_server(
+      "/api/value", "", test_support::k_traceparent, {}, "GET");
   REQUIRE(get.m_status == 200);
   REQUIRE(get.m_body.find("l2-span-2") != std::string::npos);
+
+  // Query string is appended only to the actual HTTP call URL (logs/span URLs
+  // stay clean).
+  const HttpResponse with_query = worker.call_l2_server(
+      "/api/value", "", test_support::k_traceparent, {}, "GET", "", "",
+      "filter=1");
+  REQUIRE(with_query.m_status == 200);
+  REQUIRE(with_query.m_body.find("l2-span-") != std::string::npos);
 
   // Path outside every configured L2 base: rejected before any HTTP call.
   const HttpResponse denied = worker.call_l2_server("/admin", "{}");
@@ -373,10 +326,10 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(missing.m_status == 404);
 
   const json headers_json =
-      L2WorkerTestAccess::prepare_response_headers(worker, get);
+      L2WorkerTestAccess::prepare_response_headers(get);
   REQUIRE(headers_json.is_object());
 
-  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(worker, R"({"x":1})")
+  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(R"({"x":1})")
               .empty());
 
   std::string selected_url;
@@ -405,7 +358,7 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
 
 TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
           "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
 
@@ -437,14 +390,13 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
     const HttpResponse no_urls = worker.call_l2_server("/api/value", "{}");
     REQUIRE(no_urls.m_status == 403);
 
-    const json no_content_type =
-        L2WorkerTestAccess::prepare_response_data(worker, {});
+    const json no_content_type = L2WorkerTestAccess::prepare_response_data({});
     REQUIRE(no_content_type["content_type"] == "");
     REQUIRE_FALSE(no_content_type["is_binary"].get<bool>());
     REQUIRE(no_content_type["timestamp_us"].get<uint64_t>() > 0);
 
     const json binary_type = L2WorkerTestAccess::prepare_response_data(
-        worker, {{"Content-Type", "application/octet-stream"}});
+        {{"Content-Type", "application/octet-stream"}});
     REQUIRE(binary_type["is_binary"].get<bool>());
   }
 
@@ -460,7 +412,7 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
 // ============================================================================
 
 TEST_CASE("L2Worker: NATS request pipeline", "[l2-worker]") {
-  const EnvGuard env(worker_env(l2_server_urls()));
+  const EnvMapGuard env(worker_env(l2_server_urls()));
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -540,7 +492,7 @@ TEST_CASE("L2Worker: run loop and DB gateway NATS handlers", "[l2-worker]") {
   vars["DB_POSTGRES_PASSWORD"] = "l2test";
   vars["DB_POSTGRES_HOST"] = "127.0.0.1";
   vars["DB_POSTGRES_PORT"] = "1";
-  const EnvGuard env(vars);
+  const EnvMapGuard env(vars);
   AppContext ctx;
   attach_tracer(ctx);
   L2Worker worker(ctx);
@@ -589,4 +541,42 @@ TEST_CASE("L2Worker: run loop and DB gateway NATS handlers", "[l2-worker]") {
       worker, unknown_db, 500,
       make_db_error_body("DB_UNAVAILABLE", "pool exhausted"),
       1000, 2000, trace_ctx, "db-unknown", "consume-span");
+}
+
+TEST_CASE("L2Worker: DB query before the gateway is initialized reports 503",
+          "[l2-worker]") {
+  const EnvMapGuard env(worker_env(l2_server_urls()));
+  AppContext ctx;
+  attach_tracer(ctx);
+  L2Worker worker(ctx);
+  const std::string reply_to = "l2-proxy.db.reply";
+
+  const json request{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                     {DbQueryContract::kRequestId, "db-no-gateway"},
+                     {DbQueryContract::kDb, "pg"},
+                     {DbQueryContract::kSql, "select 1"}};
+  L2WorkerTestAccess::process_db_query_from_nats(worker, request.dump(),
+                                                 reply_to);
+  REQUIRE_FALSE(worker.is_nats_connected());
+}
+
+TEST_CASE("L2Worker: explicit thread pool type is honoured", "[l2-worker]") {
+  {
+    // Non-"none" pool type takes the CUSTOM branch directly.
+    EnvVars vars = worker_env(l2_server_urls());
+    vars["THREAD_POOL_TYPE"] = "custom";
+    const EnvMapGuard env(vars);
+    AppContext ctx;
+    const L2Worker worker(ctx);
+    REQUIRE_FALSE(worker.is_nats_connected());
+  }
+  {
+    // Non-worker mode with "none" keeps the inline NONE pool.
+    EnvVars vars = worker_env(l2_server_urls());
+    vars["MODE"] = "proxy";
+    const EnvMapGuard env(vars);
+    AppContext ctx;
+    const L2Worker worker(ctx);
+    REQUIRE_FALSE(worker.is_nats_connected());
+  }
 }

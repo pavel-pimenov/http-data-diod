@@ -54,7 +54,7 @@ private:
   template <typename M>
   uint64_t shard_sum(M member) const {
     uint64_t total = 0;
-    for (const Shard &shard : m_state.m_shards) {
+    for (const auto &shard : m_state.m_shards) {
       total += (shard.*member).load(std::memory_order_acquire);
     }
     return total;
@@ -77,7 +77,8 @@ public:
 
   public:
     explicit RequestGuard(InFlightTracker *tracker)
-        : m_tracker(tracker), m_shard(tracker ? tracker->shard_index() : 0) {
+        : m_tracker(tracker),
+          m_shard(tracker ? InFlightTracker::shard_index() : 0) {
       if (m_tracker) {
         m_tracker->increment(m_shard);
       }
@@ -117,7 +118,7 @@ public:
 
 private:
   void increment(size_t shard) {
-    Shard &s = m_state.m_shards[shard];
+    auto &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_add(1, std::memory_order_relaxed);
     s.m_total.fetch_add(1, std::memory_order_relaxed);
     // First request on this shard: register the shard as active
@@ -127,13 +128,13 @@ private:
   }
 
   void decrement(size_t shard) {
-    Shard &s = m_state.m_shards[shard];
+    auto &s = m_state.m_shards[shard];
     const uint64_t prev = s.m_in_flight.fetch_sub(1, std::memory_order_release);
     // Shard became empty: unregister it. If it was the last active shard,
     // wake up any thread waiting for completion (notify under the mutex to
     // avoid a lost-wakeup race with wait_for_completion).
     if (prev == 1 && m_state.m_active.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-      std::lock_guard lock(m_sync.m_mutex);
+      const std::scoped_lock lock(m_sync.m_mutex);
       m_sync.m_cv.notify_all();
     }
   }
@@ -152,7 +153,7 @@ public:
                            bool log_issues = true) {
     std::unique_lock lock(m_sync.m_mutex);
 
-    bool completed =
+    const bool completed =
         m_sync.m_cv.wait_for(lock, timeout,
                       [this] { return m_state.m_active.load(std::memory_order_acquire) == 0; });
 

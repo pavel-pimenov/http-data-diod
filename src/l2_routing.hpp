@@ -1,8 +1,11 @@
 #ifndef L2_ROUTING_HPP
 #define L2_ROUTING_HPP
 
+#include "logger.hpp"
 #include "url_utils.hpp"
+#include <cstddef>
 #include <exception>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,7 +53,7 @@ namespace l2_routing {
 
   std::string out;
   out.reserve(in.size());
-  for (const std::string &segment : segments) {
+  for (const auto &segment : segments) {
     out += '/';
     out += segment;
   }
@@ -70,7 +73,7 @@ namespace l2_routing {
     result += parsed.m_host;
     const int default_port = parsed.m_is_https ? 443 : 80;
     if (parsed.m_port != default_port) {
-      result += ":" + std::to_string(parsed.m_port);
+      result += std::format(":{}", parsed.m_port);
     }
     return result;
   } catch (const std::exception &e) {

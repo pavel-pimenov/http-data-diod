@@ -108,6 +108,10 @@ struct WorkerMetrics {
   prometheus::Counter &m_processing_validation_errors;
   prometheus::Histogram &m_l2_response_size_bytes;
   prometheus::Gauge &m_circuit_breaker_state;
+  // Breaker transitions labelled by target state ("open"/"half_open"/"closed")
+  // and requests fast-failed while OPEN — both bounded label sets.
+  prometheus::Family<prometheus::Counter> &m_circuit_breaker_transitions_total;
+  prometheus::Counter &m_circuit_breaker_rejected_total;
   prometheus::Counter &m_duplicate_requests;
   // HTTP DB Gateway metrics: execution counters/duration on the worker and
   // per-database pool gauges (state label: "active"/"idle"). Labeled families
@@ -279,7 +283,7 @@ private:
   void init_server_metrics();
   // Stops the in-process stats-history sampler threads (created as a set in
   // init_common); safe to call on a partially-initialized context.
-  void stop_stats_history();
+  void stop_stats_history() const;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 
