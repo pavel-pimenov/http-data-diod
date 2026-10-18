@@ -2545,6 +2545,37 @@ def create_worker_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 51: Circuit breaker transitions by target state
+    panels.append(create_timeseries_panel(
+        title="Переходы Circuit Breaker",
+        id=51,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        targets=[
+            {"expr": "sum by (to) (rate(l2_worker_circuit_breaker_transitions_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{to}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 52: Requests fast-failed while the breaker is OPEN
+    panels.append(create_timeseries_panel(
+        title="Отклонено Circuit Breaker (OPEN)",
+        id=52,
+        x=12, y=y, w=12, h=8,
+        unit="reqps",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 10}
+            ]
+        },
+        targets=[
+            {"expr": "rate(l2_worker_circuit_breaker_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "отклонено/с", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     # Row 6: Deduplication
     panels.append(create_row_panel("Дедупликация", 50, y))
     y += 1

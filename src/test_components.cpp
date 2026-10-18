@@ -2452,6 +2452,42 @@ TEST_CASE("CircuitBreaker: set_gauge mirrors state transitions",
   REQUIRE(gauge.Collect().gauge.value == 1.0);
 }
 
+TEST_CASE("CircuitBreaker: transition and rejection counters",
+          "[circuit-breaker]") {
+  prometheus::Registry registry;
+  auto &transitions = prometheus::BuildCounter()
+                          .Name("cb_test_transitions_total")
+                          .Help("h")
+                          .Register(registry);
+  auto &rejected = prometheus::BuildCounter()
+                       .Name("cb_test_rejected_total")
+                       .Help("h")
+                       .Register(registry)
+                       .Add({});
+  CircuitBreaker cb;
+  cb.set_counters(transitions, rejected);
+  record_failures(cb, CircuitBreaker::g_failure_threshold);
+  REQUIRE(transitions.Add({{"to", "open"}}).Collect().counter.value == 1.0);
+  REQUIRE(rejected.Collect().counter.value == 0.0);
+  // OPEN fast-fails: the rejection counter picks it up.
+  REQUIRE(cb.allow_request() == false);
+  REQUIRE(rejected.Collect().counter.value == 1.0);
+  // OPEN -> HALF_OPEN once the open window has elapsed (no real sleep).
+  cb.m_counters.m_last_failure_time_us.store(
+      TimeUtils::steady_us() - CircuitBreaker::g_open_timeout_us - 1);
+  REQUIRE(cb.allow_request() == true);
+  REQUIRE(transitions.Add({{"to", "half_open"}}).Collect().counter.value ==
+          1.0);
+  // HALF_OPEN -> OPEN on a failed test request.
+  cb.record_failure();
+  REQUIRE(transitions.Add({{"to", "open"}}).Collect().counter.value == 2.0);
+  // HALF_OPEN -> CLOSED after the success threshold.
+  cb.m_state.store(CircuitBreaker::State::HALF_OPEN);
+  cb.record_success();
+  cb.record_success();
+  REQUIRE(transitions.Add({{"to", "closed"}}).Collect().counter.value == 1.0);
+}
+
 TEST_CASE("CircuitBreaker: opens after the failure threshold",
           "[circuit-breaker]") {
   CircuitBreaker cb;

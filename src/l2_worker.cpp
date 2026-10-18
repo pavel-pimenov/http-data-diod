@@ -111,6 +111,9 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
       static_cast<size_t>(m_ctx.m_config.m_worker.m_queue_size));
 
   m_circuit_breaker.set_gauge(m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
+  m_circuit_breaker.set_counters(
+      m_ctx.m_worker.m_metrics->m_circuit_breaker_transitions_total,
+      m_ctx.m_worker.m_metrics->m_circuit_breaker_rejected_total);
 
   Logger::info("L2Worker initialized successfully");
 }

@@ -276,6 +276,13 @@ void AppContext::init_worker_metrics() {
       MetricsManager::create_gauge(
           m_worker_registry, "l2_worker_circuit_breaker_state",
           "Circuit breaker state (0=closed, 1=open, 2=half_open)"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_circuit_breaker_transitions_total",
+          "Total number of circuit breaker transitions by target state "
+          "(open/half_open/closed)"),
+      MetricsManager::create_counter(
+          m_worker_registry, "l2_worker_circuit_breaker_rejected_total",
+          "Total number of requests fast-failed by the open circuit breaker"),
       MetricsManager::create_counter(
           m_worker_registry, "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
@@ -314,6 +321,16 @@ void AppContext::init_worker_metrics() {
           m_worker_registry, "l2_worker_graceful_shutdown_seconds",
           "Last graceful-shutdown drain duration in seconds (time from "
           "SIGTERM to full shutdown, 0 while running)")});
+
+  // Materialize the breaker's bounded transition series up front: prometheus-cpp
+  // exports a labeled family only after the first Add(), and a healthy stack may
+  // never trip the breaker, so without this the family would be absent from
+  // /metrics (and the golden check) until the first transition.
+  auto &cb_transitions =
+      m_worker.m_metrics->m_circuit_breaker_transitions_total;
+  cb_transitions.Add({{"to", "open"}});
+  cb_transitions.Add({{"to", "half_open"}});
+  cb_transitions.Add({{"to", "closed"}});
 }
 
 void AppContext::init_server_metrics() {

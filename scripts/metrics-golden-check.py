@@ -81,6 +81,8 @@ CATALOG = [
     "l2_worker_processing_validation_errors_total",
     "l2_worker_l2_response_size_bytes",
     "l2_worker_circuit_breaker_state",
+    "l2_worker_circuit_breaker_transitions_total",
+    "l2_worker_circuit_breaker_rejected_total",
     "l2_worker_duplicate_requests_total",
     "l2_worker_db_pool_connections",
     "l2_worker_db_gateway_ready",
