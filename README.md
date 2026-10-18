@@ -418,6 +418,18 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 | `l2_tracing_sentry_transactions_sent_total` | counter | Спаны, доставленные на Sentry/GlitchTip performance-эндпоинт как транзакции (при заданном `SENTRY_DSN`) |
 | `l2_tracing_sentry_transactions_failed_total` | counter | Спаны, не доставленные на Sentry/GlitchTip performance-эндпоинт (при заданном `SENTRY_DSN`) |
 
+### Идентификация сборки (общий реестр `l2_common`)
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_common_build_info` | gauge | `version`, `mode` | Информация о сборке: значение всегда `1`, версия и режим — в метках |
+
+> Регистрируется в том же общем реестре `l2_common` (рядом с tracing/sentry),
+> поэтому серия есть в `/metrics` любого режима. Константа `1` плюс метки
+> позволяют показать версию в панели/алерте без relabel'инга: панель
+> «Версия сборки» на дашборде L2 Прокси рисует `l2_common_build_info` с
+> легендой `{{version}} ({{mode}})`.
+
 ### Отслеживание ошибок (Sentry)
 
 Лёгкий клиент без внешнего SDK: события собираются в асинхронную очередь и
@@ -880,9 +892,9 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **94.38%** (15605/16534) |
-| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.15%** (30398/73875) |
-| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.35%** (7074/13260) |
+| `--fail-under-line` — строки по проекту | 90% | **94.38%** (15627/16558) |
+| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.15%** (30453/74009) |
+| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.32%** (7083/13284) |
 | пер-файловый гейт регрессии (см. ниже) | без снижения | 80 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,

@@ -2378,6 +2378,21 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 206: Версия сборки — константа 1 с метками version/mode: в панели
+    # видно, какой релиз отдаёт выбранный инстанс (общая метрика, есть в любом
+    # режиме, поэтому её можно показывать и в дашбордах воркера/сервера).
+    panels.append(create_stat_panel(
+        title="Версия сборки",
+        id=206,
+        x=0, y=y, w=8, h=8,
+        unit="short",
+        color_mode="none",
+        targets=[
+            {"expr": "l2_common_build_info{vm=~\"${vm:regex}\"}", "legendFormat": "{{version}} ({{mode}})", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 

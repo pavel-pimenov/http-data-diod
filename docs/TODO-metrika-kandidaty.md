@@ -42,7 +42,7 @@
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
-| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size` |
+| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}` |
 
 ---
 
@@ -149,14 +149,21 @@
 Регистрация: общий реестр `l2_common` (`src/trace_logger.cpp`/`sentry_client.hpp` + `app_context.cpp`).
 Кардинальность: закрытый enum. При добавлении — обновить подраздел README про трассировку.
 
-### 8. Build info и uptime
+### 8. Build info и uptime ✅ реализовано (round 160)
 Стандартная, но отсутствует — сильно упрощает корреляцию деплоя с метриками.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
-| `l2_common_build_info` | gauge (=1) | `version`, `mode` (proxy/worker) | версия сервиса на дашборде без захода в логи |
+| `l2_common_build_info` ✅ | gauge (=1) | `version`, `mode` (proxy/worker/server) | версия сервиса на дашборде без захода в логи |
 
 Регистрация: `l2_common`, значение из `g_l2_proxy_version` (`src/main.cpp`).
+Реализовано в round 160: семейство `l2_common_build_info` регистрируется в `init_common()`
+(`src/app_context.cpp`) и сразу получает одну серию со значением `1`; версия берётся из
+`g_l2_proxy_version`, режим — из `m_config.m_app.m_mode`. Метка `mode` добавлена к запланированным
+`version` — без неё в одном VictoriaMetrics серии трёх сервисов схлопнулись бы в одну (в проекте
+уже есть срез по инстансу `vm`, но режим отличает proxy/worker/server даже при одинаковой версии).
+Отдельный `l2_common_uptime_seconds` не делался: uptime даёт `process_start_time_seconds` из
+стандартного экспортёра процессов, дублировать его своим gauge'ом смысла нет.
 
 ### 9. Ёмкость очередей (рядом с существующими gauge'ами)
 `queue_size` есть, но без знаменателя нет алерта на сатурацию.

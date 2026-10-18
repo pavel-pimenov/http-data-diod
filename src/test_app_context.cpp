@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <stdlib.h>
 #include <memory>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,7 @@ const std::vector<std::string> &common_l2_families() {
       "l2_worker_sentry_events_sent_total",
       "l2_worker_sentry_events_failed_total",
       "l2_worker_sentry_queue_size",
+      "l2_common_build_info",
   };
   return g_k_families;
 }
@@ -121,4 +123,31 @@ TEST_CASE("AppContext: worker pre-creates the L2 call error type series",
   REQUIRE(types == std::vector<std::string>{"CONNECTION_ERROR", "OTHER_ERROR",
                                            "RESPONSE_ERROR", "RETRY_EXHAUSTED",
                                            "TIMEOUT_ERROR"});
+}
+
+TEST_CASE("AppContext: build info carries the version and the mode",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "worker"}};
+
+  AppContext const ctx;
+
+  bool found = false;
+  std::map<std::string, std::string> labels;
+  double value = 0.0;
+  for (const auto &family : ctx.m_common_registry->Collect()) {
+    if (family.name != "l2_common_build_info") {
+      continue;
+    }
+    found = true;
+    REQUIRE(family.metric.size() == 1);
+    value = family.metric.front().gauge.value;
+    for (const auto &label : family.metric.front().label) {
+      labels[label.name] = label.value;
+    }
+  }
+  REQUIRE(found);
+  REQUIRE(value == 1.0);
+  REQUIRE(labels.count("version") == 1);
+  REQUIRE_FALSE(labels["version"].empty());
+  REQUIRE(labels["mode"] == "worker");
 }

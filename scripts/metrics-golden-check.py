@@ -98,6 +98,7 @@ CATALOG = [
     "l2_worker_sentry_events_sent_total",
     "l2_worker_sentry_events_failed_total",
     "l2_worker_sentry_queue_size",
+    "l2_common_build_info",
     "l2_worker_graceful_shutdown_seconds",
     # l2-server
     "l2_server_requests_total",

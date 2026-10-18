@@ -14,6 +14,11 @@
 #include <memory>
 #include <prometheus/registry.h>
 
+// Build version, defined in version.cpp. Declared here the same way config.cpp
+// does it (crash_handler.hpp declares it too, but that header drags in the
+// whole Sentry crash machinery).
+extern const char *g_l2_proxy_version;
+
 ProxyContext::~ProxyContext() = default;
 
 AppContext::AppContext() {
@@ -111,6 +116,15 @@ void AppContext::init_common() {
       MetricsManager::create_gauge(m_common_registry,
                                    "l2_worker_sentry_queue_size",
                                    "Sentry events pending in the async queue")});
+
+  // Deployment identity: the value is always 1, the labels carry the build
+  // version and the mode, so a dashboard (or an alert) can tell which build an
+  // instance runs without relabeling gymnastics. The common registry is
+  // exported by every mode, so the series exists in proxy, worker and server.
+  MetricsManager::create_gauge_family(m_common_registry, "l2_common_build_info",
+                                      "Build information (value is always 1)")
+      .Add({{"version", g_l2_proxy_version}, {"mode", m_config.m_app.m_mode}})
+      .Set(1);
 }
 
 void AppContext::init_proxy_metrics() {
