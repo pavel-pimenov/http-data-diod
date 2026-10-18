@@ -42,7 +42,7 @@ std::string NatsPushService::push_request(nlohmann::json request_data,
   request_data[NatsContract::kProxyTraceId] = trace_id;
   if (m_ctx.m_tracer && !trace_id.empty() && !op_span_id.empty()) {
     request_data[NatsContract::kProxyTraceparent] =
-        m_ctx.m_tracer->generate_traceparent(trace_id, op_span_id, true);
+        JaegerLogger::generate_traceparent(trace_id, op_span_id, true);
   }
 
   std::string nats_request_json = request_data.dump();

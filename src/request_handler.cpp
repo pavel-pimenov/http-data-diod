@@ -506,7 +506,7 @@ void RequestHandler::process_request(const std::string &method,
 
   // Add proxy span info for tracing chain
   if (m_ctx.m_tracer) {
-    const auto nats_push_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_push_span_id = JaegerLogger::generate_span_id();
     add_proxy_trace_fields(request_data, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_push_span_id);
   }
@@ -627,7 +627,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     if (!m_ctx.m_tracer) {
       return;
     }
-    const auto nats_db_span_id = m_ctx.m_tracer->generate_span_id();
+    const auto nats_db_span_id = JaegerLogger::generate_span_id();
     add_proxy_trace_fields(request_json, m_ctx.m_tracer.get(), trace_ctx,
                            inlet_span_id, nats_db_span_id,
                            trace_ctx.m_sampled);

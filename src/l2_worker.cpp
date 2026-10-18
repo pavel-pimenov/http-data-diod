@@ -528,7 +528,7 @@ L2Worker::create_tracing_spans(const TraceContext &parent_trace_ctx,
   spans.m_worker_process_parent_id = op_parent_span_id;
 
   if (m_ctx.m_tracer && !parent_trace_ctx.m_trace_id.empty()) {
-    spans.m_worker_process_span_id = m_ctx.m_tracer->generate_span_id();
+    spans.m_worker_process_span_id = JaegerLogger::generate_span_id();
     Logger::debug("Worker processing span created: {} parent: {}",
                   spans.m_worker_process_span_id,
                   spans.m_worker_process_parent_id);

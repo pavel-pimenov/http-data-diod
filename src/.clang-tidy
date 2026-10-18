@@ -38,6 +38,7 @@ Checks: >
   readability-use-std-min-max,
   readability-make-member-function-const,
   readability-convert-member-functions-to-static,
+  readability-static-accessed-through-instance,
   -readability-implicit-bool-conversion,
   clang-analyzer-*,
   cppcoreguidelines-avoid-goto,

@@ -57,12 +57,12 @@ TraceContext handle_trace_context(std::string_view traceparent_raw,
   ctx.m_sampled = true;
 
   if (!traceparent_raw.empty() && tracer &&
-      tracer->parse_traceparent(traceparent_raw, ctx.m_trace_id,
-                                ctx.m_parent_id, ctx.m_sampled)) {
-    ctx.m_span_id = tracer->generate_span_id();
+      JaegerLogger::parse_traceparent(traceparent_raw, ctx.m_trace_id,
+                                      ctx.m_parent_id, ctx.m_sampled)) {
+    ctx.m_span_id = JaegerLogger::generate_span_id();
   } else if (tracer) {
-    ctx.m_trace_id = tracer->generate_trace_id();
-    ctx.m_span_id = tracer->generate_span_id();
+    ctx.m_trace_id = JaegerLogger::generate_trace_id();
+    ctx.m_span_id = JaegerLogger::generate_span_id();
     ctx.m_parent_id = "";
   } else {
     ctx.m_trace_id = "";
@@ -74,7 +74,7 @@ TraceContext handle_trace_context(std::string_view traceparent_raw,
 
   // Both traced branches converge here: rebuild the traceparent from the
   // freshly generated span id so the downstream span links to the log records.
-  ctx.m_traceparent_header = tracer->generate_traceparent(
+  ctx.m_traceparent_header = JaegerLogger::generate_traceparent(
       ctx.m_trace_id, ctx.m_span_id, ctx.m_sampled);
 
   return ctx;

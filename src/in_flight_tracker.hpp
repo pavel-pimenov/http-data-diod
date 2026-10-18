@@ -77,7 +77,8 @@ public:
 
   public:
     explicit RequestGuard(InFlightTracker *tracker)
-        : m_tracker(tracker), m_shard(tracker ? tracker->shard_index() : 0) {
+        : m_tracker(tracker),
+          m_shard(tracker ? InFlightTracker::shard_index() : 0) {
       if (m_tracker) {
         m_tracker->increment(m_shard);
       }

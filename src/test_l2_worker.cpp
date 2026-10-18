@@ -203,23 +203,20 @@ public:
     return worker.validate_l2_server_access(path, selected_url);
   }
 
-  static std::string extract_l2_server_span_id(L2Worker &worker,
-                                               const std::string &body) {
-    return worker.extract_l2_server_span_id(body);
+  static std::string extract_l2_server_span_id(const std::string &body) {
+    return L2Worker::extract_l2_server_span_id(body);
   }
 
-  static json prepare_response_headers(L2Worker &worker,
-                                       const HttpResponse &response) {
-    return worker.prepare_response_headers(response);
+  static json prepare_response_headers(const HttpResponse &response) {
+    return L2Worker::prepare_response_headers(response);
   }
 
-  static json prepare_response_data(L2Worker &worker,
-                                    const httplib::Headers &headers) {
+  static json prepare_response_data(const httplib::Headers &headers) {
     L2Worker::L2Response l2_response;
     l2_response.m_headers = headers;
     L2Worker::TracingSpans const spans;
     const L2Worker::ResponseData data =
-        worker.prepare_response_data(l2_response, spans);
+        L2Worker::prepare_response_data(l2_response, spans);
     return json{{"content_type", data.m_content_type},
                 {"is_binary", data.m_is_binary},
                 {"timestamp_us", data.m_timestamp_us}};
@@ -308,7 +305,7 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(post.m_status == 200);
   REQUIRE(post.m_body.find("l2-span-1") != std::string::npos);
   REQUIRE(post.m_headers.count("X-L2-Server") == 1);
-  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(worker, post.m_body) ==
+  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(post.m_body) ==
           "l2-span-1");
 
   const HttpResponse get =
@@ -333,10 +330,10 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(missing.m_status == 404);
 
   const json headers_json =
-      L2WorkerTestAccess::prepare_response_headers(worker, get);
+      L2WorkerTestAccess::prepare_response_headers(get);
   REQUIRE(headers_json.is_object());
 
-  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(worker, R"({"x":1})")
+  REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(R"({"x":1})")
               .empty());
 
   std::string selected_url;
@@ -397,14 +394,13 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
     const HttpResponse no_urls = worker.call_l2_server("/api/value", "{}");
     REQUIRE(no_urls.m_status == 403);
 
-    const json no_content_type =
-        L2WorkerTestAccess::prepare_response_data(worker, {});
+    const json no_content_type = L2WorkerTestAccess::prepare_response_data({});
     REQUIRE(no_content_type["content_type"] == "");
     REQUIRE_FALSE(no_content_type["is_binary"].get<bool>());
     REQUIRE(no_content_type["timestamp_us"].get<uint64_t>() > 0);
 
     const json binary_type = L2WorkerTestAccess::prepare_response_data(
-        worker, {{"Content-Type", "application/octet-stream"}});
+        {{"Content-Type", "application/octet-stream"}});
     REQUIRE(binary_type["is_binary"].get<bool>());
   }
 

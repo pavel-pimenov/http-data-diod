@@ -193,9 +193,9 @@ bool is_hex_string(const std::string &s) {
 
 TEST_CASE("TraceLogger: generate_trace_id and generate_span_id produce hex",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
-  const auto trace_id = env.m_logger->generate_trace_id();
-  const auto span_id = env.m_logger->generate_span_id();
+  const TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  const auto trace_id = JaegerLogger::generate_trace_id();
+  const auto span_id = JaegerLogger::generate_span_id();
   REQUIRE(trace_id.size() == 32);
   REQUIRE(span_id.size() == 16);
   REQUIRE(is_hex_string(trace_id));
@@ -204,12 +204,12 @@ TEST_CASE("TraceLogger: generate_trace_id and generate_span_id produce hex",
 
 TEST_CASE("TraceLogger: generate_traceparent round-trips validation",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  const TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
   const auto tp_sampled =
-      env.m_logger->generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      JaegerLogger::generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                                          "bbbbbbbbbbbbbbbb", true);
   const auto tp_unsampled =
-      env.m_logger->generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      JaegerLogger::generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                                          "bbbbbbbbbbbbbbbb", false);
   REQUIRE(tp_sampled.size() == 55);
   REQUIRE(tp_sampled.ends_with("-01"));
