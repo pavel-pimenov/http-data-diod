@@ -35,6 +35,19 @@ using test_wait_support::wait_for_condition;
 
 namespace {
 
+// Fixed ids used across the tracing tests. Jaeger validates the W3C
+// traceparent format, so the lengths matter: 32 hex chars for trace ids and
+// 16 for span ids.
+constexpr const char *k_test_trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+constexpr const char *k_test_trace_id_alt = "0123456789abcdef0123456789abcdef";
+constexpr const char *k_test_span_id = "bbbbbbbbbbbbbbbb";
+constexpr const char *k_test_span_id_alt = "cccccccccccccccc";
+// Nothing listens on port 1, so delivery to this endpoint fails fast: exactly
+// what the batch/retry/outage tests need.
+constexpr const char *k_dead_jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+constexpr const char *k_test_service_name = "test-service";
+constexpr const char *k_worker_service_name = "l2-proxy-worker";
+
 struct TraceMockServer {
   httplib::Server m_server;
   int m_port = 0;
@@ -169,7 +182,7 @@ struct SentryTracingEnv {
         m_logger(std::make_unique<JaegerLogger>(
             jaeger_endpoint, m_spans_sent, m_spans_failed, m_queue_size,
             m_last_send_duration, m_send_latency, m_queue_time, batch_size,
-            flush_interval_ms, sample_rate, sentry_dsn, "test-service",
+            flush_interval_ms, sample_rate, sentry_dsn, k_test_service_name,
             "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed,
             sentry_sample_rate, breaker_settings)) {}
 
@@ -193,7 +206,7 @@ bool is_hex_string(const std::string &s) {
 
 TEST_CASE("TraceLogger: generate_trace_id and generate_span_id produce hex",
           "[tracing]") {
-  const TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  const TraceLoggerEnv env(k_dead_jaeger_endpoint);
   const auto trace_id = JaegerLogger::generate_trace_id();
   const auto span_id = JaegerLogger::generate_span_id();
   REQUIRE(trace_id.size() == 32);
@@ -204,13 +217,13 @@ TEST_CASE("TraceLogger: generate_trace_id and generate_span_id produce hex",
 
 TEST_CASE("TraceLogger: generate_traceparent round-trips validation",
           "[tracing]") {
-  const TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  const TraceLoggerEnv env(k_dead_jaeger_endpoint);
   const auto tp_sampled =
-      JaegerLogger::generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                         "bbbbbbbbbbbbbbbb", true);
+      JaegerLogger::generate_traceparent(k_test_trace_id,
+                                         k_test_span_id, true);
   const auto tp_unsampled =
-      JaegerLogger::generate_traceparent("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                         "bbbbbbbbbbbbbbbb", false);
+      JaegerLogger::generate_traceparent(k_test_trace_id,
+                                         k_test_span_id, false);
   REQUIRE(tp_sampled.size() == 55);
   REQUIRE(tp_sampled.ends_with("-01"));
   REQUIRE(tp_unsampled.ends_with("-00"));
@@ -265,13 +278,13 @@ TEST_CASE("TraceLogger: validate_traceparent rejects malformed headers",
 
 TEST_CASE("TraceLogger: should_sample respects deterministic rate bounds",
           "[tracing]") {
-  TraceLoggerEnv env_all("http://127.0.0.1:1/api/traces", 50, 1000, 1.0);
+  TraceLoggerEnv env_all(k_dead_jaeger_endpoint, 50, 1000, 1.0);
   REQUIRE(env_all.m_logger->should_sample());
 
-  TraceLoggerEnv env_none("http://127.0.0.1:1/api/traces", 50, 1000, 0.0);
+  TraceLoggerEnv env_none(k_dead_jaeger_endpoint, 50, 1000, 0.0);
   REQUIRE_FALSE(env_none.m_logger->should_sample());
 
-  TraceLoggerEnv env_half("http://127.0.0.1:1/api/traces", 50, 1000, 0.5);
+  TraceLoggerEnv env_half(k_dead_jaeger_endpoint, 50, 1000, 0.5);
   REQUIRE(env_half.m_logger->should_sample(true));
   const bool r = env_half.m_logger->should_sample();
   REQUIRE((r == true || r == false));
@@ -311,10 +324,10 @@ TEST_CASE("TraceLogger: batch of spans is delivered to Jaeger endpoint",
   TraceMockServer const server;
   TraceLoggerEnv env(server.endpoint(), 2, 500, 1.0);
   for (int i = 0; i < 3; ++i) {
-    env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                               "bbbbbbbbbbbbbbbb", "cccccccccccccccc",
+    env.m_logger->enqueue_span(k_test_trace_id,
+                               k_test_span_id, k_test_span_id_alt,
                                "HTTP GET /query", 1000 + i, 2000 + i,
-                               "test-service",
+                               k_test_service_name,
                                nlohmann::json{{"http.method", "GET"}});
   }
   REQUIRE(wait_for_condition([&] { return env.sent() >= 3.0; }, 5000));
@@ -327,11 +340,11 @@ TEST_CASE("TraceLogger: batch of spans is delivered to Jaeger endpoint",
     REQUIRE(arr.is_array());
     total_spans += static_cast<int>(arr.size());
     for (const auto &span : arr) {
-      REQUIRE(span["traceId"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-      REQUIRE(span["id"] == "bbbbbbbbbbbbbbbb");
-      REQUIRE(span["parentId"] == "cccccccccccccccc");
+      REQUIRE(span["traceId"] == k_test_trace_id);
+      REQUIRE(span["id"] == k_test_span_id);
+      REQUIRE(span["parentId"] == k_test_span_id_alt);
       REQUIRE(span["name"] == "HTTP GET /query");
-      REQUIRE(span["localEndpoint"]["serviceName"] == "test-service");
+      REQUIRE(span["localEndpoint"]["serviceName"] == k_test_service_name);
       REQUIRE(span["tags"]["http.method"] == "GET");
       REQUIRE(span["duration"].get<uint64_t>() >= 500);
     }
@@ -340,10 +353,10 @@ TEST_CASE("TraceLogger: batch of spans is delivered to Jaeger endpoint",
 }
 
 TEST_CASE("TraceLogger: failed batch increments failed counter", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 500, 1.0);
-  env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "bbbbbbbbbbbbbbbb", "", "HTTP POST /query", 1000,
-                             2000, "test-service");
+  TraceLoggerEnv env(k_dead_jaeger_endpoint, 50, 500, 1.0);
+  env.m_logger->enqueue_span(k_test_trace_id,
+                             k_test_span_id, "", "HTTP POST /query", 1000,
+                             2000, k_test_service_name);
   REQUIRE(wait_for_condition([&] { return env.failed() >= 1.0; }, 8000));
   REQUIRE(env.sent() == 0.0);
   REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
@@ -371,9 +384,9 @@ TEST_CASE("TraceLogger: jaeger delivery recovers after the endpoint comes back",
       "http://127.0.0.1:" + std::to_string(port) + "/api/traces";
   TraceLoggerEnv env(endpoint, 50, 200, 1.0, settings);
 
-  env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "bbbbbbbbbbbbbbbb", "", "HTTP POST /query", 1000,
-                             2000, "test-service");
+  env.m_logger->enqueue_span(k_test_trace_id,
+                             k_test_span_id, "", "HTTP POST /query", 1000,
+                             2000, k_test_service_name);
   // All retries must be done before the endpoint returns, otherwise a late
   // retry would mask an exhausted pool.
   REQUIRE(wait_for_condition([&] { return env.failed() >= 1.0; }, 20000));
@@ -386,7 +399,7 @@ TEST_CASE("TraceLogger: jaeger delivery recovers after the endpoint comes back",
   REQUIRE(server.port() == port);
   env.m_logger->enqueue_span("cccccccccccccccccccccccccccccccc",
                              "dddddddddddddddd", "", "HTTP POST /query", 1000,
-                             2000, "test-service");
+                             2000, k_test_service_name);
   REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 20000));
   REQUIRE(server.body_count() == 1);
 }
@@ -403,14 +416,14 @@ TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "
   settings.m_failure_threshold = 1;
   settings.m_cooldown_base_ms = 60000;
   settings.m_cooldown_max_ms = 60000;
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 100, 1.0, settings);
+  TraceLoggerEnv env(k_dead_jaeger_endpoint, 50, 100, 1.0, settings);
 
   const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < 10000; ++i) {
-    env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                               "bbbbbbbbbbbbbbbb", "",
+    env.m_logger->enqueue_span(k_test_trace_id,
+                               k_test_span_id, "",
                                "HTTP POST /breaker", 1000, 2000,
-                               "test-service");
+                               k_test_service_name);
   }
   REQUIRE(wait_for_condition([&] { return env.failed() >= 10000.0; }, 8000));
   const auto elapsed_ms =
@@ -438,10 +451,10 @@ TEST_CASE("TraceLogger: sentry breaker sheds envelopes while open", "[tracing]"
       server.endpoint(), "http://PUBLIC@127.0.0.1:1/2", 4, 100, 1.0, 1.0,
       settings);
   for (int i = 0; i < 8; ++i) {
-    env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                "bbbbbbbbbbbbbbbb", "",
+    env->m_logger->enqueue_span(k_test_trace_id,
+                                k_test_span_id, "",
                                 "HTTP POST /v1/report", 1000000, 2000000,
-                                "l2-proxy-worker", nlohmann::json{});
+                                k_worker_service_name, nlohmann::json{});
   }
   REQUIRE(wait_for_condition([&] { return env->sentry_failed() >= 8.0; },
                              8000));
@@ -453,9 +466,9 @@ TEST_CASE("TraceLogger: full queue drops spans and increments failed",
   TraceMockServer const server(4'000'000);
   TraceLoggerEnv env(server.endpoint(), 50, 1000, 1.0);
   for (int i = 0; i < 10100; ++i) {
-    env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                               "bbbbbbbbbbbbbbbb", "", "HTTP GET /bulk", 1000,
-                               2000, "test-service");
+    env.m_logger->enqueue_span(k_test_trace_id,
+                               k_test_span_id, "", "HTTP GET /bulk", 1000,
+                               2000, k_test_service_name);
   }
   REQUIRE(env.queued() == 10000.0);
   REQUIRE(env.failed() >= 1.0);
@@ -466,18 +479,18 @@ TEST_CASE("TraceLogger: send_span posts a single span and reports failure",
   TraceMockServer server;
   TraceLoggerEnv env(server.endpoint(), 50, 1000, 1.0);
   const bool ok = env.m_logger->send_span(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP PUT /db", 1000, 2000, "test-service",
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP PUT /db", 1000, 2000, k_test_service_name,
       nlohmann::json{{"db", "postgres"}});
   REQUIRE(ok);
   REQUIRE(wait_for_condition([&] { return server.body_count() >= 1; }, 3000));
   const auto span = nlohmann::json::parse(server.snapshot_bodies().front());
   REQUIRE(span["tags"]["db"] == "postgres");
 
-  TraceLoggerEnv dead_env("http://127.0.0.1:1/api/traces", 50, 1000, 1.0);
+  TraceLoggerEnv dead_env(k_dead_jaeger_endpoint, 50, 1000, 1.0);
   const bool failed = dead_env.m_logger->send_span(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP PUT /db", 1000, 2000, "test-service");
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP PUT /db", 1000, 2000, k_test_service_name);
   REQUIRE_FALSE(failed);
   REQUIRE(dead_env.failed() >= 1.0);
 }
@@ -514,12 +527,12 @@ TEST_CASE("TraceLogger: log_span_to_jaeger enqueues real traces",
 }
 
 TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   const auto parsed = handle_trace_context(
       "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01", tracer);
-  REQUIRE(parsed.m_trace_id == "0123456789abcdef0123456789abcdef");
+  REQUIRE(parsed.m_trace_id == k_test_trace_id_alt);
   REQUIRE(parsed.m_parent_id == "0123456789abcdef");
   REQUIRE(parsed.m_sampled);
   REQUIRE(parsed.m_span_id.size() == 16);
@@ -534,11 +547,11 @@ TEST_CASE("TraceLogger: handle_trace_context uses the tracer", "[tracing]") {
 
 TEST_CASE("TraceLogger: make_span_and_traceparent uses the tracer",
           "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   ctx.m_parent_id = "abcdef0123456789";
   ctx.m_traceparent_header = "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
 
@@ -575,7 +588,7 @@ TEST_CASE("TraceLogger: validate_traceparent first-char and is_hex below '0'",
 }
 
 TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces", 50, 1000, 0.5);
+  TraceLoggerEnv env(k_dead_jaeger_endpoint, 50, 1000, 0.5);
   std::vector<std::thread> threads;
   std::atomic<int> ok{0};
   constexpr int kThreads = 4;
@@ -604,9 +617,9 @@ TEST_CASE("TraceLogger: sender loop idle-timeout resumes on enqueue",
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   REQUIRE(env.sent() == 0.0);
   // Enqueue — delivery should happen on the next iteration
-  env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "bbbbbbbbbbbbbbbb", "", "HTTP GET /idle", 1000,
-                             2000, "test-service");
+  env.m_logger->enqueue_span(k_test_trace_id,
+                             k_test_span_id, "", "HTTP GET /idle", 1000,
+                             2000, k_test_service_name);
   REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 5000));
   REQUIRE(server.body_count() >= 1);
 }
@@ -622,7 +635,7 @@ TEST_CASE("TracingHelpers: get_traceparent_header present and absent",
 }
 
 TEST_CASE("TracingHelpers: begin_request_trace with real headers", "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   httplib::Headers with;
@@ -644,7 +657,7 @@ TEST_CASE("TracingHelpers: begin_request_trace with real headers", "[tracing]") 
 }
 
 TEST_CASE("TracingHelpers: extract_and_validate raw variants", "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   const TraceContext parsed = TraceContextHelper::extract_and_validate(
@@ -662,24 +675,24 @@ TEST_CASE("TracingHelpers: extract_and_validate raw variants", "[tracing]") {
 
 TEST_CASE("TracingHelpers: JaegerSpanLogger real-tracer spam variants",
           "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   ctx.m_parent_id = "abcdef0123456789";
   ctx.m_traceparent_header =
       "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
 
   JaegerSpanLogger::log_l2_call(tracer, "GET", "http://l2:8088/x", 200, 1000,
                                 2000, ctx, "worker", "aaaaaaaaaaaaaaaa",
-                                "bbbbbbbbbbbbbbbb", "req-l2");
+                                k_test_span_id, "req-l2");
   JaegerSpanLogger::log_l2_call(tracer, "GET", "http://l2:8088/x", 200, 1000,
                                 2000, ctx, "worker", "aaaaaaaaaaaaaaaa",
-                                "bbbbbbbbbbbbbbbb", "req-l2",
+                                k_test_span_id, "req-l2",
                                 nlohmann::json{{"db", "pg"}});
   JaegerSpanLogger::log_worker_processing(tracer, "POST", "/api/p", 200, 1000,
                                           2000, ctx, "worker",
-                                          "cccccccccccccccc",
+                                          k_test_span_id_alt,
                                           "req-wp");
   JaegerSpanLogger::log_proxy_response(tracer, "GET", "/api/r", 200, 1000,
                                        2000, ctx, "proxy", "req-pr");
@@ -690,12 +703,12 @@ TEST_CASE("TracingHelpers: JaegerSpanLogger real-tracer spam variants",
 TEST_CASE("TracingHelpers: JaegerSpanLogger null tracer short-circuits",
           "[tracing]") {
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   JaegerSpanLogger::log_l2_call(nullptr, "GET", "http://l2/x", 200, 1, 2, ctx,
                                 "worker", "aaaaaaaaaaaaaaaa",
-                                "bbbbbbbbbbbbbbbb");
+                                k_test_span_id);
   JaegerSpanLogger::log_worker_processing(nullptr, "POST", "/p", 200, 1, 2, ctx,
-                                          "worker", "cccccccccccccccc",
+                                          "worker", k_test_span_id_alt,
                                           "req-wp-null");
   JaegerSpanLogger::log_proxy_response(nullptr, "GET", "/r", 200, 1, 2, ctx,
                                        "proxy", "req-pr-null");
@@ -703,22 +716,22 @@ TEST_CASE("TracingHelpers: JaegerSpanLogger null tracer short-circuits",
 }
 
 TEST_CASE("TracingHelpers: log_nats_span attaches success flag", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv env(k_dead_jaeger_endpoint);
   JaegerSpanLogger::log_nats_span(env.m_logger.get(), "PUBLISH", 200, "req-n",
-                                  "0123456789abcdef0123456789abcdef",
-                                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", 1000);
+                                  k_test_trace_id_alt,
+                                  "aaaaaaaaaaaaaaaa", k_test_span_id, 1000);
   JaegerSpanLogger::log_nats_span(env.m_logger.get(), "REQUEST", 500, "req-n2",
-                                  "0123456789abcdef0123456789abcdef",
-                                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", 2000,
+                                  k_test_trace_id_alt,
+                                  "aaaaaaaaaaaaaaaa", k_test_span_id, 2000,
                                   nlohmann::json{{"backend", "db"}});
   REQUIRE(env.m_logger->should_sample(true));
 }
 
 TEST_CASE("TracingHelpers: log_backend_error detail branch", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   ctx.m_parent_id = "abcdef0123456789";
 
   BackendErrorSpanLogger::log_backend_error(tracer, "POST", "/api/x", 502, 1000,
@@ -735,7 +748,7 @@ TEST_CASE("TracingHelpers: log_backend_error detail branch", "[tracing]") {
 
 TEST_CASE("TracingHelpers: log_rate_limit_rejection limit branches",
           "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   RateLimitSpanLogger::log_rate_limit_rejection(
@@ -751,10 +764,10 @@ TEST_CASE("TracingHelpers: log_rate_limit_rejection limit branches",
 
 TEST_CASE("TracingHelpers: make_span_and_traceparent hint and sampled",
           "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   ctx.m_traceparent_header =
       "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01";
 
@@ -773,16 +786,16 @@ TEST_CASE("TracingHelpers: make_span_and_traceparent hint and sampled",
 
 TEST_CASE("TracingHelpers: add_proxy_trace_fields populates request",
           "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
 
   nlohmann::json req = nlohmann::json::object();
   add_proxy_trace_fields(req, tracer, ctx, "1111111111111111",
                          "2222222222222222", true);
   REQUIRE(req[NatsContract::kProxyTraceId] ==
-          "0123456789abcdef0123456789abcdef");
+          k_test_trace_id_alt);
   REQUIRE(req[NatsContract::kProxySpanId] == "2222222222222222");
   REQUIRE(req[NatsContract::kProxyInletSpanId] == "1111111111111111");
   REQUIRE(req[NatsContract::kProxyTraceparent]
@@ -812,26 +825,26 @@ TEST_CASE("TracingHelpers: set_traceparent_response_header branch",
 }
 
 TEST_CASE("TracingHelpers: log_worker_span guards trace_id", "[tracing]") {
-  TraceLoggerEnv env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
   log_worker_span(tracer, "POST", "/api/x", 200, 1000, 2000, "worker", "req-ws",
-                  "0123456789abcdef0123456789abcdef", "aaaaaaaaaaaaaaaa",
-                  "bbbbbbbbbbbbbbbb");
+                  k_test_trace_id_alt, "aaaaaaaaaaaaaaaa",
+                  k_test_span_id);
   log_worker_span(tracer, "POST", "/api/x", 200, 1000, 2000, "worker",
-                  "req-ws2", "", "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+                  "req-ws2", "", "aaaaaaaaaaaaaaaa", k_test_span_id);
   log_worker_span(nullptr, "POST", "/api/x", 200, 1000, 2000, "worker",
-                  "req-ws3", "0123456789abcdef0123456789abcdef",
-                  "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+                  "req-ws3", k_test_trace_id_alt,
+                  "aaaaaaaaaaaaaaaa", k_test_span_id);
   REQUIRE(env.m_logger->should_sample(true));
 }
 
 TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
           "[tracing]") {
-  TraceLoggerEnv const env("http://127.0.0.1:1/api/traces");
+  TraceLoggerEnv const env(k_dead_jaeger_endpoint);
   auto *tracer = env.m_logger.get();
 
   TraceContext ctx;
-  ctx.m_trace_id = "0123456789abcdef0123456789abcdef";
+  ctx.m_trace_id = k_test_trace_id_alt;
   ctx.m_parent_id = "abcdef0123456789";
 
   const std::string inlet =
@@ -842,7 +855,7 @@ TEST_CASE("TraceLogger: log_incoming_span and extract_from_raw with tracer",
   const TraceContext parsed = TraceContextHelper::extract_from_raw(
       "00-0123456789abcdef0123456789abcdef-abcdef0123456789-01", tracer,
       "test-ctx");
-  REQUIRE(parsed.m_trace_id == "0123456789abcdef0123456789abcdef");
+  REQUIRE(parsed.m_trace_id == k_test_trace_id_alt);
   REQUIRE(parsed.m_parent_id == "abcdef0123456789");
   REQUIRE(parsed.m_span_id.size() == 16);
 }
@@ -854,15 +867,15 @@ TEST_CASE("TraceLogger: remaining spans are flushed on shutdown",
   {
     TraceLoggerEnv env(server.endpoint(), 8, 60000, 1.0);
     for (int i = 0; i < 8; ++i) {
-      env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                 "bbbbbbbbbbbbbbbb", "", "HTTP GET /flush1",
-                                 1000, 2000, "test-service");
+      env.m_logger->enqueue_span(k_test_trace_id,
+                                 k_test_span_id, "", "HTTP GET /flush1",
+                                 1000, 2000, k_test_service_name);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     for (int i = 0; i < 8; ++i) {
-      env.m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                 "cccccccccccccccc", "", "HTTP GET /flush2",
-                                 1000, 2000, "test-service");
+      env.m_logger->enqueue_span(k_test_trace_id,
+                                 k_test_span_id_alt, "", "HTTP GET /flush2",
+                                 1000, 2000, k_test_service_name);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     bodies_before = server.body_count();
@@ -999,8 +1012,8 @@ TEST_CASE("TraceLogger: sentry_transaction_status maps HTTP status codes",
 TEST_CASE("TraceLogger: build_sentry_transaction_json shapes a transaction event",
           "[tracing][sentry]") {
   const auto tx = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb",
-      "cccccccccccccccc", "HTTP POST /v1/request", "l2-proxy-worker",
+      k_test_trace_id, k_test_span_id,
+      k_test_span_id_alt, "HTTP POST /v1/request", k_worker_service_name,
       1000000, 3500000, "test-staging",
       nlohmann::json{{"http.method", "POST"},
                      {"http.status_code", 200},
@@ -1016,25 +1029,25 @@ TEST_CASE("TraceLogger: build_sentry_transaction_json shapes a transaction event
   REQUIRE(tx["event_id"].get<std::string>().size() == 32);
 
   const auto &trace = tx["contexts"]["trace"];
-  REQUIRE(trace["trace_id"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-  REQUIRE(trace["span_id"] == "bbbbbbbbbbbbbbbb");
-  REQUIRE(trace["parent_span_id"] == "cccccccccccccccc");
+  REQUIRE(trace["trace_id"] == k_test_trace_id);
+  REQUIRE(trace["span_id"] == k_test_span_id);
+  REQUIRE(trace["parent_span_id"] == k_test_span_id_alt);
   REQUIRE(trace["op"] == "http.server");
   REQUIRE(trace["status"] == "ok");
 
   const auto &service = tx["contexts"]["service"];
-  REQUIRE(service["name"] == "l2-proxy-worker");
+  REQUIRE(service["name"] == k_worker_service_name);
 
   REQUIRE(tx["tags"]["http.method"] == "POST");
   REQUIRE(tx["tags"]["http.flags"] == std::string("true"));
-  REQUIRE(tx["tags"]["service"] == "l2-proxy-worker");
+  REQUIRE(tx["tags"]["service"] == k_worker_service_name);
   REQUIRE(tx["extra"]["http.status_code"] == 200);
 }
 
 TEST_CASE("TraceLogger: build_sentry_transaction_json omits empty optional "
           "fields and derives status", "[tracing][sentry]") {
   const auto tx = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      k_test_trace_id, k_test_span_id, "",
       "HTTP POST /v1/request", "", 1000000, 2000000, "",
       nlohmann::json{{"http.status_code", 503}});
 
@@ -1048,14 +1061,14 @@ TEST_CASE("TraceLogger: build_sentry_transaction_json omits empty optional "
 TEST_CASE("TraceLogger: build_sentry_transaction_json embeds release when set",
           "[tracing][sentry]") {
   const auto with_release = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP POST /v1/request", k_worker_service_name, 1000000, 2000000,
       "test-staging", nlohmann::json{}, "1.0.4-5d7e7db");
   REQUIRE(with_release["release"] == "1.0.4-5d7e7db");
 
   const auto without_release = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP POST /v1/request", k_worker_service_name, 1000000, 2000000,
       "test-staging", nlohmann::json{});
   REQUIRE(!without_release.contains("release"));
 }
@@ -1063,15 +1076,15 @@ TEST_CASE("TraceLogger: build_sentry_transaction_json embeds release when set",
 TEST_CASE("TraceLogger: build_sentry_transaction_json prefixes the product "
           "mode and tags it", "[tracing][sentry]") {
   const auto with_product = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP POST /v1/request", k_worker_service_name, 1000000, 2000000,
       "test-staging", nlohmann::json{}, "", "proxy");
   REQUIRE(with_product["transaction"] == "proxy: HTTP POST /v1/request");
   REQUIRE(with_product["tags"]["mode"] == "proxy");
 
   const auto without_product = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000,
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP POST /v1/request", k_worker_service_name, 1000000, 2000000,
       "test-staging", nlohmann::json{});
   REQUIRE(without_product["transaction"] == "HTTP POST /v1/request");
   REQUIRE(!without_product["tags"].contains("mode"));
@@ -1111,8 +1124,8 @@ TEST_CASE("TraceLogger: build_sentry_transaction_envelope is a 3-line envelope",
   REQUIRE(dsn.has_value());
 
   const auto event = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
-      "HTTP POST /v1/request", "l2-proxy-worker", 1000000, 2000000, "",
+      k_test_trace_id, k_test_span_id, "",
+      "HTTP POST /v1/request", k_worker_service_name, 1000000, 2000000, "",
       nlohmann::json{});
   const auto envelope =
       JaegerLogger::build_sentry_transaction_envelope(event);
@@ -1139,12 +1152,12 @@ TEST_CASE("TraceLogger: build_sentry_transaction_envelope is a 3-line envelope",
 TEST_CASE("TraceLogger: build_sentry_envelope is a multi-item envelope",
           "[tracing][sentry]") {
   const auto event1 = JaegerLogger::build_sentry_transaction_json(
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "",
+      k_test_trace_id, k_test_span_id, "",
       "HTTP POST /v1/request", "proxy", 1000000, 2000000, "",
       nlohmann::json{}, "", "proxy");
   const auto event2 = JaegerLogger::build_sentry_transaction_json(
       "cccccccccccccccccccccccccccccccc", "dddddddddddddddd",
-      "bbbbbbbbbbbbbbbb", "HTTP GET /v1/status", "worker", 1000000, 2000000, "",
+      k_test_span_id, "HTTP GET /v1/status", "worker", 1000000, 2000000, "",
       nlohmann::json{}, "", "worker");
   const auto envelope =
       JaegerLogger::build_sentry_envelope({event1, event2});
@@ -1172,7 +1185,7 @@ TEST_CASE("TraceLogger: build_sentry_envelope is a multi-item envelope",
   REQUIRE(item2["type"] == "transaction");
   REQUIRE(item2["length"] == body2.dump().size());
   REQUIRE(body2["transaction"] == "worker: HTTP GET /v1/status");
-  REQUIRE(body2["contexts"]["trace"]["parent_span_id"] == "bbbbbbbbbbbbbbbb");
+  REQUIRE(body2["contexts"]["trace"]["parent_span_id"] == k_test_span_id);
 }
 
 TEST_CASE("TraceLogger: build_sentry_envelope is empty for no events",
@@ -1216,9 +1229,9 @@ TEST_CASE("TraceLogger: sentry performance delivery posts a transaction envelope
                           std::to_string(sentry_port) + "/2";
   auto env =
       std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn);
-  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
-                              1000000, 3500000, "l2-proxy-worker",
+  env->m_logger->enqueue_span(k_test_trace_id,
+                              k_test_span_id, "", "HTTP POST /v1/report",
+                              1000000, 3500000, k_worker_service_name,
                               nlohmann::json{{"http.status_code", 200}});
 
   REQUIRE(wait_for_condition(
@@ -1268,16 +1281,16 @@ TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
   const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
   std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
 
-  const auto *const jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto *const jaeger_endpoint = k_dead_jaeger_endpoint;
   const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
                           std::to_string(sentry_port) + "/2";
   auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,
                                                 4, 100, 1.0,
                                                 0.0 /*sentry_sample_rate*/);
   for (int i = 0; i < 8; ++i) {
-    env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
-                                1000000, 2000000, "l2-proxy-worker",
+    env->m_logger->enqueue_span(k_test_trace_id,
+                                k_test_span_id, "", "HTTP POST /v1/report",
+                                1000000, 2000000, k_worker_service_name,
                                 nlohmann::json{{"http.status_code", 200}});
   }
 
@@ -1300,11 +1313,11 @@ TEST_CASE("TraceLogger: sentry delivery failure is counted as failed",
   // Both targets are dead ports: Jaeger send fails and the Sentry
   // performance delivery must still be attempted and counted as failed.
   const auto env = std::make_unique<SentryTracingEnv>(
-      "http://127.0.0.1:1/api/traces",
+      k_dead_jaeger_endpoint,
       "http://PUBLIC@127.0.0.1:1/2");
-  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
-                              1000000, 2000000, "l2-proxy-worker",
+  env->m_logger->enqueue_span(k_test_trace_id,
+                              k_test_span_id, "", "HTTP POST /v1/report",
+                              1000000, 2000000, k_worker_service_name,
                               nlohmann::json{});
 
   REQUIRE(wait_for_condition([&] { return env->sentry_failed() >= 1.0; },
@@ -1328,14 +1341,14 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
   const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
   std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
 
-  const auto *const jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto *const jaeger_endpoint = k_dead_jaeger_endpoint;
   const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
                           std::to_string(sentry_port) + "/2";
   auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,
                                                 4, 100, 1.0, 1.0);
-  env->m_logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                              "bbbbbbbbbbbbbbbb", "", "HTTP POST /v1/report",
-                              1000000, 3500000, "l2-proxy-worker",
+  env->m_logger->enqueue_span(k_test_trace_id,
+                              k_test_span_id, "", "HTTP POST /v1/report",
+                              1000000, 3500000, k_worker_service_name,
                               nlohmann::json{{"http.status_code", 200}});
 
   REQUIRE(wait_for_condition(
@@ -1384,11 +1397,11 @@ TEST_CASE("TraceLogger: sentry delivery with null counters is safe",
           std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5});
   // Sentry DSN set but the two sentry counters are deliberately null.
   auto logger = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", spans_sent, spans_failed, queue_size,
+      k_dead_jaeger_endpoint, spans_sent, spans_failed, queue_size,
       last_duration, send_latency, queue_time, 4, 100, 1.0,
       "http://PUBLIC@127.0.0.1:1/2");
-  logger->enqueue_span("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb",
+  logger->enqueue_span(k_test_trace_id, k_test_span_id,
                        "", "HTTP POST /v1/report", 1000000, 2000000,
-                       "l2-proxy-worker", nlohmann::json{});
+                       k_worker_service_name, nlohmann::json{});
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }
