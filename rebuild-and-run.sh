@@ -373,9 +373,12 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
             GRAFANA_URL="$GRAFANA_URL" GRAFANA_USER="$GRAFANA_USER" GRAFANA_PASSWORD="$GRAFANA_PASSWORD" \
                 python3 scripts/generate-grafana-dashboards.py --correct-dashboards
         else
-            # Try default credentials
+            # Try default credentials. No `| head -N` here: the script runs with
+            # `set -o pipefail`, and truncating the generator's stdout makes it
+            # die on EPIPE (python exits 120), which would abort the whole
+            # rebuild after the stack is already up.
             GRAFANA_URL="$GRAFANA_URL" GRAFANA_USER=admin GRAFANA_PASSWORD=admin \
-                python3 scripts/generate-grafana-dashboards.py --correct-dashboards 2>&1 | head -30
+                python3 scripts/generate-grafana-dashboards.py --correct-dashboards
         fi
 
         echo ""
