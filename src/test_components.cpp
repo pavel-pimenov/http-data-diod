@@ -188,10 +188,12 @@ TEST_CASE("PerIPRateLimiter: expired entries are cleaned up by TTL",
   REQUIRE(limiter.get_stats().m_tracked_ips == 2);
 
   // TTL = 1с; ждём очистки (фоновая нить или ручной вызов — оба удаляют)
-  for (int i = 0; i < 40 && limiter.get_stats().m_tracked_ips > 0; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    limiter.cleanup_expired_ips();
-  }
+  REQUIRE(test_support::wait_for_condition(
+      [&] {
+        limiter.cleanup_expired_ips();
+        return limiter.get_stats().m_tracked_ips == 0;
+      },
+      4000, std::chrono::milliseconds(100)));
 
   const auto stats = limiter.get_stats();
   REQUIRE(stats.m_tracked_ips == 0);

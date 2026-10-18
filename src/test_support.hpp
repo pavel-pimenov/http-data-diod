@@ -5,12 +5,11 @@
 #include "httplib/httplib.h"
 #include "request_handler.hpp"
 #include "stats_logger.hpp"
+#include "test_wait_support.hpp"
 #include "trace_logger.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <cstdlib>
-#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -19,7 +18,6 @@
 #include <stdlib.h>
 #include <string>
 #include <sys/socket.h>
-#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -180,22 +178,9 @@ template <typename Handler>
   return port;
 }
 
-// Poll `predicate` every 50 ms until it returns true or `timeout_ms` elapses;
-// the predicate is checked once more after the deadline so a condition that
-// became true just as the timeout expired still counts. Keeps the live-test
-// waits bounded even when the server binary is missing or the broker hangs.
-[[nodiscard]] inline bool wait_for_condition(
-    const std::function<bool()> &predicate, int timeout_ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (predicate()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  return predicate();
-}
+// Bound every live-test wait: the polling loop itself is shared with the
+// dependency-light test TUs (see test_wait_support.hpp for the semantics).
+using test_wait_support::wait_for_condition;
 
 // The three objects every RequestHandler-driven test needs together: the
 // shutdown flag, the stats logger that borrows it and the handler that borrows

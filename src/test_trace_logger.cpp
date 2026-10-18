@@ -11,6 +11,7 @@
 #include "nlohmann/json.hpp"
 #include "sentry_client.hpp"
 #include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
 
@@ -30,19 +31,9 @@
 #include <thread>
 #include <vector>
 
-namespace {
+using test_wait_support::wait_for_condition;
 
-bool wait_for_condition(const auto &pred, int timeout_ms) {
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (pred()) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(25));
-  }
-  return pred();
-}
+namespace {
 
 struct TraceMockServer {
   httplib::Server m_server;

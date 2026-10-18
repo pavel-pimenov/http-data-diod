@@ -32,6 +32,7 @@
 #include "stats_page.hpp"
 #include "string_utils.hpp"
 #include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include "thread_pool_wrapper.hpp"
 #include "time_utils.hpp"
 #include "timed_task_queue.hpp"
@@ -1633,29 +1634,24 @@ struct TaskQueueFixture {
                                        "queue wait", latency_buckets_ms_to_10s());
 };
 
+// The timed-task-queue tests watch an atomic flag that flips within
+// microseconds, so they poll the shared waiter every 1 ms instead of its 50 ms
+// default.
 bool wait_for_tasks(const std::atomic<int> &done, int expected,
                     std::chrono::milliseconds timeout) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (done.load() >= expected) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  return done.load() >= expected;
+  return test_wait_support::wait_for_condition(
+      [&] { return done.load() >= expected; },
+      static_cast<int>(timeout.count()), std::chrono::milliseconds(1));
 }
 
 bool wait_for_flag(std::mutex &mutex, bool &flag,
                    std::chrono::milliseconds timeout) {
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (std::lock_guard const lock(mutex); flag) {
-      return true;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  std::scoped_lock const lock(mutex);
-  return flag;
+  return test_wait_support::wait_for_condition(
+      [&] {
+        std::scoped_lock const lock(mutex);
+        return flag;
+      },
+      static_cast<int>(timeout.count()), std::chrono::milliseconds(1));
 }
 
 } // namespace

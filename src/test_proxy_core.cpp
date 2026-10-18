@@ -17,6 +17,7 @@
 #include "prometheus/registry.h"
 #include "random_utils.hpp"
 #include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include "url_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -1121,11 +1122,8 @@ TEST_CASE("MetricsHistory: ring buffer records a counter family",
 
   MetricsHistory history(registry, std::chrono::seconds(15), 8, 240);
   history.start();
-  bool sampled = false;
-  for (int i = 0; i < 50 && !sampled; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    sampled = history.has_family("history_total");
-  }
+  const bool sampled = test_wait_support::wait_for_condition(
+      [&] { return history.has_family("history_total"); }, 5000);
   history.stop();
   REQUIRE(sampled);
   const auto series = history.get_series("history_total", 16);
