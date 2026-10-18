@@ -40,8 +40,8 @@
     "config.cpp": {
       "lines": 574,
       "covered": 568,
-      "branches": 1146,
-      "branches_covered": 632
+      "branches": 1144,
+      "branches_covered": 631
     },
     "config.hpp": {
       "lines": 3,
@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 87,
+      "covered": 89,
       "branches": 95,
-      "branches_covered": 63
+      "branches_covered": 64
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -314,10 +314,10 @@
       "branches_covered": 18
     },
     "rate_limiter.hpp": {
-      "lines": 53,
-      "covered": 52,
-      "branches": 26,
-      "branches_covered": 15
+      "lines": 51,
+      "covered": 51,
+      "branches": 24,
+      "branches_covered": 14
     },
     "rate_limiter_per_ip.hpp": {
       "lines": 147,
@@ -410,10 +410,10 @@
       "branches_covered": 46
     },
     "stats_page.hpp": {
-      "lines": 209,
-      "covered": 206,
-      "branches": 387,
-      "branches_covered": 245
+      "lines": 206,
+      "covered": 203,
+      "branches": 381,
+      "branches_covered": 240
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 82
+      "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
@@ -452,10 +452,10 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 363,
-      "covered": 340,
-      "branches": 785,
-      "branches_covered": 444
+      "lines": 364,
+      "covered": 341,
+      "branches": 769,
+      "branches_covered": 438
     },
     "trace_logger.hpp": {
       "lines": 26,

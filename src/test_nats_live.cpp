@@ -1359,7 +1359,6 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 #include <libpq-fe.h>
 #include <filesystem>
 #include <cerrno>
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -1389,7 +1388,7 @@ using test_support::wait_for_condition;
     return "";
   }
   std::vector<std::string> vs;
-  for (auto &e : std::filesystem::directory_iterator(ld, ec)) {
+  for (const auto &e : std::filesystem::directory_iterator(ld, ec)) {
     if (e.is_directory()) {
       vs.push_back(e.path().filename().string());
     }
@@ -1450,7 +1449,7 @@ private:
       (void)redirect_to(log.c_str());
       std::vector<const char *> av;
       av.push_back(exe.c_str());
-      for (auto &a : args) {
+      for (const auto &a : args) {
         av.push_back(a.c_str());
       }
       av.push_back(nullptr);
@@ -1476,7 +1475,7 @@ private:
       (void)redirect_to(log.c_str());
       std::vector<const char *> av;
       av.push_back(exe.c_str());
-      for (auto &a : args) {
+      for (const auto &a : args) {
         av.push_back(a.c_str());
       }
       av.push_back(nullptr);

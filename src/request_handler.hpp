@@ -31,7 +31,7 @@ private:
   // NATS push/poll services bound to m_ctx).
   struct Services {
     explicit Services(AppContext &ctx)
-        : m_id_generator(), m_push_service(ctx), m_poll_service(ctx) {}
+        : m_push_service(ctx), m_poll_service(ctx) {}
 
     RequestIdGenerator m_id_generator;
     NatsPushService m_push_service;

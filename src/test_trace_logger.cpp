@@ -1268,7 +1268,7 @@ TEST_CASE("TraceLogger: sentry sample rate zero sends no transactions",
   const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
   std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
 
-  const auto jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto *const jaeger_endpoint = "http://127.0.0.1:1/api/traces";
   const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
                           std::to_string(sentry_port) + "/2";
   auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,
@@ -1328,7 +1328,7 @@ TEST_CASE("TraceLogger: sentry delivers transactions when Jaeger target is dead"
   const int sentry_port = sentry_server.bind_to_any_port("127.0.0.1");
   std::thread sentry_thread([&] { sentry_server.listen_after_bind(); });
 
-  const auto jaeger_endpoint = "http://127.0.0.1:1/api/traces";
+  const auto *const jaeger_endpoint = "http://127.0.0.1:1/api/traces";
   const auto sentry_dsn = "http://PUBLIC@127.0.0.1:" +
                           std::to_string(sentry_port) + "/2";
   auto env = std::make_unique<SentryTracingEnv>(jaeger_endpoint, sentry_dsn,

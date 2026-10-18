@@ -2,6 +2,7 @@
 #define RATE_LIMITER_HPP
 
 #include "logger.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -122,10 +123,8 @@ private:
       uint64_t cur = m_bucket.m_tokens.load(std::memory_order_relaxed);
       uint64_t desired = 0;
       do {
-        uint64_t new_tokens = cur + tokens_to_add;
-        if (new_tokens > m_config.m_max_tokens) {
-          new_tokens = m_config.m_max_tokens;
-        }
+        const uint64_t new_tokens =
+            std::min(cur + tokens_to_add, m_config.m_max_tokens);
         desired = new_tokens;
       } while (!m_bucket.m_tokens.compare_exchange_weak(
           cur, desired, std::memory_order_acq_rel, std::memory_order_relaxed));

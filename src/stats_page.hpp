@@ -106,9 +106,8 @@ inline std::string build_sparkline_svg(
     for (size_t i = 1; i < pts.size(); ++i) {
       const auto dt = static_cast<double>(pts[i].first - pts[i - 1].first);
       double r = (pts[i].second - pts[i - 1].second) / (dt > 0.0 ? dt : 1.0);
-      if (r < 0.0) {
-        r = 0.0; // counter reset between samples
-      }
+      // counter reset between samples
+      r = std::max(r, 0.0);
       vals.push_back(r);
     }
   } else {
@@ -119,12 +118,8 @@ inline std::string build_sparkline_svg(
   double min_v = vals[0];
   double max_v = vals[0];
   for (const double v : vals) {
-    if (v < min_v) {
-      min_v = v;
-    }
-    if (v > max_v) {
-      max_v = v;
-    }
+    min_v = std::min(min_v, v);
+    max_v = std::max(max_v, v);
   }
   const double range = (max_v - min_v) > 1e-12 ? (max_v - min_v) : 1.0;
   const auto w = static_cast<double>(width);

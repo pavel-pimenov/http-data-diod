@@ -38,8 +38,6 @@
 #include "timed_task_queue.hpp"
 #include "trace_logger.hpp"
 
-extern const char *g_l2_proxy_version;
-
 using json = nlohmann::json;
 
 extern std::atomic<bool> g_shutdown_flag;
