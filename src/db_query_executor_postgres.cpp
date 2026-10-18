@@ -68,6 +68,14 @@ struct PostgresQueryExecutor::Impl {
   }
 
   std::optional<PGconn *> acquire_conn() {
+    const uint64_t start_us = TimeUtils::steady_us();
+    std::optional<PGconn *> conn = try_acquire_conn();
+    m_owner->observe_pool_acquire(
+        TimeUtils::duration_seconds(start_us, TimeUtils::steady_us()));
+    return conn;
+  }
+
+  std::optional<PGconn *> try_acquire_conn() {
     {
       const std::scoped_lock lock(m_mutex);
       if (!m_idle.empty()) {
@@ -77,6 +85,7 @@ struct PostgresQueryExecutor::Impl {
         return conn;
       }
       if (m_total >= static_cast<size_t>(m_db.m_pool_max)) {
+        m_owner->publish_pool_exhausted();
         return std::nullopt;
       }
       // reserve slot

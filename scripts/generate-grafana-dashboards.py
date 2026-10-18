@@ -2628,7 +2628,8 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_worker_db_pool_connections{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}} {{state}}", "refId": "A"}  # noqa: E501
+            {"expr": "l2_worker_db_pool_connections{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}} {{state}}", "refId": "A"},  # noqa: E501
+            {"expr": "l2_worker_db_pool_capacity{vm=~\"${vm:regex}\"}", "legendFormat": "лимит {{db}}", "refId": "B"}  # noqa: E501
         ]
     ))
 
@@ -2667,6 +2668,37 @@ def create_worker_dashboard() -> Dict:
         },
         targets=[
             {"expr": "l2_worker_db_gateway_ready{vm=~\"${vm:regex}\"}", "legendFormat": "{{db}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
+    # Panel 53: DB pool exhaustion rate
+    panels.append(create_timeseries_panel(
+        title="DB пул: отказы из-за исчерпания",
+        id=53,
+        x=0, y=y, w=12, h=8,
+        unit="reqps",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "rate(l2_worker_db_pool_exhausted_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 54: DB pool acquire latency
+    panels.append(create_timeseries_panel(
+        title="DB пул: время получения соединения",
+        id=54,
+        x=12, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": "histogram_quantile(0.50, rate(l2_worker_db_pool_acquire_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p50 {{db}}", "refId": "A"},  # noqa: E501
+            {"expr": "histogram_quantile(0.95, rate(l2_worker_db_pool_acquire_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "p95 {{db}}", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8

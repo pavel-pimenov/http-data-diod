@@ -298,6 +298,17 @@ void AppContext::init_worker_metrics() {
           "Current number of DB pool connections by database and state "
           "(active/idle)"),
       MetricsManager::create_gauge_family(
+          m_worker_registry, "l2_worker_db_pool_capacity",
+          "Configured maximum DB pool connections per database"),
+      MetricsManager::create_counter_family(
+          m_worker_registry, "l2_worker_db_pool_exhausted_total",
+          "Total DB pool acquire requests rejected because every configured "
+          "connection was busy (pool saturated)"),
+      MetricsManager::create_histogram_family(
+          m_worker_registry, "l2_worker_db_pool_acquire_duration_seconds",
+          "Histogram of DB pool connection acquire duration in seconds "
+          "(pooled hand-out or fresh connect)"),
+      MetricsManager::create_gauge_family(
           m_worker_registry, "l2_worker_db_gateway_ready",
           "DB Gateway readiness per configured database (1 = executor live, "
           "0 = still starting up)"),

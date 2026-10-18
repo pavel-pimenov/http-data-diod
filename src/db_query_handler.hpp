@@ -7,6 +7,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <string>
 #include <vector>
 
@@ -61,6 +64,13 @@ public:
   // current pointer.
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
 
+  // Wires the pool saturation families (capacity, exhaustion counter, acquire
+  // latency) into every (future) executor created by init().
+  void set_pool_saturation_metrics(
+      prometheus::Family<prometheus::Gauge> *pool_capacity,
+      prometheus::Family<prometheus::Counter> *pool_exhausted,
+      prometheus::Family<prometheus::Histogram> *pool_acquire_duration);
+
 private:
 #if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
   struct State {
@@ -89,6 +99,9 @@ private:
   } m_state;
 #endif
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
+  prometheus::Family<prometheus::Gauge> *m_pool_capacity = nullptr;
+  prometheus::Family<prometheus::Counter> *m_pool_exhausted = nullptr;
+  prometheus::Family<prometheus::Histogram> *m_pool_acquire_duration = nullptr;
 };
 
 #endif // DB_QUERY_HANDLER_HPP

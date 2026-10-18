@@ -131,6 +131,10 @@ void L2Worker::run_with_nats() {
     m_db_query_handler = std::make_unique<DbQueryHandler>();
     m_db_query_handler->set_pool_metrics(
         &m_ctx.m_worker.m_metrics->m_db_pool_connections);
+    m_db_query_handler->set_pool_saturation_metrics(
+        &m_ctx.m_worker.m_metrics->m_db_pool_capacity,
+        &m_ctx.m_worker.m_metrics->m_db_pool_exhausted_total,
+        &m_ctx.m_worker.m_metrics->m_db_pool_acquire_duration_seconds);
   }
 
   RetryHandler backoff(1, 150);

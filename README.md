@@ -181,8 +181,18 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 соединения создаются по требованию и возвращаются в пул idle; при всплеске
 количество растёт до `POOL_MAX`, при исчерпании лимита запросы не вешаются
 в очередь — им сразу возвращается 503 `DB_UNAVAILABLE`. Сценарий
-`--parallel N` (> `POOL_MAX`) в `scripts/db-gateway-e2e-test.py` проверяет
-рост пула и отсутствие потерь/перепутывания ответов.
+`--parallel N` в `scripts/db-gateway-e2e-test.py` проверяет рост пула и
+отсутствие потерь/перепутывания ответов.
+
+Сатурацию пула видно по `l2_worker_db_pool_capacity` (это `POOL_MAX`),
+`l2_worker_db_pool_connections{state}` и всплеску
+`l2_worker_db_pool_exhausted_total` («все соединения заняты»);
+`l2_worker_db_pool_acquire_duration_seconds` показывает, сколько стоит
+получить соединение — взять готовое из пула или открыть новое. Так же ведёт себя
+сценарий `--parallel N` в `scripts/db-gateway-e2e-test.py`: при `N`, близком к
+`POOL_MAX` (`--parallel 5..8`), все помеченные запросы возвращаются 1:1, а при
+заметном превышении (`--parallel 25`) часть законно получает 503 — это и есть та
+сатурация, которую считает `l2_worker_db_pool_exhausted_total`.
 
 ### Контракт ответов
 
@@ -593,6 +603,9 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_db_requests_total` | counter | `db`,`type`,`status` | Запросы DB Gateway (воркер) |
 | `l2_worker_db_query_duration_seconds` | histogram | `db` | Длительность SQL-запроса (воркер) |
 | `l2_worker_db_pool_connections` | gauge | `db`,`state` | Соединения пула СУБД (active/idle) |
+| `l2_worker_db_pool_capacity` | gauge | `db` | Настроенный лимит соединений пула СУБД (`pool_max`) |
+| `l2_worker_db_pool_exhausted_total` | counter | `db` | Отказы получить соединение: пул выжат (все соединения заняты) |
+| `l2_worker_db_pool_acquire_duration_seconds` | histogram | `db` | Длительность получения соединения из пула (из пула или новое подключение) |
 | `l2_worker_db_gateway_ready` | gauge | `db` | Готовность экзекутора DB Gateway (1=жив, 0=стартует) |
 | `l2_worker_responses_total` | counter | `status` | Ответы воркера по NATS по статусу |
 | `l2_worker_in_flight_requests` | gauge | — | Обрабатываемые запросы |
@@ -866,9 +879,9 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **94.34%** (15475/16403) |
-| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.15%** (30116/73193) |
-| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.46%** (6998/13090) |
+| `--fail-under-line` — строки по проекту | 90% | **94.36%** (15575/16506) |
+| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.14%** (30342/73759) |
+| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.38%** (7052/13212) |
 | пер-файловый гейт регрессии (см. ниже) | без снижения | 80 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,

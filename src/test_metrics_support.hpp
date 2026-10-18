@@ -65,6 +65,22 @@ make_gauge_family(prometheus::Registry &registry, const std::string &name,
   return prometheus::BuildGauge().Name(name).Help(help).Register(registry);
 }
 
+[[nodiscard]] inline prometheus::Family<prometheus::Histogram> &
+make_histogram_family(prometheus::Registry &registry, const std::string &name,
+                      const std::string &help) {
+  return prometheus::BuildHistogram().Name(name).Help(help).Register(registry);
+}
+
+// Family<Histogram>::Add() has no default-bucket overload, so tests that only
+// want to read a series created by production code (it ran the first Add with
+// its own buckets) pass throwaway bounds: Add() returns the existing series and
+// ignores them.
+[[nodiscard]] inline prometheus::Histogram &
+histogram_series(prometheus::Family<prometheus::Histogram> &family,
+                 const std::string &db) {
+  return family.Add({{"db", db}}, std::vector<double>{0.001, 0.01, 0.1, 1.0});
+}
+
 } // namespace test_support
 
 #endif

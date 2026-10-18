@@ -119,6 +119,12 @@ struct WorkerMetrics {
   prometheus::Family<prometheus::Counter> &m_db_requests_total;
   prometheus::Family<prometheus::Histogram> &m_db_query_duration_seconds;
   prometheus::Family<prometheus::Gauge> &m_db_pool_connections;
+  // DB pool saturation per database: configured capacity, acquire-attempt
+  // rejections (pool full) and connection-acquire latency. The executor is a
+  // non-blocking try-acquire, so there is no wait queue to expose.
+  prometheus::Family<prometheus::Gauge> &m_db_pool_capacity;
+  prometheus::Family<prometheus::Counter> &m_db_pool_exhausted_total;
+  prometheus::Family<prometheus::Histogram> &m_db_pool_acquire_duration_seconds;
   // DB Gateway readiness per configured database (1 = executor live,
   // 0 = still starting up). Lets observability expose slow cold-starts.
   prometheus::Family<prometheus::Gauge> &m_db_gateway_ready;

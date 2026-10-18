@@ -2,11 +2,14 @@
 #include "config.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
+#include "metrics_manager.hpp"
 #include "time_utils.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <prometheus/counter.h>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <string>
 #include <utility>
 
@@ -32,6 +35,42 @@ void DbExecutorBase::set_db_pool_gauges(double idle, double active) {
   }
   m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "idle"}}).Set(idle);
   m_pool_metrics->Add({{"db", m_db.m_name}, {"state", "active"}}).Set(active);
+}
+
+void DbExecutorBase::set_pool_saturation_metrics(
+    prometheus::Family<prometheus::Gauge> *pool_capacity,
+    prometheus::Family<prometheus::Counter> *pool_exhausted,
+    prometheus::Family<prometheus::Histogram> *pool_acquire_duration) {
+  m_pool_capacity = pool_capacity;
+  m_pool_exhausted = pool_exhausted;
+  m_pool_acquire_duration = pool_acquire_duration;
+  // Materialize the per-database series even before the first acquire: a
+  // labeled family is only exported after the first Add().
+  if (m_pool_capacity) {
+    m_pool_capacity->Add({{"db", m_db.m_name}}).Set(
+        static_cast<double>(m_db.m_pool_max));
+  }
+  if (m_pool_exhausted) {
+    m_pool_exhausted->Add({{"db", m_db.m_name}});
+  }
+  if (m_pool_acquire_duration) {
+    m_pool_acquire_duration->Add({{"db", m_db.m_name}},
+                                 latency_buckets_ms_to_10s());
+  }
+}
+
+void DbExecutorBase::publish_pool_exhausted() {
+  if (m_pool_exhausted) {
+    m_pool_exhausted->Add({{"db", m_db.m_name}}).Increment();
+  }
+}
+
+void DbExecutorBase::observe_pool_acquire(double seconds) {
+  if (m_pool_acquire_duration) {
+    m_pool_acquire_duration->Add({{"db", m_db.m_name}},
+                                 latency_buckets_ms_to_10s())
+        .Observe(seconds);
+  }
 }
 
 json DbExecutorBase::build_query_response(const json &columns_json,

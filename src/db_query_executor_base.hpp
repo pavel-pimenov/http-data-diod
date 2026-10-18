@@ -4,8 +4,10 @@
 #include "config.hpp"
 #include "db_query_executor.hpp"
 #include <cstdint>
+#include <prometheus/counter.h>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <string>
 
 class DbRowCollector;
@@ -29,10 +31,22 @@ public:
   void set_pool_metrics(
       prometheus::Family<prometheus::Gauge> *pool_metrics) override;
 
+  void set_pool_saturation_metrics(
+      prometheus::Family<prometheus::Gauge> *pool_capacity,
+      prometheus::Family<prometheus::Counter> *pool_exhausted,
+      prometheus::Family<prometheus::Histogram> *pool_acquire_duration)
+      override;
+
   // Publishes the per-database idle/active pool gauges. Driver code (including
   // the driver pimpl, which lives outside the class hierarchy) calls this from
   // refresh_pool_gauges() and after each acquire/release.
   void set_db_pool_gauges(double idle, double active);
+
+  // Saturation side of the pool wiring, called by driver pools on every
+  // acquire attempt: the capacity is published once by
+  // set_pool_saturation_metrics(), exhaustion and acquire latency per attempt.
+  void publish_pool_exhausted();
+  void observe_pool_acquire(double seconds);
 
 protected:
   // Refreshes the pool gauges from the driver's current pool state. Called by
@@ -48,6 +62,9 @@ protected:
 
   const DbConfig m_db;
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
+  prometheus::Family<prometheus::Gauge> *m_pool_capacity = nullptr;
+  prometheus::Family<prometheus::Counter> *m_pool_exhausted = nullptr;
+  prometheus::Family<prometheus::Histogram> *m_pool_acquire_duration = nullptr;
 };
 
 #endif // DB_QUERY_EXECUTOR_BASE_HPP

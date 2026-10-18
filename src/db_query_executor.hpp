@@ -4,8 +4,10 @@
 #include "config.hpp"
 #include "nlohmann/json.hpp"
 #include <memory>
+#include <prometheus/counter.h>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <string>
 
 using json = nlohmann::json;
@@ -50,6 +52,14 @@ public:
   // acquire/release. nullptr (default) disables the updates.
   virtual void
   set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics) = 0;
+
+  // Wires the per-database pool saturation families (capacity, exhaustion
+  // counter, acquire latency). Drivers whose pool cannot saturate (Oracle)
+  // inherit DbExecutorBase's implementation and simply never publish.
+  virtual void set_pool_saturation_metrics(
+      prometheus::Family<prometheus::Gauge> *pool_capacity,
+      prometheus::Family<prometheus::Counter> *pool_exhausted,
+      prometheus::Family<prometheus::Histogram> *pool_acquire_duration) = 0;
 
 protected:
   DbQueryExecutor() = default;

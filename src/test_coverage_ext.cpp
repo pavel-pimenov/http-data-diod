@@ -88,6 +88,10 @@ public:
   }
   bool ping(int) override { return true; }
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *) override {}
+  void set_pool_saturation_metrics(prometheus::Family<prometheus::Gauge> *,
+                                  prometheus::Family<prometheus::Counter> *,
+                                  prometheus::Family<prometheus::Histogram> *)
+      override {}
 };
 } // namespace
 
@@ -98,6 +102,7 @@ TEST_CASE("DbQueryExecutor: default is_ready returns true", "[db-exec]") {
   REQUIRE(exec.ping(1));
   REQUIRE(exec.default_timeout_ms() == 1000);
   REQUIRE(exec.default_max_rows() == 10);
+  exec.set_pool_saturation_metrics(nullptr, nullptr, nullptr);
   REQUIRE(exec.db_name() == "mock");
 }
 

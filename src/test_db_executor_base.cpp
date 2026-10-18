@@ -14,6 +14,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <memory>
+#include <prometheus/counter.h>
+#include <prometheus/histogram.h>
 #include <prometheus/registry.h>
 #include <string>
 
@@ -120,6 +122,45 @@ TEST_CASE("DbExecutorBase: setting metrics to nullptr disables gauges",
   ex.set_pool_metrics(nullptr);
   ex.set_db_pool_gauges(5.0, 5.0);
   REQUIRE(family.Collect().empty());
+}
+
+TEST_CASE("DbExecutorBase: pool saturation metrics are published",
+          "[db-executor-base]") {
+  StubExecutor ex(make_db());
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &capacity = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_capacity", "test");
+  auto &exhausted = test_support::make_counter_family(
+      *registry, "l2_worker_db_pool_exhausted_total", "test");
+  auto &acquire = test_support::make_histogram_family(
+      *registry, "l2_worker_db_pool_acquire_duration_seconds", "test");
+
+  ex.set_pool_saturation_metrics(&capacity, &exhausted, &acquire);
+
+  // Capacity and the zero-valued counter/histogram exist before any acquire,
+  // so the families are exported from startup.
+  REQUIRE(capacity.Add({{"db", "pg-test"}}).Collect().gauge.value == 5.0);
+  REQUIRE(exhausted.Add({{"db", "pg-test"}}).Collect().counter.value == 0.0);
+  REQUIRE(test_support::histogram_series(acquire, "pg-test")
+              .Collect()
+              .histogram.sample_count == 0);
+
+  ex.publish_pool_exhausted();
+  REQUIRE(exhausted.Add({{"db", "pg-test"}}).Collect().counter.value == 1.0);
+
+  ex.observe_pool_acquire(0.25);
+  const auto hist =
+      test_support::histogram_series(acquire, "pg-test").Collect().histogram;
+  REQUIRE(hist.sample_count == 1);
+  REQUIRE(hist.sample_sum == 0.25);
+}
+
+TEST_CASE("DbExecutorBase: pool saturation helpers are no-op without metrics",
+          "[db-executor-base]") {
+  StubExecutor ex(make_db());
+  REQUIRE_NOTHROW(ex.set_pool_saturation_metrics(nullptr, nullptr, nullptr));
+  REQUIRE_NOTHROW(ex.publish_pool_exhausted());
+  REQUIRE_NOTHROW(ex.observe_pool_acquire(0.1));
 }
 
 TEST_CASE("DbExecutorBase: build_query_response stamps the success envelope",

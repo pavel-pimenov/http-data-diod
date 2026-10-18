@@ -40,7 +40,7 @@
 | proxy task queue | `l2_proxy_task_queue_enqueued_total`, `_rejected_total`, `_wait_seconds` |
 | HTTP-пул (общий) | `l2_http_pool_active_clients`, `_available_clients`, `_client_acquisitions_total`, `_client_releases_total`, `_stale_evictions_total` |
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
-| worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_gateway_ready` |
+| worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_response_size_bytes`, `circuit_breaker_state` |
 | tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size` |
 
@@ -63,19 +63,24 @@
 семейство экспортировалось (как 0) ещё до первого перехода — иначе prometheus-cpp не отдал бы
 лейбл-семейство в `/metrics` в здоровом стеке и golden check его бы не нашёл.
 
-### 2. DB-пул PostgreSQL: ожидание и исчерпание
+### 2. DB-пул PostgreSQL: исчерпание и время получения соединения ✅ реализовано (round 157)
 Сейчас видны только idle/active из `db_pool_connections`; под нагрузкой отсутствие
-«сколько ждём соединение» и «сколько раз не дождались» — слепая зона для алертов на сатурацию.
+«сколько раз не дождались» и «сколько стоит получить соединение» — слепая зона для алертов
+на сатурацию.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
-| `l2_worker_db_pool_waiting_requests` | gauge | — | число запросов, ждущих соединение из пула (сатурация) |
-| `l2_worker_db_pool_capacity` | gauge | — | настроенный лимит пула (для алерта «waiting > 0.8×capacity») |
-| `l2_worker_db_pool_acquire_duration_seconds` | histogram | — | время ожидания соединения (пул как узкое место) |
-| `l2_worker_db_pool_exhausted_total` | counter | — | таймауты получения соединения (пул выжат) |
+| `l2_worker_db_pool_capacity` | gauge | `db` | настроенный лимит пула (`pool_max`) — знаменатель для сатурации |
+| `l2_worker_db_pool_exhausted_total` | counter | `db` | сколько acquire отброшено, потому что все соединения заняты (пул выжат) |
+| `l2_worker_db_pool_acquire_duration_seconds` | histogram | `db` | время получения соединения (из пула или новое подключение) |
+| ~~`l2_worker_db_pool_waiting_requests`~~ | — | — | **отклонено при реализации**: пул неблокирующий (try-acquire), очереди ожидания нет — gauge был бы вечно 0 |
 
-Регистрация: `src/app_context.cpp` + экспорт из `src/db_query_executor_postgres.cpp`
-(`update_pool_gauges_locked` — подходящее место для waiting/capacity). Кардинальность: нет меток.
+Реализовано в round 157: метки `db` (как у `db_pool_connections`/`db_requests_total`) вместо
+запланированных «без меток» — иначе несколько БД сливались бы; серии предсоздаются в
+`DbExecutorBase::set_pool_saturation_metrics()` (prometheus-cpp отдаёт лейбл-семейство только
+после первого `Add()`). Роль `waiting_requests` играет пара `active`/`capacity` из
+`db_pool_connections` + всплеск `exhausted_total`. Пул-сатурация заполняется из
+`PostgresQueryExecutor::Impl`; Oracle-исполнитель наследует no-op (его обсервабилити вне области).
 
 ### 3. Типизированные ошибки (использовать уже готовый классификатор)
 `src/error_categorizer.hpp` уже различает `HttpErrorType`/`L2ErrorType`/`ProcessingErrorType`,

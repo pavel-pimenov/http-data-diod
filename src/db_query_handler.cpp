@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <format>
 #include <mutex>
+#include <prometheus/counter.h>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
 #include <utility>
 #include <vector>
 
@@ -41,6 +43,8 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
       continue;
     }
     executor->set_pool_metrics(m_pool_metrics);
+    executor->set_pool_saturation_metrics(m_pool_capacity, m_pool_exhausted,
+                                          m_pool_acquire_duration);
     const std::scoped_lock lock(m_state.m_mutex);
     if (!m_state.m_executors.contains(db.m_name)) {
       m_state.m_executors.try_emplace(db.m_name, std::move(executor));
@@ -59,6 +63,15 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
 void DbQueryHandler::set_pool_metrics(
     prometheus::Family<prometheus::Gauge> *pool_metrics) {
   m_pool_metrics = pool_metrics;
+}
+
+void DbQueryHandler::set_pool_saturation_metrics(
+    prometheus::Family<prometheus::Gauge> *pool_capacity,
+    prometheus::Family<prometheus::Counter> *pool_exhausted,
+    prometheus::Family<prometheus::Histogram> *pool_acquire_duration) {
+  m_pool_capacity = pool_capacity;
+  m_pool_exhausted = pool_exhausted;
+  m_pool_acquire_duration = pool_acquire_duration;
 }
 
 std::vector<std::string> DbQueryHandler::configured_databases() const {

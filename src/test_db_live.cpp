@@ -15,6 +15,7 @@
 #include "db_query_handler.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
+#include "test_metrics_support.hpp"
 #include "test_pg_diag.hpp"
 #include "test_support.hpp"
 
@@ -28,6 +29,8 @@
 #include <filesystem>
 #include <format>
 #include <libpq-fe.h>
+#include <memory>
+#include <prometheus/registry.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string>
@@ -556,6 +559,16 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
   PostgresQueryExecutor ex(make_pg_cfg(shared_pg(), /*pool_max=*/1));
   REQUIRE(ex.init());
 
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &capacity = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_capacity", "test");
+  auto &exhausted = test_support::make_counter_family(
+      *registry, "l2_worker_db_pool_exhausted_total", "test");
+  auto &acquire = test_support::make_histogram_family(
+      *registry, "l2_worker_db_pool_acquire_duration_seconds", "test");
+  ex.set_pool_saturation_metrics(&capacity, &exhausted, &acquire);
+  REQUIRE(capacity.Add({{"db", "pg"}}).Collect().gauge.value == 1.0);
+
   int slow_status = 0;
   std::thread slow([&ex, &slow_status] {
     json const body = ex.execute_query("SELECT pg_sleep(0.4), 1",
@@ -569,6 +582,12 @@ TEST_CASE("PostgresQueryExecutor: pool exhaustion returns 503", "[db-live]") {
   REQUIRE(status == 503);
   REQUIRE(resp[DbResponseContract::kError][DbResponseContract::kCode] ==
           "DB_UNAVAILABLE");
+  // The rejecting acquire is counted as pool exhaustion and timed (the slow
+  // request's own acquire is observed too).
+  REQUIRE(exhausted.Add({{"db", "pg"}}).Collect().counter.value == 1.0);
+  REQUIRE(test_support::histogram_series(acquire, "pg")
+              .Collect()
+              .histogram.sample_count >= 2);
   slow.join();
 }
 
@@ -642,6 +661,15 @@ TEST_CASE("PostgresQueryExecutor: handles a connection lost mid-pool",
 TEST_CASE("DbQueryHandler: routes live postgres query and ping", "[db-live]") {
   REQUIRE_PG();
   DbQueryHandler handler;
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &capacity = test_support::make_gauge_family(
+      *registry, "l2_worker_db_pool_capacity", "test");
+  auto &exhausted = test_support::make_counter_family(
+      *registry, "l2_worker_db_pool_exhausted_total", "test");
+  auto &acquire = test_support::make_histogram_family(
+      *registry, "l2_worker_db_pool_acquire_duration_seconds", "test");
+  handler.set_pool_metrics(nullptr);
+  handler.set_pool_saturation_metrics(&capacity, &exhausted, &acquire);
   REQUIRE(handler.init({make_pg_cfg(shared_pg())}));
   REQUIRE(handler.is_enabled());
   REQUIRE(handler.all_configured());
@@ -693,6 +721,15 @@ TEST_CASE("DbQueryHandler: routes live postgres query and ping", "[db-live]") {
   REQUIRE(status == 400);
   REQUIRE(body[DbResponseContract::kError][DbResponseContract::kCode] ==
           "BAD_REQUEST");
+
+  // The handler wired the saturation families into the executor it created:
+  // capacity is the configured pool_max, no acquire was rejected, and every
+  // acquire (query + ping) was timed.
+  REQUIRE(capacity.Add({{"db", "pg"}}).Collect().gauge.value == 5.0);
+  REQUIRE(exhausted.Add({{"db", "pg"}}).Collect().counter.value == 0.0);
+  REQUIRE(test_support::histogram_series(acquire, "pg")
+              .Collect()
+              .histogram.sample_count >= 3);
 }
 
 TEST_CASE("DbQueryHandler: re-init keeps already ready executors", "[db-live]") {
