@@ -15,10 +15,10 @@ private:
   AppContext &m_ctx;
   void send_response_with_trace(const httplib::Request &req,
                                 httplib::Response &res, json response_json,
-                                uint64_t start_us);
+                                uint64_t start_us) const;
 
   // Serves the embedded favicon.ico for the binary GET integrity test.
-  void handle_favicon(httplib::Response &res) const;
+  static void handle_favicon(httplib::Response &res);
 
   // Test-mode random delay (L2_TEST_RESPONSE_DELAY_MS) that desynchronizes
   // response order from request order so the correlation test can exercise

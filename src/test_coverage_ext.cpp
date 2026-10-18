@@ -214,7 +214,9 @@ TEST_CASE("Pool executor: pool returning no connection throws",
   // hard error rather than a null dereference in the caller.
   struct NullPool {
     using client_type = MockHttpClient;
-    std::unique_ptr<MockHttpClient> acquire_connection() { return nullptr; }
+    static std::unique_ptr<MockHttpClient> acquire_connection() {
+      return nullptr;
+    }
     void release_connection(std::unique_ptr<MockHttpClient>) {}
   };
   NullPool pool;
@@ -241,7 +243,7 @@ TEST_CASE("Pool executor: invalid client is released and throws",
   struct InvalidPool {
     using client_type = MockHttpClient;
     int m_releases = 0;
-    std::unique_ptr<MockHttpClient> acquire_connection() {
+    static std::unique_ptr<MockHttpClient> acquire_connection() {
       auto c = std::make_unique<MockHttpClient>();
       c->m_valid = false;
       return c;

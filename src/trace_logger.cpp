@@ -320,7 +320,7 @@ std::string JaegerLogger::build_sentry_envelope(
 // configured maximum. Both the Jaeger and Sentry/GlitchTip sinks share it.
 void JaegerLogger::record_sink_failure(ExponentialBreaker &breaker,
                                        uint64_t now_steady_ms,
-                                       std::string_view sink_name) {
+                                       std::string_view sink_name) const {
   ++breaker.m_consecutive_failures;
   if (breaker.m_consecutive_failures <
       m_breaker.m_settings.m_failure_threshold) {

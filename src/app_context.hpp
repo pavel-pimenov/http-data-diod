@@ -279,7 +279,7 @@ private:
   void init_server_metrics();
   // Stops the in-process stats-history sampler threads (created as a set in
   // init_common); safe to call on a partially-initialized context.
-  void stop_stats_history();
+  void stop_stats_history() const;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 

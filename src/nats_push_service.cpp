@@ -14,7 +14,7 @@ NatsPushService::NatsPushService(AppContext &ctx) : m_ctx(ctx) {}
 std::string NatsPushService::push_request(nlohmann::json request_data,
                                           const std::string &trace_id,
                                           const std::string &span_id,
-                                          const TraceContext &trace_ctx) {
+                                          const TraceContext &trace_ctx) const {
   const int64_t nats_push_start = TimeUtils::epoch_us();
   std::string op_span_id;
   if (request_data.contains(NatsContract::kProxySpanId)) {

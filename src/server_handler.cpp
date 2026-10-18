@@ -51,7 +51,7 @@ ServerHandler::ServerHandler(AppContext &ctx) : m_ctx(ctx) {}
 void ServerHandler::send_response_with_trace(const httplib::Request &req,
                                              httplib::Response &res,
                                              json response_json,
-                                             uint64_t start_us) {
+                                             uint64_t start_us) const {
   const TraceContext trace_ctx = TraceContextHelper::extract_and_validate(
       req.headers, m_ctx.m_tracer.get(), "ServerHandler");
 
@@ -134,7 +134,7 @@ void ServerHandler::handle_post(const httplib::Request &req,
   send_response_with_trace(req, res, response_json, request_timing.start_us());
 }
 
-void ServerHandler::handle_favicon(httplib::Response &res) const {
+void ServerHandler::handle_favicon(httplib::Response &res) {
   res.set_content(
       std::string(reinterpret_cast<const char *>(g_favicon_ico.data()),
                   g_favicon_ico.size()),

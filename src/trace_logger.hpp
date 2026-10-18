@@ -151,7 +151,7 @@ private:
   // batches are then shed for the cooldown window instead of hammering the
   // dead target. Shared by the Jaeger and Sentry/GlitchTip sinks.
   void record_sink_failure(ExponentialBreaker &breaker, uint64_t now_steady_ms,
-                           std::string_view sink_name);
+                           std::string_view sink_name) const;
 
   // Fast random hex generation (thread-local, no re-initialization)
   static std::string random_hex_fast(size_t len);
@@ -245,13 +245,13 @@ public:
                TracingBreakerSettings breaker_settings = {});
   ~JaegerLogger();
 
-  std::string generate_trace_id();
-  std::string generate_span_id();
+  static std::string generate_trace_id();
+  static std::string generate_span_id();
 
   // W3C Trace Context helpers
-  std::string generate_traceparent(std::string_view trace_id,
-                                   std::string_view span_id,
-                                   bool sampled = true);
+  static std::string generate_traceparent(std::string_view trace_id,
+                                          std::string_view span_id,
+                                          bool sampled = true);
 
   // Parse traceparent header: "00-{trace-id}-{parent-id}-{flags}"
   static bool parse_traceparent(std::string_view traceparent,

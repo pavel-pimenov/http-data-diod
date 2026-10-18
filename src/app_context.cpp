@@ -33,7 +33,7 @@ AppContext::~AppContext() {
   m_tracer.reset();
 }
 
-void AppContext::stop_stats_history() {
+void AppContext::stop_stats_history() const {
   for (auto *history : {m_proxy_stats_history.get(),
                         m_worker_stats_history.get(),
                         m_server_stats_history.get(),

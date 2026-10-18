@@ -151,7 +151,7 @@ struct OracleQueryExecutor::Impl {
     }
   }
 
-  void update_pool_gauges() {
+  void update_pool_gauges() const {
     if (!m_pool) {
       return;
     }
@@ -166,7 +166,7 @@ struct OracleQueryExecutor::Impl {
     m_owner->set_db_pool_gauges(idle, active);
   }
 
-  void release_conn(dpiConn *conn) {
+  void release_conn(dpiConn *conn) const {
     if (!conn) {
       return;
     }

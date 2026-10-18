@@ -289,14 +289,14 @@ void L2Worker::run() {
                drain_seconds.count());
 }
 
-void L2Worker::update_queue_size_metric() {
+void L2Worker::update_queue_size_metric() const {
   if (m_clients.m_thread_pool) {
     m_ctx.m_worker.m_metrics->m_queue_size.Set(
         static_cast<double>(m_clients.m_thread_pool->queue_size()));
   }
 }
 
-void L2Worker::record_bytes_sent(size_t bytes) {
+void L2Worker::record_bytes_sent(size_t bytes) const {
   m_ctx.m_worker.m_metrics->m_bytes_sent.Increment(
       static_cast<double>(bytes));
 }
@@ -430,7 +430,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
                   url, max_retries, last_error.what()));
 }
 
-void L2Worker::record_l2_call_metrics(uint64_t start_us) {
+void L2Worker::record_l2_call_metrics(uint64_t start_us) const {
   const uint64_t end_us = get_current_timestamp_us();
   const double duration_seconds = TimeUtils::duration_seconds(start_us, end_us);
   try {
@@ -450,7 +450,7 @@ void L2Worker::record_l2_call_metrics(uint64_t start_us) {
 // ============================================================================
 
 bool L2Worker::parse_request_data(const std::string &request_json,
-                                  json &request_data) {
+                                  json &request_data) const {
   // C++23 expected monadic: and_then chains JSON parse → schema validation
   auto validated = validate_and_parse_json(request_json, "Worker")
                        .and_then([&](json j) -> std::expected<json, std::string> {
@@ -498,7 +498,7 @@ bool L2Worker::parse_request_data(const std::string &request_json,
 }
 
 L2Worker::RequestData
-L2Worker::extract_request_metadata(const json &request_data) {
+L2Worker::extract_request_metadata(const json &request_data) const {
   RequestData metadata;
   // Fill the shared-contract fields in one move instead of copying them
   // field by field; the base subobject is assigned in place.
@@ -522,7 +522,7 @@ L2Worker::extract_request_metadata(const json &request_data) {
 
 L2Worker::TracingSpans
 L2Worker::create_tracing_spans(const TraceContext &parent_trace_ctx,
-                               const std::string &op_parent_span_id) {
+                               const std::string &op_parent_span_id) const {
   TracingSpans spans;
 
   spans.m_worker_process_parent_id = op_parent_span_id;

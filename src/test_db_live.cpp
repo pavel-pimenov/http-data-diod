@@ -143,10 +143,10 @@ private:
     return ::waitpid(m_pid, &status, WNOHANG) == 0;
   }
 
-  [[nodiscard]] bool run_wait(const std::string &exe,
-                              const std::vector<std::string> &args,
-                              const std::string &logfile,
-                              const ServerUser &target) const {
+  [[nodiscard]] static bool run_wait(const std::string &exe,
+                                     const std::vector<std::string> &args,
+                                     const std::string &logfile,
+                                     const ServerUser &target) {
     const pid_t pid = ::fork();
     if (pid == 0) {
       if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {
@@ -179,10 +179,10 @@ private:
     return true;
   }
 
-  [[nodiscard]] pid_t spawn_server(const std::string &exe,
-                                   const std::vector<std::string> &args,
-                                   const std::string &logfile,
-                                   const ServerUser &target) const {
+  [[nodiscard]] static pid_t spawn_server(const std::string &exe,
+                                          const std::vector<std::string> &args,
+                                          const std::string &logfile,
+                                          const ServerUser &target) {
     const pid_t pid = ::fork();
     if (pid == 0) {
       if (!drop_privileges(target) || !redirect_to(logfile.c_str())) {

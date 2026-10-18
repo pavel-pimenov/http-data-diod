@@ -609,7 +609,7 @@ TEST_CASE("NatsPushService: serializes the backend request",
           "[nats-services]") {
   const EnvGuard mode{{"MODE", "proxy"}};
   AppContext ctx;
-  NatsPushService push(ctx);
+  const NatsPushService push(ctx);
 
   {
     const json request{{NatsContract::kRequestId, "req-42"}};
@@ -643,7 +643,7 @@ TEST_CASE("NatsPushService: traceparent and inlet span with a tracer",
   const EnvGuard mode{{"MODE", "proxy"}};
   AppContext ctx;
   attach_tracer(ctx);
-  NatsPushService push(ctx);
+  const NatsPushService push(ctx);
 
   json const request{{NatsContract::kRequestId, "req-45"},
                      {NatsContract::kProxyInletSpanId, "inlet-1"}};

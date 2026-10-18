@@ -249,9 +249,9 @@
     },
     "metrics_history.hpp": {
       "lines": 92,
-      "covered": 89,
+      "covered": 87,
       "branches": 95,
-      "branches_covered": 64
+      "branches_covered": 63
     },
     "metrics_manager.cpp": {
       "lines": 16,
@@ -413,7 +413,7 @@
       "lines": 206,
       "covered": 203,
       "branches": 381,
-      "branches_covered": 240
+      "branches_covered": 239
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 85
+      "branches_covered": 84
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,

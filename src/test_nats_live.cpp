@@ -179,7 +179,7 @@ public:
     return true;
   }
 
-  bool wait_ready(int timeout_ms = 8000) {
+  [[nodiscard]] bool wait_ready(int timeout_ms = 8000) const {
     return wait_for_port(m_port, true, timeout_ms);
   }
 
@@ -1438,9 +1438,10 @@ private:
     int st = 0;
     return ::waitpid(m_pid, &st, WNOHANG) == 0;
   }
-  [[nodiscard]] bool run_wait(const std::string &exe,
-                              const std::vector<std::string> &args,
-                              const std::string &log, const ServerUser &t) const {
+  [[nodiscard]] static bool run_wait(const std::string &exe,
+                                     const std::vector<std::string> &args,
+                                     const std::string &log,
+                                     const ServerUser &t) {
     pid_t const p = ::fork();
     if (p == 0) {
       if (!drop_privileges(t)) {
@@ -1464,9 +1465,10 @@ private:
     }
     return WIFEXITED(st) && WEXITSTATUS(st) == 0;
   }
-  [[nodiscard]] pid_t spawn(const std::string &exe,
-                            const std::vector<std::string> &args,
-                            const std::string &log, const ServerUser &t) const {
+  [[nodiscard]] static pid_t spawn(const std::string &exe,
+                                   const std::vector<std::string> &args,
+                                   const std::string &log,
+                                   const ServerUser &t) {
     pid_t const p = ::fork();
     if (p == 0) {
       if (!drop_privileges(t)) {

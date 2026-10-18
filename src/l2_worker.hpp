@@ -72,8 +72,8 @@ private:
   // White-box hook for test_l2_worker.cpp: the private pipeline stages and
   // runtime state are driven through that accessor.
   friend class L2WorkerTestAccess;
-  std::string extract_l2_server_span_id(const std::string &l2_response);
-  json prepare_response_headers(const HttpResponse &l2_http_response);
+  static std::string extract_l2_server_span_id(const std::string &l2_response);
+  static json prepare_response_headers(const HttpResponse &l2_http_response);
   // NATS mode methods
   void run_with_nats();
   // Subscribes the worker to the main request subject; returns false on
@@ -99,7 +99,7 @@ private:
                                 uint64_t db_end_us,
                                 const TraceContext &trace_ctx,
                                 const std::string &request_id,
-                                const std::string &consume_span_id);
+                                const std::string &consume_span_id) const;
   // Wraps the DB result {status, body} into the NATS response envelope, records
   // the per-db/type/status counter and publishes it to reply_to.
   void send_db_query_response(const std::string &reply_to, int status,
@@ -121,7 +121,7 @@ private:
                           const NatsHeaders &headers);
   void send_nats_response_impl(const std::string &reply_to,
                                const std::string &response_json,
-                               const NatsHeaders *headers = nullptr);
+                               const NatsHeaders *headers = nullptr) const;
 
   bool validate_l2_server_access(const std::string &path,
                                  std::string &selected_url);
@@ -129,15 +129,15 @@ private:
       const std::string &url, const std::string &query, const std::string &body,
       const std::string &traceparent, const httplib::Headers &forwarded_headers,
       const std::string &method, int &final_attempt);
-  void record_l2_call_metrics(uint64_t start_us);
+  void record_l2_call_metrics(uint64_t start_us) const;
   void metrics_ticker_loop(const std::stop_token &st);
   // Samples the thread-pool queue depth into the worker queue-size gauge.
-  void update_queue_size_metric();
+  void update_queue_size_metric() const;
   // Publishes the per-database DB Gateway readiness gauge for every configured
   // database (1 = executor live, 0 = still starting up).
   void publish_db_gateway_ready_metric();
   // Records the outgoing NATS response payload size into m_bytes_sent.
-  void record_bytes_sent(size_t bytes);
+  void record_bytes_sent(size_t bytes) const;
 
   // Worker-side view of the decoded NATS request: the shared contract fields
   // (worker_request_parser::WorkerRequestData) plus the TraceContext the worker
@@ -167,14 +167,15 @@ private:
   };
 
   // Pipeline stages
-  bool parse_request_data(const std::string &request_json, json &request_data);
-  RequestData extract_request_metadata(const json &request_data);
+  bool parse_request_data(const std::string &request_json,
+                          json &request_data) const;
+  RequestData extract_request_metadata(const json &request_data) const;
   TracingSpans create_tracing_spans(const TraceContext &parent_trace_ctx,
-                                    const std::string &op_parent_span_id);
+                                    const std::string &op_parent_span_id) const;
   L2Response execute_l2_call(const RequestData &metadata,
                              const TracingSpans &spans);
-ResponseData prepare_response_data(const L2Response &l2_response,
-                                      const TracingSpans &spans);
+  static ResponseData prepare_response_data(const L2Response &l2_response,
+                                            const TracingSpans &spans);
   // Runs the L2 call, wraps the result into the NATS response envelope, stores
   // it in the dedup cache and publishes it. Returns the L2 status code.
   int send_l2_response(const RequestData &metadata, const TracingSpans &spans,

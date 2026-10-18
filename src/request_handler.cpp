@@ -113,7 +113,7 @@ void RequestHandler::handle_get(const httplib::Request &req,
 }
 
 void RequestHandler::handle_crash_test(const httplib::Request &req,
-                                       httplib::Response &res) {
+                                       httplib::Response &res) const {
   // Intentionally crashes the process to test the crash handler. Guarded
   // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
   // not remotely SIGSEGV the proxy.
@@ -202,7 +202,7 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
   }
 }
 
-void RequestHandler::handle_duplicates(httplib::Response &res) {
+void RequestHandler::handle_duplicates(httplib::Response &res) const {
   // Simple report of duplicate POST requests detected from clients. When the
   // detector is absent (non-proxy mode) or disabled this endpoint answers 404
   // so callers can distinguish "not supported here" from "empty report".
@@ -306,7 +306,7 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
 // ============================================================================
 bool RequestHandler::record_and_maybe_reject_duplicate(
     const std::string &client_id, const std::string &client_ip,
-    const std::string &body, httplib::Response &res) {
+    const std::string &body, httplib::Response &res) const {
   if (!m_ctx.m_proxy.m_duplicate_detector) {
     return false;
   }
@@ -351,7 +351,7 @@ bool RequestHandler::fail_backend_request(
     httplib::Response &res, const std::string &method, const std::string &path,
     int status, const std::string &message, const std::string &category,
     const std::string &detail, uint64_t start_us, const TraceContext &trace_ctx,
-    const std::string &request_id) {
+    const std::string &request_id) const {
   BackendErrorSpanLogger::log_backend_error(
       m_ctx.m_tracer.get(), method, path, status, start_us, trace_ctx,
       m_ctx.m_config.m_app.m_mode, request_id, category, detail);
@@ -371,7 +371,7 @@ bool RequestHandler::reject_rate_limited(
     httplib::Response &res, const std::string &client_ip,
     const std::string &client_id, const std::string &traceparent_raw,
     const std::string &reason, prometheus::Counter &rejected_counter,
-    const std::string &message, uint64_t limit, uint64_t remaining) {
+    const std::string &message, uint64_t limit, uint64_t remaining) const {
   rejected_counter.Increment();
   increment_per_client_metric(m_ctx.m_proxy.m_per_client_id_metrics_collector,
                               client_id, 1);
@@ -391,7 +391,8 @@ bool RequestHandler::reject_rate_limited(
 TraceContext RequestHandler::setup_tracing(
     const httplib::Request &req, const std::string &request_id,
     long long start_us, std::string &inlet_span_id,
-    std::string &backend_push_span_id, std::string &traceparent_for_backend) {
+    std::string &backend_push_span_id,
+    std::string &traceparent_for_backend) const {
   const TraceContext trace_ctx = extract_trace_context(
       req, m_ctx.m_tracer.get(), backend_push_span_id, traceparent_for_backend);
 
@@ -408,7 +409,7 @@ TraceContext RequestHandler::setup_tracing(
 std::string RequestHandler::push_to_backend(
     nlohmann::json request_data, const std::string &request_id,
     const std::string &trace_id, const std::string &backend_push_span_id,
-    const TraceContext &trace_ctx) {
+    const TraceContext &trace_ctx) const {
   Logger::debug("Proxy queueing request via NATS: request_id={} size={}",
                 request_id, request_data.size());
 
@@ -741,7 +742,7 @@ void RequestHandler::send_db_gateway_error(
     httplib::Response &res, int status, const std::string &code,
     const std::string &message, const std::string &method,
     const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
-    const std::string &request_id) {
+    const std::string &request_id) const {
   if (m_ctx.m_tracer) {
     JaegerSpanLogger::log_proxy_response(
         m_ctx.m_tracer.get(), method, path, status, start_us,

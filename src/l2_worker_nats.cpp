@@ -497,7 +497,7 @@ void L2Worker::send_nats_response(const std::string &reply_to,
 
 void L2Worker::send_nats_response_impl(const std::string &reply_to,
                                        const std::string &response_json,
-                                       const NatsHeaders *headers) {
+                                       const NatsHeaders *headers) const {
   constexpr int max_retries = 3;
   constexpr int retry_delay_ms = 100;
 
@@ -601,13 +601,10 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   send_db_query_response(reply_to, status, body, consume_span_id, request_data);
 }
 
-void L2Worker::observe_db_query_outcome(const json &request_data, int status,
-                                        const json &body,
-                                        uint64_t db_start_us,
-                                        uint64_t db_end_us,
-                                        const TraceContext &trace_ctx,
-                                        const std::string &request_id,
-                                        const std::string &consume_span_id) {
+void L2Worker::observe_db_query_outcome(
+    const json &request_data, int status, const json &body,
+    uint64_t db_start_us, uint64_t db_end_us, const TraceContext &trace_ctx,
+    const std::string &request_id, const std::string &consume_span_id) const {
   const std::string db_name =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =
