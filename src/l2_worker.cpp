@@ -236,8 +236,7 @@ HttpResponse L2Worker::call_l2_server(
 
   if (m_ctx.m_tracer && !l2_trace_ctx.m_trace_id.empty()) {
     const auto end_us = get_current_timestamp_us();
-    const int span_status =
-        success ? static_cast<int>(http_response.m_status) : 500;
+    const int span_status = success ? http_response.m_status : 500;
     nlohmann::json attrs;
     if (!success) {
       // Expose how many L2 server attempts were made before giving up so the

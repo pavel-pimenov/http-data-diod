@@ -188,8 +188,8 @@
       "branches_covered": 2
     },
     "in_flight_tracker.hpp": {
-      "lines": 60,
-      "covered": 58,
+      "lines": 61,
+      "covered": 59,
       "branches": 42,
       "branches_covered": 27
     },
@@ -224,8 +224,8 @@
       "branches_covered": 99
     },
     "l2_worker.cpp": {
-      "lines": 302,
-      "covered": 270,
+      "lines": 301,
+      "covered": 269,
       "branches": 474,
       "branches_covered": 259
     },

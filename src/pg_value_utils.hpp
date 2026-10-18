@@ -88,7 +88,7 @@ inline std::string pg_type_name(uint32_t oid) {
   case kPgUuidOid:
     return "UUID";
   default:
-    return std::format("UNKNOWN({})", static_cast<uint32_t>(oid));
+    return std::format("UNKNOWN({})", oid);
   }
 }
 
