@@ -40,18 +40,22 @@ jobs:
           cp -a src/build/l2-proxy-version.h src/l2-proxy-version.h
           rm -f src/build/l2-proxy
 
-      # GRAFANA_URL points to a dead port so rebuild-and-run.sh skips the
-      # dashboard-update block and the build/health gates stay deterministic.
       # buildx docker-container driver enables the GitHub Actions cache backend;
       # rebuild-and-run.sh then builds via `docker buildx bake` (L2_BAKE_CACHE=gha)
       # so layers produced on this run warm the next CI run.
+      # GRAFANA_URL is NOT redirected to a dead port here: the stack's Grafana
+      # lives at the published localhost:3000, rebuild-and-run.sh provisions the
+      # dashboards into it, and the runtime gate's live Grafana <-> Perses
+      # parity check then has both sides to compare. (Pointing GRAFANA_URL at a
+      # dead port used to skip the update block and left Grafana empty, which
+      # made the parity gate fail on every run since round 68.)
       - name: Set up Buildx with GitHub Actions cache
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
 
       - name: Build images and start the stack
-        run: GRAFANA_URL=http://127.0.0.1:65530 L2_BAKE_CACHE=gha ./rebuild-and-run.sh
+        run: L2_BAKE_CACHE=gha ./rebuild-and-run.sh
 
       # Message counter, DB Gateway e2e, golden metrics (--traffic --db) and
       # /metrics consistency — the same single source of truth as pre-commit.
@@ -83,7 +87,13 @@ jobs:
 
   coverage:
     name: Coverage gate (lines >= 90%, branch >= 40%, per-file regression)
-    runs-on: ubuntu-latest
+    # Deliberately arm64, i.e. the architecture docs/coverage-baseline.json was
+    # recorded on (the developer machine, linux/arm64/4 vCPU). gcov attributes a
+    # handful of executable lines per file differently per target, so the amd64
+    # runner saw e.g. http_client.cpp as 101 executable lines instead of 97 and
+    # reported bogus per-file regressions. Same architecture as the baseline
+    # keeps the per-file gate strict instead of hiding it behind a tolerance.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -98,6 +108,7 @@ jobs:
         run: bash scripts/run-coverage.sh "$GITHUB_WORKSPACE/coverage-report"
 
       - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report

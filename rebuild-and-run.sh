@@ -343,10 +343,13 @@ if [ -f "scripts/generate-grafana-dashboards.py" ]; then
     # Check if GRAFANA_URL is set, otherwise try localhost:3000
     GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 
-    # Wait for Grafana to be fully ready (may take 10-15 seconds after container starts)
+    # Wait for Grafana to be fully ready (may take 10-15 seconds after container starts).
+    # 30 tries: in CI the dashboards are provisioned from scratch and the live
+    # Grafana <-> Perses parity gate needs them, so a cold Grafana must not be
+    # skipped silently. Breaking on the first healthy response keeps local runs fast.
     echo "⏳ Waiting for Grafana to be fully ready..."
     GRAFANA_READY=false
-    for i in $(seq 1 15); do
+    for i in $(seq 1 30); do
         if curl -s --connect-timeout 2 --max-time 5 "$GRAFANA_URL/api/health" > /dev/null 2>&1; then
             # Grafana responds, but may still be initializing
             sleep 3

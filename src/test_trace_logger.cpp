@@ -397,10 +397,24 @@ TEST_CASE("TraceLogger: jaeger delivery recovers after the endpoint comes back",
   // failures just before).
   TraceMockServer const server(0, port);
   REQUIRE(server.port() == port);
-  env.m_logger->enqueue_span("cccccccccccccccccccccccccccccccc",
-                             "dddddddddddddddd", "", "HTTP POST /query", 1000,
-                             2000, k_test_service_name);
-  REQUIRE(wait_for_condition([&] { return env.sent() >= 1.0; }, 20000));
+  // A retired port is refused instantly on most hosts, but it can also be
+  // blackholed (every attempt then burns the whole send timeout) -- on a slow
+  // CI runner the first batch after the endpoint returned was dropped and no
+  // further span followed, so the recovery went unnoticed. Keep enqueuing until
+  // one batch lands. A leaked pool slot would never recover at all (that is the
+  // regression this test guards), so re-enqueueing does not weaken the check.
+  const auto recovery_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (env.sent() < 1.0 &&
+         std::chrono::steady_clock::now() < recovery_deadline) {
+    env.m_logger->enqueue_span("cccccccccccccccccccccccccccccccc",
+                               "dddddddddddddddd", "", "HTTP POST /query",
+                               1000, 2000, k_test_service_name);
+    if (wait_for_condition([&] { return env.sent() >= 1.0; }, 3000)) {
+      break;
+    }
+  }
+  REQUIRE(env.sent() >= 1.0);
   REQUIRE(server.body_count() == 1);
 }
 

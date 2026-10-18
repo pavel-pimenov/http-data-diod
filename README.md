@@ -726,6 +726,12 @@ row/grid-секций, а затем прогоняет выборку запр�
 Запускается в runtime-гейте `scripts/ci-gate.sh runtime` (с `--allow-down`: контейнеры
 упали — чек пропускается с предупреждением).
 
+В CI стек поднимается **без** подмены `GRAFANA_URL`, поэтому `rebuild-and-run.sh`
+действительно накатывает дашборды в контейнер Grafana (`:3000`) и живое сравнение
+выполняется по-настоящему. Раньше CI указывал `GRAFANA_URL` на мёртвый порт: блок
+обновления дашбордов пропускался, Grafana оставалась пустой, и гейт падал на каждом
+прогоне (с раунда 68, когда он появился) сообщением «Grafana=0 Perses=8».
+
 Сервис `perses` в `docker-compose.yml` слушает `8089:8080` и использует named volume
 `perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-имидемпотентно).
 Режим `--mode migrate` (через `POST /api/migrate`) оставлен как fallback.
@@ -860,10 +866,10 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **93.62%** (14749/15754) |
-| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.20%** (28186/68416) |
-| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 45% | **51.73%** (6935/13407) |
-| пер-файловый гейт регрессии (см. ниже) | без снижения | 77 production-файлов в baseline |
+| `--fail-under-line` — строки по проекту | 90% | **94.34%** (15475/16403) |
+| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.15%** (30116/73193) |
+| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.46%** (6998/13090) |
+| пер-файловый гейт регрессии (см. ниже) | без снижения | 80 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
 запускается из `scripts/run-coverage.sh` сразу после отчёта. Сверяет построчное
@@ -878,6 +884,20 @@ python3 scripts/coverage-regression-check.py --update   # обновить basel
 python3 scripts/coverage-regression-check.py            # только проверить
 python3 scripts/coverage-regression-check.py --max-drop 0.5   # допуск в п.п.
 ```
+
+**Архитектура CI-джобы покрытия.** Джоб `coverage` в `.github/workflows/ci.yml`
+намеренно крутится на `ubuntu-24.04-arm` — той же архитектуре, на которой снят
+`docs/coverage-baseline.json` (машина разработчика, linux/arm64, 4 vCPU). gcov
+приписывает часть исполняемых строк по-разному на разных таргетах: при том же
+исходнике и той же версии gcc на amd64 `http_client.cpp` давал 101 исполняемую
+строку вместо 97, а `config.cpp` — 577 вместо 574. Из-за этого пер-файловый гейт
+на amd64-раннере с самого появления baseline (раунд 74) показывал ложные
+регрессии: пять файлов теряли ровно по одной покрытой строке
+(`common_utils.cpp`, `db_query_executor_oracle.cpp`, `header_utils.hpp`,
+`http_client_pool.cpp`, `in_flight_tracker.hpp`), а `config.cpp`/`http_client.cpp`
+ещё и меняли общее число строк (до −1.9 п.п.). Остальные джобы остаются на
+amd64 — покрытие это замер, а не проверка поведения, и строгий пер-файловый гейт
+возможен только на архитектуре baseline.
 
 **Ветвевое покрытие (branch):**
 
