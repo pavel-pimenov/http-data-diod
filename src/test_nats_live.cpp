@@ -629,6 +629,10 @@ TEST_CASE("NatsClient: reconnects after the broker restarts", "[nats-live]") {
 
   const std::string subject = unique_subject("nats.reconnect");
   NatsClient client(live_nats_cfg(subject, server.port()));
+  prometheus::Registry registry;
+  auto &reconnects =
+      test_support::make_counter(registry, "tst_nats_reconnects", "h");
+  client.set_metrics(NatsClient::Metrics{nullptr, &reconnects, nullptr});
   REQUIRE(client.connect());
   std::atomic<int> received{0};
   REQUIRE(client.subscribe(subject, [&received](const std::string &,
@@ -645,6 +649,8 @@ TEST_CASE("NatsClient: reconnects after the broker restarts", "[nats-live]") {
   server.restart();
   REQUIRE(wait_for_condition([&client]() { return client.is_connected(); },
                              15000));
+  // The reconnect is visible as a metric, not only as a log line.
+  REQUIRE(reconnects.Collect().counter.value >= 1.0);
 
   REQUIRE(client.publish(subject, "after"));
   REQUIRE(wait_for_condition([&received]() { return received.load() == 2; },
@@ -659,6 +665,10 @@ TEST_CASE("NatsClient: request timeout marks the connection down and records "
 
   const std::string subject = unique_subject("nats.reqtimeout");
   NatsClient client(live_nats_cfg(subject, server.port()));
+  prometheus::Registry registry;
+  auto &timeouts =
+      test_support::make_counter(registry, "tst_nats_timeouts", "h");
+  client.set_metrics(NatsClient::Metrics{&timeouts, nullptr, nullptr});
   REQUIRE(client.connect());
 
   std::atomic<int> received{0};
@@ -677,6 +687,8 @@ TEST_CASE("NatsClient: request timeout marks the connection down and records "
   REQUIRE(received.load() == 1);
   REQUIRE(client.get_last_error().has_value());
   REQUIRE_FALSE(client.is_connected());
+  // The timeout is counted separately from the other NATS errors.
+  REQUIRE(timeouts.Collect().counter.value == 1.0);
 
   client.disconnect();
 }
