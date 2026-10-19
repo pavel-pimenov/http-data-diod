@@ -2,10 +2,10 @@
   "comment": "Пер-файловая база покрытия production-файлов (отчёт gcovr --json). Сверяется скриптом scripts/coverage-regression-check.py; обновляй: scripts/coverage-regression-check.py --update",
   "files": {
     "app_context.cpp": {
-      "lines": 280,
-      "covered": 278,
-      "branches": 492,
-      "branches_covered": 246
+      "lines": 319,
+      "covered": 317,
+      "branches": 648,
+      "branches_covered": 313
     },
     "async_sender_queue.hpp": {
       "lines": 65,
@@ -20,22 +20,22 @@
       "branches_covered": 0
     },
     "circuit_breaker.cpp": {
-      "lines": 62,
-      "covered": 61,
-      "branches": 48,
-      "branches_covered": 34
+      "lines": 75,
+      "covered": 74,
+      "branches": 70,
+      "branches_covered": 45
     },
     "common_utils.cpp": {
-      "lines": 139,
-      "covered": 133,
-      "branches": 170,
-      "branches_covered": 116
+      "lines": 150,
+      "covered": 144,
+      "branches": 194,
+      "branches_covered": 129
     },
     "common_utils.hpp": {
-      "lines": 22,
-      "covered": 22,
-      "branches": 38,
-      "branches_covered": 20
+      "lines": 26,
+      "covered": 26,
+      "branches": 44,
+      "branches_covered": 24
     },
     "config.cpp": {
       "lines": 574,
@@ -74,10 +74,10 @@
       "branches_covered": 0
     },
     "db_query_executor_base.cpp": {
-      "lines": 21,
-      "covered": 21,
-      "branches": 40,
-      "branches_covered": 17
+      "lines": 42,
+      "covered": 42,
+      "branches": 130,
+      "branches_covered": 57
     },
     "db_query_executor_base.hpp": {
       "lines": 1,
@@ -98,16 +98,16 @@
       "branches_covered": 33
     },
     "db_query_executor_postgres.cpp": {
-      "lines": 208,
-      "covered": 196,
-      "branches": 318,
-      "branches_covered": 176
+      "lines": 214,
+      "covered": 202,
+      "branches": 328,
+      "branches_covered": 181
     },
     "db_query_handler.cpp": {
-      "lines": 83,
-      "covered": 82,
-      "branches": 142,
-      "branches_covered": 81
+      "lines": 89,
+      "covered": 88,
+      "branches": 144,
+      "branches_covered": 82
     },
     "db_query_handler.hpp": {
       "lines": 11,
@@ -224,10 +224,10 @@
       "branches_covered": 99
     },
     "l2_worker.cpp": {
-      "lines": 301,
-      "covered": 269,
-      "branches": 474,
-      "branches_covered": 259
+      "lines": 308,
+      "covered": 276,
+      "branches": 498,
+      "branches_covered": 269
     },
     "l2_worker.hpp": {
       "lines": 6,
@@ -236,10 +236,10 @@
       "branches_covered": 41
     },
     "l2_worker_nats.cpp": {
-      "lines": 362,
-      "covered": 321,
-      "branches": 826,
-      "branches_covered": 397
+      "lines": 366,
+      "covered": 325,
+      "branches": 828,
+      "branches_covered": 398
     },
     "logger.hpp": {
       "lines": 274,
@@ -388,8 +388,8 @@
     "sentry_client.cpp": {
       "lines": 221,
       "covered": 217,
-      "branches": 612,
-      "branches_covered": 319
+      "branches": 616,
+      "branches_covered": 322
     },
     "sentry_client.hpp": {
       "lines": 2,
@@ -404,16 +404,16 @@
       "branches_covered": 120
     },
     "stats_logger.cpp": {
-      "lines": 88,
-      "covered": 86,
-      "branches": 74,
-      "branches_covered": 46
+      "lines": 92,
+      "covered": 90,
+      "branches": 80,
+      "branches_covered": 51
     },
     "stats_page.hpp": {
       "lines": 206,
       "covered": 203,
       "branches": 381,
-      "branches_covered": 239
+      "branches_covered": 240
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -425,7 +425,7 @@
       "lines": 62,
       "covered": 62,
       "branches": 132,
-      "branches_covered": 84
+      "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
       "lines": 23,
@@ -452,10 +452,10 @@
       "branches_covered": 5
     },
     "trace_logger.cpp": {
-      "lines": 364,
-      "covered": 341,
-      "branches": 769,
-      "branches_covered": 438
+      "lines": 369,
+      "covered": 346,
+      "branches": 779,
+      "branches_covered": 443
     },
     "trace_logger.hpp": {
       "lines": 26,
@@ -468,6 +468,12 @@
       "covered": 127,
       "branches": 302,
       "branches_covered": 168
+    },
+    "tracing_metrics.hpp": {
+      "lines": 3,
+      "covered": 3,
+      "branches": 18,
+      "branches_covered": 7
     },
     "url_utils.hpp": {
       "lines": 69,

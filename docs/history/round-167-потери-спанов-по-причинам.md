@@ -89,4 +89,11 @@ Jaeger-счётчика убран; Sentry-счётчик (счётчик тра
   golden=92`, parity Grafana↔Perses — `OK`.
 - `./scripts/run-cppcheck.sh` — rc=0; `./scripts/run-clang-tidy.sh --all` — 47
   файлов, «no errors or warnings in project files».
-- Гейт покрытия проверяет CI на этом коммите.
+- Гейт покрытия: CI показал `production-файлы: 81, строк 6648/7261 = 91.56%` и
+  `0 регрессий`, но `FAIL: 1 новых файлов вне baseline` — новый production-файл
+  `src/tracing_metrics.hpp` (с инлайн-функцией `count_span_drop`) ещё не был в
+  `docs/coverage-baseline.json`. Baseline обновлён по отчёту самого CI
+  (`coverage-regression-check.py --update`): добавлен только новый файл
+  (3 строки, 3 покрытых), ни одно покрытие существующих файлов не занижено —
+  проверка diff'а подтвердила `lowered: none`. После обновления гейт зелёный:
+  `OK: регрессий покрытия нет (допуск 0.0 п.п.)`.
