@@ -901,6 +901,7 @@ TEST_CASE("ThreadPoolWrapper: CUSTOM executes on the pool and reuses it",
   auto fut = pool.enqueue([]() { return std::this_thread::get_id(); });
   REQUIRE(fut.get() != std::this_thread::get_id());
   std::vector<std::future<int>> results;
+  results.reserve(tasks);
   for (size_t i = 0; i < tasks; ++i) {
     results.push_back(pool.enqueue([i]() { return static_cast<int>(i * i); }));
   }
@@ -924,6 +925,9 @@ TEST_CASE("ThreadPoolWrapper: unknown pool type is rejected on enqueue",
           "[thread-pool-wrapper]") {
   // The enum only carries CUSTOM/NONE; an out-of-range value must be refused
   // instead of dereferencing a pool that was never constructed.
+  // The test needs an out-of-range enum value on purpose: the point is that
+  // the pool refuses it instead of dereferencing a pool that was never built.
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   auto const unknown = static_cast<ThreadPoolWrapper::Type>(42);
   ThreadPoolWrapper pool(unknown, 1);
   REQUIRE(pool.queue_size() == 0);
@@ -1699,6 +1703,9 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
   bool release = false;
   std::atomic<int> done{0};
 
+  // False positive: the analyzer loses the std::function allocation inside
+  // the Catch2 macro.
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   REQUIRE(queue.enqueue([&]() {
     {
       std::scoped_lock const lock(gate);

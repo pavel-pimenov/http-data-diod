@@ -14,6 +14,14 @@
 #   - diagnostics from system headers (/usr/include, ...) and bundled third-party
 #     code (httplib, base64, nats/src) are filtered out: fmt/spdlog consteval
 #     false positives are not actionable in project code.
+#   - the lint compile DB is built with -DFMT_CONSTEVAL=: fmt guards its
+#     compile-time format-string check with FMT_CONSTEVAL, and with consteval
+#     enabled clang cannot constant-evaluate fmt's FMT_STRING for spdlog's
+#     format helper. The translation unit then fails to compile and
+#     clang-tidy aborts it with "Error while processing" -- not a single
+#     project diagnostic is reported, so the sweep silently skipped every
+#     file that includes the logger. Without consteval the check degrades to
+#     a runtime one, which is irrelevant for a static analysis pass.
 #
 # Usage:
 #   ./scripts/run-clang-tidy.sh        # lint changed C++ files
@@ -107,7 +115,8 @@ ensure_compile_commands() {
     local compile_db="$BUILD_DIR/compile_commands.json"
     if [ -f "$compile_db" ] \
        && [ "$L2_DIR/CMakeLists.txt" -ot "$compile_db" ] \
-       && [ "$L2_DIR/Dockerfile" -ot "$compile_db" ]; then
+       && [ "$L2_DIR/Dockerfile" -ot "$compile_db" ] \
+       && [ "${BASH_SOURCE[0]}" -ot "$compile_db" ]; then
         return 0
     fi
     log_info "Generating per-file compile_commands.json (clang-tidy)..."
@@ -118,6 +127,7 @@ ensure_compile_commands() {
                -DCMAKE_UNITY_BUILD=OFF \
                -DL2_PROXY_TEST_PCH=OFF \
                -DL2_PROXY_APP_PCH=OFF \
+               -DCMAKE_CXX_FLAGS=-DFMT_CONSTEVAL= \
                -S . -B build-lint >/dev/null"
 }
 

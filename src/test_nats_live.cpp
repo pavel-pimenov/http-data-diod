@@ -66,7 +66,6 @@ namespace {
 // Config is loaded by the AppContext ctor.
 using test_support::attach_tracer;
 using test_support::call_get;
-using test_support::call_post;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
 using test_support::ProxyHandler;
@@ -587,7 +586,7 @@ TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
 
   const std::optional<std::string> r1 = client.request(subject, "ping", 3000);
   REQUIRE(r1.has_value());
-  REQUIRE(*r1 == R"({"pong":1})");
+  REQUIRE(test_support::require_value(r1, "nats reply") == R"({"pong":1})");
 
   const NatsReply r2 = client.request_with_headers(
       subject, "ping", {{"X-Client", "c1"}}, {"X-Reply-Marker"}, 3000);
@@ -602,7 +601,7 @@ TEST_CASE("NatsClient: request/reply, reply headers and consume span id",
   REQUIRE(client.check_connection());
   const std::optional<std::string> pong = client.ping();
   REQUIRE(pong.has_value());
-  REQUIRE_FALSE(pong->empty());
+  REQUIRE_FALSE(test_support::require_value(pong, "pong").empty());
 
   client.unsubscribe();
   REQUIRE(client.drain(3000));
@@ -682,7 +681,7 @@ TEST_CASE("NatsClient: request with timeout 0 falls back to the config timeout",
   REQUIRE(client.connect());
   const std::optional<std::string> reply = client.request(subject, "ping", 0);
   REQUIRE(reply.has_value());
-  REQUIRE(*reply == "pong");
+  REQUIRE(test_support::require_value(reply, "nats reply") == "pong");
 
   client.disconnect();
 }
@@ -1158,7 +1157,8 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   const std::optional<std::string> r2 =
       test_client.request(subject, request, 3000);
   REQUIRE(r2.has_value());
-  REQUIRE(json::parse(*r2)[NatsResponseContract::kStatus] == 200);
+  REQUIRE(json::parse(test_support::require_value(r2, "nats reply"))
+              [NatsResponseContract::kStatus] == 200);
   REQUIRE(backend.m_posts.load() == 1);
 
   // A fire-and-forget publish (no reply subject) reaches the worker's
@@ -1172,7 +1172,8 @@ TEST_CASE("L2Worker: run loop serves requests over a live broker",
   const std::optional<std::string> r3 =
       test_client.request(subject, "not-json", 3000);
   REQUIRE(r3.has_value());
-  REQUIRE(json::parse(*r3)["error"] == "Invalid request format");
+  REQUIRE(json::parse(test_support::require_value(r3, "nats reply"))["error"] ==
+          "Invalid request format");
 }
 
 TEST_CASE("NatsClient: constructor logs configured auth and TLS flags",

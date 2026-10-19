@@ -15,6 +15,7 @@
 #include <memory>
 #include <netinet/in.h>
 #include <optional>
+#include <stdexcept>
 #include <stdlib.h>
 #include <string>
 #include <sys/socket.h>
@@ -114,6 +115,18 @@ inline void attach_tracer(AppContext &ctx) {
   ctx.m_tracer = std::make_unique<JaegerLogger>(
       "http://127.0.0.1:1/api/traces", metrics.m_jaeger,
       /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
+}
+
+// Returns the value of an optional or throws with a readable message: a test
+// that forgets the emptiness check fails with the reason instead of
+// dereferencing an empty optional. The explicit branch (instead of a REQUIRE
+// macro) is also what makes the access provably safe for the static analysis.
+template <typename T> T require_value(const std::optional<T> &opt,
+                                      const std::string &what = "value") {
+  if (!opt) {
+    throw std::runtime_error("missing optional: " + what);
+  }
+  return *opt;
 }
 
 inline httplib::Request make_get(const std::string &path) {

@@ -11,6 +11,7 @@
 #include "nlohmann/json.hpp"
 #include "sentry_client.hpp"
 #include "test_metrics_support.hpp"
+#include "test_support.hpp"
 #include "test_wait_support.hpp"
 #include "trace_logger.hpp"
 #include "tracing_metrics.hpp"
@@ -612,6 +613,7 @@ TEST_CASE("TraceLogger: should_sample is thread-safe", "[tracing]") {
   std::atomic<int> ok{0};
   constexpr int kThreads = 4;
   constexpr int kEach = 100;
+  threads.reserve(kThreads);
   for (int i = 0; i < kThreads; ++i) {
     threads.emplace_back([&env, &ok] {
       for (int j = 0; j < kEach; ++j) {
@@ -1114,12 +1116,14 @@ TEST_CASE("TraceLogger: sentry_envelope_url uses project id and path prefix",
   const auto dsn =
       sentry::parse_dsn("http://PUBLIC@glitchtip:8000/2");
   REQUIRE(dsn.has_value());
-  REQUIRE(JaegerLogger::sentry_envelope_url(*dsn) ==
+  REQUIRE(JaegerLogger::sentry_envelope_url(
+              test_support::require_value(dsn, "dsn")) ==
           "http://glitchtip:8000/api/2/envelope/");
 
   const auto prefixed = sentry::parse_dsn("http://PUBLIC@127.0.0.1:9000/sub/3");
   REQUIRE(prefixed.has_value());
-  REQUIRE(JaegerLogger::sentry_envelope_url(*prefixed) ==
+  REQUIRE(JaegerLogger::sentry_envelope_url(
+              test_support::require_value(prefixed, "prefixed dsn")) ==
           "http://127.0.0.1:9000/sub/api/3/envelope/");
 }
 
@@ -1127,13 +1131,15 @@ TEST_CASE("TraceLogger: sentry_auth_header includes optional secret",
           "[tracing][sentry]") {
   const auto no_secret = sentry::parse_dsn("http://PUBLIC@glitchtip:8000/2");
   REQUIRE(no_secret.has_value());
-  REQUIRE(JaegerLogger::sentry_auth_header(*no_secret) ==
+  REQUIRE(JaegerLogger::sentry_auth_header(
+              test_support::require_value(no_secret, "dsn without secret")) ==
           "Sentry sentry_version=7, sentry_key=PUBLIC");
 
   const auto with_secret =
       sentry::parse_dsn("http://PUBLIC:SECRET@glitchtip:8000/2");
   REQUIRE(with_secret.has_value());
-  REQUIRE(JaegerLogger::sentry_auth_header(*with_secret) ==
+  REQUIRE(JaegerLogger::sentry_auth_header(
+              test_support::require_value(with_secret, "dsn with secret")) ==
           "Sentry sentry_version=7, sentry_key=PUBLIC/SECRET");
 }
 

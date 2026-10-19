@@ -245,7 +245,10 @@ SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
       m_queue{m_config.m_max_queue_size,
               AsyncSenderQueue<sentry::SentryEvent>::OverflowPolicy::
                   DropOldest} {
-  if (enabled()) {
+  // enabled() means the DSN parsed; the explicit check keeps the optional
+  // access provably safe (clang-tidy's bugprone-unchecked-optional-access
+  // cannot infer the relation between the two).
+  if (enabled() && m_config.m_dsn_data.has_value()) {
     Logger::info("Sentry client enabled: host={} project={} service={}",
                  m_config.m_dsn_data->m_host,
                  m_config.m_dsn_data->m_project_id,

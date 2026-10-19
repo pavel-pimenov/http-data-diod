@@ -1581,6 +1581,7 @@ TEST_CASE("ThreadPool: Basic enqueue and result", "[thread-pool]") {
 TEST_CASE("ThreadPool: Multiple tasks complete", "[thread-pool]") {
   ThreadPool pool(4);
   std::vector<std::future<int>> futures;
+  futures.reserve(10);
   for (int i = 0; i < 10; ++i) {
     futures.push_back(pool.enqueue([i]() { return i * 2; }));
   }
@@ -1594,6 +1595,7 @@ TEST_CASE("ThreadPool: Concurrent enqueue from multiple threads",
   ThreadPool pool(4);
   std::atomic<int> counter{0};
   std::vector<std::future<void>> futures;
+  futures.reserve(20);
   for (int i = 0; i < 20; ++i) {
     futures.push_back(pool.enqueue([&counter]() { counter.fetch_add(1); }));
   }
@@ -1686,6 +1688,7 @@ TEST_CASE("ThreadPool: shutdown drains queued tasks", "[thread-pool]") {
   ThreadPool pool(2);
   std::atomic<int> counter{0};
   std::vector<std::future<void>> futures;
+  futures.reserve(8);
   for (int i = 0; i < 8; ++i) {
     futures.push_back(pool.enqueue([&counter]() { counter.fetch_add(1); }));
   }
@@ -2314,7 +2317,8 @@ TEST_CASE("DedupCache: store then find returns the response",
   cache.store("req-1", R"({"response":"v1"})");
   const auto found = cache.find("req-1");
   REQUIRE(found.has_value());
-  REQUIRE(*found == R"({"response":"v1"})");
+  REQUIRE(test_support::require_value(found, "cached response") ==
+          R"({"response":"v1"})");
 }
 
 TEST_CASE("DedupCache: missing key returns nullopt", "[dedup-cache]") {
@@ -2328,7 +2332,7 @@ TEST_CASE("DedupCache: store refreshes an existing entry", "[dedup-cache]") {
   cache.store("req-1", "new");
   const auto found = cache.find("req-1");
   REQUIRE(found.has_value());
-  REQUIRE(*found == "new");
+  REQUIRE(test_support::require_value(found, "cached response") == "new");
 }
 
 TEST_CASE("DedupCache: entry expires after TTL", "[dedup-cache]") {
@@ -2381,6 +2385,7 @@ TEST_CASE("DedupCache: concurrent access does not lose entries",
   std::vector<std::thread> threads;
   constexpr int kThreads = 8;
   constexpr int kEach = 200;
+  threads.reserve(kThreads);
   for (int t = 0; t < kThreads; ++t) {
     threads.emplace_back([&, t]() {
       for (int i = 0; i < kEach; ++i) {
@@ -2742,8 +2747,9 @@ TEST_CASE("Common utils: get_header_value returns value or default",
 TEST_CASE("Common utils: find_header_optional", "[common-utils]") {
   httplib::Headers headers;
   headers.emplace("x-token", "abc");
-  REQUIRE(find_header_optional(headers, "x-token").has_value());
-  REQUIRE(*find_header_optional(headers, "x-token") == "abc");
+  const auto token = find_header_optional(headers, "x-token");
+  REQUIRE(token.has_value());
+  REQUIRE(test_support::require_value(token, "x-token header") == "abc");
   REQUIRE(!find_header_optional(headers, "x-missing").has_value());
   headers.emplace("x-empty", "");
   REQUIRE(!find_header_optional(headers, "x-empty").has_value());
