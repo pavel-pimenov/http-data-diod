@@ -33,6 +33,7 @@ CATALOG = [
     "l2_proxy_client_requests_total",
     "l2_proxy_nats_requests_total",
     "l2_proxy_client_request_errors_total",
+    "l2_proxy_rejections_total",
     "l2_proxy_nats_errors_total",
     "l2_proxy_nats_connection_creates_total",
     "l2_proxy_nats_connection_errors_total",

@@ -3,6 +3,7 @@
 
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "error_categorizer.hpp"
 #include "httplib/httplib.h"
 #include "nats_poll_service.hpp"
 #include "nats_push_service.hpp"
@@ -110,6 +111,10 @@ private:
                                          const std::string &client_ip,
                                          const std::string &body,
                                          httplib::Response &res) const;
+
+  // Counts one refusal of the proxy (the reason is the `reason` label of
+  // l2_proxy_rejections_total).
+  void count_rejection(error_categorizer::RejectionReason reason) const;
 
   // Increments a per-client-id counter bucket (request counts, duplicate or
   // rate-limit rejections) when the dynamic-labeled collector is set.

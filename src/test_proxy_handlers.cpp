@@ -45,6 +45,23 @@
 
 namespace {
 
+// Value of the proxy's rejection counter for one reason.
+double rejection_count(const AppContext &ctx, const std::string &reason) {
+  for (const auto &family : ctx.m_proxy_registry->Collect()) {
+    if (family.name != "l2_proxy_rejections_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "reason" && label.value == reason) {
+          return metric.counter.value;
+        }
+      }
+    }
+  }
+  return 0.0;
+}
+
 using test_support::attach_tracer;
 using test_support::call_get;
 using test_support::call_post;
@@ -302,6 +319,7 @@ TEST_CASE("RequestHandler: POST without a backend answers 504",
     REQUIRE(res.status == 400);
     REQUIRE(json::parse(res.body)["error"] == "Invalid JSON in request body");
   }
+  REQUIRE(rejection_count(ctx, "invalid_json") == 1.0);
   {
     httplib::Request req = make_post("/", R"({"value":1})");
     req.headers = {{"X-DataHub-Client-Id", "client-a"}};
@@ -343,6 +361,9 @@ TEST_CASE("RequestHandler: global rate limiter rejects with 429",
     REQUIRE(json::parse(res.body)["error"] ==
             "Global rate limit exceeded. Please retry later.");
   }
+  // The umbrella counter records the refusal together with its reason.
+  REQUIRE(rejection_count(ctx, "rate_limit_global") == 1.0);
+  REQUIRE(rejection_count(ctx, "rate_limit_per_ip") == 0.0);
 }
 
 TEST_CASE("RequestHandler: per-IP rate limiter rejects with 429",
@@ -440,6 +461,8 @@ TEST_CASE("RequestHandler: duplicate POST is rejected with 409",
     REQUIRE(res.status == 409);
     REQUIRE(json::parse(res.body)["error"] == "duplicate request");
   }
+  REQUIRE(rejection_count(ctx, "duplicate") == 1.0);
+  REQUIRE(rejection_count(ctx, "invalid_json") == 0.0);
 }
 
 // ============================================================================

@@ -1,6 +1,7 @@
 #include "request_handler.hpp"
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "error_categorizer.hpp"
 #include "config.hpp"
 #include "crash_handler.hpp"
 #include "db_gateway_routing.hpp"
@@ -239,6 +240,7 @@ void RequestHandler::handle_post(const httplib::Request &req,
   }
 
   if (!body.empty() && !nlohmann::json::accept(body)) {
+    count_rejection(error_categorizer::RejectionReason::INVALID_JSON);
     fail_request_categorized(res, 400, "Invalid JSON in request body",
                              &m_ctx.m_proxy.m_metrics->m_client_errors);
     return;
@@ -261,6 +263,7 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
   // Check global rate limiter first
   if (m_ctx.m_proxy.m_rate_limiter &&
       !m_ctx.m_proxy.m_rate_limiter->acquire()) {
+    count_rejection(error_categorizer::RejectionReason::RATE_LIMIT_GLOBAL);
     Logger::debug(
         "Global rate limit exceeded: token bucket empty (max={} burst, "
         "refill={}/s). Sustained request rate above global capacity — "
@@ -279,6 +282,7 @@ bool RequestHandler::check_rate_limits(const std::string &client_ip,
   // Check per-IP rate limiter if enabled
   if (m_ctx.m_proxy.m_per_ip_rate_limiter &&
       !m_ctx.m_proxy.m_per_ip_rate_limiter->acquire(client_ip)) {
+    count_rejection(error_categorizer::RejectionReason::RATE_LIMIT_PER_IP);
     return reject_rate_limited(
         res, client_ip, client_id, traceparent_raw, "per_ip",
         m_ctx.m_proxy.m_per_ip_rate_limiter_metrics->m_rejected_requests,
@@ -330,9 +334,17 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
   }
   increment_per_client_metric(
       m_ctx.m_proxy.m_per_client_id_duplicate_collector, client_id, 1);
+  count_rejection(error_categorizer::RejectionReason::DUPLICATE);
   res.status = 409;
   send_json_response(res, res.status, make_error_json("duplicate request"));
   return true;
+}
+
+void RequestHandler::count_rejection(
+    error_categorizer::RejectionReason reason) const {
+  m_ctx.m_proxy.m_metrics->m_rejections
+      .Add({{"reason", error_categorizer::rejection_reason_to_string(reason)}})
+      .Increment();
 }
 
 void RequestHandler::increment_per_client_metric(

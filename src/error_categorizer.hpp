@@ -38,6 +38,15 @@ enum class L2ErrorType : std::uint8_t {
   OTHER_ERROR
 };
 
+// Why the proxy refused a request before forwarding it. The names are the
+// values of the `reason` label of l2_proxy_rejections_total.
+enum class RejectionReason : std::uint8_t {
+  RATE_LIMIT_GLOBAL,
+  RATE_LIMIT_PER_IP,
+  DUPLICATE,
+  INVALID_JSON,
+};
+
 enum class ProcessingErrorType : std::uint8_t {
   JSON_PARSE_ERROR,
   VALIDATION_ERROR,
@@ -149,6 +158,8 @@ inline constexpr std::array<const char *, 9> g_http_error_names = {
 inline constexpr std::array<const char *, 5> g_l2_error_names = {
     "CONNECTION_ERROR", "TIMEOUT_ERROR", "RESPONSE_ERROR", "RETRY_EXHAUSTED",
     "OTHER_ERROR"};
+inline constexpr std::array<const char *, 4> g_rejection_reason_names = {
+    "rate_limit_global", "rate_limit_per_ip", "duplicate", "invalid_json"};
 inline constexpr std::array<const char *, 7> g_processing_error_names = {
     "JSON_PARSE_ERROR", "VALIDATION_ERROR", "DECOMPRESSION_ERROR",
     "ENCODING_ERROR",   "TIMEOUT_ERROR",    "RESOURCE_EXHAUSTED",
@@ -184,6 +195,10 @@ inline std::string http_error_type_to_string(HttpErrorType type) {
 
 inline std::string l2_error_type_to_string(L2ErrorType type) {
   return std::string(enum_to_string(type, g_l2_error_names));
+}
+
+inline std::string rejection_reason_to_string(RejectionReason reason) {
+  return std::string(enum_to_string(reason, g_rejection_reason_names));
 }
 
 inline std::string processing_error_type_to_string(ProcessingErrorType type) {

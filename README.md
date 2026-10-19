@@ -545,6 +545,7 @@ HTTP-эндпоинт.
 | `l2_proxy_client_requests_total` | counter | — | Клиентские запросы, полученные прокси |
 | `l2_proxy_nats_requests_total` | counter | — | NATS-запросы, отправленные прокси |
 | `l2_proxy_client_request_errors_total` | counter | `type` | Ошибки входных клиентских запросов, разобранные по причине |
+| `l2_proxy_rejections_total` | counter | `reason` | Отказы прокси до отправки в воркер, разобранные по причине |
 | `l2_proxy_nats_errors_total` | counter | — | Ошибки операций NATS |
 | `l2_proxy_nats_connection_creates_total` | counter | — | Созданные NATS-соединения |
 | `l2_proxy_nats_connection_errors_total` | counter | — | Ошибки создания NATS-соединений |
@@ -570,6 +571,18 @@ HTTP-эндпоинт.
 | `l2_proxy_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_proxy_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 | `l2_proxy_duplicate_tracked_clients` | gauge | — | Число client_id, отслеживаемых duplicate-детектором (ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит TTL) |
+
+`l2_proxy_rejections_total{reason}` — umbrella-счётчик отказов прокси *до*
+передачи запроса воркеру, с закрытым набором причин:
+`rate_limit_global` (исчерпан глобальный rate-limit), `rate_limit_per_ip`
+(исчерпан лимит на IP), `duplicate` (дубликат POST-тела, отказ 409),
+`invalid_json` (тело не разобралось как JSON, отказ 400). Он отвечает на
+вопрос «почему мы отказываем» одним графиком, тогда как по каждой причине
+счётчики разбросаны по разным семействам (`l2_rate_limiter_rejected_total`,
+`l2_per_ip_rate_limiter_rejected_total`, `l2_proxy_duplicate_posts_detected_total`,
+`l2_proxy_client_request_errors_total{type="CLIENT_ERROR"}`). Все причины
+предсоздаются при старте, поэтому семейство есть в `/metrics` и без единого
+отказа.
 
 Разбор `l2_proxy_client_request_errors_total{type}`: тип берётся из HTTP-статуса отказа
 и текста ошибки (классификатор `src/error_categorizer.hpp`, общий с воркером). Для 4xx

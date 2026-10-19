@@ -153,6 +153,34 @@ TEST_CASE("AppContext: pre-creates the tracing span drop reason series",
                                             "queue_full", "shutdown_flush"});
 }
 
+TEST_CASE("AppContext: proxy pre-creates the rejection reason series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "proxy"}};
+
+  AppContext const ctx;
+
+  REQUIRE(has_family(ctx.m_proxy_registry, "l2_proxy_rejections_total"));
+  std::vector<std::string> reasons;
+  for (const auto &family : ctx.m_proxy_registry->Collect()) {
+    if (family.name != "l2_proxy_rejections_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "reason") {
+          reasons.push_back(label.value);
+        }
+      }
+    }
+  }
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy proxy refuses nothing, so all reasons must exist as 0.
+  std::ranges::sort(reasons);
+  REQUIRE(reasons == std::vector<std::string>{"duplicate", "invalid_json",
+                                            "rate_limit_global",
+                                            "rate_limit_per_ip"});
+}
+
 TEST_CASE("AppContext: build info carries the version and the mode",
           "[app_context]") {
   EnvGuard const mode{{"MODE", "worker"}};

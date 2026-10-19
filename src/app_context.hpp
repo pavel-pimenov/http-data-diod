@@ -26,6 +26,10 @@ struct ProxyMetrics {
   // zero series at wiring time (see init_proxy_metrics), otherwise the family
   // would be missing from /metrics on a healthy proxy until the first error.
   prometheus::Family<prometheus::Counter> &m_client_errors;
+  // Refusals of the proxy before the request was forwarded, split by reason
+  // (see error_categorizer::RejectionReason): a single place that answers
+  // "why do we turn requests away".
+  prometheus::Family<prometheus::Counter> &m_rejections;
   prometheus::Counter &m_nats_errors;
   prometheus::Counter &m_nats_connection_creates;
   prometheus::Counter &m_nats_connection_errors;
