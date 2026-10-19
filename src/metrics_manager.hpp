@@ -12,6 +12,7 @@
 #include <prometheus/histogram.h>
 #include <prometheus/registry.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace histogram_buckets {
@@ -155,5 +156,56 @@ inline void set_nats_readiness_gauges(prometheus::Gauge &nats_connected,
   nats_connected.Set(value);
   health_ready.Set(value);
 }
+
+// Short-hand for the registration calls: a mode registers dozens of metrics
+// on its own registry, and repeating the registry argument at every call makes
+// the aggregate initialisers of the metric structs hard to read. One registrar
+// per registry keeps only the name and the help text in the call.
+class MetricRegistrar {
+public:
+  explicit MetricRegistrar(std::shared_ptr<prometheus::Registry> registry)
+      : m_registry(std::move(registry)) {}
+
+  [[nodiscard]] prometheus::Counter &
+  counter(const std::string &name, const std::string &help) const {
+    return MetricsManager::create_counter(m_registry, name, help);
+  }
+
+  [[nodiscard]] prometheus::Gauge &
+  gauge(const std::string &name, const std::string &help) const {
+    return MetricsManager::create_gauge(m_registry, name, help);
+  }
+
+  [[nodiscard]] prometheus::Histogram &
+  histogram(const std::string &name, const std::string &help,
+            const std::vector<double> &buckets) const {
+    return MetricsManager::create_histogram(m_registry, name, help, buckets);
+  }
+
+  template <std::size_t N>
+  [[nodiscard]] prometheus::Histogram &
+  histogram(const std::string &name, const std::string &help,
+            const std::array<double, N> &buckets) const {
+    return MetricsManager::create_histogram(m_registry, name, help, buckets);
+  }
+
+  [[nodiscard]] prometheus::Family<prometheus::Counter> &
+  counter_family(const std::string &name, const std::string &help) const {
+    return MetricsManager::create_counter_family(m_registry, name, help);
+  }
+
+  [[nodiscard]] prometheus::Family<prometheus::Gauge> &
+  gauge_family(const std::string &name, const std::string &help) const {
+    return MetricsManager::create_gauge_family(m_registry, name, help);
+  }
+
+  [[nodiscard]] prometheus::Family<prometheus::Histogram> &
+  histogram_family(const std::string &name, const std::string &help) const {
+    return MetricsManager::create_histogram_family(m_registry, name, help);
+  }
+
+private:
+  std::shared_ptr<prometheus::Registry> m_registry;
+};
 
 #endif // METRICS_MANAGER_HPP

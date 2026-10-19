@@ -3,7 +3,7 @@
 
 Five sources describe the same metric catalogue and drift apart silently:
 
-  1. C++ registration — `MetricsManager::create_*` calls and
+  1. C++ registration — `MetricsManager::create_*` / `MetricRegistrar` calls and
      `DynamicLabeledFamily<...>::Series` literals in src/*.cpp|hpp
      (test_*.cpp excluded). This is the runtime truth.
   2. Grafana dashboards — PromQL in scripts/generate-grafana-dashboards.py
@@ -47,8 +47,12 @@ GOLDEN_PATH = REPO_ROOT / "scripts" / "metrics-golden-check.py"
 README_PATH = REPO_ROOT / "README.md"
 
 METRIC_LITERAL = r"(l2_[a-z0-9_]+)"
+# The registration calls come in two shapes: the direct
+# MetricsManager::create_* form and the MetricRegistrar short-hand
+# (reg_<registry>.<kind>("name", ...)) introduced for the metric structs.
 CREATE_CALL = re.compile(
-    r"MetricsManager::create_\w+\(\s*[^,]+,\s*\"" + METRIC_LITERAL + r"\"", re.S)
+    r"(?:MetricsManager::create_\w+\(\s*[^,]+,\s*|reg_\w+\.\w+\(\s*)\""
+    + METRIC_LITERAL + r"\"", re.S)
 DYNAMIC_SERIES_MARK = re.compile(r"DynamicLabeledFamily<[^>]*>::Series>")
 HISTOGRAM_SUFFIXES = ("_bucket", "_count", "_sum")
 
