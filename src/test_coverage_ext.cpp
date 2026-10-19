@@ -17,6 +17,7 @@
 #include "metrics_history.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "tracing_metrics.hpp"
 #include "nlohmann/json.hpp"
 #include "pool_executor.hpp"
 #include "prometheus/counter.h"
@@ -1262,8 +1263,10 @@ struct JaegerTracerFixture {
             *m_registry, "test_j_queue_time", "qt",
             std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
     m_tracer = std::make_unique<JaegerLogger>(
-        "http://localhost:19999", m_spans_sent, m_spans_failed, m_queue_size,
-        m_last_send_duration, m_send_latency, m_queue_time,
+        "http://localhost:19999",
+        JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
+                               m_last_send_duration, m_send_latency,
+                               m_queue_time},
         /*batch_size=*/2, /*flush_interval_ms=*/100, /*sample_rate=*/1.0);
   }
 };

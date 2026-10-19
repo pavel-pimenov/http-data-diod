@@ -5,6 +5,7 @@
 #include "dynamic_labeled_family.hpp"
 #include "in_flight_tracker.hpp"
 #include "metrics_history.hpp"
+#include "tracing_metrics.hpp"
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -78,12 +79,9 @@ struct ProxyMetrics {
 struct TracingMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
   // Intentional design for Prometheus metrics
-  prometheus::Counter &m_spans_sent;
-  prometheus::Counter &m_spans_failed;
-  prometheus::Gauge &m_queue_size;
-  prometheus::Gauge &m_last_send_duration;
-  prometheus::Histogram &m_send_latency;
-  prometheus::Histogram &m_queue_time;
+  // Delivery metrics of the Jaeger path; the same struct is handed to the
+  // JaegerLogger, so the handles are wired once here (see tracing_metrics.hpp).
+  JaegerDeliveryMetrics m_jaeger;
   // Sentry/GlitchTip performance transactions (delivered when SENTRY_DSN set).
   prometheus::Counter &m_sentry_transactions_sent;
   prometheus::Counter &m_sentry_transactions_failed;

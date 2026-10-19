@@ -392,12 +392,8 @@ void init_tracer(AppContext &app_ctx) {
                  app_ctx.m_config.m_tracing.m_flush_interval_ms,
                  app_ctx.m_config.m_tracing.m_sample_rate);
     app_ctx.m_tracer = std::make_unique<JaegerLogger>(
-        app_ctx.m_config.m_tracing.m_url, app_ctx.m_tracing_metrics->m_spans_sent,
-        app_ctx.m_tracing_metrics->m_spans_failed,
-        app_ctx.m_tracing_metrics->m_queue_size,
-        app_ctx.m_tracing_metrics->m_last_send_duration,
-        app_ctx.m_tracing_metrics->m_send_latency,
-        app_ctx.m_tracing_metrics->m_queue_time,
+        app_ctx.m_config.m_tracing.m_url,
+        app_ctx.m_tracing_metrics->m_jaeger,
         app_ctx.m_config.m_tracing.m_batch_size,
         app_ctx.m_config.m_tracing.m_flush_interval_ms,
         app_ctx.m_config.m_tracing.m_sample_rate,

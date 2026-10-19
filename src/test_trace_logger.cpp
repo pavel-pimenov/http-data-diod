@@ -13,6 +13,7 @@
 #include "test_metrics_support.hpp"
 #include "test_wait_support.hpp"
 #include "trace_logger.hpp"
+#include "tracing_metrics.hpp"
 #include "tracing_helpers.hpp"
 
 #include <atomic>
@@ -134,10 +135,12 @@ struct TraceLoggerEnv {
             m_registry, "l2_tracing_queue_time_seconds", "h",
             std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
         m_logger(std::make_unique<JaegerLogger>(
-            endpoint, m_spans_sent, m_spans_failed, m_queue_size,
-            m_last_send_duration, m_send_latency, m_queue_time, batch_size,
-            flush_interval_ms, sample_rate, "", "", "", "", nullptr, nullptr,
-            1.0, breaker_settings)) {}
+            endpoint,
+            JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
+                                   m_last_send_duration, m_send_latency,
+                                   m_queue_time},
+            batch_size, flush_interval_ms, sample_rate, "", "", "", "",
+            nullptr, nullptr, 1.0, breaker_settings)) {}
 
   double sent() const { return m_spans_sent.Collect().counter.value; }
   double failed() const { return m_spans_failed.Collect().counter.value; }
@@ -180,11 +183,13 @@ struct SentryTracingEnv {
             m_registry, "t_sentry_queue_time", "h",
             std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
         m_logger(std::make_unique<JaegerLogger>(
-            jaeger_endpoint, m_spans_sent, m_spans_failed, m_queue_size,
-            m_last_send_duration, m_send_latency, m_queue_time, batch_size,
-            flush_interval_ms, sample_rate, sentry_dsn, k_test_service_name,
-            "test-env", "v1.0", &m_sentry_sent, &m_sentry_failed,
-            sentry_sample_rate, breaker_settings)) {}
+            jaeger_endpoint,
+            JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
+                                   m_last_send_duration, m_send_latency,
+                                   m_queue_time},
+            batch_size, flush_interval_ms, sample_rate, sentry_dsn,
+            k_test_service_name, "test-env", "v1.0", &m_sentry_sent,
+            &m_sentry_failed, sentry_sample_rate, breaker_settings)) {}
 
   double sentry_sent() const { return m_sentry_sent.Collect().counter.value; }
   double sentry_failed() const {
@@ -1411,9 +1416,10 @@ TEST_CASE("TraceLogger: sentry delivery with null counters is safe",
           std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5});
   // Sentry DSN set but the two sentry counters are deliberately null.
   auto logger = std::make_unique<JaegerLogger>(
-      k_dead_jaeger_endpoint, spans_sent, spans_failed, queue_size,
-      last_duration, send_latency, queue_time, 4, 100, 1.0,
-      "http://PUBLIC@127.0.0.1:1/2");
+      k_dead_jaeger_endpoint,
+      JaegerDeliveryMetrics{spans_sent, spans_failed, queue_size,
+                             last_duration, send_latency, queue_time},
+      4, 100, 1.0, "http://PUBLIC@127.0.0.1:1/2");
   logger->enqueue_span(k_test_trace_id, k_test_span_id,
                        "", "HTTP POST /v1/report", 1000000, 2000000,
                        k_worker_service_name, nlohmann::json{});

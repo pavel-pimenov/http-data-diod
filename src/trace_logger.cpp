@@ -8,6 +8,7 @@
 #include "prometheus/histogram.h"
 #include "random_utils.hpp"
 #include "sentry_client.hpp"
+#include "tracing_metrics.hpp"
 #include "nlohmann/json.hpp"
 #include "time_utils.hpp"
 #include <algorithm>
@@ -39,13 +40,9 @@ constexpr int kJaegerPoolAcquireTimeoutSeconds = 3;
 }
 
 JaegerLogger::JaegerLogger(const std::string &endpoint,
-                           prometheus::Counter &spans_sent,
-                           prometheus::Counter &spans_failed,
-                           prometheus::Gauge &queue_size,
-                           prometheus::Gauge &last_send_duration,
-                           prometheus::Histogram &send_latency,
-                           prometheus::Histogram &queue_time, size_t batch_size,
-                           int flush_interval_ms, double sample_rate,
+                           const JaegerDeliveryMetrics &metrics,
+                           size_t batch_size, int flush_interval_ms,
+                           double sample_rate,
                            const std::string &sentry_dsn,
                            const std::string &sentry_service,
                            const std::string &sentry_environment,
@@ -55,8 +52,7 @@ JaegerLogger::JaegerLogger(const std::string &endpoint,
                            double sentry_sample_rate,
                            TracingBreakerSettings breaker_settings)
     : m_jaeger({endpoint, batch_size, flush_interval_ms, sample_rate}),
-      m_jaeger_metrics({spans_sent, spans_failed, queue_size,
-                        last_send_duration, send_latency, queue_time}),
+      m_jaeger_metrics(metrics),
       m_sentry_metrics({sentry_spans_sent, sentry_spans_failed}),
       m_pools{.m_http_client_pool = std::make_unique<HttpClientPool>(
                   kJaegerPoolMaxSize, kJaegerPoolTimeoutSeconds,

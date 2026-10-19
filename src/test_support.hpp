@@ -112,9 +112,7 @@ public:
 inline void attach_tracer(AppContext &ctx) {
   auto &metrics = *ctx.m_tracing_metrics;
   ctx.m_tracer = std::make_unique<JaegerLogger>(
-      "http://127.0.0.1:1/api/traces", metrics.m_spans_sent,
-      metrics.m_spans_failed, metrics.m_queue_size, metrics.m_last_send_duration,
-      metrics.m_send_latency, metrics.m_queue_time,
+      "http://127.0.0.1:1/api/traces", metrics.m_jaeger,
       /*batch_size=*/10000, /*flush_interval_ms=*/100000, /*sample_rate=*/1.0);
 }
 

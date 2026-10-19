@@ -5,6 +5,7 @@
 #include "json_utils.hpp"
 #include "sentry_client.hpp"
 #include "async_sender_queue.hpp"
+#include "tracing_metrics.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -60,22 +61,13 @@ private:
   // ===== Delivery metrics. Prometheus references are owned by the registry
   // and injected at construction; Jaeger sinks are always registered, the
   // Sentry/GlitchTip counters are nullable pointers (absent without DSN).
-  struct JaegerMetrics {
-    prometheus::Counter &m_spans_sent;
-    prometheus::Counter &m_spans_failed;
-    prometheus::Gauge &m_queue_size;
-    prometheus::Gauge &m_last_send_duration;
-    prometheus::Histogram &m_send_latency;
-    prometheus::Histogram &m_queue_time;
-  };
-
   struct SentryMetrics {
     prometheus::Counter *m_spans_sent;
     prometheus::Counter *m_spans_failed;
   };
 
   JaegerConfig m_jaeger;
-  JaegerMetrics m_jaeger_metrics;
+  JaegerDeliveryMetrics m_jaeger_metrics;
   SentryMetrics m_sentry_metrics;
 
   // HTTP transport pools: one for the Jaeger endpoint, a dedicated one for the
@@ -227,11 +219,8 @@ public:
   static std::string
   build_sentry_envelope(const std::vector<nlohmann::json> &events);
 
-  JaegerLogger(const std::string &endpoint, prometheus::Counter &spans_sent,
-               prometheus::Counter &spans_failed, prometheus::Gauge &queue_size,
-               prometheus::Gauge &last_send_duration,
-               prometheus::Histogram &send_latency,
-               prometheus::Histogram &queue_time,
+  JaegerLogger(const std::string &endpoint,
+               const JaegerDeliveryMetrics &metrics,
                size_t batch_size = g_tracing_default_batch_size,
                int flush_interval_ms = g_tracing_send_interval_ms,
                double sample_rate = 1.0,

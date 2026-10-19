@@ -2,6 +2,7 @@
 #include "error_categorizer.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "tracing_metrics.hpp"
 // The AppContext destructor is defined out of line: its unique_ptr members
 // (see app_context.hpp) need complete types here, which include-cleaner cannot
 // see through the unique_ptr default deleter, so keep these includes.
@@ -77,25 +78,27 @@ void AppContext::init_common() {
   m_common_stats_history->start();
 
   m_tracing_metrics = std::make_unique<TracingMetrics>(TracingMetrics{
-      MetricsManager::create_counter(
-          m_common_registry, "l2_tracing_spans_sent_total",
-          "Total number of spans sent to Jaeger"),
-      MetricsManager::create_counter(
-          m_common_registry, "l2_tracing_spans_failed_total",
-          "Total number of spans failed to send to Jaeger"),
-      MetricsManager::create_gauge(m_common_registry, "l2_tracing_queue_size",
-                                   "Current size of the tracing span queue"),
-      MetricsManager::create_gauge(
-          m_common_registry, "l2_tracing_last_send_duration_seconds",
-          "Duration of the last span send to Jaeger"),
-      MetricsManager::create_histogram(
-          m_common_registry, "l2_tracing_send_latency_seconds",
-          "Histogram of span batch send latency in seconds",
-          histogram_buckets::g_buckets.m_latency_ms_to_5s),
-      MetricsManager::create_histogram(
-          m_common_registry, "l2_tracing_queue_time_seconds",
-          "Histogram of time spans spend in queue before sending in seconds",
-          histogram_buckets::g_buckets.m_latency_ms_to_5s),
+      JaegerDeliveryMetrics{
+          MetricsManager::create_counter(
+              m_common_registry, "l2_tracing_spans_sent_total",
+              "Total number of spans sent to Jaeger"),
+          MetricsManager::create_counter(
+              m_common_registry, "l2_tracing_spans_failed_total",
+              "Total number of spans failed to send to Jaeger"),
+          MetricsManager::create_gauge(m_common_registry,
+                                       "l2_tracing_queue_size",
+                                       "Current size of the tracing span queue"),
+          MetricsManager::create_gauge(
+              m_common_registry, "l2_tracing_last_send_duration_seconds",
+              "Duration of the last span send to Jaeger"),
+          MetricsManager::create_histogram(
+              m_common_registry, "l2_tracing_send_latency_seconds",
+              "Histogram of span batch send latency in seconds",
+              histogram_buckets::g_buckets.m_latency_ms_to_5s),
+          MetricsManager::create_histogram(
+              m_common_registry, "l2_tracing_queue_time_seconds",
+              "Histogram of time spans spend in queue before sending in seconds",
+              histogram_buckets::g_buckets.m_latency_ms_to_5s)},
       MetricsManager::create_counter(
           m_common_registry, "l2_tracing_sentry_transactions_sent_total",
           "Total number of spans delivered to the Sentry/GlitchTip "
