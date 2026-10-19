@@ -344,7 +344,8 @@ void JaegerLogger::deliver_sentry_transactions(
   const uint64_t cooldown_until =
       m_breaker.m_sentry.m_cooldown_until_steady_ms.load();
   if (cooldown_until != 0 && now_steady_ms < cooldown_until) {
-    m_jaeger_metrics.m_spans_failed.Increment(batch.size());
+    // Only the Sentry transaction is shed here -- the Jaeger batch has already
+    // been delivered, so the Jaeger "spans failed" counter must not move.
     if (m_sentry_metrics.m_spans_failed) {
       m_sentry_metrics.m_spans_failed->Increment(batch.size());
     }
@@ -420,6 +421,7 @@ void JaegerLogger::enqueue_span(const std::string &trace_id,
                end_us, now_us, attributes});
   if (!outcome.m_accepted) {
     m_jaeger_metrics.m_spans_failed.Increment();
+    count_span_drop(m_jaeger_metrics.m_spans_dropped, "queue_full", 1);
     Logger::warn("Tracing queue full, dropped span: trace_id={}", trace_id);
     return;
   }
@@ -521,6 +523,8 @@ void JaegerLogger::sender_loop(const std::stop_token &st) {
       Logger::debug("Successfully flushed {} spans", final_batch.size());
     } else {
       m_jaeger_metrics.m_spans_failed.Increment(final_batch.size());
+      count_span_drop(m_jaeger_metrics.m_spans_dropped, "shutdown_flush",
+                      final_batch.size());
       Logger::debug("Dropped {} spans on shutdown (non-critical)",
                     final_batch.size());
     }
@@ -552,8 +556,10 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
   const auto now_ms = TimeUtils::steady_ms();
   if (now_ms < m_breaker.m_jaeger.m_cooldown_until_steady_ms.load()) {
     m_jaeger_metrics.m_spans_failed.Increment(batch.size());
+    count_span_drop(m_jaeger_metrics.m_spans_dropped, "breaker_open",
+                    batch.size());
     Logger::debug(
-        "Jaeger breaker open, shed batch of {} spans during cooldown", 
+        "Jaeger breaker open, shed batch of {} spans during cooldown",
         batch.size());
     deliver_sentry_transactions(batch);
     const auto end_time = std::chrono::steady_clock::now();
@@ -585,6 +591,8 @@ void JaegerLogger::send_batch_with_retry(const std::vector<SpanData> &batch,
     m_jaeger_metrics.m_spans_sent.Increment(batch.size());
   } else {
     m_jaeger_metrics.m_spans_failed.Increment(batch.size());
+    count_span_drop(m_jaeger_metrics.m_spans_dropped, "export_error",
+                    batch.size());
     Logger::error(
         "Jaeger batch send failed after {} retries, dropped {} spans",
         retries, batch.size());

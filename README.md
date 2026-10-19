@@ -411,6 +411,18 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 |---|---|---|
 | `l2_tracing_spans_sent_total` | counter | Спаны, отправленные в Jaeger |
 | `l2_tracing_spans_failed_total` | counter | Спаны, не отправленные в Jaeger |
+| `l2_tracing_spans_dropped_total` | counter | `reason` | Потерянные спаны по причине: `queue_full` / `breaker_open` / `export_error` / `shutdown_flush` |
+
+`l2_tracing_spans_failed_total` смешивает два разных события — «экспортёр не
+отвечает» и «очередь спанов переполнилась», — поэтому по нему нельзя понять,
+где именно теряются трассы. `l2_tracing_spans_dropped_total{reason}` разделяет
+потери: `queue_full` (очередь переполнена — приложение создаёт спаны быстрее,
+чем экспортёр отправляет), `breaker_open` (партию сбросил брейкер во время
+кулдауна), `export_error` (отправка не удалась после всех попыток) и
+`shutdown_flush` (не успели на финальном сбросе при остановке). Все четыре
+причины предсоздаются при старте, поэтому семейство есть в `/metrics` и без
+единой потери; на дашборде «Распределённая трассировка» панель спанов показывает
+разрез `sum by (reason)`.
 | `l2_tracing_queue_size` | gauge | Текущий размер очереди спанов |
 | `l2_tracing_last_send_duration_seconds` | gauge | Длительность последней отправки партии спанов |
 | `l2_tracing_send_latency_seconds` | histogram | Латентность отправки партии спанов |

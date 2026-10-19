@@ -98,7 +98,11 @@ void AppContext::init_common() {
           MetricsManager::create_histogram(
               m_common_registry, "l2_tracing_queue_time_seconds",
               "Histogram of time spans spend in queue before sending in seconds",
-              histogram_buckets::g_buckets.m_latency_ms_to_5s)},
+              histogram_buckets::g_buckets.m_latency_ms_to_5s),
+          MetricsManager::create_counter_family(
+              m_common_registry, "l2_tracing_spans_dropped_total",
+              "Total number of spans lost on the way to Jaeger, labeled by "
+              "reason")},
       MetricsManager::create_counter(
           m_common_registry, "l2_tracing_sentry_transactions_sent_total",
           "Total number of spans delivered to the Sentry/GlitchTip "
@@ -107,6 +111,15 @@ void AppContext::init_common() {
           m_common_registry, "l2_tracing_sentry_transactions_failed_total",
           "Total number of spans not delivered to the Sentry/GlitchTip "
           "performance endpoint")});
+
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy stack never loses a span, so every reason gets its zero series up
+  // front (same reasoning as the circuit-breaker transitions in the worker
+  // registry).
+  auto &spans_dropped = m_tracing_metrics->m_jaeger.m_spans_dropped;
+  for (const char *reason : g_tracing_drop_reasons) {
+    spans_dropped.Add({{"reason", reason}});
+  }
 
   m_sentry_metrics = std::make_unique<SentryMetrics>(SentryMetrics{
       MetricsManager::create_counter(

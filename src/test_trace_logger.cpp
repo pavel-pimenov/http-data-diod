@@ -108,6 +108,7 @@ struct TraceLoggerEnv {
   prometheus::Gauge &m_last_send_duration;
   prometheus::Histogram &m_send_latency;
   prometheus::Histogram &m_queue_time;
+  prometheus::Family<prometheus::Counter> &m_spans_dropped;
   std::unique_ptr<JaegerLogger> m_logger;
 
   explicit TraceLoggerEnv(const std::string &endpoint, size_t batch_size = 50,
@@ -127,17 +128,33 @@ struct TraceLoggerEnv {
         m_queue_time(test_support::make_histogram(
             m_registry, "l2_tracing_queue_time_seconds", "h",
             std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_spans_dropped(test_support::make_counter_family(
+            m_registry, "l2_tracing_spans_dropped_total", "h")),
         m_logger(std::make_unique<JaegerLogger>(
             endpoint,
             JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
                                    m_last_send_duration, m_send_latency,
-                                   m_queue_time},
+                                   m_queue_time, m_spans_dropped},
             batch_size, flush_interval_ms, sample_rate, "", "", "", "",
             nullptr, nullptr, 1.0, breaker_settings)) {}
 
   double sent() const { return m_spans_sent.Collect().counter.value; }
   double failed() const { return m_spans_failed.Collect().counter.value; }
   double queued() const { return m_queue_size.Collect().gauge.value; }
+
+  // Value of the typed drop counter for one reason.
+  double dropped(const std::string &reason) const {
+    for (const auto &metric_family : m_spans_dropped.Collect()) {
+      for (const auto &metric : metric_family.metric) {
+        for (const auto &label : metric.label) {
+          if (label.name == "reason" && label.value == reason) {
+            return metric.counter.value;
+          }
+        }
+      }
+    }
+    return 0.0;
+  }
 };
 
 struct SentryTracingEnv {
@@ -150,6 +167,7 @@ struct SentryTracingEnv {
   prometheus::Gauge &m_last_send_duration;
   prometheus::Histogram &m_send_latency;
   prometheus::Histogram &m_queue_time;
+  prometheus::Family<prometheus::Counter> &m_spans_dropped;
   std::unique_ptr<JaegerLogger> m_logger;
 
   SentryTracingEnv(const std::string &jaeger_endpoint,
@@ -175,11 +193,13 @@ struct SentryTracingEnv {
         m_queue_time(test_support::make_histogram(
             m_registry, "t_sentry_queue_time", "h",
             std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5})),
+        m_spans_dropped(test_support::make_counter_family(
+            m_registry, "t_sentry_spans_dropped", "h")),
         m_logger(std::make_unique<JaegerLogger>(
             jaeger_endpoint,
             JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
                                    m_last_send_duration, m_send_latency,
-                                   m_queue_time},
+                                   m_queue_time, m_spans_dropped},
             batch_size, flush_interval_ms, sample_rate, sentry_dsn,
             k_test_service_name, "test-env", "v1.0", &m_sentry_sent,
             &m_sentry_failed, sentry_sample_rate, breaker_settings)) {}
@@ -453,6 +473,10 @@ TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "
   REQUIRE(elapsed_ms < 2500);
   REQUIRE(env.sent() == 0.0);
   REQUIRE(wait_for_condition([&] { return env.queued() == 0.0; }, 2000));
+  // The shed batches are counted separately from the delivery failures, so an
+  // operator can tell "the exporter is down" from "the breaker is shedding".
+  REQUIRE(env.dropped("breaker_open") > 0.0);
+  REQUIRE(env.dropped("queue_full") == 0.0);
 }
 
 TEST_CASE("TraceLogger: sentry breaker sheds envelopes while open", "[tracing]"
@@ -1418,11 +1442,14 @@ TEST_CASE("TraceLogger: sentry delivery with null counters is safe",
       test_support::make_histogram(
           reg, "t_nc_qtime", "h",
           std::vector<double>{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5});
+  auto &spans_dropped =
+      test_support::make_counter_family(reg, "t_nc_dropped", "h");
   // Sentry DSN set but the two sentry counters are deliberately null.
   auto logger = std::make_unique<JaegerLogger>(
       k_dead_jaeger_endpoint,
       JaegerDeliveryMetrics{spans_sent, spans_failed, queue_size,
-                             last_duration, send_latency, queue_time},
+                             last_duration, send_latency, queue_time,
+                             spans_dropped},
       4, 100, 1.0, "http://PUBLIC@127.0.0.1:1/2");
   logger->enqueue_span(k_test_trace_id, k_test_span_id,
                        "", "HTTP POST /v1/report", 1000000, 2000000,

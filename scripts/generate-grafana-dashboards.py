@@ -508,7 +508,10 @@ def create_tracing_dashboard() -> Dict:
         },
         targets=[
             {"expr": "rate(l2_tracing_spans_sent_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отправлено спанов/с", "refId": "A"},  # noqa: E501
-            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"}  # noqa: E501
+            {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"},  # noqa: E501
+            # Потерянные спаны по причине: очередь переполнена / брейкер сбросил
+            # партию / экспортёр не отвечает / не успели на финальном сбросе.
+            {"expr": "sum by (reason) (rate(l2_tracing_spans_dropped_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{reason}}", "refId": "C"}  # noqa: E501
         ]
     ))
 

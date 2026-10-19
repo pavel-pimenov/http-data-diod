@@ -1248,6 +1248,7 @@ struct JaegerTracerFixture {
   prometheus::Gauge &m_last_send_duration;
   prometheus::Histogram &m_send_latency;
   prometheus::Histogram &m_queue_time;
+  prometheus::Family<prometheus::Counter> &m_spans_dropped;
   std::unique_ptr<JaegerLogger> m_tracer;
 
   JaegerTracerFixture()
@@ -1265,12 +1266,14 @@ struct JaegerTracerFixture {
             std::vector<double>{0.001, 0.01, 0.1, 1.0})),
         m_queue_time(test_support::make_histogram(
             *m_registry, "test_j_queue_time", "qt",
-            std::vector<double>{0.001, 0.01, 0.1, 1.0})) {
+            std::vector<double>{0.001, 0.01, 0.1, 1.0})),
+        m_spans_dropped(test_support::make_counter_family(
+            *m_registry, "test_j_spans_dropped", "dropped")) {
     m_tracer = std::make_unique<JaegerLogger>(
         "http://localhost:19999",
         JaegerDeliveryMetrics{m_spans_sent, m_spans_failed, m_queue_size,
                                m_last_send_duration, m_send_latency,
-                               m_queue_time},
+                               m_queue_time, m_spans_dropped},
         /*batch_size=*/2, /*flush_interval_ms=*/100, /*sample_rate=*/1.0);
   }
 };

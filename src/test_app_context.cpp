@@ -125,6 +125,34 @@ TEST_CASE("AppContext: worker pre-creates the L2 call error type series",
                                            "TIMEOUT_ERROR"});
 }
 
+TEST_CASE("AppContext: pre-creates the tracing span drop reason series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "worker"}};
+
+  AppContext const ctx;
+
+  REQUIRE(
+      has_family(ctx.m_common_registry, "l2_tracing_spans_dropped_total"));
+  std::vector<std::string> reasons;
+  for (const auto &family : ctx.m_common_registry->Collect()) {
+    if (family.name != "l2_tracing_spans_dropped_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "reason") {
+          reasons.push_back(label.value);
+        }
+      }
+    }
+  }
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy stack never loses a span, so all reasons must exist as 0.
+  std::ranges::sort(reasons);
+  REQUIRE(reasons == std::vector<std::string>{"breaker_open", "export_error",
+                                            "queue_full", "shutdown_flush"});
+}
+
 TEST_CASE("AppContext: build info carries the version and the mode",
           "[app_context]") {
   EnvGuard const mode{{"MODE", "worker"}};
