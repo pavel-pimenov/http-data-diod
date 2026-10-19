@@ -93,6 +93,7 @@ CATALOG = [
     "l2_worker_responses_total",
     "l2_worker_in_flight_requests",
     "l2_worker_queue_size",
+    "l2_worker_queue_capacity",
     "l2_worker_nats_connected",
     "l2_worker_health_ready",
     "l2_worker_sentry_events_sent_total",

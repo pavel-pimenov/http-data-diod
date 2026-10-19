@@ -33,13 +33,13 @@
 
 | Подсистема | Есть сейчас |
 |---|---|
-| proxy HTTP | `l2_proxy_client_requests_total`, `responses_total{status}`, `request_duration_seconds`, `in_flight_requests`, `request_size_bytes`/`response_size_bytes`, `bytes_received_total`/`bytes_sent_total`, `client_request_errors_total{type}`, `health_ready` |
+| proxy HTTP | `l2_proxy_client_requests_total`, `responses_total{status}`, `request_duration_seconds`, `in_flight_requests`, `request_size_bytes`/`response_size_bytes`, `bytes_received_total`/`bytes_sent_total`, `client_request_errors_total{type}`, `rejections_total{reason}`, `health_ready` |
 | proxy rate limiting | `l2_rate_limiter_tokens`, `l2_rate_limiter_rejected_total`, `l2_per_ip_*` (requests/rejected/ips_tracked), `l2_proxy_per_client_id_*` (requests/rejected/latency), `l2_proxy_per_ip_*` |
 | proxy duplicate | `duplicate_requests_total`, `duplicate_posts_detected_total`, `duplicate_tracked_clients`, `per_client_id_duplicate_requests_total`, `per_client_id_duplicate_rejected_total` |
 | proxy DB/NATS-клиент | `db_requests_total`, `db_request_duration_seconds`, `db_nats_request_duration_seconds`, `nats_connected`, `nats_connection_creates_total`, `nats_connection_errors_total`, `nats_errors_total`, `nats_requests_total`, `nats_request_duration_seconds`, `nats_poll_attempts_total`, `nats_poll_attempt_duration_seconds`, `nats_poll_retry_wait_seconds` |
 | proxy task queue | `l2_proxy_task_queue_enqueued_total`, `_rejected_total`, `_wait_seconds` |
 | HTTP-пул (общий) | `l2_http_pool_active_clients`, `_available_clients`, `_client_acquisitions_total`, `_client_releases_total`, `_stale_evictions_total` |
-| worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
+| worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `queue_capacity`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
 | tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_spans_dropped_total{reason}`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}` |
@@ -135,7 +135,7 @@
 Кардинальность: `from×to` ограничены списком endpoint'ов из конфига (обычно ≤ единицы);
 при росте списка — рассмотреть метку `to` только. Регистрация: `app_context.cpp`, инкремент в `src/l2_worker.cpp`.
 
-### 6. Единая причина отказов на proxy
+### 6. Единая причина отказов на proxy ✅ реализовано (round 170)
 `rejections_total{reason}` — зонтичная метрика для дашборда «почему отказываем»,
 чтобы не складывать вручную четыре разных счётчика.
 
@@ -145,6 +145,13 @@
 
 Кардинальность: закрытый enum причин. Регистрация: `app_context.cpp`, инкремент в
 `rate_limiter*.hpp`, `duplicate_detector.hpp`, `request_handler.cpp`.
+
+Реализовано в round 170: `l2_proxy_rejections_total{reason}` с закрытым набором
+причин (`rate_limit_global`/`rate_limit_per_ip`/`duplicate`/`invalid_json`) —
+enum `RejectionReason` в `src/error_categorizer.hpp`, все серии предсоздаются при
+старте, инкремент в одном методе `RequestHandler::count_rejection()` (метки из
+enum, а не литералы в местах вызова). Частные счётчики остались: они считают
+*события*, umbrella — *отказы*.
 
 ### 7. Tracing/sentry: потери и невалидный traceparent 🟡 частично (round 167: потери спанов)
 Есть `spans_failed_total`, но потеря из-за переполнения очереди/выключенного экспортёра неотличима.
@@ -184,7 +191,7 @@ Sentry-событий: очередь переполнена / отключен�
 Отдельный `l2_common_uptime_seconds` не делался: uptime даёт `process_start_time_seconds` из
 стандартного экспортёра процессов, дублировать его своим gauge'ом смысла нет.
 
-### 9. Ёмкость очередей (рядом с существующими gauge'ами)
+### 9. Ёмкость очередей (рядом с существующими gauge'ами) 🟡 частично (round 169: воркер)
 `queue_size` есть, но без знаменателя нет алерта на сатурацию.
 
 | Метрика | Тип | Метки | Что закрывает |
@@ -194,6 +201,17 @@ Sentry-событий: очередь переполнена / отключен�
 | `l2_worker_task_queue_wait_seconds` | histogram | — | ожидание в очереди воркера (у proxy есть, у воркера нет) |
 
 Регистрация: `app_context.cpp` (ёмкость — из конфига, `timed_task_queue`/`thread_pool_wrapper`).
+
+Сделано в round 169: `l2_worker_queue_capacity` — ёмкость очереди пула потоков
+воркера (предел из `L2_WORKER_QUEUE_SIZE` либо автоматический: 8 задач на поток
+× `L2_WORKER_THREADS`; в `ThreadPool` добавлены аксессоры
+`effective_queue_capacity()`/`max_queue_capacity()`).
+
+Остаток (следующий раунд): у прокси очередь задач есть, но **нет метрики
+глубины** (`ThreadPoolWrapper::queue_size()` не экспортируется) — ёмкость без
+числителя бесполезна, поэтому сначала нужна `l2_proxy_task_queue_size`
+(периодический опрос, как `l2_worker_queue_size` в воркере), и только потом
+`l2_proxy_task_queue_capacity`.
 
 ---
 

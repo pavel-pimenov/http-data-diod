@@ -55,6 +55,17 @@ public:
 
   [[nodiscard]] size_t queue_size() const;
   [[nodiscard]] size_t thread_count() const { return m_workers.m_workers.size(); }
+  // Effective capacity of the task queue: the explicit limit, or the
+  // automatic bound (threads * g_max_queue_per_thread) when the limit is 0.
+  // The queue depth alone is not a saturation signal without this denominator.
+  [[nodiscard]] static size_t effective_queue_capacity(size_t threads,
+                                                       size_t max_queue_size) {
+    return max_queue_size == 0 ? threads * g_max_queue_per_thread
+                                : max_queue_size;
+  }
+  [[nodiscard]] size_t max_queue_capacity() const {
+    return m_queue.m_max_queue_size;
+  }
 
 private:
   // Maximum number of tasks dequeued per lock acquisition — reduces mutex
@@ -82,8 +93,7 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
     : m_queue{
           {}, {}, {}, {},
           false,
-          max_queue_size == 0 ? threads * g_max_queue_per_thread
-                              : max_queue_size} {
+          effective_queue_capacity(threads, max_queue_size)} {
   for (size_t i = 0; i < threads; ++i) {
     m_workers.m_workers.emplace_back([this](std::stop_token st) {
       for (;;) {

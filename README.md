@@ -255,6 +255,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_worker_responses_total{status="..."}` — ответы воркера, отданные по NATS, по HTTP-статусу (counter family).
 - `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
 - `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
+- `l2_worker_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при инициализации пула): без знаменателя глубина очереди не позволяет судить о насыщении. Предел либо задаётся явно (`L2_WORKER_QUEUE_SIZE`), либо выводится автоматически как 8 задач на поток (`L2_WORKER_THREADS`); воркер с `THREAD_POOL_TYPE=none` принудительно переводится на обычный пул, поэтому ёмкость всегда определена.
 - `l2_worker_nats_connected` — состояние связи воркера с NATS (1/0, gauge).
 - `l2_worker_health_ready` — готовность воркера по `/health/ready` (1/0, gauge).
 - `l2_server_responses_total{status="..."}` — ответы L2-сервера по HTTP-статусу (counter family).
@@ -646,6 +647,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_responses_total` | counter | `status` | Ответы воркера по NATS по статусу |
 | `l2_worker_in_flight_requests` | gauge | — | Обрабатываемые запросы |
 | `l2_worker_queue_size` | gauge | — | Глубина очереди пула потоков |
+| `l2_worker_queue_capacity` | gauge | — | Ёмкость очереди пула потоков (знаменатель для насыщения) |
 | `l2_worker_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_worker_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 | `l2_worker_sentry_events_sent_total` | counter | — | Sentry-события успешно доставлены |

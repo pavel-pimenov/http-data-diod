@@ -279,6 +279,10 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   L2Worker worker(ctx);
 
   REQUIRE_FALSE(worker.is_nats_connected());
+  // The queue depth is only meaningful together with its capacity: the worker
+  // publishes the limit of its thread-pool queue at init.
+  REQUIRE(ctx.m_worker.m_metrics->m_queue_capacity.Collect().gauge.value >
+          0.0);
   L2WorkerTestAccess::update_queue_size_metric(worker);
   L2WorkerTestAccess::record_bytes_sent(worker, 42);
 

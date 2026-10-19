@@ -1590,6 +1590,19 @@ TEST_CASE("ThreadPool: Multiple tasks complete", "[thread-pool]") {
   }
 }
 
+TEST_CASE("ThreadPool: automatic queue capacity is threads times the bound",
+          "[thread-pool]") {
+  // max_queue_size == 0 selects the automatic bound (8 queued tasks per
+  // worker thread); the depth gauge is only a saturation signal together with
+  // this capacity.
+  REQUIRE(ThreadPool::effective_queue_capacity(4, 0) == 32);
+  REQUIRE(ThreadPool::effective_queue_capacity(4, 32) == 32);
+  ThreadPool const auto_pool(3, 0);
+  REQUIRE(auto_pool.max_queue_capacity() == 24);
+  ThreadPool const limited_pool(3, 5);
+  REQUIRE(limited_pool.max_queue_capacity() == 5);
+}
+
 TEST_CASE("ThreadPool: Concurrent enqueue from multiple threads",
           "[thread-pool]") {
   ThreadPool pool(4);
@@ -1618,6 +1631,7 @@ TEST_CASE("ThreadPool: accessors report queue and thread counts",
   ThreadPool pool(1, 4);
   REQUIRE(pool.thread_count() == 1);
   REQUIRE(pool.queue_size() == 0);
+  REQUIRE(pool.max_queue_capacity() == 4);
 
   std::atomic<bool> task_started{false};
   std::promise<void> gate;

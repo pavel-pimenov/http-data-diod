@@ -2160,7 +2160,7 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"}  # noqa: E501
+            {"expr": "rate(l2_rate_limiter_rejected_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Отклонено/с", "refId": "A"},  # noqa: E501
         ]
     ))
 
@@ -2813,7 +2813,10 @@ def create_worker_dashboard() -> Dict:
         x=8, y=y, w=8, h=8,
         unit="short",
         targets=[
-            {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"}  # noqa: E501
+            {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"},  # noqa: E501
+            # Знаменатель насыщения: без ёмкости глубина очереди ничего не
+            # говорит о том, близко ли пул к пределу.
+            {"expr": "l2_worker_queue_capacity{vm=~\"${vm:regex}\"}", "legendFormat": "capacity", "refId": "B"}  # noqa: E501
         ]
     ))
 

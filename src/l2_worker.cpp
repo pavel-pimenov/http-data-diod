@@ -110,6 +110,11 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
       pool_type, m_ctx.m_config.m_worker.m_threads,
       static_cast<size_t>(m_ctx.m_config.m_worker.m_queue_size));
 
+  // The queue depth is only a saturation signal together with its capacity:
+  // the limit is either configured explicitly or derived from the thread count.
+  m_ctx.m_worker.m_metrics->m_queue_capacity.Set(
+      static_cast<double>(m_clients.m_thread_pool->max_queue_capacity()));
+
   m_circuit_breaker.set_gauge(m_ctx.m_worker.m_metrics->m_circuit_breaker_state);
   m_circuit_breaker.set_counters(
       m_ctx.m_worker.m_metrics->m_circuit_breaker_transitions_total,

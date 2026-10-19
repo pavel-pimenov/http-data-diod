@@ -48,6 +48,13 @@ public:
     return m_backend.m_custom_pool ? m_backend.m_custom_pool->queue_size() : 0;
   }
 
+  // Capacity of the task queue; 0 for the inline (Type::NONE) backend, which
+  // has no queue at all.
+  [[nodiscard]] size_t max_queue_capacity() const {
+    return m_backend.m_custom_pool ? m_backend.m_custom_pool->max_queue_capacity()
+                                    : 0;
+  }
+
 private:
   struct Backend {
     Type m_type;

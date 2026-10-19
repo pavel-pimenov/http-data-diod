@@ -366,6 +366,10 @@ void AppContext::init_worker_metrics() {
           m_worker_registry, "l2_worker_queue_size",
           "Current worker thread-pool queue depth"),
       MetricsManager::create_gauge(
+          m_worker_registry, "l2_worker_queue_capacity",
+          "Capacity of the worker thread-pool queue (denominator for the "
+          "queue depth)"),
+      MetricsManager::create_gauge(
           m_worker_registry, "l2_worker_nats_connected",
           "NATS connection state (1 = connected, 0 = disconnected)"),
       MetricsManager::create_gauge(

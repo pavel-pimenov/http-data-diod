@@ -141,6 +141,9 @@ struct WorkerMetrics {
   prometheus::Gauge &m_in_flight_requests;
   // Worker thread-pool queue depth (backpressure early warning).
   prometheus::Gauge &m_queue_size;
+  // Capacity of the worker thread-pool queue: the denominator that turns the
+  // depth into a saturation ratio.
+  prometheus::Gauge &m_queue_capacity;
   // NATS connection state (1 = connected, 0 = disconnected) for availability.
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
