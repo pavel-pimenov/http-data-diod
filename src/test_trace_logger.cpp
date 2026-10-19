@@ -52,9 +52,7 @@ constexpr const char *k_test_service_name = "test-service";
 constexpr const char *k_worker_service_name = "l2-proxy-worker";
 
 struct TraceMockServer {
-  httplib::Server m_server;
-  int m_port = 0;
-  std::thread m_thread;
+  test_support::MockHttpServer m_http;
   mutable std::mutex m_mu;
   std::vector<std::string> m_bodies;
   int m_slow_us = 0;
@@ -62,40 +60,33 @@ struct TraceMockServer {
   // `port` = 0 binds an ephemeral port; a non-zero value rebinds a previously
   // reserved port (used to bring an endpoint back on the same address).
   explicit TraceMockServer(int slow_us = 0, int port = 0) : m_slow_us(slow_us) {
-    m_server.Post("/api/traces",
-                  [this](const httplib::Request &req, httplib::Response &res) {
-                    if (m_slow_us > 0) {
-                      std::this_thread::sleep_for(
-                          std::chrono::microseconds(m_slow_us));
-                    }
-                    std::scoped_lock const lock(m_mu);
-                    m_bodies.push_back(req.body);
-                    res.status = 200;
-                  });
-    m_server.Get("/ping",
-                 [](const httplib::Request &, httplib::Response &res) {
-                   res.status = 200;
-                 });
-    if (port > 0) {
-      REQUIRE(m_server.bind_to_port("127.0.0.1", port));
-      m_port = port;
-    } else {
-      m_port = m_server.bind_to_any_port("127.0.0.1");
-    }
-    m_thread = std::thread([this] { m_server.listen_after_bind(); });
+    m_http.http().Post(
+        "/api/traces",
+        [this](const httplib::Request &req, httplib::Response &res) {
+          if (m_slow_us > 0) {
+            std::this_thread::sleep_for(
+                std::chrono::microseconds(m_slow_us));
+          }
+          std::scoped_lock const lock(m_mu);
+          m_bodies.push_back(req.body);
+          res.status = 200;
+        });
+    m_http.http().Get("/ping",
+                      [](const httplib::Request &, httplib::Response &res) {
+                        res.status = 200;
+                      });
+    m_http.start(port);
   }
 
-  ~TraceMockServer() {
-    m_server.stop();
-    if (m_thread.joinable()) {
-      m_thread.join();
-    }
-  }
+  // The server thread writes into m_bodies, so it must be stopped before the
+  // members are destroyed: a member of the base class is destroyed after the
+  // derived ones, hence the explicit stop() here.
+  ~TraceMockServer() { m_http.stop(); }
 
-  int port() const { return m_port; }
+  int port() const { return m_http.port(); }
 
   std::string endpoint() const {
-    return "http://127.0.0.1:" + std::to_string(m_port) + "/api/traces";
+    return "http://127.0.0.1:" + std::to_string(m_http.port()) + "/api/traces";
   }
 
   size_t body_count() const {

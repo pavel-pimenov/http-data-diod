@@ -19,6 +19,7 @@
 #include "config.hpp"
 #include "db_query_utils.hpp"
 #include "httplib/httplib.h"
+#include "test_http_support.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "nats_client.hpp"
@@ -413,33 +414,26 @@ private:
 
 // Loopback stand-in for the L2 backend used by the worker live test.
 struct L2BackendServer {
-  httplib::Server m_server;
-  int m_port = 0;
-  std::thread m_thread;
+  test_support::MockHttpServer m_http;
   std::atomic<int> m_posts{0};
 
   L2BackendServer() {
-    m_server.Post("/api/value",
-                  [this](const httplib::Request &, httplib::Response &res) {
-                    m_posts.fetch_add(1);
-                    res.set_content(R"({"server_span_id":"l2-live-val"})",
-                                    "application/json");
-                  });
-    m_port = m_server.bind_to_any_port("127.0.0.1");
-    m_thread = std::thread([this] { m_server.listen_after_bind(); });
-    m_server.wait_until_ready();
+    m_http.http().Post("/api/value",
+                       [this](const httplib::Request &,
+                              httplib::Response &res) {
+                         m_posts.fetch_add(1);
+                         res.set_content(R"({"server_span_id":"l2-live-val"})",
+                                         "application/json");
+                       });
+    m_http.start();
   }
 
-  ~L2BackendServer() {
-    m_server.stop();
-    if (m_thread.joinable()) {
-      m_thread.join();
-    }
-  }
+  // The server thread writes into m_posts, so it must be stopped before the
+  // members are destroyed (a base-class member is destroyed after the derived
+  // ones), hence the explicit stop() here.
+  ~L2BackendServer() { m_http.stop(); }
 
-  std::string api_url() const {
-    return "http://127.0.0.1:" + std::to_string(m_port) + "/api";
-  }
+  std::string api_url() const { return m_http.base_url() + "/api"; }
 };
 
 } // namespace

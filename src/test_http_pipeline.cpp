@@ -5,6 +5,7 @@
 #include "http_client.hpp"
 #include "http_client_pool.hpp"
 #include "httplib/httplib.h"
+#include "test_http_support.hpp"
 #include "test_metrics_support.hpp"
 
 #include <atomic>
@@ -28,24 +29,22 @@ namespace {
 // Local loopback server shared by the HttpClient round-trip tests. Runs on an
 // ephemeral port (bind_to_any_port) so no external service is required.
 struct TestHttpServer {
-  httplib::Server m_server;
-  int m_port = 0;
-  std::thread m_thread;
+  test_support::MockHttpServer m_http;
   std::atomic<int> m_echo_posts{0};
 
   TestHttpServer() {
-    m_server.Get("/json", [](const httplib::Request &, httplib::Response &res) {
+    m_http.http().Get("/json", [](const httplib::Request &, httplib::Response &res) {
       res.set_content(R"({"hello":"world"})", "application/json");
     });
 
-    m_server.Get("/not-found",
+    m_http.http().Get("/not-found",
                  [](const httplib::Request &, httplib::Response &res) {
                    res.status = 404;
                    res.set_content(R"({"error":"not found"})",
                                    "application/json");
                  });
 
-    m_server.Post("/echo",
+    m_http.http().Post("/echo",
                   [this](const httplib::Request &req, httplib::Response &res) {
                     m_echo_posts.fetch_add(1);
                     res.set_header("Echo-Content-Type",
@@ -59,28 +58,22 @@ struct TestHttpServer {
                     res.set_content(req.body, "application/json");
                   });
 
-    m_server.Post("/created",
+    m_http.http().Post("/created",
                   [](const httplib::Request &, httplib::Response &res) {
                     res.status = 201;
                     res.set_header("X-Resource-Id", "42");
                     res.set_content(R"({"created":true})", "application/json");
                   });
 
-    m_port = m_server.bind_to_any_port("127.0.0.1");
-    m_thread = std::thread([this] { m_server.listen_after_bind(); });
-    m_server.wait_until_ready();
+    m_http.start();
   }
 
-  ~TestHttpServer() {
-    m_server.stop();
-    if (m_thread.joinable()) {
-      m_thread.join();
-    }
-  }
+  // The server thread writes into m_echo_posts, so it must be stopped before
+  // the members are destroyed (a base-class member is destroyed after the
+  // derived ones), hence the explicit stop() here.
+  ~TestHttpServer() { m_http.stop(); }
 
-  std::string base_url() const {
-    return "http://127.0.0.1:" + std::to_string(m_port);
-  }
+  std::string base_url() const { return m_http.base_url(); }
 };
 
 TestHttpServer &g_test_server() {

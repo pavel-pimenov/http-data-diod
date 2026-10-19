@@ -17,6 +17,7 @@
 #include "db_query_utils.hpp"
 #include "http_client.hpp"
 #include "httplib/httplib.h"
+#include "test_http_support.hpp"
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "retry_handler.hpp"
@@ -50,14 +51,12 @@ using test_support::EnvVars;
 // Loopback stand-in for the L2 backend: covers the success, retry, binary and
 // content-type-less response paths of the worker call pipeline.
 struct L2BackendServer {
-  httplib::Server m_server;
-  int m_port = 0;
-  std::thread m_thread;
+  test_support::MockHttpServer m_http;
   std::atomic<int> m_value_posts{0};
   std::atomic<int> m_flaky_hits{0};
 
   L2BackendServer() {
-    m_server.Post("/api/value",
+    m_http.http().Post("/api/value",
                   [this](const httplib::Request &, httplib::Response &res) {
                     m_value_posts.fetch_add(1);
                     res.set_header("X-L2-Server", "loopback");
@@ -65,14 +64,14 @@ struct L2BackendServer {
                                     "application/json");
                   });
 
-    m_server.Get("/api/value", [](const httplib::Request &,
+    m_http.http().Get("/api/value", [](const httplib::Request &,
                                   httplib::Response &res) {
       res.set_content(R"({"server_span_id":"l2-span-2"})", "application/json");
     });
 
     // First call fails with 502, the retry succeeds: exercises the
     // 502-retry branch of execute_l2_call_with_retry.
-    m_server.Post("/api/flaky",
+    m_http.http().Post("/api/flaky",
                   [this](const httplib::Request &, httplib::Response &res) {
                     if (m_flaky_hits.fetch_add(1) == 0) {
                       res.status = 502;
@@ -84,33 +83,27 @@ struct L2BackendServer {
                     }
                   });
 
-    m_server.Post("/api/binary", [](const httplib::Request &,
+    m_http.http().Post("/api/binary", [](const httplib::Request &,
                                     httplib::Response &res) {
       res.set_content(std::string("\x00\x01\x02", 3),
                       "application/octet-stream");
     });
 
-    m_server.Get("/api/empty", [](const httplib::Request &,
+    m_http.http().Get("/api/empty", [](const httplib::Request &,
                                   httplib::Response &res) {
       res.status = 200;
       res.body.clear();
     });
 
-    m_port = m_server.bind_to_any_port("127.0.0.1");
-    m_thread = std::thread([this] { m_server.listen_after_bind(); });
-    m_server.wait_until_ready();
+    m_http.start();
   }
 
-  ~L2BackendServer() {
-    m_server.stop();
-    if (m_thread.joinable()) {
-      m_thread.join();
-    }
-  }
+  // The server thread writes into m_value_posts/m_flaky_hits, so it must be
+  // stopped before the members are destroyed (a base-class member is destroyed
+  // after the derived ones), hence the explicit stop() here.
+  ~L2BackendServer() { m_http.stop(); }
 
-  std::string api_url() const {
-    return "http://127.0.0.1:" + std::to_string(m_port) + "/api";
-  }
+  std::string api_url() const { return m_http.base_url() + "/api"; }
 };
 
 L2BackendServer &g_l2_backend() {

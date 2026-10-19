@@ -17,6 +17,11 @@ namespace test_support {
 // object would be destroyed while its thread was still serving.
 //
 // Usage: register the routes on http(), then start().
+//
+// A fixture whose handlers write into the *derived* class' own members must
+// stop the server in its own destructor: a member of this class is destroyed
+// after the derived class' members, so the server thread would still be
+// running while those members are already gone.
 class MockHttpServer {
 public:
   MockHttpServer() = default;

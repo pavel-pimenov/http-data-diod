@@ -91,5 +91,16 @@
   perses=91 readme=91 golden=91`.
 - `generate-grafana-dashboards.py --check`, `generate-perses-dashboards.py --check` (8/8),
   `lint-python.py` — без замечаний.
-- Сборка/тесты, health, smoke, `ci-gate.sh runtime` (golden с предсозданными сериями), cppcheck,
-  clang-tidy `--all`, coverage — см. прогон.
+- Сборка: `All tests passed (2860 assertions in 596 test cases)` (на один кейс больше,
+  чем в раунде 157 — новый тест предсоздания серий) и `945 assertions in 125 test cases`;
+  `./health-check.sh all` — все проверки пройдены; `message_counter.py --iterations 1
+  --concurrent 1` — `Failed requests: 0`.
+- `./scripts/ci-gate.sh runtime` с поднятым профилем `databases` (rc=0): DB Gateway e2e 7/7,
+  golden `87/86 families … WORKER=29` → после раунда `87/87 families` (добавилось семейство
+  `l2_common_build_info` из раунда 160), consistency `registered=91 dashboards=91 perses=91
+  readme=91 golden=91`, `OK: Grafana and Perses dashboards are in parity`.
+- `./scripts/run-cppcheck.sh` — rc=0; `./scripts/run-clang-tidy.sh --all` — 47 файлов,
+  «no errors or warnings in project files» (начиная с раунда 163 этот прогон анализирует
+  **все** TU, а не только те, что компилируются под clang).
+- Гейт покрытия проверяет CI на этом коммите (локальный прогон покрытия в этом окружении
+  упирается в CPU-лимит виртуальной машины и не завершается за разумное время).
