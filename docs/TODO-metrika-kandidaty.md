@@ -42,7 +42,7 @@
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
-| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}` |
+| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_spans_dropped_total{reason}`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}` |
 
 ---
 
@@ -146,17 +146,27 @@
 Кардинальность: закрытый enum причин. Регистрация: `app_context.cpp`, инкремент в
 `rate_limiter*.hpp`, `duplicate_detector.hpp`, `request_handler.cpp`.
 
-### 7. Tracing/sentry: потери и невалидный traceparent
+### 7. Tracing/sentry: потери и невалидный traceparent 🟡 частично (round 167: потери спанов)
 Есть `spans_failed_total`, но потеря из-за переполнения очереди/выключенного экспортёра неотличима.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
-| `l2_tracing_spans_dropped_total` | counter | `reason` (queue_full/disabled/export_error) | потеря трейсов и её причина |
+| `l2_tracing_spans_dropped_total` ✅ | counter | `reason` (`queue_full`/`breaker_open`/`export_error`/`shutdown_flush`) | потеря трейсов и её причина |
 | `l2_tracing_traceparent_invalid_total` | counter | — | клиенты присылают битый traceparent (шум/атака) |
 | `l2_common_sentry_dropped_total` | counter | `reason` (queue_full/disabled) | потеря событий Sentry |
 
 Регистрация: общий реестр `l2_common` (`src/trace_logger.cpp`/`sentry_client.hpp` + `app_context.cpp`).
 Кардинальность: закрытый enum. При добавлении — обновить подраздел README про трассировку.
+
+Сделано в round 167: `l2_tracing_spans_dropped_total{reason}` с четырьмя причинами
+(очередь переполнена / брейкер сбросил партию / отправка не удалась после всех
+попыток / не успели на финальном сбросе) — список причин в одном месте
+(`g_tracing_drop_reasons`), все серии предсоздаются при старте; попутно исправлен
+перепутанный счётчик (путь Sentry-брекера увеличивал Jaeger-овский `spans_failed`).
+
+Остаток (следующий раунд): `l2_tracing_traceparent_invalid_total` (битый
+traceparent от клиентов) и `l2_common_sentry_dropped_total{reason}` (потеря
+Sentry-событий: очередь переполнена / отключено).
 
 ### 8. Build info и uptime ✅ реализовано (round 160)
 Стандартная, но отсутствует — сильно упрощает корреляцию деплоя с метриками.
