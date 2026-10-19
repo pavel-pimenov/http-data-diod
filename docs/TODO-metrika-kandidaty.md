@@ -123,17 +123,21 @@
 
 Регистрация: `app_context.cpp` + `src/nats_client.hpp` (точки reconnect/callback). Кардинальность: нет меток.
 
-### 5. Ретраи и failover к L2
+### 5. Ретраи и failover к L2 ✅ реализовано (round 173: повторы; failover не применим)
 `l2_calls_total` есть, но нет «сколько попыток из-за ретраев» и «сколько раз переключились
 на резервный L2» — ключевое для понимания деградации бэкенда.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
-| `l2_worker_retries_total` | counter | `outcome` (retried/exhausted) | цена ретраев, исчерпание попыток |
-| `l2_worker_l2_failover_total` | counter | `from`, `to` (endpoint из конфига) | переключения между L2-серверами |
+| `l2_worker_retries_total` ✅ | counter | `outcome` (retried/exhausted) | цена ретраев, исчерпание попыток |
+| ~~`l2_worker_l2_failover_total`~~ | — | — | **отклонено при реализации**: в NATS-режиме воркер публишует в NATS по списку `L2_SERVER_URLS`, а не переключает «резервный» HTTP-эндпоинт — события «переключились на резервный адрес» в коде нет (выбор следующего адреса при недоступности — это и есть `l2_worker_l2_calls_total` по разным URL) |
 
 Кардинальность: `from×to` ограничены списком endpoint'ов из конфига (обычно ≤ единицы);
 при росте списка — рассмотреть метку `to` только. Регистрация: `app_context.cpp`, инкремент в `src/l2_worker.cpp`.
+
+Реализовано в round 173: `l2_worker_retries_total{outcome}` (`retried`/`exhausted`) —
+цена повторов вызова L2; список исходов в `app_context.hpp` (`g_worker_retry_outcomes`),
+все серии предсоздаются при старте, инкременты — в цикле `execute_l2_call_with_retry`.
 
 ### 6. Единая причина отказов на proxy ✅ реализовано (round 170)
 `rejections_total{reason}` — зонтичная метрика для дашборда «почему отказываем»,

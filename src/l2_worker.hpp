@@ -125,6 +125,9 @@ private:
 
   bool validate_l2_server_access(const std::string &path,
                                  std::string &selected_url);
+  // Counts one retry outcome of the L2 call loop ("retried"/"exhausted").
+  void count_retry(const char *outcome) const;
+
   HttpResponse execute_l2_call_with_retry(
       const std::string &url, const std::string &query, const std::string &body,
       const std::string &traceparent, const httplib::Headers &forwarded_headers,

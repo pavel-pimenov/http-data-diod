@@ -106,12 +106,21 @@ struct SentryMetrics {
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
+// Outcomes of the L2 call retry loop. The list is the single source of truth:
+// the AppContext pre-creates a series per outcome.
+inline constexpr std::array<const char *, 2> g_worker_retry_outcomes = {
+    "retried", "exhausted"};
+
 struct WorkerMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
   // Intentional design for Prometheus metrics
   prometheus::Counter &m_requests_processed;
   prometheus::Counter &m_l2_calls;
   prometheus::Counter &m_l2_errors;
+  // L2 call retries split by outcome: a retry that was performed ("retried")
+  // and a call that ran out of attempts ("exhausted"). The retry cost was
+  // visible only in the logs.
+  prometheus::Family<prometheus::Counter> &m_retries_total;
   // L2 call failures broken down by categorized cause (L2ErrorType): lets an
   // alert tell a timeout apart from TLS/protocol/response errors. One series
   // per enum value is pre-created in init_worker_metrics().

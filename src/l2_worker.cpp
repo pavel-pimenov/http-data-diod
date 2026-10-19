@@ -337,6 +337,10 @@ std::generator<int> attempt_sequence(int max) {
 }
 #endif
 
+void L2Worker::count_retry(const char *outcome) const {
+  m_ctx.m_worker.m_metrics->m_retries_total.Add({{"outcome", outcome}}).Increment();
+}
+
 HttpResponse L2Worker::execute_l2_call_with_retry(
     const std::string &url, const std::string &query, const std::string &body,
     const std::string &traceparent, const httplib::Headers &forwarded_headers,
@@ -398,8 +402,12 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
           attempt < max_retries) {
         Logger::warn("L2 server returned {} on attempt {} url: {}. Retrying...",
                      http_code, attempt, url);
+        count_retry("retried");
         sleep_for_attempt_jitter(attempt);
         continue;
+      }
+      if (http_code >= 500 && attempt >= max_retries) {
+        count_retry("exhausted");
       }
 
       if (http_code >= 200 && http_code < 400) {
@@ -414,8 +422,10 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         Logger::warn(
             "L2 server call failed on attempt {}: {} url: {}. Retrying...",
             attempt, e.what(), url);
+        count_retry("retried");
         sleep_for_attempt_jitter(attempt);
       } else {
+        count_retry("exhausted");
         handle_http_error(std::string(e.what()),
                           &m_ctx.m_worker.m_metrics->m_l2_errors,
                           "L2 server call", max_retries, url);

@@ -312,6 +312,9 @@ void AppContext::init_worker_metrics() {
           "l2_worker_l2_errors_total",
           "Total number of L2 server call errors in worker"),
       reg_worker.counter_family(
+          "l2_worker_retries_total",
+          "L2 call retries split by outcome (retried/exhausted)"),
+      reg_worker.counter_family(
           "l2_worker_l2_call_errors_total",
           "L2 server call errors by categorized cause (type label)"),
       reg_worker.counter("l2_worker_bytes_received_total",
@@ -415,6 +418,12 @@ void AppContext::init_worker_metrics() {
   auto &l2_call_errors = m_worker.m_metrics->m_l2_call_errors_total;
   for (const char *type : error_categorizer::g_l2_error_names) {
     l2_call_errors.Add({{"type", type}});
+  }
+
+  // Same for the retry outcomes.
+  auto &retries = m_worker.m_metrics->m_retries_total;
+  for (const char *outcome : g_worker_retry_outcomes) {
+    retries.Add({{"outcome", outcome}});
   }
 }
 

@@ -2466,6 +2466,8 @@ def create_worker_dashboard() -> Dict:
         },
         targets=[
             {"expr": "rate(l2_worker_l2_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с", "refId": "A"},  # noqa: E501
+            # Повторы вызова L2: выполненный повтор и исчерпанные попытки.
+            {"expr": "sum by (outcome) (rate(l2_worker_retries_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{outcome}}", "refId": "C"},  # noqa: E501
             {"expr": "rate(l2_worker_l2_call_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки/с {{type}}", "refId": "B"}  # noqa: E501
         ]
     ))

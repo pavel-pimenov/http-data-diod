@@ -48,6 +48,23 @@ using test_support::attach_tracer;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
 
+// Value of the worker's retry counter for one outcome.
+double retry_count(const AppContext &ctx, const std::string &outcome) {
+  for (const auto &family : ctx.m_worker_registry->Collect()) {
+    if (family.name != "l2_worker_retries_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "outcome" && label.value == outcome) {
+          return metric.counter.value;
+        }
+      }
+    }
+  }
+  return 0.0;
+}
+
 // Loopback stand-in for the L2 backend: covers the success, retry, binary and
 // content-type-less response paths of the worker call pipeline.
 struct L2BackendServer {
@@ -398,10 +415,15 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
   }
 
   // 502 on the first attempt is retried and succeeds on the second.
+  const double retried_before = retry_count(ctx, "retried");
   L2Worker retry_worker(ctx);
   const HttpResponse recovered = retry_worker.call_l2_server("/api/flaky", "{}");
   REQUIRE(recovered.m_status == 200);
   REQUIRE(g_l2_backend().m_flaky_hits == 2);
+  // The retry is visible as a metric, not only as a log line: the flaky call
+  // performed exactly one retry (the earlier failure cases of this test case
+  // may have retried as well, hence the delta).
+  REQUIRE(retry_count(ctx, "retried") == retried_before + 1.0);
 }
 
 // ============================================================================

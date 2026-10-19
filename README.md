@@ -641,6 +641,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_l2_calls_total` | counter | — | Вызовы L2-сервера |
 | `l2_worker_l2_errors_total` | counter | — | Ошибки вызовов L2-сервера |
 | `l2_worker_l2_call_errors_total` | counter | `type` | Ошибки вызова L2 по причине (`L2ErrorType`: CONNECTION_ERROR / TIMEOUT_ERROR / RESPONSE_ERROR / RETRY_EXHAUSTED / OTHER_ERROR); серии всех причин предсозданы со значением 0 |
+| `l2_worker_retries_total` | counter | `outcome` | Повторы вызова L2: `retried` (повтор выполнен) / `exhausted` (попытки исчерпаны) |
 | `l2_worker_bytes_received_total` | counter | — | Байт, получено воркером |
 | `l2_worker_bytes_sent_total` | counter | — | Байт, отправлено воркером |
 | `l2_worker_request_duration_seconds` | histogram | — | Длительность обработки запроса |
