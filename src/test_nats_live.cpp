@@ -771,8 +771,19 @@ TEST_CASE("NatsClient: health check fails fast once the broker stops",
   REQUIRE(client.is_connected());
 
   server.stop();
-  REQUIRE(wait_for_condition([&client]() { return !client.is_connected(); },
-                             10000));
+  // Wait for the NATS client's disconnected callback, not just for the
+  // connection status: is_connected() already reports false as soon as the
+  // broker's status changes, which happens before the callback runs -- the
+  // callback is the only path that reports the loss of an *established*
+  // connection, and skipping it left that branch uncovered depending on the
+  // timing (the per-file coverage gate then failed at random).
+  REQUIRE(wait_for_condition(
+      [&client]() {
+        const auto error = client.get_last_error();
+        return error.has_value() && *error == "lost connection to NATS server";
+      },
+      10000));
+  REQUIRE_FALSE(client.is_connected());
 
   // Regression guard: check_connection()/ping() used to hang forever here
   // because ensure_connected() -> connect() never returned while the broker was
