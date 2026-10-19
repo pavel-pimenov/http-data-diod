@@ -3,7 +3,6 @@
 #include "error_types.hpp"
 #include "json_response_utils.hpp"
 #include "logger.hpp"
-#include "metrics_manager.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -304,14 +303,10 @@ void run_worker(AppContext &app_ctx) {
   });
   health_server.Get("/health/ready", [&worker, &app_ctx](const httplib::Request & /*req*/,
                                                  httplib::Response &res) {
-    const bool ready = worker.is_nats_connected();
-    set_nats_readiness_gauges(app_ctx.m_worker.m_metrics->m_nats_connected,
-                              app_ctx.m_worker.m_metrics->m_health_ready, ready);
-    if (ready) {
-      set_health_ready_nats(res, "l2-worker");
-    } else {
-      set_health_not_ready_nats(res, "l2-worker", "NATS not connected");
-    }
+    write_nats_readiness(res, "l2-worker",
+                         app_ctx.m_worker.m_metrics->m_nats_connected,
+                         app_ctx.m_worker.m_metrics->m_health_ready,
+                         worker.is_nats_connected(), "NATS not connected");
   });
 
   // Lightweight HTML status page (no Grafana needed) sourced from the Prometheus

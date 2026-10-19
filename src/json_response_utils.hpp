@@ -4,6 +4,7 @@
 #include "httplib/httplib.h"
 #include <format>
 #include <nlohmann/json.hpp>
+#include <prometheus/gauge.h>
 #include <string>
 #include <string_view>
 
@@ -74,6 +75,35 @@ inline void set_health_not_ready_nats(httplib::Response &res,
           R"({{"status": "not_ready", "service": "{}", "error": "{}"}})",
           service, error),
       "application/json");
+}
+
+// Mirrors NATS connectivity into the two gauges the /health/ready endpoint
+// updates: the connection state read by the availability panels and the
+// readiness flag itself. Both NATS-backed handlers (worker, proxy) set them
+// with the same ternary pair.
+inline void set_nats_readiness_gauges(prometheus::Gauge &nats_connected,
+                                      prometheus::Gauge &health_ready,
+                                      bool ready) {
+  const double value = ready ? 1.0 : 0.0;
+  nats_connected.Set(value);
+  health_ready.Set(value);
+}
+
+// Mirrors the NATS connection state into the readiness gauges and writes the
+// readiness answer. The proxy and the worker answer /health/ready the same way
+// — only the readiness check and the service name differ — so the pair of calls
+// lives here instead of being copied into both handlers.
+inline void write_nats_readiness(httplib::Response &res,
+                                 std::string_view service,
+                                 prometheus::Gauge &nats_connected,
+                                 prometheus::Gauge &health_ready, bool ready,
+                                 std::string_view error) {
+  set_nats_readiness_gauges(nats_connected, health_ready, ready);
+  if (ready) {
+    set_health_ready_nats(res, service);
+  } else {
+    set_health_not_ready_nats(res, service, error);
+  }
 }
 
 #endif // JSON_RESPONSE_UTILS_HPP

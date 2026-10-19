@@ -192,15 +192,10 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
     nats_healthy = false;
   }
 
-  set_nats_readiness_gauges(m_ctx.m_proxy.m_metrics->m_nats_connected,
-                            m_ctx.m_proxy.m_metrics->m_health_ready,
-                            nats_healthy);
-
-  if (nats_healthy) {
-    set_health_ready_nats(res, "l2-proxy");
-  } else {
-    set_health_not_ready_nats(res, "l2-proxy", error_msg);
-  }
+  write_nats_readiness(res, "l2-proxy",
+                       m_ctx.m_proxy.m_metrics->m_nats_connected,
+                       m_ctx.m_proxy.m_metrics->m_health_ready, nats_healthy,
+                       error_msg);
 }
 
 void RequestHandler::handle_duplicates(httplib::Response &res) const {

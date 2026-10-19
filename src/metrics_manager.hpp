@@ -145,18 +145,6 @@ inline void observe_db_request_duration(
       .Observe(TimeUtils::duration_seconds(start_us, end_us));
 }
 
-// Mirrors NATS connectivity into the two gauges the /health/ready endpoint
-// updates: the connection state read by the availability panels and the
-// readiness flag itself. Both NATS-backed handlers (worker, proxy) set them
-// with the same ternary pair.
-inline void set_nats_readiness_gauges(prometheus::Gauge &nats_connected,
-                                      prometheus::Gauge &health_ready,
-                                      bool ready) {
-  const double value = ready ? 1.0 : 0.0;
-  nats_connected.Set(value);
-  health_ready.Set(value);
-}
-
 // Short-hand for the registration calls: a mode registers dozens of metrics
 // on its own registry, and repeating the registry argument at every call makes
 // the aggregate initialisers of the metric structs hard to read. One registrar
