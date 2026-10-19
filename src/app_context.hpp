@@ -89,6 +89,9 @@ struct TracingMetrics {
   // Sentry/GlitchTip performance transactions (delivered when SENTRY_DSN set).
   prometheus::Counter &m_sentry_transactions_sent;
   prometheus::Counter &m_sentry_transactions_failed;
+  // Client traceparent headers that could not be parsed (broken clients or
+  // noise/attacks): the request is served, but the trace is not continued.
+  prometheus::Counter &m_traceparent_invalid;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
@@ -98,6 +101,8 @@ struct SentryMetrics {
   prometheus::Counter &m_events_sent;
   prometheus::Counter &m_events_failed;
   prometheus::Gauge &m_queue_size;
+  // Sentry events lost before a delivery attempt, split by reason.
+  prometheus::Family<prometheus::Counter> &m_events_dropped;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

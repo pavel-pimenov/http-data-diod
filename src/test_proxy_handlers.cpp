@@ -331,6 +331,25 @@ TEST_CASE("RequestHandler: POST without a backend answers 504",
   }
 }
 
+TEST_CASE("RequestHandler: an unparsable client traceparent is counted",
+          "[request-handler]") {
+  const EnvGuard mode{{"MODE", "proxy"}};
+  AppContext ctx;
+  ProxyHandler handler(ctx);
+
+  {
+    httplib::Request req = make_post("/", R"({"value":1})");
+    req.headers = {{"traceparent", "not-a-traceparent"}};
+    httplib::Response res;
+    handler.handle_post(req, res);
+    REQUIRE(res.status == 504);
+  }
+  // A present but unusable traceparent is counted separately from the requests
+  // without any traceparent at all (broken client, or noise).
+  REQUIRE(ctx.m_tracing_metrics->m_traceparent_invalid.Collect().counter.value ==
+          1.0);
+}
+
 TEST_CASE("RequestHandler: global rate limiter rejects with 429",
           "[rate-limit-http]") {
   const ProxyEnv env;

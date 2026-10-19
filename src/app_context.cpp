@@ -31,7 +31,7 @@ AppContext::AppContext() {
   m_sentry = std::make_unique<SentryClient>(
       m_config.m_sentry.m_dsn, m_sentry_metrics->m_events_sent,
       m_sentry_metrics->m_events_failed, m_sentry_metrics->m_queue_size,
-      m_config.m_app.m_mode, m_config.m_sentry.m_environment, m_config.m_sentry.m_release,
+      m_sentry_metrics->m_events_dropped, m_config.m_app.m_mode, m_config.m_sentry.m_environment, m_config.m_sentry.m_release,
       m_config.m_sentry.m_timeout_ms, m_config.m_sentry.m_max_queue_size);
 }
 
@@ -110,7 +110,11 @@ void AppContext::init_common() {
       reg_common.counter(
           "l2_tracing_sentry_transactions_failed_total",
           "Total number of spans not delivered to the Sentry/GlitchTip "
-          "performance endpoint")});
+          "performance endpoint"),
+      reg_common.counter(
+          "l2_tracing_traceparent_invalid_total",
+          "Total number of client traceparent headers that could not be "
+          "parsed")});
 
   // prometheus-cpp exports a labeled family only after the first Add(), and a
   // healthy stack never loses a span, so every reason gets its zero series up
@@ -130,7 +134,17 @@ void AppContext::init_common() {
           "Sentry events that failed to deliver or were dropped while the "
           "queue was full"),
       reg_common.gauge("l2_worker_sentry_queue_size",
-                       "Sentry events pending in the async queue")});
+                       "Sentry events pending in the async queue"),
+      reg_common.counter_family(
+          "l2_worker_sentry_events_dropped_total",
+          "Total number of Sentry events lost before a delivery attempt, "
+          "labeled by reason")});
+
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy stack loses no Sentry event, so the reason gets its zero series up
+  // front.
+  m_sentry_metrics->m_events_dropped.Add(
+      {{"reason", sentry::kDropReasonQueueFull}});
 
   // Deployment identity: the value is always 1, the labels carry the build
   // version and the mode, so a dashboard (or an alert) can tell which build an

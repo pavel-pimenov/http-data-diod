@@ -230,6 +230,7 @@ std::string build_envelope(const SentryEvent &event, const DsnData &dsn,
 SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
                            prometheus::Counter &events_failed,
                            prometheus::Gauge &queue_size,
+                           prometheus::Family<prometheus::Counter> &events_dropped,
                            std::string service_name, std::string environment,
                            std::string release, int timeout_ms,
                            size_t max_queue_size, const TransportFn &transport)
@@ -241,7 +242,7 @@ SentryClient::SentryClient(std::string dsn, prometheus::Counter &events_sent,
                timeout_ms,
                max_queue_size == 0 ? 1 : max_queue_size,
                transport},
-      m_metrics{events_sent, events_failed, queue_size},
+      m_metrics{events_sent, events_failed, queue_size, events_dropped},
       m_queue{m_config.m_max_queue_size,
               AsyncSenderQueue<sentry::SentryEvent>::OverflowPolicy::
                   DropOldest} {
@@ -276,6 +277,9 @@ void SentryClient::capture(const sentry::SentryEvent &event) {
   const auto outcome = m_queue.push(event);
   if (outcome.m_dropped) {
     m_metrics.m_events_failed.Increment();
+    m_metrics.m_events_dropped
+        .Add({{"reason", std::string(sentry::kDropReasonQueueFull)}})
+        .Increment();
   }
   m_metrics.m_queue_size.Set(static_cast<double>(outcome.m_size));
 }

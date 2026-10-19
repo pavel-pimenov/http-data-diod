@@ -405,8 +405,17 @@ TraceContext RequestHandler::setup_tracing(
     long long start_us, std::string &inlet_span_id,
     std::string &backend_push_span_id,
     std::string &traceparent_for_backend) const {
+  const std::string traceparent_raw = get_traceparent_header(req.headers);
   const TraceContext trace_ctx = extract_trace_context(
       req, m_ctx.m_tracer.get(), backend_push_span_id, traceparent_for_backend);
+
+  // A traceparent that is present but unusable (broken client, or noise that
+  // looks like a trace): the request is still served, but the trace is not
+  // continued -- worth counting separately from the requests without any
+  // traceparent at all.
+  if (!traceparent_raw.empty() && trace_ctx.m_trace_id.empty()) {
+    m_ctx.m_tracing_metrics->m_traceparent_invalid.Increment();
+  }
 
   inlet_span_id =
       log_incoming_span(m_ctx.m_tracer.get(), "/", start_us, request_id,

@@ -54,13 +54,29 @@ struct SentryTestMetrics {
   prometheus::Counter &m_sent_counter;
   prometheus::Counter &m_failed_counter;
   prometheus::Gauge &m_queue_gauge;
+  prometheus::Family<prometheus::Counter> &m_dropped_counter;
   SentryTestMetrics()
       : m_sent_counter(test_support::make_counter(
           *m_registry, "tst_sentry_sent", "h")),
         m_failed_counter(test_support::make_counter(
             *m_registry, "tst_sentry_failed", "h")),
         m_queue_gauge(test_support::make_gauge(
-            *m_registry, "tst_sentry_queue", "h")) {}
+            *m_registry, "tst_sentry_queue", "h")),
+        m_dropped_counter(test_support::make_counter_family(
+            *m_registry, "tst_sentry_dropped", "h")) {}
+
+  [[nodiscard]] double dropped(const std::string &reason) const {
+    for (const auto &metric_family : m_dropped_counter.Collect()) {
+      for (const auto &metric : metric_family.metric) {
+        for (const auto &label : metric.label) {
+          if (label.name == "reason" && label.value == reason) {
+            return metric.counter.value;
+          }
+        }
+      }
+    }
+    return 0.0;
+  }
 };
 
 } // namespace
@@ -238,7 +254,7 @@ TEST_CASE("SentryClient: disabled without a DSN is a no-op",
           "[sentry-client]") {
   SentryTestMetrics m;
   SentryClient client("", m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge,
-                      "srv");
+                      m.m_dropped_counter, "srv");
   REQUIRE_FALSE(client.enabled());
   client.capture_message("should be dropped");
   client.flush();
@@ -252,7 +268,8 @@ TEST_CASE("SentryClient: delivers queued events via the transport",
   std::vector<std::string> delivered;
   SentryClient client(
       "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
-      m.m_queue_gauge, "l2-worker", "prod", "1.0.0", 3000, 256,
+      m.m_queue_gauge, m.m_dropped_counter, "l2-worker", "prod", "1.0.0", 3000,
+      256,
       [&](const std::string &envelope) {
         delivered.push_back(envelope);
         return true;
@@ -286,7 +303,7 @@ TEST_CASE("SentryClient: transport failure is counted, not propagated",
   SentryTestMetrics m;
   SentryClient client(
       "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
-      m.m_queue_gauge, "srv", "", "", 3000, 256,
+      m.m_queue_gauge, m.m_dropped_counter, "srv", "", "", 3000, 256,
       [&](const std::string &) { return false; });
   REQUIRE(client.enabled());
 
@@ -305,7 +322,7 @@ TEST_CASE("SentryClient: full SentryEvent with tags/extra is delivered",
   std::vector<std::string> delivered;
   SentryClient client(
       "http://PUBLIC@ingest.local/7", m.m_sent_counter, m.m_failed_counter,
-      m.m_queue_gauge, "l2-worker", "", "", 3000, 256,
+      m.m_queue_gauge, m.m_dropped_counter, "l2-worker", "", "", 3000, 256,
       [&](const std::string &envelope) {
         delivered.push_back(envelope);
         return true;
@@ -345,7 +362,7 @@ TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
   std::atomic<bool> release{false};
   SentryClient client(
       "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
-      m.m_queue_gauge, "srv", "", "", 3000, k_limit,
+      m.m_queue_gauge, m.m_dropped_counter, "srv", "", "", 3000, k_limit,
       [&](const std::string &envelope) {
         started.store(true);
         while (!release.load()) {
@@ -371,6 +388,9 @@ TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
   REQUIRE(m.m_failed_counter.Value() == 2.0);
   REQUIRE(m.m_sent_counter.Value() == 5.0);
   REQUIRE(m.m_queue_gauge.Value() == 0.0);
+  // The events lost to the full queue are counted with their reason, so a
+  // full queue is distinguishable from a failed delivery.
+  REQUIRE(m.dropped("queue_full") == 2.0);
 }
 
 TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
@@ -393,7 +413,8 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
   SentryTestMetrics m;
   SentryClient client(
       "http://PUBLIC@127.0.0.1:" + std::to_string(port) + "/42",
-      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge,
+      m.m_dropped_counter, "srv", "", "",
       3000, 8);
   REQUIRE(client.enabled());
 
@@ -420,7 +441,8 @@ TEST_CASE("SentryClient: send_envelope counts a non-2xx response as failure",
   SentryTestMetrics m;
   SentryClient client(
       "http://PUBLIC@127.0.0.1:" + std::to_string(port) + "/42",
-      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge,
+      m.m_dropped_counter, "srv", "", "",
       3000, 8);
   client.capture_message("server error");
   client.flush();
@@ -433,7 +455,8 @@ TEST_CASE("SentryClient: send_envelope counts a connection failure",
           "[sentry-client]") {
   SentryTestMetrics m;
   SentryClient client("http://PUBLIC@127.0.0.1:1/42", m.m_sent_counter,
-                      m.m_failed_counter, m.m_queue_gauge, "srv", "", "", 1000,
+                      m.m_failed_counter, m.m_queue_gauge, m.m_dropped_counter,
+                      "srv", "", "", 1000,
                       8);
   client.capture_message("dead endpoint");
   client.flush();
@@ -446,7 +469,8 @@ TEST_CASE("SentryClient: send_envelope https scheme fails without a TLS server",
           "[sentry-client]") {
   SentryTestMetrics m;
   SentryClient client("https://PUBLIC@127.0.0.1:1/42", m.m_sent_counter,
-                      m.m_failed_counter, m.m_queue_gauge, "srv", "", "", 1000,
+                      m.m_failed_counter, m.m_queue_gauge, m.m_dropped_counter,
+                      "srv", "", "", 1000,
                       8);
   client.capture_message("no tls here");
   client.flush();
@@ -473,7 +497,8 @@ TEST_CASE("SentryClient: secret key is sent in the X-Sentry-Auth header",
   SentryTestMetrics m;
   SentryClient client(
       "http://PUBLIC:SECRET@127.0.0.1:" + std::to_string(port) + "/42",
-      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge, "srv", "", "",
+      m.m_sent_counter, m.m_failed_counter, m.m_queue_gauge,
+      m.m_dropped_counter, "srv", "", "",
       3000, 8);
   client.capture_message("with secret");
   client.flush();
@@ -490,7 +515,7 @@ TEST_CASE("SentryClient: zero max_queue_size is clamped to one",
   std::vector<std::string> delivered;
   SentryClient client(
       "https://PUBLIC@ingest.sentry.io/42", m.m_sent_counter, m.m_failed_counter,
-      m.m_queue_gauge, "srv", "", "", 1000, 0,
+      m.m_queue_gauge, m.m_dropped_counter, "srv", "", "", 1000, 0,
       [&](const std::string &envelope) {
         delivered.push_back(envelope);
         return true;

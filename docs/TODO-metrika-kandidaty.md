@@ -153,7 +153,7 @@ enum `RejectionReason` в `src/error_categorizer.hpp`, все серии пре�
 enum, а не литералы в местах вызова). Частные счётчики остались: они считают
 *события*, umbrella — *отказы*.
 
-### 7. Tracing/sentry: потери и невалидный traceparent 🟡 частично (round 167: потери спанов)
+### 7. Tracing/sentry: потери и невалидный traceparent ✅ реализовано (round 167: потери спанов; round 172: потери Sentry и битые traceparent)
 Есть `spans_failed_total`, но потеря из-за переполнения очереди/выключенного экспортёра неотличима.
 
 | Метрика | Тип | Метки | Что закрывает |
@@ -171,9 +171,12 @@ enum, а не литералы в местах вызова). Частные с�
 (`g_tracing_drop_reasons`), все серии предсоздаются при старте; попутно исправлен
 перепутанный счётчик (путь Sentry-брекера увеличивал Jaeger-овский `spans_failed`).
 
-Остаток (следующий раунд): `l2_tracing_traceparent_invalid_total` (битый
-traceparent от клиентов) и `l2_common_sentry_dropped_total{reason}` (потеря
-Sentry-событий: очередь переполнена / отключено).
+Сделано в round 172: `l2_tracing_traceparent_invalid_total` (клиентские
+`traceparent`, которые присутствуют, но не разбираются — запросы без заголовка не
+считаются) и `l2_worker_sentry_events_dropped_total{reason}` (Sentry-события,
+потерянные до попытки доставки; имя выбрано по соседям
+`l2_worker_sentry_events_*`, а не как в плане `l2_common_sentry_dropped_total` —
+чтобы не плодить второй префикс для того же реестра).
 
 ### 8. Build info и uptime ✅ реализовано (round 160)
 Стандартная, но отсутствует — сильно упрощает корреляцию деплоя с метриками.

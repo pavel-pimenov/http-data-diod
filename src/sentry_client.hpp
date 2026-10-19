@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <prometheus/counter.h>
+#include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <string>
 #include <string_view>
@@ -16,6 +17,9 @@
 #include <vector>
 
 namespace sentry {
+
+// Why a Sentry event was dropped before a delivery attempt was made.
+inline constexpr const char *kDropReasonQueueFull = "queue_full";
 
 enum class EventLevel : std::uint8_t { Debug, Info, Warning, Error, Fatal };
 
@@ -90,6 +94,7 @@ public:
 
   SentryClient(std::string dsn, prometheus::Counter &events_sent,
                prometheus::Counter &events_failed, prometheus::Gauge &queue_size,
+               prometheus::Family<prometheus::Counter> &events_dropped,
                std::string service_name = "unknown",
                std::string environment = "", std::string release = "",
                int timeout_ms = 3000, size_t max_queue_size = 256,
@@ -128,6 +133,9 @@ private:
     prometheus::Counter &m_events_sent;
     prometheus::Counter &m_events_failed;
     prometheus::Gauge &m_queue_size;
+    // Events lost before the delivery attempt, split by reason: the queue
+    // being full is a different problem than a failed delivery.
+    prometheus::Family<prometheus::Counter> &m_events_dropped;
   } m_metrics;
   AsyncSenderQueue<sentry::SentryEvent> m_queue;
   std::jthread m_sender_thread;

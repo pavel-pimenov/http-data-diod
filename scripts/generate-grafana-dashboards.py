@@ -511,7 +511,10 @@ def create_tracing_dashboard() -> Dict:
             {"expr": "rate(l2_tracing_spans_failed_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки спанов/с", "refId": "B"},  # noqa: E501
             # Потерянные спаны по причине: очередь переполнена / брейкер сбросил
             # партию / экспортёр не отвечает / не успели на финальном сбросе.
-            {"expr": "sum by (reason) (rate(l2_tracing_spans_dropped_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{reason}}", "refId": "C"}  # noqa: E501
+            {"expr": "sum by (reason) (rate(l2_tracing_spans_dropped_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{reason}}", "refId": "C"},  # noqa: E501
+            # Клиентские traceparent, которые не удалось разобрать: битый клиент
+            # или шум, похожий на трассировку.
+            {"expr": "rate(l2_tracing_traceparent_invalid_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Битых traceparent/с", "refId": "D"}  # noqa: E501
         ]
     ))
 
@@ -672,7 +675,9 @@ def create_sentry_dashboard() -> Dict:
         },
         targets=[
             {"expr": 'rate(l2_worker_sentry_events_sent_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Отправлено/с", "refId": "A"},  # noqa: E501
-            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "B"}  # noqa: E501
+            {"expr": 'rate(l2_worker_sentry_events_failed_total{vm=~"${vm:regex}"}[1m])', "legendFormat": "Ошибки/с", "refId": "B"},  # noqa: E501
+            # Потерянные до попытки доставки (переполненная очередь).
+            {"expr": 'sum by (reason) (rate(l2_worker_sentry_events_dropped_total{vm=~"${vm:regex}"}[1m]))', "legendFormat": "{{reason}}", "refId": "C"}  # noqa: E501
         ]
     ))
 

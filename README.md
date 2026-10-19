@@ -413,6 +413,8 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 | `l2_tracing_spans_sent_total` | counter | Спаны, отправленные в Jaeger |
 | `l2_tracing_spans_failed_total` | counter | Спаны, не отправленные в Jaeger |
 | `l2_tracing_spans_dropped_total` | counter | `reason` | Потерянные спаны по причине: `queue_full` / `breaker_open` / `export_error` / `shutdown_flush` |
+| `l2_tracing_traceparent_invalid_total` | counter | — | Клиентские заголовки `traceparent`, которые не удалось разобрать |
+| `l2_worker_sentry_events_dropped_total` | counter | `reason` | Потерянные события Sentry (до попытки доставки): `queue_full` |
 
 `l2_tracing_spans_failed_total` смешивает два разных события — «экспортёр не
 отвечает» и «очередь спанов переполнилась», — поэтому по нему нельзя понять,
