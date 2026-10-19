@@ -2,10 +2,10 @@
   "comment": "Пер-файловая база покрытия production-файлов (отчёт gcovr --json). Сверяется скриптом scripts/coverage-regression-check.py; обновляй: scripts/coverage-regression-check.py --update",
   "files": {
     "app_context.cpp": {
-      "lines": 319,
-      "covered": 317,
-      "branches": 648,
-      "branches_covered": 313
+      "lines": 342,
+      "covered": 340,
+      "branches": 756,
+      "branches_covered": 363
     },
     "async_sender_queue.hpp": {
       "lines": 65,
@@ -140,10 +140,10 @@
       "branches_covered": 88
     },
     "error_categorizer.hpp": {
-      "lines": 30,
-      "covered": 29,
-      "branches": 30,
-      "branches_covered": 21
+      "lines": 32,
+      "covered": 31,
+      "branches": 32,
+      "branches_covered": 22
     },
     "exceptions.hpp": {
       "lines": 1,
@@ -200,10 +200,10 @@
       "branches_covered": 0
     },
     "json_response_utils.hpp": {
-      "lines": 36,
-      "covered": 36,
-      "branches": 46,
-      "branches_covered": 24
+      "lines": 47,
+      "covered": 47,
+      "branches": 50,
+      "branches_covered": 28
     },
     "json_schema_validator.hpp": {
       "lines": 102,
@@ -224,10 +224,10 @@
       "branches_covered": 99
     },
     "l2_worker.cpp": {
-      "lines": 308,
-      "covered": 276,
-      "branches": 498,
-      "branches_covered": 269
+      "lines": 318,
+      "covered": 285,
+      "branches": 528,
+      "branches_covered": 280
     },
     "l2_worker.hpp": {
       "lines": 6,
@@ -260,16 +260,16 @@
       "branches_covered": 5
     },
     "metrics_manager.hpp": {
-      "lines": 30,
-      "covered": 30,
-      "branches": 80,
-      "branches_covered": 38
+      "lines": 53,
+      "covered": 53,
+      "branches": 100,
+      "branches_covered": 55
     },
     "nats_client.cpp": {
-      "lines": 458,
-      "covered": 422,
-      "branches": 748,
-      "branches_covered": 401
+      "lines": 469,
+      "covered": 433,
+      "branches": 766,
+      "branches_covered": 413
     },
     "nats_client.hpp": {
       "lines": 2,
@@ -302,10 +302,10 @@
       "branches_covered": 18
     },
     "proxy_init.cpp": {
-      "lines": 93,
-      "covered": 85,
-      "branches": 196,
-      "branches_covered": 88
+      "lines": 97,
+      "covered": 89,
+      "branches": 198,
+      "branches_covered": 89
     },
     "random_utils.hpp": {
       "lines": 15,
@@ -332,10 +332,10 @@
       "branches_covered": 27
     },
     "request_handler.cpp": {
-      "lines": 440,
-      "covered": 419,
-      "branches": 935,
-      "branches_covered": 510
+      "lines": 450,
+      "covered": 430,
+      "branches": 965,
+      "branches_covered": 525
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -386,10 +386,10 @@
       "branches_covered": 3
     },
     "sentry_client.cpp": {
-      "lines": 221,
-      "covered": 217,
-      "branches": 616,
-      "branches_covered": 322
+      "lines": 225,
+      "covered": 221,
+      "branches": 634,
+      "branches_covered": 329
     },
     "sentry_client.hpp": {
       "lines": 2,
@@ -404,10 +404,10 @@
       "branches_covered": 120
     },
     "stats_logger.cpp": {
-      "lines": 92,
-      "covered": 90,
-      "branches": 80,
-      "branches_covered": 51
+      "lines": 89,
+      "covered": 87,
+      "branches": 74,
+      "branches_covered": 46
     },
     "stats_page.hpp": {
       "lines": 206,
@@ -422,16 +422,16 @@
       "branches_covered": 12
     },
     "thread_pool.hpp": {
-      "lines": 62,
-      "covered": 62,
+      "lines": 66,
+      "covered": 66,
       "branches": 132,
       "branches_covered": 85
     },
     "thread_pool_wrapper.hpp": {
-      "lines": 23,
-      "covered": 23,
-      "branches": 18,
-      "branches_covered": 13
+      "lines": 26,
+      "covered": 26,
+      "branches": 20,
+      "branches_covered": 15
     },
     "time_utils.hpp": {
       "lines": 35,

@@ -936,9 +936,9 @@ docker run --rm --entrypoint gcovr http-data-diod:coverage \
 
 | Гейт | Порог | Текущее значение |
 |---|---|---|
-| `--fail-under-line` — строки по проекту | 90% | **94.39%** (15738/16674) |
-| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.20%** (30681/74473) |
-| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.31%** (7136/13386) |
+| `--fail-under-line` — строки по проекту | 90% | **94.45%** (15908/16842) |
+| `--fail-under-branch` — ветви по проекту (полный scope) | 40% | **41.21%** (30989/75193) |
+| `--fail-under-branch` — ветви только production-файлы (без `test_*.cpp`) | 50% | **53.26%** (7251/13614) |
 | пер-файловый гейт регрессии (см. ниже) | без снижения | 80 production-файлов в baseline |
 
 **Пер-файловый гейт регрессии** — `scripts/coverage-regression-check.py`,
