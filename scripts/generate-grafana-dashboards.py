@@ -1997,7 +1997,12 @@ def create_proxy_dashboard() -> Dict:
         unit="reqps",
         targets=[
             {"expr": "rate(l2_proxy_nats_connection_creates_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Создания/с", "refId": "A"},  # noqa: E501
-            {"expr": "rate(l2_proxy_nats_connection_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки подкл./с", "refId": "B"}  # noqa: E501
+            {"expr": "rate(l2_proxy_nats_connection_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки подкл./с", "refId": "B"},  # noqa: E501
+            # Таймауты запросов, успешные переподключения и число активных
+            # подписок — по ним видно «NATS шуршал» и «подписки текут».
+            {"expr": "rate(l2_proxy_nats_timeouts_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Таймауты/с", "refId": "C"},  # noqa: E501
+            {"expr": "rate(l2_proxy_nats_reconnects_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Переподключения/с", "refId": "D"},  # noqa: E501
+            {"expr": "l2_proxy_nats_subscriptions{vm=~\"${vm:regex}\"}", "legendFormat": "Подписки", "refId": "E"}  # noqa: E501
         ]
     ))
     y += 8

@@ -26,6 +26,7 @@
 #include "nats_poll_service.hpp"
 #include "proxy_init.hpp"
 #include "request_handler.hpp"
+#include "test_metrics_support.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -509,6 +510,27 @@ TEST_CASE("NatsPollService: returns empty when the NATS client is missing",
 // ============================================================================
 // Track A: NatsClient against a live broker
 // ============================================================================
+
+TEST_CASE("NatsClient: the subscription gauge follows subscribe/unsubscribe",
+          "[nats-live]") {
+  NatsServer server;
+  server.start_live();
+
+  const std::string subject = unique_subject("nats.subgauge");
+  NatsClient client(live_nats_cfg(subject, server.port()));
+  prometheus::Registry registry;
+  auto &subscriptions =
+      test_support::make_gauge(registry, "tst_nats_subscriptions", "h");
+  client.set_metrics(NatsClient::Metrics{nullptr, nullptr, &subscriptions});
+  REQUIRE(client.connect());
+
+  REQUIRE(client.subscribe(subject, [](const std::string &, const std::string &,
+                                       const std::string &) {}));
+  REQUIRE(subscriptions.Collect().gauge.value == 1.0);
+
+  client.unsubscribe();
+  REQUIRE(subscriptions.Collect().gauge.value == 0.0);
+}
 
 TEST_CASE("NatsClient: pub/sub round-trip, headers and queue subscribers",
           "[nats-live]") {
@@ -1365,6 +1387,8 @@ TEST_CASE("L2Worker: reconnects and keeps serving after the broker restarts",
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <prometheus/registry.h>
+
 
 #include "test_pg_diag.hpp"
 

@@ -33,6 +33,11 @@ struct ProxyMetrics {
   prometheus::Counter &m_nats_errors;
   prometheus::Counter &m_nats_connection_creates;
   prometheus::Counter &m_nats_connection_errors;
+  // NATS request timeouts and successful reconnects, plus the number of
+  // active subscriptions (a leak signal).
+  prometheus::Counter &m_nats_timeouts;
+  prometheus::Counter &m_nats_reconnects;
+  prometheus::Gauge &m_nats_subscriptions;
   prometheus::Histogram &m_nats_request_duration_seconds;
   // NATS poll breakdown: how many request/reply attempts a single poll needed
   // (1 = plain round-trip, >1 = retries with backoff sleeps in between), how

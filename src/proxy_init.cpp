@@ -26,6 +26,10 @@ void init_proxy_components(AppContext &app_ctx) {
 
   app_ctx.m_nats_client =
       std::make_shared<NatsClient>(app_ctx.m_config.create_nats_config());
+  app_ctx.m_nats_client->set_metrics(NatsClient::Metrics{
+      &app_ctx.m_proxy.m_metrics->m_nats_timeouts,
+      &app_ctx.m_proxy.m_metrics->m_nats_reconnects,
+      &app_ctx.m_proxy.m_metrics->m_nats_subscriptions});
 
   if (!app_ctx.m_nats_client->connect()) {
     Logger::error("Failed to connect to NATS server");

@@ -179,6 +179,12 @@ void AppContext::init_proxy_metrics() {
           "Total number of NATS connections created"),
       reg_proxy.counter("l2_proxy_nats_connection_errors_total",
                         "Total number of NATS connection errors"),
+      reg_proxy.counter("l2_proxy_nats_timeouts_total",
+                        "NATS request/reply timeouts"),
+      reg_proxy.counter("l2_proxy_nats_reconnects_total",
+                        "Successful NATS reconnects after a connection loss"),
+      reg_proxy.gauge("l2_proxy_nats_subscriptions",
+                      "Number of active NATS subscriptions"),
       reg_proxy.histogram(
           "l2_proxy_nats_request_duration_seconds",
           "Histogram of NATS request duration in seconds",

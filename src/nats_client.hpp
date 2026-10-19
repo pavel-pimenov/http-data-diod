@@ -11,6 +11,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -73,6 +75,15 @@ public:
   static constexpr int kDefaultConnectAttempts = 3;
 
   explicit NatsClient(const NatsConfig &cfg);
+
+  // Optional metrics binding. The proxy sets it; the worker's own client does
+  // not (its counters live in a different registry), hence the pointers.
+  struct Metrics {
+    prometheus::Counter *m_timeouts = nullptr;
+    prometheus::Counter *m_reconnects = nullptr;
+    prometheus::Gauge *m_subscriptions = nullptr;
+  };
+  void set_metrics(const Metrics &metrics);
 
   ~NatsClient() override;
 
@@ -178,6 +189,7 @@ private:
   } m_state;
 
   std::vector<NatsSubscription> m_subscriptions;
+  Metrics m_metrics;
   NatsErrorState m_error_state;
 
   // Builds all NATS options (callbacks, auth, TLS); returns false on any failed

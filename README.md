@@ -551,6 +551,9 @@ HTTP-эндпоинт.
 | `l2_proxy_nats_errors_total` | counter | — | Ошибки операций NATS |
 | `l2_proxy_nats_connection_creates_total` | counter | — | Созданные NATS-соединения |
 | `l2_proxy_nats_connection_errors_total` | counter | — | Ошибки создания NATS-соединений |
+| `l2_proxy_nats_timeouts_total` | counter | — | Таймауты NATS-запроса (request/reply) |
+| `l2_proxy_nats_reconnects_total` | counter | — | Успешные переподключения к NATS после потери соединения |
+| `l2_proxy_nats_subscriptions` | gauge | — | Число активных NATS-подписок |
 | `l2_proxy_nats_request_duration_seconds` | histogram | — | Длительность NATS request/reply (весь poll-цикл) |
 | `l2_proxy_nats_poll_attempts_total` | counter | — | Число request/reply-попыток poll-цикла (1 на запрос = чистый round-trip, >1 = ретраи после пустого/потерянного ответа) |
 | `l2_proxy_nats_poll_attempt_duration_seconds` | histogram | — | Длительность одной NATS-попытки внутри poll-цикла (без backoff-пауз) |

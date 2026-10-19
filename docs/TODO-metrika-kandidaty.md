@@ -111,7 +111,7 @@
 серии семейства; на дашборде L2 Прокси панель «Запросы в секунду» показывает разрез
 `sum by (type)`.
 
-### 4. NATS-клиент: таймауты, реконнекты, подписки
+### 4. NATS-клиент: таймауты, реконнекты, подписки ✅ реализовано (round 174)
 `connection_creates_total` смешивает первый коннект и реконнекты; явного счётчика таймаутов нет,
 хотя `nats_poll_attempts_total` есть.
 
@@ -122,6 +122,12 @@
 | `l2_proxy_nats_subscriptions` | gauge | — | число активных подписок (утечка подписок) |
 
 Регистрация: `app_context.cpp` + `src/nats_client.hpp` (точки reconnect/callback). Кардинальность: нет меток.
+
+Реализовано в round 174: `l2_proxy_nats_timeouts_total`,
+`l2_proxy_nats_reconnects_total` и `l2_proxy_nats_subscriptions` (gauge числа
+активных подписок). У `NatsClient` появилась необязательная привязка метрик
+(`NatsClient::Metrics` + `set_metrics()`, по образу circuit breaker) — клиент
+используется и прокси, и воркером, а счётчики живут в разных реестрах.
 
 ### 5. Ретраи и failover к L2 ✅ реализовано (round 173: повторы; failover не применим)
 `l2_calls_total` есть, но нет «сколько попыток из-за ретраев» и «сколько раз переключились

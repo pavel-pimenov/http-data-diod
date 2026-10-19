@@ -297,6 +297,8 @@ void NatsClient::on_disconnected(natsConnection *nc) {
   }
 }
 
+void NatsClient::set_metrics(const Metrics &metrics) { m_metrics = metrics; }
+
 void NatsClient::on_reconnected(natsConnection *nc) {
   if (!m_state.m_shutdown.load(std::memory_order_acquire)) {
     m_state.m_connected = true;
@@ -311,6 +313,9 @@ void NatsClient::on_reconnected(natsConnection *nc) {
       }
     }
 
+    if (m_metrics.m_reconnects != nullptr) {
+      m_metrics.m_reconnects->Increment();
+    }
     Logger::info("NATS reconnected successfully{}", connected_url_suffix);
   }
 }
@@ -495,6 +500,10 @@ NatsClient::request_impl(std::string_view subject, std::string_view data,
   if (s != NATS_OK) {
     const auto error_text = nats_status_text(s);
 
+    if (s == NATS_TIMEOUT && m_metrics.m_timeouts != nullptr) {
+      m_metrics.m_timeouts->Increment();
+    }
+
     if (s == NATS_NO_RESPONDERS) {
       set_last_error(std::format("request failed for subject '{}': {}",
                                  subject, error_text));
@@ -605,6 +614,10 @@ bool NatsClient::subscribe(std::string_view subject,
 
   subscription.m_sub = sub;
   m_subscriptions.push_back(std::move(subscription));
+  if (m_metrics.m_subscriptions != nullptr) {
+    m_metrics.m_subscriptions->Set(
+        static_cast<double>(m_subscriptions.size()));
+  }
 
   auto queue_group_info =
       queue_group.empty() ? std::string{} : std::format(" queue_group={}", queue_group);
@@ -627,6 +640,10 @@ void NatsClient::unsubscribe() {
   // Drain so in-flight handlers finish before the subscriptions are destroyed.
   drain_subscription_locked(false);
   destroy_subscription_locked();
+  if (m_metrics.m_subscriptions != nullptr) {
+    m_metrics.m_subscriptions->Set(
+        static_cast<double>(m_subscriptions.size()));
+  }
   Logger::info("Unsubscribed from {} NATS subject(s)", count);
 }
 
