@@ -7,6 +7,7 @@
 #include "common_utils.hpp"
 #include "duplicate_detector.hpp"
 #include "httplib/httplib.h"
+#include "test_http_support.hpp"
 #include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "sentry_client.hpp"

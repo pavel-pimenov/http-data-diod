@@ -3,6 +3,7 @@
 // via an injected transport, and the real HTTP delivery path (send_envelope)
 // against a local loopback httplib::Server. No external network traffic.
 #include "httplib/httplib.h"
+#include "test_http_support.hpp"
 #include "sentry_client.hpp"
 #include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -374,10 +375,11 @@ TEST_CASE("SentryClient: bounded queue drops the oldest on overflow",
 
 TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
           "[sentry-client]") {
-  httplib::Server server;
+  test_support::MockHttpServer mock;
   std::string received;
   std::string received_auth_header;
-  server.Post(".*", [&](const httplib::Request &req, httplib::Response &res) {
+  mock.http().Post(".*", [&](const httplib::Request &req,
+                             httplib::Response &res) {
     received = req.body;
     auto auth = req.headers.find("X-Sentry-Auth");
     if (auth != req.headers.end()) {
@@ -385,8 +387,8 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
     }
     res.status = 200;
   });
-  const int port = server.bind_to_any_port("127.0.0.1");
-  std::thread server_thread([&] { server.listen_after_bind(); });
+  mock.start();
+  const int port = mock.port();
 
   SentryTestMetrics m;
   SentryClient client(
@@ -404,19 +406,16 @@ TEST_CASE("SentryClient: send_envelope delivers over real HTTP",
   REQUIRE(received.find("via real http") != std::string::npos);
   REQUIRE(received_auth_header.find("sentry_key=PUBLIC") !=
           std::string::npos);
-
-  server.stop();
-  server_thread.join();
 }
 
 TEST_CASE("SentryClient: send_envelope counts a non-2xx response as failure",
           "[sentry-client]") {
-  httplib::Server server;
-  server.Post(".*", [](const httplib::Request &, httplib::Response &res) {
+  test_support::MockHttpServer mock;
+  mock.http().Post(".*", [](const httplib::Request &, httplib::Response &res) {
     res.status = 500;
   });
-  const int port = server.bind_to_any_port("127.0.0.1");
-  std::thread server_thread([&] { server.listen_after_bind(); });
+  mock.start();
+  const int port = mock.port();
 
   SentryTestMetrics m;
   SentryClient client(
@@ -428,9 +427,6 @@ TEST_CASE("SentryClient: send_envelope counts a non-2xx response as failure",
 
   REQUIRE(m.m_sent_counter.Value() == 0.0);
   REQUIRE(m.m_failed_counter.Value() == 1.0);
-
-  server.stop();
-  server_thread.join();
 }
 
 TEST_CASE("SentryClient: send_envelope counts a connection failure",
@@ -461,17 +457,18 @@ TEST_CASE("SentryClient: send_envelope https scheme fails without a TLS server",
 
 TEST_CASE("SentryClient: secret key is sent in the X-Sentry-Auth header",
           "[sentry-client]") {
-  httplib::Server server;
+  test_support::MockHttpServer mock;
   std::string received_auth_header;
-  server.Post(".*", [&](const httplib::Request &req, httplib::Response &res) {
+  mock.http().Post(".*", [&](const httplib::Request &req,
+                             httplib::Response &res) {
     auto auth = req.headers.find("X-Sentry-Auth");
     if (auth != req.headers.end()) {
       received_auth_header = auth->second;
     }
     res.status = 200;
   });
-  const int port = server.bind_to_any_port("127.0.0.1");
-  std::thread server_thread([&] { server.listen_after_bind(); });
+  mock.start();
+  const int port = mock.port();
 
   SentryTestMetrics m;
   SentryClient client(
@@ -485,9 +482,6 @@ TEST_CASE("SentryClient: secret key is sent in the X-Sentry-Auth header",
   REQUIRE(m.m_failed_counter.Value() == 0.0);
   REQUIRE(received_auth_header.find("sentry_key=PUBLIC/SECRET") !=
           std::string::npos);
-
-  server.stop();
-  server_thread.join();
 }
 
 TEST_CASE("SentryClient: zero max_queue_size is clamped to one",
