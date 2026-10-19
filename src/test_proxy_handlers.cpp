@@ -29,6 +29,7 @@
 #include "response_builder.hpp"
 #include "server_handler.hpp"
 #include "stats_logger.hpp"
+#include "metrics_manager.hpp"
 #include "test_support.hpp"
 
 #include <atomic>
@@ -46,20 +47,10 @@
 namespace {
 
 // Value of the proxy's rejection counter for one reason.
-double rejection_count(const AppContext &ctx, const std::string &reason) {
-  for (const auto &family : ctx.m_proxy_registry->Collect()) {
-    if (family.name != "l2_proxy_rejections_total") {
-      continue;
-    }
-    for (const auto &metric : family.metric) {
-      for (const auto &label : metric.label) {
-        if (label.name == "reason" && label.value == reason) {
-          return metric.counter.value;
-        }
-      }
-    }
-  }
-  return 0.0;
+[[nodiscard]] double rejection_count(const AppContext &ctx,
+                                     const std::string &reason) {
+  return labeled_counter_value(ctx.m_proxy.m_metrics->m_rejections, "reason",
+                                reason);
 }
 
 using test_support::attach_tracer;

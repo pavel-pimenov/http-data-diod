@@ -208,4 +208,33 @@ private:
   std::shared_ptr<prometheus::Registry> m_registry;
 };
 
+// Value of one labelled series of a counter family; 0 when the series does not
+// exist (a labelled family is exported only after its first Add()).
+inline double labeled_counter_value(
+    const prometheus::Family<prometheus::Counter> &family,
+    const std::string &label_name, const std::string &label_value) {
+  for (const auto &metric_family : family.Collect()) {
+    for (const auto &metric : metric_family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == label_name && label.value == label_value) {
+          return metric.counter.value;
+        }
+      }
+    }
+  }
+  return 0.0;
+}
+
+// Sum over all the series of a counter family.
+inline double family_counter_total(
+    const prometheus::Family<prometheus::Counter> &family) {
+  double total = 0.0;
+  for (const auto &metric_family : family.Collect()) {
+    for (const auto &metric : metric_family.metric) {
+      total += metric.counter.value;
+    }
+  }
+  return total;
+}
+
 #endif // METRICS_MANAGER_HPP

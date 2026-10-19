@@ -11,6 +11,7 @@
 #include "json_utils.hpp"
 #include "nlohmann/json.hpp"
 #include "sentry_client.hpp"
+#include "metrics_manager.hpp"
 #include "test_metrics_support.hpp"
 #include "test_support.hpp"
 #include "test_wait_support.hpp"
@@ -143,17 +144,8 @@ struct TraceLoggerEnv {
   double queued() const { return m_queue_size.Collect().gauge.value; }
 
   // Value of the typed drop counter for one reason.
-  double dropped(const std::string &reason) const {
-    for (const auto &metric_family : m_spans_dropped.Collect()) {
-      for (const auto &metric : metric_family.metric) {
-        for (const auto &label : metric.label) {
-          if (label.name == "reason" && label.value == reason) {
-            return metric.counter.value;
-          }
-        }
-      }
-    }
-    return 0.0;
+  [[nodiscard]] double dropped(const std::string &reason) const {
+    return labeled_counter_value(m_spans_dropped, "reason", reason);
   }
 };
 

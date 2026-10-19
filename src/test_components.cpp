@@ -14,6 +14,7 @@
 #include "in_flight_tracker.hpp"
 #include "json_response_utils.hpp"
 #include "json_schema_validator.hpp"
+#include "metrics_manager.hpp"
 #include "json_utils.hpp"
 #include "nats_client.hpp"
 #include "nlohmann/json.hpp"
@@ -3003,16 +3004,7 @@ TEST_CASE("Common utils: fail_request_categorized labels the error type",
                            "Failed to queue request via NATS");
 
   const auto value_of = [&family](const std::string &type) {
-    for (const auto &metric_family : family.Collect()) {
-      for (const auto &metric : metric_family.metric) {
-        for (const auto &label : metric.label) {
-          if (label.name == "type" && label.value == type) {
-            return metric.counter.value;
-          }
-        }
-      }
-    }
-    return 0.0;
+    return labeled_counter_value(family, "type", type);
   };
   // A missing metric family must not break the failure path.
   handle_client_error("no family", nullptr, 500);

@@ -21,6 +21,7 @@
 #include "json_utils.hpp"
 #include "l2_worker.hpp"
 #include "retry_handler.hpp"
+#include "metrics_manager.hpp"
 #include "test_support.hpp"
 
 #include <atomic>
@@ -49,20 +50,10 @@ using test_support::EnvMapGuard;
 using test_support::EnvVars;
 
 // Value of the worker's retry counter for one outcome.
-double retry_count(const AppContext &ctx, const std::string &outcome) {
-  for (const auto &family : ctx.m_worker_registry->Collect()) {
-    if (family.name != "l2_worker_retries_total") {
-      continue;
-    }
-    for (const auto &metric : family.metric) {
-      for (const auto &label : metric.label) {
-        if (label.name == "outcome" && label.value == outcome) {
-          return metric.counter.value;
-        }
-      }
-    }
-  }
-  return 0.0;
+[[nodiscard]] double retry_count(const AppContext &ctx,
+                                 const std::string &outcome) {
+  return labeled_counter_value(ctx.m_worker.m_metrics->m_retries_total,
+                                "outcome", outcome);
 }
 
 // Loopback stand-in for the L2 backend: covers the success, retry, binary and

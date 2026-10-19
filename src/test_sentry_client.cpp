@@ -5,6 +5,7 @@
 #include "httplib/httplib.h"
 #include "test_http_support.hpp"
 #include "sentry_client.hpp"
+#include "metrics_manager.hpp"
 #include "test_metrics_support.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
@@ -66,16 +67,7 @@ struct SentryTestMetrics {
             *m_registry, "tst_sentry_dropped", "h")) {}
 
   [[nodiscard]] double dropped(const std::string &reason) const {
-    for (const auto &metric_family : m_dropped_counter.Collect()) {
-      for (const auto &metric : metric_family.metric) {
-        for (const auto &label : metric.label) {
-          if (label.name == "reason" && label.value == reason) {
-            return metric.counter.value;
-          }
-        }
-      }
-    }
-    return 0.0;
+    return labeled_counter_value(m_dropped_counter, "reason", reason);
   }
 };
 
