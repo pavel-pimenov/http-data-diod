@@ -83,6 +83,20 @@ inline bool fail_request(httplib::Response &res, int status,
   return false;
 }
 
+// Same idiom as fail_request, for an error counter that carries the error type
+// as a label (the proxy's l2_proxy_client_request_errors_total{type}): the type
+// is derived from the status code and the log message, so call sites keep
+// passing just the status they already have.
+inline bool fail_request_categorized(
+    httplib::Response &res, int status, std::string_view message,
+    prometheus::Family<prometheus::Counter> *metrics_family,
+    std::string_view request_id = "", std::string_view log_message = "") {
+  handle_client_error(std::string(log_message.empty() ? message : log_message),
+                      metrics_family, status);
+  set_json_error_response(res, status, message, request_id);
+  return false;
+}
+
 inline std::string resolve_parent_id(std::string_view parent_span_id,
                                      std::string_view fallback_parent_id) {
   return parent_span_id.empty() ? std::string(fallback_parent_id)

@@ -116,7 +116,15 @@ StatsLogger::ModeStats StatsLogger::collect_mode_stats() const {
     s.m_bytes_received = static_cast<uint64_t>(m.m_bytes_received.Value());
     s.m_bytes_sent = static_cast<uint64_t>(m.m_bytes_sent.Value());
     s.m_client_requests = static_cast<uint64_t>(m.m_client_requests.Value());
-    s.m_client_errors = static_cast<uint64_t>(m.m_client_errors.Value());
+    // The proxy counter is a labeled family (one series per error type), so
+    // the reported total is the sum over the series.
+    uint64_t client_errors = 0;
+    for (const auto &metric_family : m.m_client_errors.Collect()) {
+      for (const auto &metric : metric_family.metric) {
+        client_errors += static_cast<uint64_t>(metric.counter.value);
+      }
+    }
+    s.m_client_errors = client_errors;
     s.m_nats_requests = static_cast<uint64_t>(m.m_nats_requests.Value());
     s.m_nats_errors = static_cast<uint64_t>(m.m_nats_errors.Value());
   } else if (m_app_ctx.m_config.m_app.m_mode == "worker") {

@@ -239,8 +239,8 @@ void RequestHandler::handle_post(const httplib::Request &req,
   }
 
   if (!body.empty() && !nlohmann::json::accept(body)) {
-    fail_request(res, 400, "Invalid JSON in request body",
-                 &m_ctx.m_proxy.m_metrics->m_client_errors);
+    fail_request_categorized(res, 400, "Invalid JSON in request body",
+                             &m_ctx.m_proxy.m_metrics->m_client_errors);
     return;
   }
 
@@ -362,9 +362,9 @@ bool RequestHandler::fail_backend_request(
                     category, message, detail, path),
         request_id, {"proxy_backend_error", category});
   }
-  return fail_request(res, status, message,
-                      &m_ctx.m_proxy.m_metrics->m_client_errors, request_id,
-                      detail);
+  return fail_request_categorized(res, status, message,
+                                  &m_ctx.m_proxy.m_metrics->m_client_errors,
+                                  request_id, detail);
 }
 
 bool RequestHandler::reject_rate_limited(
@@ -381,8 +381,8 @@ bool RequestHandler::reject_rate_limited(
   RateLimitSpanLogger::log_rate_limit_rejection(
       m_ctx.m_tracer.get(), reason, client_ip, traceparent_raw,
       std::to_string(limit), std::to_string(remaining));
-  return fail_request(res, 429, message,
-                      &m_ctx.m_proxy.m_metrics->m_client_errors);
+  return fail_request_categorized(res, 429, message,
+                                  &m_ctx.m_proxy.m_metrics->m_client_errors);
 }
 
 // ============================================================================

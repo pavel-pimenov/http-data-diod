@@ -19,7 +19,12 @@ struct ProxyMetrics {
   // Intentional design for Prometheus metrics
   prometheus::Counter &m_client_requests;
   prometheus::Counter &m_nats_requests;
-  prometheus::Counter &m_client_errors;
+  // Client-visible refusals split by error type (see error_categorizer.hpp):
+  // separates "the client sent garbage" from "we timed out waiting for the
+  // worker" and from rate limiting in one breakdown. Every enum value gets its
+  // zero series at wiring time (see init_proxy_metrics), otherwise the family
+  // would be missing from /metrics on a healthy proxy until the first error.
+  prometheus::Family<prometheus::Counter> &m_client_errors;
   prometheus::Counter &m_nats_errors;
   prometheus::Counter &m_nats_connection_creates;
   prometheus::Counter &m_nats_connection_errors;

@@ -42,6 +42,10 @@ using error_categorizer::processing_error_type_to_string;
 void handle_error(const std::string &error_msg,
                   prometheus::Counter *metrics_counter = nullptr,
                   bool log_error = true);
+void handle_client_error(
+    const std::string &error_msg,
+    prometheus::Family<prometheus::Counter> *metrics_family = nullptr,
+    int status_code = 0);
 void handle_http_error(const std::string &error_msg,
                        prometheus::Counter *metrics_counter = nullptr,
                        const std::string &operation = "", int attempt = 0,

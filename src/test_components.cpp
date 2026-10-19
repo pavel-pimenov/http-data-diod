@@ -2966,6 +2966,43 @@ TEST_CASE("Common utils: handle_error tolerates null counter", "[common-utils]")
   REQUIRE(true);
 }
 
+TEST_CASE("Common utils: fail_request_categorized labels the error type",
+          "[common-utils]") {
+  prometheus::Registry registry;
+  auto &family = prometheus::BuildCounter()
+                     .Name("l2_proxy_client_request_errors_total")
+                     .Help("h")
+                     .Register(registry);
+
+  httplib::Response res;
+  fail_request_categorized(res, 400, "Invalid JSON in request body", &family);
+  fail_request_categorized(res, 429, "Rate limit exceeded", &family);
+  fail_request_categorized(res, 504, "Timeout waiting for response", &family);
+  fail_request_categorized(res, 500, "Invalid response format", &family);
+  fail_request_categorized(res, 500, "Failed to queue request", &family, "",
+                           "Failed to queue request via NATS");
+
+  const auto value_of = [&family](const std::string &type) {
+    for (const auto &metric_family : family.Collect()) {
+      for (const auto &metric : metric_family.metric) {
+        for (const auto &label : metric.label) {
+          if (label.name == "type" && label.value == type) {
+            return metric.counter.value;
+          }
+        }
+      }
+    }
+    return 0.0;
+  };
+  // A missing metric family must not break the failure path.
+  handle_client_error("no family", nullptr, 500);
+  REQUIRE(value_of("CLIENT_ERROR") == 1.0);     // 400 — wins by status
+  REQUIRE(value_of("RATE_LIMIT_ERROR") == 1.0); // 429
+  REQUIRE(value_of("TIMEOUT_ERROR") == 1.0);    // 504 + "timeout" в тексте
+  REQUIRE(value_of("PROTOCOL_ERROR") == 1.0);   // 500 + "invalid" в тексте
+  REQUIRE(value_of("SERVER_ERROR") == 1.0);     // 500 без ключевого слова
+}
+
 TEST_CASE("Common utils: handle_http_error formats url and attempt",
           "[common-utils]") {
   prometheus::Registry registry;

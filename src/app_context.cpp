@@ -135,9 +135,10 @@ void AppContext::init_proxy_metrics() {
       MetricsManager::create_counter(m_proxy_registry,
                                      "l2_proxy_nats_requests_total",
                                      "Total number of NATS requests sent"),
-      MetricsManager::create_counter(m_proxy_registry,
-                                     "l2_proxy_client_request_errors_total",
-                                     "Total number of client request errors"),
+      MetricsManager::create_counter_family(
+          m_proxy_registry, "l2_proxy_client_request_errors_total",
+          "Total number of client request errors, labeled by error type "
+          "(see the README catalogue for the meaning of each type)"),
       MetricsManager::create_counter(m_proxy_registry,
                                      "l2_proxy_nats_errors_total",
                                      "Total number of NATS operation errors"),
@@ -251,6 +252,15 @@ void AppContext::init_proxy_metrics() {
           MetricsManager::create_counter(
               m_proxy_registry, "l2_http_pool_stale_evictions_total",
               "Total number of stale HTTP connections evicted from the pool")});
+
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy proxy refuses nothing, so every enum value gets its zero series up
+  // front (same reasoning as the circuit-breaker transitions and the L2 call
+  // errors in the worker registry).
+  auto &client_errors = m_proxy.m_metrics->m_client_errors;
+  for (const char *type : error_categorizer::g_http_error_names) {
+    client_errors.Add({{"type", type}});
+  }
 }
 
 void AppContext::init_worker_metrics() {

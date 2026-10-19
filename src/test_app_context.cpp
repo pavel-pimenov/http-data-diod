@@ -151,3 +151,35 @@ TEST_CASE("AppContext: build info carries the version and the mode",
   REQUIRE_FALSE(labels["version"].empty());
   REQUIRE(labels["mode"] == "worker");
 }
+
+TEST_CASE("AppContext: proxy pre-creates the client error type series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "proxy"}};
+
+  AppContext const ctx;
+
+  REQUIRE(
+      has_family(ctx.m_proxy_registry, "l2_proxy_client_request_errors_total"));
+  std::vector<std::string> types;
+  for (const auto &family : ctx.m_proxy_registry->Collect()) {
+    if (family.name != "l2_proxy_client_request_errors_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "type") {
+          types.push_back(label.value);
+        }
+      }
+    }
+  }
+  // prometheus-cpp exports a labeled family only after the first Add(), and a
+  // healthy proxy refuses nothing, so all enum values must exist as 0.
+  std::ranges::sort(types);
+  REQUIRE(types == std::vector<std::string>{
+                      "CLIENT_ERROR",      "CONNECTION_ERROR",
+                      "OTHER_ERROR",       "PROTOCOL_ERROR",
+                      "RATE_LIMIT_ERROR",  "SERVER_ERROR",
+                      "SSL_ERROR",         "STATUS_CODE_ERROR",
+                      "TIMEOUT_ERROR"});
+}

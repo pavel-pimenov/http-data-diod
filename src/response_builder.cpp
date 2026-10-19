@@ -18,8 +18,8 @@ void set_response_content(httplib::Response &res,
                           const std::string &method, const std::string &path,
                           uint64_t start_us, AppContext &ctx) {
   if (!parsed_response_data.is_object()) {
-    handle_error("Invalid response format",
-                 &ctx.m_proxy.m_metrics->m_client_errors);
+    handle_client_error("Invalid response format",
+                        &ctx.m_proxy.m_metrics->m_client_errors, 500);
     set_json_error_response(res, 500, "Invalid response format", request_id);
     return;
   }

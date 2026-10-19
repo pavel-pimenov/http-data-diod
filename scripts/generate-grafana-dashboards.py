@@ -1138,7 +1138,10 @@ def create_slo_dashboard() -> Dict:
         unit="reqps",
         targets=[
             {"expr": "sum(rate(l2_proxy_client_requests_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Всего запросов/с", "refId": "A"},  # noqa: E501
-            {"expr": "sum(rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "Ошибок/с", "refId": "B"}  # noqa: E501
+            # Breakdown по причине отказа (CLIENT_ERROR / RATE_LIMIT_ERROR /
+            # TIMEOUT_ERROR / PROTOCOL_ERROR / SERVER_ERROR): сумма серий равна
+            # прежней общей «Ошибок/с», но теперь видно, почему отказываем.
+            {"expr": "sum by (type) (rate(l2_proxy_client_request_errors_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{type}}", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 8

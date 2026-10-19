@@ -93,6 +93,31 @@ void handle_error(const std::string &error_msg,
   }
 }
 
+void handle_client_error(
+    const std::string &error_msg,
+    prometheus::Family<prometheus::Counter> *metrics_family, int status_code) {
+  Logger::error(error_msg);
+
+  if (metrics_family == nullptr) {
+    return;
+  }
+
+  // A 4xx refusal is the client's fault and the status classifies it exactly
+  // (400 -> CLIENT_ERROR, 429 -> RATE_LIMIT_ERROR). A 5xx is ours, but its
+  // class alone flattens *why* the backend failed, so there the message
+  // keywords win ("Timeout waiting for response" -> TIMEOUT_ERROR, "Invalid
+  // response format" -> PROTOCOL_ERROR) and SERVER_ERROR stays the fallback.
+  HttpErrorType type = categorize_http_error(error_msg, status_code);
+  if (type == HttpErrorType::SERVER_ERROR) {
+    const auto by_message = categorize_http_error(error_msg);
+    if (by_message != HttpErrorType::OTHER_ERROR) {
+      type = by_message;
+    }
+  }
+
+  metrics_family->Add({{"type", http_error_type_to_string(type)}}).Increment();
+}
+
 void handle_http_error(const std::string &error_msg,
                        prometheus::Counter *metrics_counter,
                        const std::string &operation, int attempt,

@@ -33,7 +33,7 @@
 
 | Подсистема | Есть сейчас |
 |---|---|
-| proxy HTTP | `l2_proxy_client_requests_total`, `responses_total{status}`, `request_duration_seconds`, `in_flight_requests`, `request_size_bytes`/`response_size_bytes`, `bytes_received_total`/`bytes_sent_total`, `client_request_errors_total`, `health_ready` |
+| proxy HTTP | `l2_proxy_client_requests_total`, `responses_total{status}`, `request_duration_seconds`, `in_flight_requests`, `request_size_bytes`/`response_size_bytes`, `bytes_received_total`/`bytes_sent_total`, `client_request_errors_total{type}`, `health_ready` |
 | proxy rate limiting | `l2_rate_limiter_tokens`, `l2_rate_limiter_rejected_total`, `l2_per_ip_*` (requests/rejected/ips_tracked), `l2_proxy_per_client_id_*` (requests/rejected/latency), `l2_proxy_per_ip_*` |
 | proxy duplicate | `duplicate_requests_total`, `duplicate_posts_detected_total`, `duplicate_tracked_clients`, `per_client_id_duplicate_requests_total`, `per_client_id_duplicate_rejected_total` |
 | proxy DB/NATS-клиент | `db_requests_total`, `db_request_duration_seconds`, `db_nats_request_duration_seconds`, `nats_connected`, `nats_connection_creates_total`, `nats_connection_errors_total`, `nats_errors_total`, `nats_requests_total`, `nats_request_duration_seconds`, `nats_poll_attempts_total`, `nats_poll_attempt_duration_seconds`, `nats_poll_retry_wait_seconds` |
@@ -82,7 +82,7 @@
 `db_pool_connections` + всплеск `exhausted_total`. Пул-сатурация заполняется из
 `PostgresQueryExecutor::Impl`; Oracle-исполнитель наследует no-op (его обсервабилити вне области).
 
-### 3. Типизированные ошибки (использовать уже готовый классификатор) 🟡 частично (round 159: воркерная половина)
+### 3. Типизированные ошибки (использовать уже готовый классификатор) ✅ реализовано (round 159: воркер; round 161: прокси)
 `src/error_categorizer.hpp` уже различает `HttpErrorType`/`L2ErrorType`/`ProcessingErrorType`,
 но метрики `l2_proxy_client_request_errors_total` и `l2_worker_l2_errors_total` без метки причины —
 в алерте не отличить таймаут от TLS/протокольной ошибки.
@@ -90,17 +90,26 @@
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
 | `l2_worker_l2_call_errors_total` ✅ | counter | `type` (`L2ErrorType`) | разбор ошибок вызова L2 по причине |
-| `l2_proxy_client_request_errors_total` (расширить) | counter | `type` (`HttpErrorType`) | разбор ошибок клиента к worker |
+| `l2_proxy_client_request_errors_total{type}` ✅ | counter | `type` (`HttpErrorType`) | разбор ошибок клиента к worker |
 
 Сделано в round 159: `l2_worker_l2_call_errors_total` рядом с неразмеченным
 `l2_worker_l2_errors_total` (инкремент в `src/l2_worker.cpp` там же, где сейчас считается общий
 счётчик; все пять серий `type` предсоздаются в `init_worker_metrics()` — в здоровом стеке ошибок
 нет, а prometheus-cpp отдаёт лейбл-семейство только после первого `Add()`).
 
-Остаток (следующий раунд): расширить `l2_proxy_client_request_errors_total` меткой `type`.
-Это не «плюс метрика», а смена типа семейства (`Counter` → `Family<Counter>`), поэтому в тот же
-раунд попадают четыре точки инкремента (`request_handler.cpp` ×3, `response_builder.cpp`),
-суммирование в `stats_logger` (у семейства нет `Value()`), панель и golden-check.
+Сделано в round 161 (прокси): `l2_proxy_client_request_errors_total` **расширен меткой `type`**
+(`Counter` → `Family<Counter>`, имя не менялось, поэтому golden/README/дашборды остались в силе).
+Тип выводится централизованно в новом `handle_client_error()` (`common_utils.cpp`) из пары
+«статус + текст ошибки»: 4xx классифицирует статус (`400` → `CLIENT_ERROR`, `429` →
+`RATE_LIMIT_ERROR`), у 5xx (статус одинаков у разных причин) выигрывают ключевые слова текста
+(`504 Timeout waiting for response` → `TIMEOUT_ERROR`, `500 Invalid response format` →
+`PROTOCOL_ERROR`), а `SERVER_ERROR` остаётся fallback'ом. Все девять значений enum
+предсоздаются в `init_proxy_metrics()`. Четыре точки инкремента перешли на новый inline-хелпер
+`fail_request_categorized()` (`request_handler.cpp` ×3, `response_builder.cpp` ×1) — старые
+`fail_request`/`handle_error` не тронуты, поэтому l2-server и тесты остались на прежних
+неразмеченных счётчиках (по правилу проекта l2-server не развиваем). `stats_logger` суммирует
+серии семейства; на дашборде L2 Прокси панель «Запросы в секунду» показывает разрез
+`sum by (type)`.
 
 ### 4. NATS-клиент: таймауты, реконнекты, подписки
 `connection_creates_total` смешивает первый коннект и реконнекты; явного счётчика таймаутов нет,

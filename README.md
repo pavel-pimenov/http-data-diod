@@ -531,7 +531,7 @@ HTTP-эндпоинт.
 |---|---|---|---|
 | `l2_proxy_client_requests_total` | counter | — | Клиентские запросы, полученные прокси |
 | `l2_proxy_nats_requests_total` | counter | — | NATS-запросы, отправленные прокси |
-| `l2_proxy_client_request_errors_total` | counter | — | Ошибки входных клиентских запросов |
+| `l2_proxy_client_request_errors_total` | counter | `type` | Ошибки входных клиентских запросов, разобранные по причине |
 | `l2_proxy_nats_errors_total` | counter | — | Ошибки операций NATS |
 | `l2_proxy_nats_connection_creates_total` | counter | — | Созданные NATS-соединения |
 | `l2_proxy_nats_connection_errors_total` | counter | — | Ошибки создания NATS-соединений |
@@ -557,6 +557,17 @@ HTTP-эндпоинт.
 | `l2_proxy_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_proxy_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 | `l2_proxy_duplicate_tracked_clients` | gauge | — | Число client_id, отслеживаемых duplicate-детектором (ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит TTL) |
+
+Разбор `l2_proxy_client_request_errors_total{type}`: тип берётся из HTTP-статуса отказа
+и текста ошибки (классификатор `src/error_categorizer.hpp`, общий с воркером). Для 4xx
+решает статус: `400` → `CLIENT_ERROR`, `429` → `RATE_LIMIT_ERROR`. Для 5xx, где статус
+одинаков у разных причин, решают ключевые слова текста — `504 Timeout waiting for
+response` → `TIMEOUT_ERROR`, `500 Invalid response format` → `PROTOCOL_ERROR` — а при
+отсутствии совпадений остаётся `SERVER_ERROR`. Все девять значений enum
+предсоздаются при старте (как у circuit breaker и у `l2_worker_l2_call_errors_total`),
+поэтому семейство есть в `/metrics` и без единой ошибки; на дашборде L2 Прокси панель
+«Запросы в секунду» показывает разрез `sum by (type)`, так что по графику видно,
+отказываем мы из-за клиента, из-за лимита или из-за воркера.
 
 Наблюдаемость дубликатов POST-тел: когда клиент часто шлёт один и тот же body,
 прокси пишет WARN-сообщение со статистикой (`client_id`, `client_ip`, счётчик
