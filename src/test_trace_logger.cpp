@@ -421,7 +421,13 @@ TEST_CASE("TraceLogger: jaeger delivery recovers after the endpoint comes back",
     }
   }
   REQUIRE(env.sent() >= 1.0);
-  REQUIRE(server.body_count() == 1);
+  // At least one batch must have reached the revived endpoint -- the exact
+  // count is not an invariant: delivery is at-least-once (a batch whose
+  // response was lost is retried and the server records it twice), and on a
+  // loaded runner the client's send timeout can fire after the server already
+  // took the body. The regression this test guards is a *leaked* pool slot:
+  // then nothing would ever arrive, whatever the count.
+  REQUIRE(server.body_count() >= 1);
 }
 
 TEST_CASE("TraceLogger: jaeger breaker sheds batches while open and counts "
