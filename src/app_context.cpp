@@ -177,6 +177,13 @@ void AppContext::init_common() {
               "Time an HTTP pool acquire waited for a free connection",
               histogram_buckets::g_buckets.m_latency_ms_to_5s)});
 
+  // The exposition cost of /metrics: the scrape price grows with the metric
+  // cardinality, so it has to be visible (the exposer measures it).
+  m_metrics_render_duration = &reg_common.histogram(
+      "l2_common_metrics_render_duration_seconds",
+      "Time to render the /metrics exposition",
+      histogram_buckets::g_buckets.m_latency_ms_to_5s);
+
   // Deployment identity: the value is always 1, the labels carry the build
   // version and the mode, so a dashboard (or an alert) can tell which build an
   // instance runs without relabeling gymnastics. The common registry is

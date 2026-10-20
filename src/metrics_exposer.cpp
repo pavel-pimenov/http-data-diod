@@ -3,9 +3,11 @@
 #include "logger.hpp"
 
 #include <prometheus/collectable.h>
+#include <prometheus/histogram.h>
 #include <prometheus/metric_family.h>
 #include <prometheus/text_serializer.h>
 
+#include <chrono>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -18,7 +20,9 @@ constexpr const char *kMetricsContentType =
     "text/plain; version=0.0.4; charset=utf-8";
 } // namespace
 
-MetricsExposer::MetricsExposer(int port) : m_port(port) {
+MetricsExposer::MetricsExposer(int port,
+                                 prometheus::Histogram *render_duration)
+    : m_port(port), m_render_duration(render_duration) {
   m_server.Get("/metrics", [this](const httplib::Request & /*req*/,
                                  httplib::Response &res) {
     res.set_content(serialize(), kMetricsContentType);
@@ -50,6 +54,7 @@ void MetricsExposer::register_collectable(
 }
 
 std::string MetricsExposer::serialize() const {
+  const auto start = std::chrono::steady_clock::now();
   std::vector<prometheus::MetricFamily> metrics;
   {
     const std::scoped_lock lock(m_mutex);
@@ -62,5 +67,11 @@ std::string MetricsExposer::serialize() const {
   std::ostringstream out;
   prometheus::TextSerializer const serializer;
   serializer.Serialize(out, metrics);
+  if (m_render_duration != nullptr) {
+    const auto render_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+            .count();
+    m_render_duration->Observe(render_seconds);
+  }
   return out.str();
 }

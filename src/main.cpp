@@ -192,8 +192,10 @@ void run_httplib_server(
 
 std::unique_ptr<MetricsExposer> create_metrics_exposer(
     int port, const std::shared_ptr<prometheus::Registry> &registry,
-    const std::shared_ptr<prometheus::Registry> &common = nullptr) {
-  auto exposer = std::make_unique<MetricsExposer>(port);
+    const std::shared_ptr<prometheus::Registry> &common = nullptr,
+    prometheus::Histogram *render_duration = nullptr) {
+  auto exposer =
+      std::make_unique<MetricsExposer>(port, render_duration);
   exposer->register_collectable(registry);
   if (common) {
     // Cross-cutting observability (l2_tracing_*, l2_worker_sentry_*) served
@@ -229,7 +231,8 @@ void run_proxy(AppContext &app_ctx) {
   // Exposer first: :19090/metrics stays up while init_proxy_components blocks
   // on NATS connect; per-IP/client collectors register below once created.
   auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry,
-                                          app_ctx.m_common_registry);
+                                          app_ctx.m_common_registry,
+                                          app_ctx.m_metrics_render_duration);
 
   init_proxy_components(app_ctx);
 
@@ -290,7 +293,8 @@ void run_worker(AppContext &app_ctx) {
   auto stats_logger = start_stats_logging(app_ctx);
 
   auto exposer = create_metrics_exposer(19091, app_ctx.m_worker_registry,
-                                          app_ctx.m_common_registry);
+                                          app_ctx.m_common_registry,
+                                          app_ctx.m_metrics_render_duration);
 
   L2Worker worker(app_ctx);
 
@@ -345,7 +349,8 @@ void run_l2_server(AppContext &app_ctx) {
   ServerHandler server_handler(app_ctx);
 
   auto exposer = create_metrics_exposer(19092, app_ctx.m_server_registry,
-                                          app_ctx.m_common_registry);
+                                          app_ctx.m_common_registry,
+                                          app_ctx.m_metrics_render_duration);
 
   Logger::info("C++ L2 Server listening on {}://0.0.0.0:{}",
                app_ctx.m_config.m_server.m_protocol,

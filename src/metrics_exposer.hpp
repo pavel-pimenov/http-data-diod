@@ -4,6 +4,7 @@
 #include "httplib/httplib.h"
 
 #include <prometheus/collectable.h>
+#include <prometheus/histogram.h>
 
 #include <atomic>
 #include <memory>
@@ -24,7 +25,11 @@ class MetricsExposer {
 public:
   // A zero port binds an ephemeral one (the bound port is then available via
   // port()); the services pass their fixed metrics port.
-  explicit MetricsExposer(int port);
+  //
+  // render_duration (optional) measures how long the exposition takes: the
+  // scrape cost grows with the cardinality, so it has to be visible.
+  explicit MetricsExposer(int port,
+                          prometheus::Histogram *render_duration = nullptr);
   ~MetricsExposer();
 
   MetricsExposer(const MetricsExposer &) = delete;
@@ -42,6 +47,7 @@ private:
 
   httplib::Server m_server;
   int m_port;
+  prometheus::Histogram *m_render_duration = nullptr;
   std::vector<std::shared_ptr<prometheus::Collectable>> m_collectables;
   mutable std::mutex m_mutex;
   std::thread m_thread;

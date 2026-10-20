@@ -301,6 +301,10 @@ public:
   // visible in proxy and l2-server processes too.
   std::shared_ptr<prometheus::Registry> m_common_registry;
   std::unique_ptr<TracingMetrics> m_tracing_metrics;
+  // Histogram of the /metrics exposition cost, measured by the exposer (the
+  // scrape price grows with the metric cardinality). A pointer, like the other
+  // optional metric bindings.
+  prometheus::Histogram *m_metrics_render_duration = nullptr;
   std::unique_ptr<SentryMetrics> m_sentry_metrics;
   std::shared_ptr<NatsClient> m_nats_client;
   InFlightTracker m_in_flight_tracker;
