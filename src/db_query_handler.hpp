@@ -62,6 +62,9 @@ public:
   // Wires the pool gauge family into every (future) executor created by
   // init(). Safe to call before init(); executors already created keep their
   // current pointer.
+  // Wires the counter of failed queries broken down by error class.
+  void set_error_metrics(prometheus::Family<prometheus::Counter> *errors_by_class);
+
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics);
 
   // Wires the pool saturation families (capacity, exhaustion counter, acquire
@@ -99,6 +102,7 @@ private:
   } m_state;
 #endif
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
+  prometheus::Family<prometheus::Counter> *m_errors_by_class = nullptr;
   prometheus::Family<prometheus::Gauge> *m_pool_capacity = nullptr;
   prometheus::Family<prometheus::Counter> *m_pool_exhausted = nullptr;
   prometheus::Family<prometheus::Histogram> *m_pool_acquire_duration = nullptr;

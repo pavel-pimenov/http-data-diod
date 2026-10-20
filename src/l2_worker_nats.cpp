@@ -129,6 +129,8 @@ void L2Worker::run_with_nats() {
 
   if (m_ctx.m_config.m_db_query.m_enabled) {
     m_db_query_handler = std::make_unique<DbQueryHandler>();
+    m_db_query_handler->set_error_metrics(
+        &m_ctx.m_worker.m_metrics->m_db_query_errors_total);
     m_db_query_handler->set_pool_metrics(
         &m_ctx.m_worker.m_metrics->m_db_pool_connections);
     m_db_query_handler->set_pool_saturation_metrics(

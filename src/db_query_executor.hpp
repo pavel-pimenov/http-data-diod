@@ -53,6 +53,12 @@ public:
   virtual void
   set_pool_metrics(prometheus::Family<prometheus::Gauge> *pool_metrics) = 0;
 
+  // Wires the counter of failed queries broken down by error class (the
+  // SQLSTATE class for PostgreSQL). Drivers that cannot report a class
+  // (Oracle) inherit DbExecutorBase's implementation and simply never publish.
+  virtual void set_error_metrics(
+      prometheus::Family<prometheus::Counter> *errors_by_class) = 0;
+
   // Wires the per-database pool saturation families (capacity, exhaustion
   // counter, acquire latency). Drivers whose pool cannot saturate (Oracle)
   // inherit DbExecutorBase's implementation and simply never publish.

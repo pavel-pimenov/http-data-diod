@@ -2678,7 +2678,10 @@ def create_worker_dashboard() -> Dict:
         x=0, y=y, w=12, h=8,
         unit="reqps",
         targets=[
-            {"expr": "rate(l2_worker_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"}  # noqa: E501
+            {"expr": "rate(l2_worker_db_requests_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "{{db}} {{type}} {{status}}", "refId": "A"},  # noqa: E501
+            # Неудачные запросы по классу SQLSTATE: видно, «отвалилась» ли БД
+            # (08), упёрся ли запрос в синтаксис (42) или в ограничения (23).
+            {"expr": "sum by (error_class) (rate(l2_worker_db_query_errors_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{error_class}}", "refId": "B"}  # noqa: E501
         ]
     ))
 

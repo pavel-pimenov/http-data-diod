@@ -147,6 +147,9 @@ struct WorkerMetrics {
   // per-database pool gauges (state label: "active"/"idle"). Labeled families
   // as in ProxyMetrics.
   prometheus::Family<prometheus::Counter> &m_db_requests_total;
+  // Failed queries broken down by error class (the SQLSTATE class for
+  // PostgreSQL: "08" connection, "42" syntax, "23" constraint, ...).
+  prometheus::Family<prometheus::Counter> &m_db_query_errors_total;
   prometheus::Family<prometheus::Histogram> &m_db_query_duration_seconds;
   prometheus::Family<prometheus::Gauge> &m_db_pool_connections;
   // DB pool saturation per database: configured capacity, acquire-attempt

@@ -659,6 +659,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_circuit_breaker_rejected_total` | counter | — | Запросы, отброшенные открытым CB (fast-fail) |
 | `l2_worker_duplicate_requests_total` | counter | — | Ответы из кэша дедупликации |
 | `l2_worker_db_requests_total` | counter | `db`,`type`,`status` | Запросы DB Gateway (воркер) |
+| `l2_worker_db_query_errors_total` | counter | `error_class` | Неудачные запросы БД по классу SQLSTATE (`08` — соединение, `22` — данные, `23` — целостность, `42` — синтаксис, `53` — ресурсы, …) |
 | `l2_worker_db_query_duration_seconds` | histogram | `db` | Длительность SQL-запроса (воркер) |
 | `l2_worker_db_pool_connections` | gauge | `db`,`state` | Соединения пула СУБД (active/idle) |
 | `l2_worker_db_pool_capacity` | gauge | `db` | Настроенный лимит соединений пула СУБД (`pool_max`) |

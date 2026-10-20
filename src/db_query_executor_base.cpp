@@ -23,6 +23,19 @@ int DbExecutorBase::default_max_rows() const { return m_db.m_max_rows; }
 
 const std::string &DbExecutorBase::db_name() const { return m_db.m_name; }
 
+void DbExecutorBase::set_error_metrics(
+    prometheus::Family<prometheus::Counter> *errors_by_class) {
+  m_errors_by_class = errors_by_class;
+}
+
+void DbExecutorBase::count_query_error(
+    const std::string &error_class) const {
+  if (m_errors_by_class == nullptr) {
+    return;
+  }
+  m_errors_by_class->Add({{"error_class", error_class}}).Increment();
+}
+
 void DbExecutorBase::set_pool_metrics(
     prometheus::Family<prometheus::Gauge> *pool_metrics) {
   m_pool_metrics = pool_metrics;

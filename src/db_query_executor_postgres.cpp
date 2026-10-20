@@ -137,6 +137,22 @@ struct PostgresQueryExecutor::Impl {
     return text == nullptr ? std::string() : trim_trailing(text, "\r\n ");
   }
 
+  // SQLSTATE class of a failed result: the first two characters of the
+  // five-character SQLSTATE ("08" — connection, "42" — syntax, "23" —
+  // constraint, ...). The class is a short, bounded label; the full SQLSTATE
+  // would be a per-database string (unbounded cardinality) and the message
+  // text is far too varied to label at all.
+  static std::string sqlstate_class(PGresult *res) {
+    if (res == nullptr) {
+      return "unknown";
+    }
+    const char *state = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+    if (state == nullptr || std::string_view(state).size() < 2) {
+      return "unknown";
+    }
+    return std::string(state, 2);
+  }
+
   // Applies the per-query statement_timeout; returns "" on success, otherwise
   // the connection's last error text (trimmed).
   static std::string set_statement_timeout(PGconn *conn, int timeout_ms) {
@@ -246,6 +262,7 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
       param_values.data(), param_lengths.data(), nullptr, 0);
   if (PQresultStatus(res) != PGRES_TUPLES_OK) {
     const auto message = Impl::trim_copy(PQresultErrorMessage(res));
+    count_query_error(Impl::sqlstate_class(res));
     PQclear(res);
     m_impl->release_conn(conn);
     return make_db_sql_error(status_code, message);

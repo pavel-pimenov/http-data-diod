@@ -42,6 +42,7 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
                     db.m_name);
       continue;
     }
+    executor->set_error_metrics(m_errors_by_class);
     executor->set_pool_metrics(m_pool_metrics);
     executor->set_pool_saturation_metrics(m_pool_capacity, m_pool_exhausted,
                                           m_pool_acquire_duration);
@@ -58,6 +59,11 @@ bool DbQueryHandler::init(const std::vector<DbConfig> &databases) {
   Logger::info("DB handler: ready with {}/{} database(s)", m_state.m_executors.size(),
                m_state.m_expected_count);
   return true;
+}
+
+void DbQueryHandler::set_error_metrics(
+    prometheus::Family<prometheus::Counter> *errors_by_class) {
+  m_errors_by_class = errors_by_class;
 }
 
 void DbQueryHandler::set_pool_metrics(

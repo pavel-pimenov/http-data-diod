@@ -1,4 +1,5 @@
 #include "app_context.hpp"
+#include "db_query_utils.hpp"
 #include "error_categorizer.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
@@ -371,6 +372,10 @@ void AppContext::init_worker_metrics() {
           "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
       reg_worker.counter_family(
+          "l2_worker_db_query_errors_total",
+          "Failed DB queries broken down by error class (the SQLSTATE class "
+          "for PostgreSQL)"),
+      reg_worker.counter_family(
           "l2_worker_db_requests_total",
           "Total number of HTTP DB Gateway requests executed by the worker "
           "by database, type and HTTP status"),
@@ -436,6 +441,13 @@ void AppContext::init_worker_metrics() {
   auto &l2_call_errors = m_worker.m_metrics->m_l2_call_errors_total;
   for (const char *type : error_categorizer::g_l2_error_names) {
     l2_call_errors.Add({{"type", type}});
+  }
+
+  // Same for the DB error classes: the family must exist before the first
+  // failed query, otherwise it would not be exported at all.
+  auto &db_errors = m_worker.m_metrics->m_db_query_errors_total;
+  for (const char *error_class : g_db_error_classes) {
+    db_errors.Add({{"error_class", error_class}});
   }
 
   // Same for the retry outcomes.

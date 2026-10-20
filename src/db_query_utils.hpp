@@ -3,6 +3,7 @@
 
 #include "json_utils.hpp"
 #include "string_utils.hpp"
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <expected>
@@ -176,6 +177,17 @@ inline json make_db_unavailable(int &status_code,
       detail.empty() ? "Failed to acquire a database connection"
                      : "Failed to acquire a database connection: " + detail);
 }
+
+// SQLSTATE classes (the first two characters of the five-character SQLSTATE)
+// pre-created for l2_worker_db_query_errors_total. The list covers the classes
+// PostgreSQL returns in practice ("08" connection, "22" data, "23" integrity,
+// "25" invalid transaction state, "42" syntax, "53" resources, "55" object not
+// in prerequisite state, "57" operator intervention, "58" system, "72" snapshot,
+// "F0" config file, "HV" foreign data wrapper, "P0" PL/pgSQL, "XX" internal);
+// a class outside the list appears on first use.
+inline constexpr std::array<const char *, 15> g_db_error_classes = {
+    "08", "22", "23", "25", "42", "53", "55", "57", "58",
+    "72", "F0", "HV", "P0", "XX", "unknown"};
 
 // Sets status_code to 422 and returns a SQL_ERROR body. Shared by the twelve
 // error paths in the pg/oracle executors that repeated the identical

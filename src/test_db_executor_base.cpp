@@ -11,6 +11,7 @@
 #include "prometheus/gauge.h"
 #include "json_utils.hpp"
 #include "test_metrics_support.hpp"
+#include "metrics_manager.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <memory>
@@ -67,6 +68,26 @@ TEST_CASE("DbExecutorBase: configured defaults are exposed",
   REQUIRE(ex.default_timeout_ms() == 1234);
   REQUIRE(ex.default_max_rows() == 111);
   REQUIRE(ex.db_name() == "pg-test");
+}
+
+TEST_CASE("DbExecutorBase: query errors are counted by class",
+          "[db-executor-base]") {
+  StubExecutor ex(make_db());
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &family = test_support::make_counter_family(
+      *registry, "l2_worker_db_query_errors_total", "test");
+  family.Add({{"error_class", "42"}});
+
+  // Without a wired family the count is a no-op (the driver may be wired
+  // later than the first error).
+  ex.count_query_error("42");
+
+  ex.set_error_metrics(&family);
+  ex.count_query_error("42");
+  ex.count_query_error("23");
+  REQUIRE(labeled_counter_value(family, "error_class", "42") == 1.0);
+  REQUIRE(labeled_counter_value(family, "error_class", "23") == 1.0);
+  REQUIRE(labeled_counter_value(family, "error_class", "08") == 0.0);
 }
 
 TEST_CASE("DbExecutorBase: set_pool_metrics triggers refresh",

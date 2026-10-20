@@ -88,6 +88,7 @@ public:
     return json::object();
   }
   bool ping(int) override { return true; }
+  void set_error_metrics(prometheus::Family<prometheus::Counter> *) override {}
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *) override {}
   void set_pool_saturation_metrics(prometheus::Family<prometheus::Gauge> *,
                                   prometheus::Family<prometheus::Counter> *,
@@ -1122,6 +1123,9 @@ public:
     return json::object();
   }
   bool ping(int) override { return true; }
+  void set_error_metrics(prometheus::Family<prometheus::Counter> *errors) override {
+    DbExecutorBase::set_error_metrics(errors);
+  }
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *pm) override {
     DbExecutorBase::set_pool_metrics(pm);
   }

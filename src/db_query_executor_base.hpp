@@ -31,6 +31,14 @@ public:
   void set_pool_metrics(
       prometheus::Family<prometheus::Gauge> *pool_metrics) override;
 
+  void set_error_metrics(
+      prometheus::Family<prometheus::Counter> *errors_by_class) override;
+
+  // Counts one failed query under its error class. The class is a short,
+  // bounded label (the SQLSTATE class, e.g. "08" for a connection problem);
+  // an empty class means "could not classify".
+  void count_query_error(const std::string &error_class) const;
+
   void set_pool_saturation_metrics(
       prometheus::Family<prometheus::Gauge> *pool_capacity,
       prometheus::Family<prometheus::Counter> *pool_exhausted,
@@ -41,6 +49,8 @@ public:
   // the driver pimpl, which lives outside the class hierarchy) calls this from
   // refresh_pool_gauges() and after each acquire/release.
   void set_db_pool_gauges(double idle, double active);
+
+  prometheus::Family<prometheus::Counter> *m_errors_by_class = nullptr;
 
   // Saturation side of the pool wiring, called by driver pools on every
   // acquire attempt: the capacity is published once by
