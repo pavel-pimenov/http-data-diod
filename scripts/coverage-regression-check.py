@@ -2,9 +2,12 @@
 """Пер-файловый гейт регрессии покрытия: gcovr JSON ↔ закоммиченный baseline.
 
 Сравнивает построчное покрытие каждого production-файла с baseline из git и
-падает, если файл понизил свой процент (потерянные покрытые строки или новые
-непокрытые). Тестовые TU (`test_*.cpp`) не сравниваются и в baseline не пишутся:
-их качество контролируют глобальные гейты строки/ветвей в src/Dockerfile.
+падает, если в файле стало больше НЕПОКРЫТЫХ строк (настоящая потеря
+покрытия). Просевший при этом процент без роста непокрытых строк — это
+«сдвиг»: строки переехали в другой файл (например, в общий заголовок), и
+знаменатель файла сократился; такой случай печатается, но гейт не роняет.
+Тестовые TU (`test_*.cpp`) не сравниваются и в baseline не пишутся: их качество
+контролируют глобальные гейты строки/ветвей в src/Dockerfile.
 
 Baseline генерируется тем же скриптом из отчёта, который рисует coverage-стадия
 (`coverage-report/cov.json`), и обновляется осознанно, вместе с кодом.
@@ -12,7 +15,7 @@ Baseline генерируется тем же скриптом из отчёта
 Usage:
   scripts/coverage-regression-check.py                 # проверка
   scripts/coverage-regression-check.py --report X.json # путь к отчёту gcovr
-  scripts/coverage-regression-check.py --max-drop 0.5  # допуск в п.п.
+  scripts/coverage-regression-check.py --max-drop 0.5  # порог отчёта о сдвиге
   scripts/coverage-regression-check.py --update        # переписать baseline
 
 Exit codes: 0 — ок, 1 — регрессия или новый файл вне baseline, 2 — ошибка
@@ -91,9 +94,25 @@ def line_pct(stat):
 
 
 def compare(baseline, current, max_drop):
-    """Возвращает (regressions, new_files, removed) в production-файлах."""
+    """Возвращает (регрессии, сдвиги, новые_файлы, удалённые).
+
+    Различаются два принципиально разных события:
+
+    * **регрессия** — в файле стало больше НЕПОКРЫТЫХ строк, то есть часть
+      кода перестала выполняться (это настоящая потеря покрытия, гейт падает);
+    * **сдвиг** — процент просел, но непокрытых строк не прибавилось: строки
+      переехали в другой файл (например, общий помощник в заголовке), и
+      знаменатель файла сократился. Потери покрытия нет — гейт не падает, но
+      событие печатается, чтобы сдвиг не выглядел загадочно.
+
+    Проверка по числу непокрытых строк, а не по проценту, и есть то, что
+    отличает потерю от переноса кода: перенос уменьшает и покрытые, и
+    непокрытые строки файла, но не увеличивает второе.
+    """
     regressions = []
+    shifts = []
     new_files = []
+    new_files_with_gaps = []
     for name in sorted(current):
         if is_test_file(name):
             continue
@@ -102,6 +121,8 @@ def compare(baseline, current, max_drop):
             continue
         if name not in baseline:
             new_files.append(name)
+            if now["lines"] - now.get("covered", 0) > 0:
+                new_files_with_gaps.append(name)
             continue
         old = baseline[name]
         if not old.get("lines"):
@@ -109,11 +130,16 @@ def compare(baseline, current, max_drop):
         old_pct = line_pct(old)
         now_pct = line_pct(now)
         drop = old_pct - now_pct
-        if drop > max_drop + 1e-9:
-            regressions.append((name, old_pct, now_pct, drop))
+        old_gaps = old["lines"] - old.get("covered", 0)
+        now_gaps = now["lines"] - now.get("covered", 0)
+        if now_gaps > old_gaps:
+            regressions.append((name, old_pct, now_pct, drop,
+                                now_gaps - old_gaps))
+        elif drop > max_drop + 1e-9:
+            shifts.append((name, old_pct, now_pct, drop))
     removed = sorted(name for name in baseline
                      if name not in current and not is_test_file(name))
-    return regressions, new_files, removed
+    return regressions, shifts, new_files, new_files_with_gaps, removed
 
 
 def production_stats(files):
@@ -134,7 +160,9 @@ def main(argv=None):
     parser.add_argument("--baseline", default=str(DEFAULT_BASELINE),
                         help="путь к baseline-файлу")
     parser.add_argument("--max-drop", type=float, default=0.0,
-                        help="допустимое снижение покрытия файла в п.п. (по умолчанию 0)")
+                        help="порог для отчёта о сдвиге структуры, п.п. "
+                             "(регрессия определяется по росту непокрытых "
+                             "строк и допуском не регулируется)")
     parser.add_argument("--update", action="store_true",
                         help="переписать baseline из текущего отчёта")
     args = parser.parse_args(argv)
@@ -176,10 +204,15 @@ def main(argv=None):
               "запусти --update", file=sys.stderr)
         return 1
 
-    regressions, new_files, removed = compare(baseline, production, args.max_drop)
-    for name, old_pct, now_pct, drop in regressions:
+    (regressions, shifts, new_files, new_files_with_gaps,
+     removed) = compare(baseline, production, args.max_drop)
+    for name, old_pct, now_pct, drop, gaps in regressions:
         print(f"REGRESSION {name}: {old_pct:.2f}% -> {now_pct:.2f}% "
-              f"(-{drop:.2f} п.п.)")
+              f"(-{drop:.2f} п.п.), непокрытых строк стало больше на {gaps}")
+    for name, old_pct, now_pct, drop in shifts:
+        print(f"SHIFT {name}: {old_pct:.2f}% -> {now_pct:.2f}% "
+              f"(-{drop:.2f} п.п.) — непокрытых строк не прибавилось, "
+              "это перенос кода между файлами, а не потеря покрытия")
     for name in new_files:
         print(f"NEW {name}: файла нет в baseline — "
               "прими его: coverage-regression-check.py --update")
@@ -187,10 +220,15 @@ def main(argv=None):
         print(f"REMOVED {name}: есть в baseline, нет в отчёте — "
               "обнови baseline: coverage-regression-check.py --update")
 
-    if regressions or new_files:
-        print(f"FAIL: {len(regressions)} регрессий, {len(new_files)} новых "
-              "файлов вне baseline")
+    if regressions or new_files_with_gaps:
+        print(f"FAIL: {len(regressions)} регрессий, "
+              f"{len(new_files_with_gaps)} новых файлов с непокрытыми строками")
         return 1
+    if new_files:
+        print(f"OK: регрессий покрытия нет; {len(new_files)} новых файлов "
+              "вне baseline (все строки покрыты) — обнови baseline при "
+              "следующем обновлении")
+        return 0
     print(f"OK: регрессий покрытия нет (допуск {args.max_drop} п.п.)")
     return 0
 
