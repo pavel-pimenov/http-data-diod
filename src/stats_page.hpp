@@ -155,6 +155,111 @@ inline int parse_stats_window(const ParamsT &params, int default_min = 30) {
   return window_min;
 }
 
+// Overall readiness of the service, derived from the *_health_ready gauges and
+// the *_nats_connected gauge when they are present.
+struct StatsReadiness {
+  bool m_has_health = false;
+  bool m_ready = true;
+  bool m_has_nats = false;
+  bool m_nats_ok = true;
+  bool m_overall_ok = true;
+};
+
+inline StatsReadiness compute_readiness(
+    std::span<const prometheus::MetricFamily> const fam_view) {
+  StatsReadiness readiness;
+  for (const auto &family : fam_view) {
+    std::span<const prometheus::ClientMetric> const mview(family.metric);
+    for (const auto &metric : mview) {
+      if (family.name.find("health_ready") != std::string::npos) {
+        readiness.m_has_health = true;
+        if (metric.gauge.value != 1.0) {
+          readiness.m_ready = false;
+        }
+      }
+      if (family.name.find("nats_connected") != std::string::npos) {
+        readiness.m_has_nats = true;
+        if (metric.gauge.value != 1.0) {
+          readiness.m_nats_ok = false;
+        }
+      }
+    }
+  }
+  readiness.m_overall_ok =
+      (!readiness.m_has_health || readiness.m_ready) &&
+      (!readiness.m_has_nats || readiness.m_nats_ok);
+  return readiness;
+}
+
+// One metric family as a card: the name, the help text, the (capped) list of
+// series and a sparkline of the family's representative series.
+inline void render_stats_tile(std::ostringstream &html,
+                               const prometheus::MetricFamily &family,
+                               const MetricsHistory *hist,
+                               int window_minutes) {
+  // Cap series per tile so labeled/dense families (per-IP, per-client-id) don't
+  // blow up the card height and break the no-scroll layout.
+  constexpr std::size_t kMaxSeriesPerTile = 6;
+
+  if (family.metric.empty()) {
+    return;
+  }
+  html << "<div class=\"tile\">\n";
+  html << "<div class=\"tname\">" << escape_html(family.name) << "</div>\n";
+  if (!family.help.empty()) {
+    html << "<div class=\"thelp\">" << escape_html(family.help) << "</div>\n";
+  }
+  html << "<div class=\"vals\">\n";
+  std::span<const prometheus::ClientMetric> const mview(family.metric);
+  const std::size_t shown = std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
+  // ranges::views::take — C++23 сахар вместо ручного min+for
+  for (const auto &metric : mview | std::views::take(shown)) {
+    const std::string labels = format_labels(metric.label);
+    html << R"(<div class="vrow"><span class="labels">)"
+         << escape_html(labels) << "</span> <span class=\"val\">"
+         << escape_html(format_metric_value(metric, family.type))
+         << "</span></div>\n";
+  }
+  if (mview.size() > shown) {
+    html << "<div class=\"vrow more\">+" << (mview.size() - shown)
+         << " more</div>\n";
+  }
+  html << "</div>\n";
+
+  // One compact sparkline per tile: the family's representative series
+  // (unlabeled/total if present, else the most active labeled series).
+  if (hist && hist->has_family(family.name)) {
+    const bool as_rate =
+        (family.type == prometheus::MetricType::Counter ||
+         family.type == prometheus::MetricType::Histogram ||
+         family.type == prometheus::MetricType::Summary);
+    const auto series = hist->get_series(family.name, 16);
+    const MetricsHistory::Series *repr = nullptr;
+    double best = -1.0;
+    for (const auto &s : series) {
+      if (s.m_labels.empty()) {
+        repr = &s;
+        break;
+      }
+      const double last = s.m_points.empty() ? 0.0 : s.m_points.back().second;
+      if (last > best) {
+        best = last;
+        repr = &s;
+      }
+    }
+    if (repr) {
+      const std::string svg =
+          build_sparkline_svg(repr->m_points, as_rate, window_minutes);
+      if (!svg.empty()) {
+        html << R"(<div class="sparkwrap"><div class="cap">last )"
+             << window_minutes << "m</div>" << svg << "</div>\n";
+      }
+    }
+  }
+
+  html << "</div>\n";
+}
+
 inline std::string build_stats_html(
     const std::string &service_name,
     const std::shared_ptr<prometheus::Registry> &registry,
@@ -164,33 +269,9 @@ inline std::string build_stats_html(
   const auto families = registry->Collect();
   std::span<const prometheus::MetricFamily> const fam_view(families);
 
-  // Derive an overall readiness banner from the *_health_ready gauges and the
-  // *_nats_connected gauge when present.
-  bool has_health = false;
-  bool ready = true;
-  bool nats_ok = true;
-  bool has_nats = false;
-  for (const auto &family : fam_view) {
-    std::span<const prometheus::ClientMetric> const mview(family.metric);
-    for (const auto &metric : mview) {
-      if (family.name.find("health_ready") != std::string::npos) {
-        has_health = true;
-        if (metric.gauge.value != 1.0) {
-          ready = false;
-        }
-      }
-      if (family.name.find("nats_connected") != std::string::npos) {
-        has_nats = true;
-        if (metric.gauge.value != 1.0) {
-          nats_ok = false;
-        }
-      }
-    }
-  }
-  const bool overall_ok = (!has_health || ready) && (!has_nats || nats_ok);
-  const char *banner_color = overall_ok ? "#1f7a3d" : "#a3271f";
-  const char *banner_text =
-      overall_ok ? "OPERATIONAL" : "DEGRADED";
+  StatsReadiness const readiness = compute_readiness(fam_view);
+  const char *banner_color = readiness.m_overall_ok ? "#1f7a3d" : "#a3271f";
+  const char *banner_text = readiness.m_overall_ok ? "OPERATIONAL" : "DEGRADED";
 
   std::ostringstream html;
   html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
@@ -240,83 +321,14 @@ inline std::string build_stats_html(
        << tsbuf.data() << " · 5s</span></div>\n";
   html << "<div class=\"grid\">\n";
 
-  // Cap series per tile so labeled/dense families (per-IP, per-client-id) don't
-  // blow up the card height and break the no-scroll layout.
-  constexpr std::size_t kMaxSeriesPerTile = 6;
-
-  const auto render_tile =
-      [&](const prometheus::MetricFamily &family, const MetricsHistory *hist) {
-        if (family.metric.empty()) {
-          return;
-        }
-        html << "<div class=\"tile\">\n";
-        html << "<div class=\"tname\">" << escape_html(family.name)
-             << "</div>\n";
-        if (!family.help.empty()) {
-          html << "<div class=\"thelp\">" << escape_html(family.help)
-               << "</div>\n";
-        }
-        html << "<div class=\"vals\">\n";
-        std::span<const prometheus::ClientMetric> const mview(family.metric);
-        const std::size_t shown =
-            std::min<std::size_t>(mview.size(), kMaxSeriesPerTile);
-        // ranges::views::take — C++23 сахар вместо ручного min+for
-        for (const auto &metric : mview | std::views::take(shown)) {
-          const std::string labels = format_labels(metric.label);
-          html << R"(<div class="vrow"><span class="labels">)"
-               << escape_html(labels) << "</span> <span class=\"val\">"
-               << escape_html(format_metric_value(metric, family.type))
-               << "</span></div>\n";
-        }
-        if (mview.size() > shown) {
-          html << "<div class=\"vrow more\">+" << (mview.size() - shown)
-               << " more</div>\n";
-        }
-        html << "</div>\n";
-
-        // One compact sparkline per tile: the family's representative series
-        // (unlabeled/total if present, else the most active labeled series).
-        if (hist && hist->has_family(family.name)) {
-          const bool as_rate =
-              (family.type == prometheus::MetricType::Counter ||
-               family.type == prometheus::MetricType::Histogram ||
-               family.type == prometheus::MetricType::Summary);
-          const auto series = hist->get_series(family.name, 16);
-          const MetricsHistory::Series *repr = nullptr;
-          double best = -1.0;
-          for (const auto &s : series) {
-            if (s.m_labels.empty()) {
-              repr = &s;
-              break;
-            }
-            const double last =
-                s.m_points.empty() ? 0.0 : s.m_points.back().second;
-            if (last > best) {
-              best = last;
-              repr = &s;
-            }
-          }
-          if (repr) {
-            const std::string svg =
-                build_sparkline_svg(repr->m_points, as_rate, window_minutes);
-            if (!svg.empty()) {
-              html << R"(<div class="sparkwrap"><div class="cap">last )"
-                   << window_minutes << "m</div>" << svg << "</div>\n";
-            }
-          }
-        }
-
-        html << "</div>\n";
-      };
-
   for (const auto &family : fam_view) {
-    render_tile(family, history);
+    render_stats_tile(html, family, history, window_minutes);
   }
 
   if (extra_registry) {
     const auto extra_families = extra_registry->Collect();
     for (const auto &family : extra_families) {
-      render_tile(family, extra_history);
+      render_stats_tile(html, family, extra_history, window_minutes);
     }
   }
 
