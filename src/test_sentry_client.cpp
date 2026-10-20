@@ -7,6 +7,7 @@
 #include "sentry_client.hpp"
 #include "metrics_manager.hpp"
 #include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <memory>
@@ -524,5 +525,8 @@ TEST_CASE("SentryClient: zero max_queue_size is clamped to one",
   REQUIRE(m.m_sent_counter.Value() == static_cast<double>(delivered.size()));
   REQUIRE(delivered.size() >= 1);
   REQUIRE(delivered.size() <= 2);
-  REQUIRE(m.m_queue_gauge.Value() == 0.0);
+  // The sender thread publishes the queue depth after popping, so the gauge
+  // may lag the drain by a moment: wait for it instead of racing it.
+  REQUIRE(test_wait_support::wait_for_condition(
+      [&m] { return m.m_queue_gauge.Value() == 0.0; }, 2000));
 }

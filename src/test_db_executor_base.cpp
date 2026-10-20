@@ -70,6 +70,15 @@ TEST_CASE("DbExecutorBase: configured defaults are exposed",
   REQUIRE(ex.db_name() == "pg-test");
 }
 
+TEST_CASE("DbErrorClass: the SQLSTATE class is the first two characters",
+          "[db-executor-base]") {
+  REQUIRE(db_error_class("42P01") == "42");     // syntax
+  REQUIRE(db_error_class("08006") == "08");    // connection
+  REQUIRE(db_error_class("23505") == "23");    // integrity
+  REQUIRE(db_error_class("") == "unknown");    // no state at all
+  REQUIRE(db_error_class("4") == "unknown");   // too short to classify
+}
+
 TEST_CASE("DbExecutorBase: query errors are counted by class",
           "[db-executor-base]") {
   StubExecutor ex(make_db());

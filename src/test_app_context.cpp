@@ -182,6 +182,59 @@ TEST_CASE("AppContext: proxy pre-creates the rejection reason series",
                                             "rate_limit_per_ip"});
 }
 
+TEST_CASE("AppContext: labelled families keep their label contract",
+          "[app_context]") {
+  // The dashboard legends (PromQL {{type}} / {{reason}} / {{outcome}} / ...) are
+  // bound to these label names, and the metric structs are aggregate-initialised
+  // positionally -- a mismatch between the declaration order and the
+  // registration order swaps two families silently. This pins the label set of
+  // every labelled family the dashboards rely on.
+  const std::map<std::string, std::set<std::string>> expected{
+      {"l2_proxy_client_request_errors_total", {"type"}},
+      {"l2_proxy_rejections_total", {"reason"}},
+      // The per-database families (l2_proxy_db_requests_total and
+      // l2_worker_db_requests_total) are not listed here: their series appear
+      // only after real DB traffic, so a fresh context does not export them.
+      {"l2_worker_l2_call_errors_total", {"type"}},
+      {"l2_worker_retries_total", {"outcome"}},
+      {"l2_worker_db_query_errors_total", {"error_class"}},
+      {"l2_tracing_spans_dropped_total", {"reason"}},
+      {"l2_worker_sentry_events_dropped_total", {"reason"}},
+  };
+
+  std::map<std::string, std::set<std::string>> actual;
+  for (const char *mode : {"proxy", "worker"}) {
+    EnvGuard const env{{"MODE", mode}};
+    AppContext const ctx;
+
+    for (const auto &registry :
+         {ctx.m_proxy_registry, ctx.m_worker_registry, ctx.m_common_registry}) {
+      for (const auto &family : registry->Collect()) {
+        if (!expected.contains(family.name)) {
+          continue;
+        }
+        std::set<std::string> labels;
+        for (const auto &metric : family.metric) {
+          for (const auto &label : metric.label) {
+            labels.insert(label.name);
+          }
+        }
+        auto [it, inserted] = actual.emplace(family.name, labels);
+        if (!inserted) {
+          // The same family must carry the same label set in every mode.
+          REQUIRE(it->second == labels);
+        }
+      }
+    }
+  }
+
+  // Every family of the contract must be present with exactly its labels.
+  for (const auto &[name, labels] : expected) {
+    REQUIRE(actual.contains(name));
+    REQUIRE(actual.at(name) == labels);
+  }
+}
+
 TEST_CASE("AppContext: the DB error family is labeled by error class",
           "[app_context]") {
   EnvGuard const mode{{"MODE", "worker"}};

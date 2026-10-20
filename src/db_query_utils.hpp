@@ -178,6 +178,17 @@ inline json make_db_unavailable(int &status_code,
                      : "Failed to acquire a database connection: " + detail);
 }
 
+// SQLSTATE class of a failed query: the first two characters of the
+// five-character code ("08" connection, "22" data, "23" integrity, "42" syntax,
+// ...). An absent or too short state means "could not classify" — the class is a
+// short, bounded label, while the full code would be a per-database string.
+inline std::string db_error_class(std::string_view sqlstate) {
+  if (sqlstate.size() < 2) {
+    return "unknown";
+  }
+  return std::string(sqlstate.substr(0, 2));
+}
+
 // SQLSTATE classes (the first two characters of the five-character SQLSTATE)
 // pre-created for l2_worker_db_query_errors_total. The list covers the classes
 // PostgreSQL returns in practice ("08" connection, "22" data, "23" integrity,
