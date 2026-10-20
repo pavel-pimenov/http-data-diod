@@ -16,6 +16,9 @@
 #include "json_schema_validator.hpp"
 #include "metrics_manager.hpp"
 #include "json_utils.hpp"
+#include "metrics_exposer.hpp"
+#include "test_metrics_support.hpp"
+#include "test_wait_support.hpp"
 #include "nats_client.hpp"
 #include "nlohmann/json.hpp"
 #include "prometheus/gauge.h"
@@ -51,6 +54,7 @@
 #include <spdlog/common.h>
 #include <spdlog/common-inl.h>
 #include <string>
+#include <memory>
 #include <unordered_set>
 #include <prometheus/registry.h>
 #include <set>
@@ -2967,6 +2971,39 @@ TEST_CASE("Common utils: validate_and_parse_json with context and request_id",
 
   auto bad = validate_and_parse_json("{", "query", "req-42");
   REQUIRE_FALSE(bad.has_value());
+}
+
+TEST_CASE("MetricsExposer: serves the registered registries in text format",
+          "[metrics-exposer]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  test_support::make_counter(*registry, "l2_test_exposer_counter", "h")
+      .Increment(7);
+
+  {
+    // Port 0: the exposer binds an ephemeral port and publishes it.
+    MetricsExposer exposer(0);
+    REQUIRE(exposer.port() > 0);
+    exposer.register_collectable(registry);
+
+    std::string body;
+    bool ok = false;
+    REQUIRE(test_wait_support::wait_for_condition([&] {
+      httplib::Client client("127.0.0.1", exposer.port());
+      client.set_connection_timeout(1);
+      client.set_read_timeout(2);
+      auto const res = client.Get("/metrics");
+      if (!res) {
+        return false;
+      }
+      body = res->body;
+      ok = res->status == 200;
+      return ok;
+    }, 5000));
+    REQUIRE(ok);
+    REQUIRE(body.find("l2_test_exposer_counter 7") != std::string::npos);
+    REQUIRE(body.find("# TYPE l2_test_exposer_counter counter") !=
+            std::string::npos);
+  }
 }
 
 TEST_CASE("Common utils: handle_error increments counter and logs",

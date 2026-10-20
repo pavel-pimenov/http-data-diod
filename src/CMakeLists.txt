@@ -183,110 +183,8 @@ target_compile_definitions(proj_prometheus_core
     PUBLIC PROMETHEUS_CPP_CORE_STATIC_DEFINE
 )
 
-# util: header-only prometheus/detail/base64.h used by pull's BasicAuth.
-add_library(proj_prometheus_util INTERFACE)
-target_include_directories(proj_prometheus_util INTERFACE
-    ${PROMETHEUS_CPP_ROOT}/util/include
-)
-
-# pull: the network Exposer (/metrics over HTTP) backed by civetweb.
-# Civetweb is vendored alongside prometheus (3rdparty/civetweb) because the
-# Ubuntu package splits the C API (libcivetweb) and the C++ CivetServer wrapper
-# (libcivetweb-cpp) and neither matches the API the vendored prometheus-cpp pull
-# expects. SSL and Lua are NOT compiled in: only the plain HTTP /metrics path is
-# needed by the proxy/worker/server exposers.
-#
-# With NO_FILESYSTEMS civetweb has no fallback for log_access and
-# mg_cry_internal_impl and fails with "Must either enable filesystems or provide
-# a custom mg_cry_internal_impl implementation", so the embedder must supply
-# them via MG_EXTERNAL_FUNCTION_*. Both are no-ops for our metrics-only
-# exposers, and upstream ships neither file (they are the embedder's), so the
-# stubs are generated into the build dir instead of being carried inside the
-# vendored tree.
-set(CIVETWEB_STUB_DIR ${CMAKE_CURRENT_BINARY_DIR}/civetweb-stubs)
-file(WRITE ${CIVETWEB_STUB_DIR}/external_log_access.inl
-"/* No-op: access log is not written for metrics-only server */
-static void
-log_access(const struct mg_connection *conn)
-{
-	(void)conn;
-}
-")
-file(WRITE ${CIVETWEB_STUB_DIR}/external_mg_cry_internal_impl.inl
-"/* No-op: errors are not logged to disk for metrics-only server */
-static void
-mg_cry_internal_impl(const struct mg_connection *conn,
-                     const char *func,
-                     unsigned line,
-                     const char *fmt,
-                     va_list ap)
-{
-	(void)conn;
-	(void)func;
-	(void)line;
-	(void)fmt;
-	(void)ap;
-}
-")
-add_library(proj_civetweb STATIC
-    ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/civetweb.c
-    ${PROMETHEUS_CPP_ROOT}/3rdparty/civetweb/src/CivetServer.cpp
-)
-target_include_directories(proj_civetweb PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/prometheus-cpp/3rdparty/civetweb/include
-)
-target_include_directories(proj_civetweb PRIVATE
-    ${CIVETWEB_STUB_DIR}
-)
-target_compile_definitions(proj_civetweb PRIVATE
-    NO_SSL
-    NO_SSL_DL
-    NO_CGI
-    NO_FILES
-    NO_CACHING
-    NO_FILESYSTEMS
-    MG_EXTERNAL_FUNCTION_mg_cry_internal_impl
-    MG_EXTERNAL_FUNCTION_log_access
-)
-target_compile_options(proj_civetweb PRIVATE
-    ${L2_PROXY_COMMON_COMPILE_OPTIONS}
-    -Wno-unused-result
-)
-target_link_libraries(proj_civetweb PUBLIC Threads::Threads)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(proj_civetweb PRIVATE rt)
-endif()
-
-add_library(proj_prometheus_pull STATIC
-    ${PROMETHEUS_CPP_ROOT}/pull/src/basic_auth.cc
-    ${PROMETHEUS_CPP_ROOT}/pull/src/endpoint.cc
-    ${PROMETHEUS_CPP_ROOT}/pull/src/exposer.cc
-    ${PROMETHEUS_CPP_ROOT}/pull/src/handler.cc
-    ${PROMETHEUS_CPP_ROOT}/pull/src/metrics_collector.cc
-)
-target_compile_features(proj_prometheus_pull PUBLIC cxx_std_17)
-target_include_directories(proj_prometheus_pull PUBLIC
-    ${PROMETHEUS_CPP_ROOT}/pull/include
-)
-target_compile_definitions(proj_prometheus_pull
-    PUBLIC PROMETHEUS_CPP_PULL_STATIC_DEFINE
-    PRIVATE HAVE_ZLIB
-)
-target_link_libraries(proj_prometheus_pull
-    PUBLIC
-        proj_prometheus_core
-        proj_prometheus_util
-        proj_civetweb
-        ZLIB::ZLIB
-        Threads::Threads
-)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(proj_prometheus_pull PRIVATE rt)
-endif()
-
 # Compatibility alias so existing references keep working without renaming.
 add_library(prometheus-cpp::core ALIAS proj_prometheus_core)
-add_library(prometheus-cpp::pull ALIAS proj_prometheus_pull)
 
 # Find spdlog (fast C++ logging library)
 find_package(spdlog CONFIG REQUIRED)
@@ -324,6 +222,7 @@ add_executable(l2-proxy
  version.cpp
  shutdown_flag.cpp
  app_context.cpp
+ metrics_exposer.cpp
  proxy_init.cpp
  common_utils.cpp
  config.cpp
@@ -408,7 +307,6 @@ target_include_directories(l2-proxy PRIVATE ${NATS_C_INCLUDE_DIR})
 target_link_libraries(l2-proxy PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
-    prometheus-cpp::pull
     prometheus-cpp::core
     pthread
     ZLIB::ZLIB
@@ -425,11 +323,6 @@ if(ENABLE_PROFILER)
     )
 endif()
 target_link_libraries(l2-proxy PRIVATE ${NATS_C_LIBRARY})
-
-# The vendored civetweb is a static archive linked transitively through
-# prometheus-cpp::pull, so no extra --no-as-needed handling is required here:
-# civetweb's symbols are referenced directly (not only via vtables) and resolve
-# at static-link time.
 
 # C++23 std::stacktrace / std::print may need -lstdc++exp on GCC 13-16
 find_library(STDCXX_EXP_LIBRARY stdc++exp
@@ -570,11 +463,14 @@ if(BUILD_TESTS)
         CPPHTTPLIB_ZLIB_SUPPORT
         ENABLE_NATS
     )
+    # The /metrics endpoint is an app component; the test drives it directly.
+    target_sources(test_components PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/metrics_exposer.cpp
+    )
     target_link_libraries(test_components PRIVATE 
         Catch2::Catch2WithMain 
         pthread
         spdlog::spdlog_header_only
-        prometheus-cpp::pull
         prometheus-cpp::core
         OpenSSL::SSL
         OpenSSL::Crypto

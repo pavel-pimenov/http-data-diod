@@ -3,6 +3,7 @@
 #include "error_types.hpp"
 #include "json_response_utils.hpp"
 #include "logger.hpp"
+#include "metrics_exposer.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -21,7 +22,6 @@
 #include "cpp_httplib_config.h"
 #include "httplib/httplib.h"
 
-#include <prometheus/exposer.h>
 
 #include "nlohmann/json.hpp"
 #include "prometheus/family.h"
@@ -190,16 +190,15 @@ void run_httplib_server(
   }
 }
 
-std::unique_ptr<prometheus::Exposer> create_metrics_exposer(
+std::unique_ptr<MetricsExposer> create_metrics_exposer(
     int port, const std::shared_ptr<prometheus::Registry> &registry,
     const std::shared_ptr<prometheus::Registry> &common = nullptr) {
-  auto exposer =
-      std::make_unique<prometheus::Exposer>(std::format("0.0.0.0:{}", port));
-  exposer->RegisterCollectable(registry);
+  auto exposer = std::make_unique<MetricsExposer>(port);
+  exposer->register_collectable(registry);
   if (common) {
     // Cross-cutting observability (l2_tracing_*, l2_worker_sentry_*) served
     // on every mode's metrics port via the shared common registry.
-    exposer->RegisterCollectable(common);
+    exposer->register_collectable(common);
   }
   return exposer;
 }
@@ -238,21 +237,21 @@ void run_proxy(AppContext &app_ctx) {
   RequestHandler request_handler(app_ctx, *stats_logger);
 
   if (app_ctx.m_proxy.m_per_ip_metrics_collector) {
-    exposer->RegisterCollectable(app_ctx.m_proxy.m_per_ip_metrics_collector);
+    exposer->register_collectable(app_ctx.m_proxy.m_per_ip_metrics_collector);
   }
 
   if (app_ctx.m_proxy.m_per_client_id_metrics_collector) {
-    exposer->RegisterCollectable(
+    exposer->register_collectable(
         app_ctx.m_proxy.m_per_client_id_metrics_collector);
   }
 
   if (app_ctx.m_proxy.m_per_client_id_duplicate_collector) {
-    exposer->RegisterCollectable(
+    exposer->register_collectable(
         app_ctx.m_proxy.m_per_client_id_duplicate_collector);
   }
 
   if (app_ctx.m_proxy.m_per_client_id_latency_collector) {
-    exposer->RegisterCollectable(
+    exposer->register_collectable(
         app_ctx.m_proxy.m_per_client_id_latency_collector);
   }
 
