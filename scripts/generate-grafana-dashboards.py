@@ -1700,7 +1700,10 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(scalar(max(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))), 1e-6))", "legendFormat": "{{client_id}}", "refId": "A"}  # noqa: E501
+            {"expr": "topk(10, rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]) / clamp_min(scalar(max(rate(l2_proxy_per_client_id_requests_total{vm=~\"${vm:regex}\",client_id!=\"unknown\"}[5m]))), 1e-6))", "legendFormat": "{{client_id}}", "refId": "A"},  # noqa: E501
+            # Выброшенные значения меток: их исчезновение из top-k иначе
+            # выглядит как «клиент перестал ходить».
+            {"expr": "rate(l2_proxy_per_client_id_dropped_labels_total{vm=~\"${vm:regex}\"}[5m])", "legendFormat": "Выброшено меток/с", "refId": "B"}  # noqa: E501
         ]
     ))
     y += 6

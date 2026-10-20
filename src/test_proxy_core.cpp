@@ -777,17 +777,21 @@ TEST_CASE("Dynamic labeled family: empty family is omitted on collect",
 
 TEST_CASE("Dynamic labeled family: max_entries cap evicts oldest",
           "[labeled-family]") {
+  prometheus::Registry registry;
+  auto &dropped = test_support::make_counter(registry, "dropped", "h");
   DynamicLabeledFamily<prometheus::Counter> family(
       "client_id",
       std::vector<DynamicLabeledFamily<prometheus::Counter>::Series>{
           {"requests_total", "help"}},
-      {}, 0, 2);
+      {}, 0, 2, std::vector<double>{}, &dropped);
   family.get("a", 0)->Increment();
   family.get("b", 0)->Increment();
   family.get("c", 0)->Increment();
 
   auto families = family.Collect();
   REQUIRE(families.size() == 1);
+  // The evicted label value is counted: without it the family silently shrinks.
+  REQUIRE(dropped.Collect().counter.value == 1.0);
   // Two of the three series survive (created oldest == most recently touched
   // order is the same here since all are touched once in sequence), and the
   // most-recently-touched ones are kept.

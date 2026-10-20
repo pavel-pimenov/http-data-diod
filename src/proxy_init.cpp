@@ -108,6 +108,12 @@ void init_proxy_components(AppContext &app_ctx) {
     Logger::info("Per-IP rate limiting disabled");
   }
 
+  // The per-client-id families are bounded (cap + TTL), and an evicted label
+  // value silently disappears from the metrics: the dropped counter makes that
+  // visible.
+  auto &dropped_labels =
+      app_ctx.m_proxy.m_metrics->m_per_client_id_dropped_labels;
+
   app_ctx.m_proxy.m_per_client_id_metrics_collector =
       std::make_shared<DynamicLabeledFamily<prometheus::Counter>>(
           "client_id",
@@ -117,7 +123,8 @@ void init_proxy_components(AppContext &app_ctx) {
                "header"},
               {"l2_proxy_per_client_id_rejected_total",
                "Total number of requests rejected by rate limiters per "
-               "X-DataHub-Client-Id header"}});
+               "X-DataHub-Client-Id header"}}, DynamicLabeledFamily<prometheus::Counter>::Provider{}, 300, 10000,
+          std::vector<double>{}, &dropped_labels);
 
   app_ctx.m_proxy.m_per_client_id_latency_collector =
       std::make_shared<DynamicLabeledFamily<prometheus::Histogram>>(
@@ -128,7 +135,8 @@ void init_proxy_components(AppContext &app_ctx) {
           DynamicLabeledFamily<prometheus::Histogram>::Provider{}, 300, 10000,
           std::vector<double>(
               histogram_buckets::g_buckets.m_latency_5ms_to_10s.begin(),
-              histogram_buckets::g_buckets.m_latency_5ms_to_10s.end()));
+              histogram_buckets::g_buckets.m_latency_5ms_to_10s.end()),
+          &dropped_labels);
 
   app_ctx.m_proxy.m_per_client_id_duplicate_collector =
       std::make_shared<DynamicLabeledFamily<prometheus::Counter>>(
@@ -139,7 +147,8 @@ void init_proxy_components(AppContext &app_ctx) {
                "again) detected per X-DataHub-Client-Id header"},
               {"l2_proxy_per_client_id_duplicate_rejected_total",
                "Reserved: rejected duplicate POSTs per X-DataHub-Client-Id "
-               "header"}});
+               "header"}}, DynamicLabeledFamily<prometheus::Counter>::Provider{}, 300, 10000,
+          std::vector<double>{}, &dropped_labels);
 
   DuplicateDetector::Options dup_options;
   dup_options.m_enabled = app_ctx.m_config.m_duplicate.m_enabled;

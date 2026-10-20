@@ -90,6 +90,9 @@ struct ProxyMetrics {
   // Client ids currently tracked by the duplicate detector (bounded by
   // DUPLICATE_DETECTION_MAX_CLIENTS); updated from the periodic stats logger.
   prometheus::Gauge &m_duplicate_tracked_clients;
+  // Label values dropped by the per-client-id families (cap or TTL): without
+  // the counter the family silently shrinks and the eviction is invisible.
+  prometheus::Counter &m_per_client_id_dropped_labels;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

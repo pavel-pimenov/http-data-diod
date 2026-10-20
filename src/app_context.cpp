@@ -309,7 +309,11 @@ void AppContext::init_proxy_metrics() {
       reg_proxy.gauge(
           "l2_proxy_duplicate_tracked_clients",
           "Current number of client ids tracked by the duplicate detector "
-          "(bounded by DUPLICATE_DETECTION_MAX_CLIENTS)")});
+          "(bounded by DUPLICATE_DETECTION_MAX_CLIENTS)"),
+      reg_proxy.counter(
+          "l2_proxy_per_client_id_dropped_labels_total",
+          "Label values dropped by the per-client-id metric families (cap or "
+          "TTL)")});
 
   // prometheus-cpp exports a labeled family only after the first Add(), and a
   // healthy proxy refuses nothing, so every enum value gets its zero series up

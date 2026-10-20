@@ -2,6 +2,7 @@
 #define DYNAMIC_LABELED_FAMILY_HPP
 
 #include <prometheus/collectable.h>
+#include <prometheus/counter.h>
 #include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
@@ -58,14 +59,18 @@ public:
   // ttl_seconds: drop label values idle longer than this on the next Collect()
   //   (0 disables TTL).
   // max_entries: hard cap on tracked label values; oldest evicted first.
+  // dropped_labels: optional counter of the evicted label values (the cap and
+  // the TTL silently shrink the family otherwise).
   // histogram_buckets: required bucket boundaries when T = Histogram.
   DynamicLabeledFamily(std::string label_name, std::vector<Series> series,
                        Provider provider = {}, uint64_t ttl_seconds = 300,
                        size_t max_entries = 10000,
-                       std::vector<double> histogram_buckets = {})
+                       std::vector<double> histogram_buckets = {},
+                       prometheus::Counter *dropped_labels = nullptr)
       : m_config{std::move(label_name), std::move(series),
                  std::move(provider), ttl_seconds, max_entries,
-                 std::move(histogram_buckets)} {
+                 std::move(histogram_buckets)},
+        m_dropped_labels(dropped_labels) {
     m_state.m_families.reserve(m_config.m_series.size());
     for (const auto& s : m_config.m_series) {
       m_state.m_families.push_back(std::make_shared<prometheus::Family<T>>(
@@ -114,6 +119,8 @@ private:
     const std::vector<double> m_histogram_buckets;
   } m_config;
 
+  prometheus::Counter *m_dropped_labels = nullptr;
+
   struct State {
     mutable std::mutex m_mutex;
     mutable std::vector<std::shared_ptr<prometheus::Family<T>>> m_families;
@@ -140,6 +147,9 @@ private:
   }
 
   void remove_label(const std::string& label_value) const {
+    if (m_dropped_labels != nullptr) {
+      m_dropped_labels->Increment();
+    }
     const auto it = m_state.m_children.find(label_value);
     if (it == m_state.m_children.end()) {
       return;
