@@ -619,6 +619,8 @@ HTTP-пул клиентов (gauge/counter, реестр прокси):
 | `l2_http_pool_client_acquisitions_total` | counter | Взятий клиента из пула |
 | `l2_http_pool_client_releases_total` | counter | Возвратов клиента в пул |
 | `l2_http_pool_stale_evictions_total` | counter | Вытеснено устаревших соединений |
+| `l2_http_pool_client_acquisition_timeouts_total` | counter | Таймауты получения соединения из пула (все соединения заняты) |
+| `l2_http_pool_client_acquisition_duration_seconds` | histogram | Время ожидания свободного соединения в пуле |
 
 Rate limiter (прокси, режим `MODE=proxy`):
 

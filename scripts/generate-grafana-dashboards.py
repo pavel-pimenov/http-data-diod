@@ -2112,6 +2112,10 @@ def create_proxy_dashboard() -> Dict:
         unit="short",
         targets=[
             {"expr": "l2_http_pool_active_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Активные", "refId": "A"},  # noqa: E501
+            # Время ожидания свободного соединения и таймауты получения: по
+            # ним видно, что пул исчерпан и вызывающие стоят в очереди.
+            {"expr": "histogram_quantile(0.95, sum by (le) (rate(l2_http_pool_client_acquisition_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m])))", "legendFormat": "Ожидание P95", "refId": "B"},  # noqa: E501
+            {"expr": "rate(l2_http_pool_client_acquisition_timeouts_total{vm=~\"${vm:regex}\"}[5m])", "legendFormat": "Таймауты/с", "refId": "C"},  # noqa: E501
             {"expr": "l2_http_pool_available_clients{vm=~\"${vm:regex}\"}", "legendFormat": "Доступные", "refId": "B"}  # noqa: E501
         ]
     ))

@@ -200,6 +200,11 @@ struct HttpPoolMetrics {
   prometheus::Counter &m_client_acquisitions_total;
   prometheus::Counter &m_client_releases_total;
   prometheus::Counter &m_stale_evictions_total;
+  // Acquire timeouts and the time an acquire waited for a free connection: the
+  // pool's saturation signal (the pool hands out a limited number of
+  // connections, so a slow acquire means the callers queue up).
+  prometheus::Counter &m_acquisition_timeouts_total;
+  prometheus::Histogram &m_acquisition_duration_seconds;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

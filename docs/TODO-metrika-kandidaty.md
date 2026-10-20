@@ -230,10 +230,14 @@ enum, а не литералы в местах вызова). Частные с�
 
 ## P2 — полезно, но требует аккуратности
 
+> Пункт про ожидание в HTTP-пуле закрыт в раунде 177: пул эти величины уже
+> считал, но воркер их не отдавал, а сами метрики пула жили в реестре прокси
+> вместо общего.
+
 | Метрика | Тип | Метки | Зачем / риск |
 |---|---|---|---|
 | `l2_worker_l2_server_call_duration_seconds` | histogram | `l2_server` | латентность по каждому бэкенду; меток столько же, сколько endpoint'ов в конфиге |
-| `l2_http_pool_wait_duration_seconds` | histogram | — | ожидание свободного pooled-клиента (видно только acquisitions/releases) |
+| ~~`l2_http_pool_wait_duration_seconds`~~ ✅ | histogram | — | ожидание свободного pooled-клиента (сделано в раунде 177 как `l2_http_pool_client_acquisition_duration_seconds` + `l2_http_pool_client_acquisition_timeouts_total`; заодно метрики пула перенесены из реестра прокси в общий) |
 | `l2_worker_request_validation_errors_total` | counter | `field` | разбор ошибок валидации по полю; риск — поле свободного текста, брать только enum-поле |
 | `l2_worker_db_query_errors_total` | counter | `error_class` (SQLSTATE-класс) | разбор ошибок SQL; метка — только класс (2 символа), не код сообщения |
 | `l2_worker_retry_attempts` | histogram | — | распределение числа попыток (цена ретраев) |

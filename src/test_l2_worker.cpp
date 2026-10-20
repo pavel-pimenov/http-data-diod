@@ -49,6 +49,20 @@ using test_support::attach_tracer;
 using test_support::EnvMapGuard;
 using test_support::EnvVars;
 
+// Value of a counter in the common registry (0 when the family is absent).
+[[nodiscard]] double common_counter(const AppContext &ctx,
+                                    const std::string &name) {
+  for (const auto &family : ctx.m_common_registry->Collect()) {
+    if (family.name != name) {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      return metric.counter.value;
+    }
+  }
+  return 0.0;
+}
+
 // Value of the worker's retry counter for one outcome.
 [[nodiscard]] double retry_count(const AppContext &ctx,
                                  const std::string &outcome) {
@@ -299,6 +313,11 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
       {"X-DataHub-Client-Id", "client-7"},
       {"User-Agent", "worker-test/1.0"}};
 
+  // The HTTP pool is shared (the worker calls L2 through it), so its metrics
+  // live in the common registry and the acquire is counted there.
+  const double acquisitions_before =
+      common_counter(ctx, "l2_http_pool_client_acquisitions_total");
+
   const HttpResponse post = worker.call_l2_server(
       "/api/value", R"({"q":1})", test_support::k_traceparent,
       forwarded_headers, "POST");
@@ -307,6 +326,9 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(post.m_headers.count("X-L2-Server") == 1);
   REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(post.m_body) ==
           "l2-span-1");
+  // The pool acquire is counted in the common registry.
+  REQUIRE(common_counter(ctx, "l2_http_pool_client_acquisitions_total") ==
+          acquisitions_before + 1.0);
 
   const HttpResponse get = worker.call_l2_server(
       "/api/value", "", test_support::k_traceparent, {}, "GET");

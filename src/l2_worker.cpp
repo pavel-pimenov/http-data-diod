@@ -18,7 +18,6 @@
 #include <format>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <optional>
 #include <stop_token>
 #include <stdexcept>
 #include <utility>
@@ -68,8 +67,8 @@ m_dedup_cache(context.m_config.m_dedup.m_enabled,
         PoolMetrics{metrics.m_active_clients, metrics.m_available_clients,
                     metrics.m_client_acquisitions_total,
                     metrics.m_client_releases_total,
-                    std::nullopt, // acquisition_timeouts (not tracked)
-                    std::nullopt, // acquisition_duration (not tracked)
+                    metrics.m_acquisition_timeouts_total,
+                    metrics.m_acquisition_duration_seconds,
                     metrics.m_stale_evictions_total});
   }
 

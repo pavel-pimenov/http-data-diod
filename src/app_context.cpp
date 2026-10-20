@@ -146,6 +146,36 @@ void AppContext::init_common() {
   m_sentry_metrics->m_events_dropped.Add(
       {{"reason", sentry::kDropReasonQueueFull}});
 
+  // The HTTP pool is shared: the worker uses it for the L2 calls and the
+  // tracer for the span delivery, so its metrics belong to the common registry
+  // (before this they were registered on the proxy's, where the worker's pool
+  // numbers never showed up).
+  m_proxy.m_http_pool_metrics =
+      std::make_unique<HttpPoolMetrics>(HttpPoolMetrics{
+          reg_common.gauge(
+              "l2_http_pool_active_clients",
+              "Current number of active HTTP/SSL clients in the pool"),
+          reg_common.gauge(
+              "l2_http_pool_available_clients",
+              "Current number of available HTTP/SSL clients in the pool"),
+          reg_common.counter(
+              "l2_http_pool_client_acquisitions_total",
+              "Total number of HTTP client acquisitions from the pool"),
+          reg_common.counter(
+              "l2_http_pool_client_releases_total",
+              "Total number of HTTP client releases to the pool"),
+          reg_common.counter(
+              "l2_http_pool_stale_evictions_total",
+              "Total number of stale HTTP connections evicted from the pool"),
+          reg_common.counter(
+              "l2_http_pool_client_acquisition_timeouts_total",
+              "Total number of HTTP pool acquire timeouts (all connections in "
+              "use)"),
+          reg_common.histogram(
+              "l2_http_pool_client_acquisition_duration_seconds",
+              "Time an HTTP pool acquire waited for a free connection",
+              histogram_buckets::g_buckets.m_latency_ms_to_5s)});
+
   // Deployment identity: the value is always 1, the labels carry the build
   // version and the mode, so a dashboard (or an alert) can tell which build an
   // instance runs without relabeling gymnastics. The common registry is
@@ -269,24 +299,6 @@ void AppContext::init_proxy_metrics() {
           "l2_proxy_duplicate_tracked_clients",
           "Current number of client ids tracked by the duplicate detector "
           "(bounded by DUPLICATE_DETECTION_MAX_CLIENTS)")});
-
-  m_proxy.m_http_pool_metrics =
-      std::make_unique<HttpPoolMetrics>(HttpPoolMetrics{
-          reg_proxy.gauge(
-              "l2_http_pool_active_clients",
-              "Current number of active HTTP/SSL clients in the pool"),
-          reg_proxy.gauge(
-              "l2_http_pool_available_clients",
-              "Current number of available HTTP/SSL clients in the pool"),
-          reg_proxy.counter(
-              "l2_http_pool_client_acquisitions_total",
-              "Total number of HTTP client acquisitions from the pool"),
-          reg_proxy.counter(
-              "l2_http_pool_client_releases_total",
-              "Total number of HTTP client releases to the pool"),
-          reg_proxy.counter(
-              "l2_http_pool_stale_evictions_total",
-              "Total number of stale HTTP connections evicted from the pool")});
 
   // prometheus-cpp exports a labeled family only after the first Add(), and a
   // healthy proxy refuses nothing, so every enum value gets its zero series up

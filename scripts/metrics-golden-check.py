@@ -65,6 +65,8 @@ CATALOG = [
     "l2_http_pool_client_acquisitions_total",
     "l2_http_pool_client_releases_total",
     "l2_http_pool_stale_evictions_total",
+    "l2_http_pool_client_acquisition_timeouts_total",
+    "l2_http_pool_client_acquisition_duration_seconds",
     # Rate limiter (proxy)
     "l2_rate_limiter_tokens",
     "l2_rate_limiter_rejected_total",
