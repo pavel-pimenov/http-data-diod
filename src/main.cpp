@@ -306,6 +306,13 @@ void run_worker(AppContext &app_ctx) {
   });
   health_server.Get("/health/ready", [&worker, &app_ctx](const httplib::Request & /*req*/,
                                                  httplib::Response &res) {
+    if (!worker.is_nats_connected()) {
+      // The reason of a refusal is visible only in the body and the log, so it is
+      // counted as well.
+      app_ctx.m_worker.m_metrics->m_not_ready_total
+          .Add({{"reason", "nats_unavailable"}})
+          .Increment();
+    }
     write_nats_readiness(res, "l2-worker",
                          app_ctx.m_worker.m_metrics->m_nats_connected,
                          app_ctx.m_worker.m_metrics->m_health_ready,

@@ -245,8 +245,8 @@ enum, а не литералы в местах вызова). Частные с�
 | `l2_common_stats_page_render_duration_seconds` | histogram | — | то же для `/stats` |
 | `l2_common_stats_history_samples_total` | counter | `outcome` (ok/error) | здоровье истории метрик (`metrics_history.hpp`) |
 | `l2_common_stats_history_buffer_size` | gauge | — | заполнение буфера истории |
-| `l2_proxy_not_ready_total` | counter | `reason` | почему proxy не в ready (диагностика healthcheck) |
-| `l2_worker_not_ready_total` | counter | `reason` | то же для worker |
+| ~~`l2_proxy_not_ready_total`~~ ✅ | counter | `reason` | почему proxy не в ready (диагностика healthcheck) (сделано в раунде 186 ✅) |
+| ~~`l2_worker_not_ready_total`~~ ✅ | counter | `reason` | то же для worker (сделано в раунде 186 ✅) |
 | `l2_common_crash_dumps_total` | counter | — | записанные стектрейсы (`src/crash_handler.hpp`) |
 | `l2_proxy_duplicate_cache_evictions_total` | counter | `reason` (ttl/cap) | вытеснение из дедуп-кэша (косвенно — повторные посты) |
 | `l2_proxy_per_client_id_dropped_labels_total` | counter | — | срабатывание cap в `dynamic_labeled_family.hpp` (иначе потеря кардинальности молчалива) |

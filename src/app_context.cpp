@@ -303,6 +303,9 @@ void AppContext::init_proxy_metrics() {
           "l2_proxy_health_ready",
           "Readiness state (1 = ready, 0 = not ready) mirrored from "
           "/health/ready"),
+      reg_proxy.counter_family(
+          "l2_proxy_not_ready_total",
+          "How often the proxy reported not ready, labeled by reason"),
       reg_proxy.gauge(
           "l2_proxy_duplicate_tracked_clients",
           "Current number of client ids tracked by the duplicate detector "
@@ -428,6 +431,9 @@ void AppContext::init_worker_metrics() {
           "l2_worker_health_ready",
           "Readiness state (1 = ready, 0 = not ready) mirrored from "
           "/health/ready"),
+      reg_worker.counter_family(
+          "l2_worker_not_ready_total",
+          "How often the worker reported not ready, labeled by reason"),
       reg_worker.gauge(
           "l2_worker_graceful_shutdown_seconds",
           "Last graceful-shutdown drain duration in seconds (time from "
@@ -455,6 +461,13 @@ void AppContext::init_worker_metrics() {
   auto &db_errors = m_worker.m_metrics->m_db_query_errors_total;
   for (const char *error_class : g_db_error_classes) {
     db_errors.Add({{"error_class", error_class}});
+  }
+
+  // The not-ready reasons (proxy and worker) — the family must exist before
+  // the first refusal, otherwise it would not be exported at all.
+  for (const char *reason : g_not_ready_reasons) {
+    m_proxy.m_metrics->m_not_ready_total.Add({{"reason", reason}});
+    m_worker.m_metrics->m_not_ready_total.Add({{"reason", reason}});
   }
 
   // Same for the retry outcomes.

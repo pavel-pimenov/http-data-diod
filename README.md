@@ -439,6 +439,8 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 |---|---|---|---|
 | `l2_common_build_info` | gauge | `version`, `mode` | Информация о сборке: значение всегда `1`, версия и режим — в метках |
 | `l2_common_metrics_render_duration_seconds` | histogram | — | Стоимость рендера экспозиции `/metrics` (растёт с кардинальностью метрик) |
+| `l2_proxy_not_ready_total` | counter | `reason` | Как часто прокси отвечал «не готов» и почему (`nats_unavailable` / `ping_failed` / `health_check_failed`) |
+| `l2_worker_not_ready_total` | counter | `reason` | Как часто воркер отвечал «не готов» и почему |
 
 > Регистрируется в том же общем реестре `l2_common` (рядом с tracing/sentry),
 > поэтому серия есть в `/metrics` любого режима. Константа `1` плюс метки

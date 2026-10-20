@@ -200,6 +200,8 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_worker_db_query_errors_total", {"error_class"}},
       {"l2_tracing_spans_dropped_total", {"reason"}},
       {"l2_worker_sentry_events_dropped_total", {"reason"}},
+      {"l2_proxy_not_ready_total", {"reason"}},
+      {"l2_worker_not_ready_total", {"reason"}},
   };
 
   std::map<std::string, std::set<std::string>> actual;

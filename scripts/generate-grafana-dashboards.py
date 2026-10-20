@@ -2384,7 +2384,10 @@ def create_proxy_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_proxy_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}  # noqa: E501
+            {"expr": "l2_proxy_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"},  # noqa: E501
+            # Почему сервис отвечал «не готов»: причина видна только в теле
+            # /health/ready и в логе.
+            {"expr": "sum by (reason) (rate(l2_proxy_not_ready_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{reason}}", "refId": "B"},  # noqa: E501
         ]
     ))
     y += 8
@@ -2876,7 +2879,8 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"}  # noqa: E501
+            {"expr": "l2_worker_health_ready{vm=~\"${vm:regex}\"}", "legendFormat": "ready", "refId": "A"},  # noqa: E501
+            {"expr": "sum by (reason) (rate(l2_worker_not_ready_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{reason}}", "refId": "B"},  # noqa: E501
         ]
     ))
     y += 8

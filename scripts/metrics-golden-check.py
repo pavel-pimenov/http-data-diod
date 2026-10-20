@@ -123,6 +123,8 @@ CATALOG = [
     "l2_common_metrics_render_duration_seconds",
     "l2_tracing_traceparent_invalid_total",
     "l2_worker_sentry_events_dropped_total",
+    "l2_proxy_not_ready_total",
+    "l2_worker_not_ready_total",
     "l2_tracing_queue_size",
     "l2_tracing_last_send_duration_seconds",
     "l2_tracing_send_latency_seconds",

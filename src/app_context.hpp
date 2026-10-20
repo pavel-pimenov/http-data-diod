@@ -15,6 +15,11 @@
 #include <string>
 #include <vector>
 
+// Reasons a service can report "not ready". The list is the single source of
+// truth: the AppContext pre-creates a series per reason.
+inline constexpr std::array<const char *, 3> g_not_ready_reasons = {
+    "nats_unavailable", "ping_failed", "health_check_failed"};
+
 struct ProxyMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
   // Intentional design for Prometheus metrics
@@ -79,6 +84,9 @@ struct ProxyMetrics {
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
   prometheus::Gauge &m_health_ready;
+  // How often the service reported "not ready", by reason: the reason itself is
+  // only visible in the /health/ready body and in the log.
+  prometheus::Family<prometheus::Counter> &m_not_ready_total;
   // Client ids currently tracked by the duplicate detector (bounded by
   // DUPLICATE_DETECTION_MAX_CLIENTS); updated from the periodic stats logger.
   prometheus::Gauge &m_duplicate_tracked_clients;
@@ -174,6 +182,8 @@ struct WorkerMetrics {
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
   prometheus::Gauge &m_health_ready;
+  // Same as the proxy's: how often the worker reported "not ready", by reason.
+  prometheus::Family<prometheus::Counter> &m_not_ready_total;
   // Last graceful-shutdown drain duration in seconds (time from SIGTERM to
   // full shutdown, 0 while running). Для prod-мониторинга деплоев.
   prometheus::Gauge &m_graceful_shutdown_seconds;
