@@ -2,11 +2,16 @@
 
 #include "logger.hpp"
 
+#include <prometheus/collectable.h>
+#include <prometheus/metric_family.h>
 #include <prometheus/text_serializer.h>
 
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr const char *kMetricsContentType =

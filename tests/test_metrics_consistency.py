@@ -373,6 +373,7 @@ class GoldenRequiredTest(unittest.TestCase):
         "l2_proxy_db_nats_request_duration_seconds",
         "l2_worker_db_requests_total",
         "l2_worker_db_query_duration_seconds",
+        "l2_worker_db_query_errors_total",
     }
 
     def test_default_requires_full_catalogue(self):

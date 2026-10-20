@@ -83,45 +83,58 @@ class CompareTest(unittest.TestCase):
         current = dict(self.baseline())
         current["app_context.cpp"] = stat(100, 90)
         current.pop("gone.cpp")
-        regressions, new_files, removed = crc.compare(self.baseline(), current, 0.0)
+        regressions, shifts, new_files, new_files_with_gaps, removed = (
+            crc.compare(self.baseline(), current, 0.0))
         self.assertEqual([r[0] for r in regressions], ["app_context.cpp"])
         self.assertAlmostEqual(regressions[0][3], 5.0)
+        # The file gained uncovered lines (5 -> 10): a real loss.
+        self.assertEqual(regressions[0][4], 5)
+        self.assertEqual(shifts, [])
         self.assertEqual(new_files, [])
+        self.assertEqual(new_files_with_gaps, [])
         self.assertEqual(removed, ["gone.cpp"])
 
     def test_new_lines_without_coverage_are_a_regression(self):
         current = dict(self.baseline())
         current["app_context.cpp"] = stat(110, 95)
-        regressions, _, _ = crc.compare(self.baseline(), current, 0.0)
+        regressions = crc.compare(self.baseline(), current, 0.0)[0]
         self.assertEqual(len(regressions), 1)
 
     def test_same_coverage_and_improvement_pass(self):
         current = dict(self.baseline())
         current["app_context.cpp"] = stat(110, 105)
-        regressions, new_files, _ = crc.compare(self.baseline(), current, 0.0)
+        regressions, shifts, new_files, _, _ = crc.compare(
+            self.baseline(), current, 0.0)
         self.assertEqual(regressions, [])
+        self.assertEqual(shifts, [])
         self.assertEqual(new_files, [])
 
-    def test_max_drop_tolerates_small_drop(self):
+    def test_percentage_drop_without_new_uncovered_lines_is_a_shift(self):
+        # The lines moved to another file: the uncovered count stayed the same,
+        # so this is a structural shift and not a coverage loss.
         current = dict(self.baseline())
-        current["app_context.cpp"] = stat(100, 94)
-        regressions = crc.compare(self.baseline(), current, 0.0)[0]
-        self.assertEqual([r[0] for r in regressions], ["app_context.cpp"])
-        self.assertEqual(crc.compare(self.baseline(), current, 1.0)[0], [])
-        regressions = crc.compare(self.baseline(), current, 0.5)[0]
-        self.assertEqual([r[0] for r in regressions], ["app_context.cpp"])
+        # Same uncovered count (5), smaller file: the percentage drops only
+        # because the denominator shrank.
+        current["app_context.cpp"] = stat(90, 85)
+        regressions, shifts, _, _, _ = crc.compare(self.baseline(), current, 0.0)
+        self.assertEqual(regressions, [])
+        self.assertEqual([s[0] for s in shifts], ["app_context.cpp"])
 
     def test_new_production_file_is_reported(self):
         current = dict(self.baseline())
         current["new_feature.cpp"] = stat(10, 10)
-        _, new_files, _ = crc.compare(self.baseline(), current, 0.0)
+        _, _, new_files, new_files_with_gaps, _ = crc.compare(
+            self.baseline(), current, 0.0)
         self.assertEqual(new_files, ["new_feature.cpp"])
+        # Fully covered: reported, but it does not fail the gate.
+        self.assertEqual(new_files_with_gaps, [])
 
     def test_test_files_are_ignored_in_both_directions(self):
         current = dict(self.baseline())
         current["test_regression.cpp"] = stat(100, 10)
         current["test_new.cpp"] = stat(50, 50)
-        regressions, new_files, _ = crc.compare(self.baseline(), current, 0.0)
+        regressions, _, new_files, _, _ = crc.compare(
+            self.baseline(), current, 0.0)
         self.assertEqual(regressions, [])
         self.assertEqual(new_files, [])
 
@@ -181,7 +194,22 @@ class MainTest(unittest.TestCase):
                            "--baseline", str(baseline_path)])
             self.assertEqual(rc, 1)
 
-    def test_new_file_without_baseline_fails(self):
+    def test_new_file_with_uncovered_lines_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = pathlib.Path(tmp) / "cov.json"
+            baseline_path = pathlib.Path(tmp) / "baseline.json"
+            self.write_report(report_path, {"app_context.cpp": [line(1)]})
+            self.run_main(["--report", str(report_path),
+                      "--baseline", str(baseline_path), "--update"])
+            self.write_report(report_path, {"app_context.cpp": [line(1)],
+                                            "brand_new.cpp": [line(0)]})
+            rc = self.run_main(["--report", str(report_path),
+                           "--baseline", str(baseline_path)])
+            self.assertEqual(rc, 1)
+
+    def test_new_fully_covered_file_only_nudges(self):
+        # A new file whose every line is covered is no coverage loss: the gate
+        # reports it (the baseline has to learn it) but does not fail.
         with tempfile.TemporaryDirectory() as tmp:
             report_path = pathlib.Path(tmp) / "cov.json"
             baseline_path = pathlib.Path(tmp) / "baseline.json"
@@ -192,7 +220,7 @@ class MainTest(unittest.TestCase):
                                             "brand_new.cpp": [line(1)]})
             rc = self.run_main(["--report", str(report_path),
                            "--baseline", str(baseline_path)])
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, 0)
 
     def test_empty_baseline_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

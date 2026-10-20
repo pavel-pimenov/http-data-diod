@@ -372,13 +372,13 @@ void AppContext::init_worker_metrics() {
           "l2_worker_duplicate_requests_total",
           "Total number of duplicate NATS requests served from dedup cache"),
       reg_worker.counter_family(
-          "l2_worker_db_query_errors_total",
-          "Failed DB queries broken down by error class (the SQLSTATE class "
-          "for PostgreSQL)"),
-      reg_worker.counter_family(
           "l2_worker_db_requests_total",
           "Total number of HTTP DB Gateway requests executed by the worker "
           "by database, type and HTTP status"),
+      reg_worker.counter_family(
+          "l2_worker_db_query_errors_total",
+          "Failed DB queries broken down by error class (the SQLSTATE class "
+          "for PostgreSQL)"),
       reg_worker.histogram_family(
           "l2_worker_db_query_duration_seconds",
           "Histogram of DB query execution duration in seconds by database"),

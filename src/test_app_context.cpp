@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <stdlib.h>
 #include <memory>
+#include <set>
 #include <map>
 #include <string>
 #include <vector>
@@ -179,6 +180,30 @@ TEST_CASE("AppContext: proxy pre-creates the rejection reason series",
   REQUIRE(reasons == std::vector<std::string>{"duplicate", "invalid_json",
                                             "rate_limit_global",
                                             "rate_limit_per_ip"});
+}
+
+TEST_CASE("AppContext: the DB error family is labeled by error class",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "worker"}};
+
+  AppContext const ctx;
+
+  // The metric structs are aggregate-initialised positionally, so a mismatch
+  // between the declaration order and the registration order silently swaps
+  // two families (and their label sets). This pins the label set of the error
+  // family so such a swap cannot pass unnoticed.
+  std::set<std::string> labels;
+  for (const auto &family : ctx.m_worker_registry->Collect()) {
+    if (family.name != "l2_worker_db_query_errors_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        labels.insert(label.name);
+      }
+    }
+  }
+  REQUIRE(labels == std::set<std::string>{"error_class"});
 }
 
 TEST_CASE("AppContext: build info carries the version and the mode",
