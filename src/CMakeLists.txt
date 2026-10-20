@@ -301,14 +301,6 @@ endif()
 # Find PostgreSQL client (libpq) for the DB gateway's postgres driver
 find_package(PostgreSQL REQUIRED)
 
-# Find CLI11 (command line parsing) - optional
-if(BUILD_TESTS)
-    find_package(CLI11 CONFIG QUIET)
-    if(NOT CLI11_FOUND)
-        find_package(CLI11 REQUIRED)
-    endif()
-endif()
-
 # No find_package needed
 
 
@@ -505,7 +497,7 @@ endif()
 
 # Unit tests (optional, enabled with -DBUILD_TESTS=ON)
 if(BUILD_TESTS)
-    message(STATUS "Building unit tests with Catch2 and CLI11")
+    message(STATUS "Building unit tests with Catch2")
     
     # Component tests
     # Unity-build constraint: anonymous-namespace names must be unique across
@@ -580,7 +572,6 @@ if(BUILD_TESTS)
     )
     target_link_libraries(test_components PRIVATE 
         Catch2::Catch2WithMain 
-        CLI11::CLI11
         pthread
         spdlog::spdlog_header_only
         prometheus-cpp::pull

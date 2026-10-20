@@ -981,36 +981,34 @@ TEST_CASE("Common utils ext: handle_processing_error_with_category maps "
   auto &inv = test_support::make_counter(*registry, "cu_total", "h");
   auto &json_err = test_support::make_counter(*registry, "cu_json", "h");
   auto &valid_err = test_support::make_counter(*registry, "cu_valid", "h");
-  auto &decomp_err = test_support::make_counter(*registry, "cu_decomp", "h");
   auto &other_err = test_support::make_counter(*registry, "cu_other", "h");
   ProcessingErrorMetrics metrics;
   metrics.m_total_errors = &inv;
   metrics.m_json_errors = &json_err;
   metrics.m_validation_errors = &valid_err;
-  metrics.m_decompression_errors = &decomp_err;
   metrics.m_other_errors = &other_err;
 
   handle_processing_error_with_category("invalid json: syntax error", metrics);
   REQUIRE(inv.Value() == 1.0);
   REQUIRE(json_err.Value() == 1.0);
   REQUIRE(valid_err.Value() == 0.0);
-  REQUIRE(decomp_err.Value() == 0.0);
   REQUIRE(other_err.Value() == 0.0);
 
+  // No dedicated counter for the decompression category: it falls back to
+  // the "other" counter (the category itself still shows up in the log).
   handle_processing_error_with_category("bzip2 decompression failed", metrics);
   REQUIRE(inv.Value() == 2.0);
-  REQUIRE(decomp_err.Value() == 1.0);
-  REQUIRE(other_err.Value() == 0.0);
+  REQUIRE(other_err.Value() == 1.0);
 
   handle_processing_error_with_category(
       "validation failed: unknown field missing", metrics);
   REQUIRE(inv.Value() == 3.0);
   REQUIRE(valid_err.Value() == 1.0);
-  REQUIRE(other_err.Value() == 0.0);
+  REQUIRE(other_err.Value() == 1.0);
 
   handle_processing_error_with_category("random mystery error", metrics);
   REQUIRE(inv.Value() == 4.0);
-  REQUIRE(other_err.Value() == 1.0);
+  REQUIRE(other_err.Value() == 2.0);
 }
 
 TEST_CASE("Common utils ext: handle_processing_error_with_category tolerates "

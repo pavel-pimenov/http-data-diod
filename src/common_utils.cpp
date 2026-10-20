@@ -197,9 +197,7 @@ void handle_processing_error_with_category(
       std::array{std::pair{ProcessingErrorType::JSON_PARSE_ERROR,
                            metrics.m_json_errors},
                  std::pair{ProcessingErrorType::VALIDATION_ERROR,
-                           metrics.m_validation_errors},
-                 std::pair{ProcessingErrorType::DECOMPRESSION_ERROR,
-                           metrics.m_decompression_errors}});
+                           metrics.m_validation_errors}});
 }
 
 std::expected<json, std::string>

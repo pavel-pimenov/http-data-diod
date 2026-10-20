@@ -3,6 +3,7 @@
 
 #include "error_categorizer.hpp"
 #include <prometheus/counter.h>
+#include <string>
 
 // ============================================================================
 // Error Metrics Structs
@@ -12,7 +13,6 @@ struct ProcessingErrorMetrics {
   prometheus::Counter *m_total_errors = nullptr;
   prometheus::Counter *m_json_errors = nullptr;
   prometheus::Counter *m_validation_errors = nullptr;
-  prometheus::Counter *m_decompression_errors = nullptr;
   prometheus::Counter *m_other_errors = nullptr;
 };
 

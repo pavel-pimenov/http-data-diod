@@ -58,6 +58,11 @@ ARG DEBIAN_FRONTEND=noninteractive
 # (installed automatically). libzstd-dev and pkg-config are not referenced by
 # the application or either CMake build (zstd comes at link time from the
 # libzstd1 runtime lib, pulled in by libssl3t64).
+# libcli11-dev is gone: CLI11 was never included by any project source, so the
+# package only added download/install time to every build.
+# libgoogle-perftools-dev is NOT installed here: it is needed only by
+# ENABLE_PROFILER=ON builds and is installed in its own conditional layer
+# below (keeps the heavy base apt layer cached and out of the default image).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && \
@@ -70,13 +75,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     zlib1g-dev \
     libssl-dev \
     libspdlog-dev \
-    libgoogle-perftools-dev \
     clang-tidy \
     clang-format \
     cppcheck \
     shellcheck \
     catch2 \
-    libcli11-dev \
     libpq-dev \
     postgresql \
     && apt-get clean
@@ -150,6 +153,17 @@ ARG ENABLE_ASAN=false
 # not the apt-install layers above (an ARG in scope re-keys every later step).
 # CACHE_BUST forces rebuild when changed: bump value or set via env to invalidate cache
 ARG CACHE_BUST=1
+# gperftools is needed only by ENABLE_PROFILER=ON builds (CMake links
+# tcmalloc_and_profiler). It lives in its own layer so the default build
+# neither downloads nor carries it, and so the heavy base apt layer above
+# stays cached for both build modes.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ "$ENABLE_PROFILER" = "true" ]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends libgoogle-perftools-dev && \
+        apt-get clean; \
+    fi
 # The /app/build mount persists the ninja build dir between RUN invocations, so
 # a code change recompiles only the affected unity batch and relinks instead of
 # rebuilding everything via ccache. The id embeds the build mode + CACHE_BUST:
