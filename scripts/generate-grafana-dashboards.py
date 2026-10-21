@@ -2588,6 +2588,19 @@ def create_worker_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 89: L2 call duration per backend — the aggregate panel above
+    # cannot tell which of the configured L2 servers is slow.
+    panels.append(create_timeseries_panel(
+        title="L2 длительность по бэкенду (p99)",
+        id=89,
+        x=0, y=y, w=24, h=8,
+        unit="s",
+        targets=[
+            {"expr": "histogram_quantile(0.99, sum by (le, backend) (rate(l2_worker_l2_server_call_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m])))", "legendFormat": "{{backend}} p99", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     # Row 4: Response Size
     panels.append(create_row_panel("Размер ответа", 30, y))
     y += 1

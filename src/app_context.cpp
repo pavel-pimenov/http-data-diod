@@ -400,6 +400,10 @@ void AppContext::init_worker_metrics() {
           "l2_worker_l2_call_duration_seconds",
           "Histogram of L2 server call duration in seconds",
           histogram_buckets::g_buckets.m_latency_5ms_to_10s),
+      reg_worker.histogram_family(
+          "l2_worker_l2_server_call_duration_seconds",
+          "Histogram of the L2 server call duration per backend (label: the "
+          "configured L2 server URL)"),
       reg_worker.counter(
           "l2_worker_processing_json_errors_total",
           "JSON parsing errors during request processing"),
@@ -519,6 +523,15 @@ void AppContext::init_worker_metrics() {
   auto &retries = m_worker.m_metrics->m_retries_total;
   for (const char *outcome : g_worker_retry_outcomes) {
     retries.Add({{"outcome", outcome}});
+  }
+
+  // The per-backend latency family needs the bucket bounds on every Add()
+  // (the family does not remember them), and the set of backends is known
+  // from the config, so one zero series per configured L2 server is created
+  // up front — otherwise the family would be absent until the first call.
+  auto &per_backend = m_worker.m_metrics->m_l2_server_call_duration_seconds;
+  for (const auto &url : m_config.m_server.m_urls) {
+    per_backend.Add({{"backend", url}}, latency_buckets_5ms_to_10s());
   }
 }
 

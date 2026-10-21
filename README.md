@@ -257,6 +257,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
 - `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
 - `l2_worker_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при инициализации пула): без знаменателя глубина очереди не позволяет судить о насыщении. Предел либо задаётся явно (`L2_WORKER_QUEUE_SIZE`), либо выводится автоматически как 8 задач на поток (`L2_WORKER_THREADS`); воркер с `THREAD_POOL_TYPE=none` принудительно переводится на обычный пул, поэтому ёмкость всегда определена.
+- `l2_worker_l2_server_call_duration_seconds{backend}` — латентность вызова L2 по каждому настроенному бэкенду (histogram с меткой `backend` = базовый URL из `L2_SERVER_URLS`). Агрегатная `l2_worker_l2_call_duration_seconds` не отвечает на вопрос «какой из бэкендов медленный», когда их несколько; число серий ограничено конфигом, одна нулевая серия на каждый URL создаётся при старте.
 - `l2_proxy_task_queue_size` — глубина очереди задач HTTP-пула прокси (gauge): число принятых соединений, которые ещё не забрал воркер-тред. Считается в обёртке `TimedTaskQueue` (список задач у httplib приватный, поэтому иначе глубину не увидеть).
 - `l2_proxy_task_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при создании пула): `0` означает «предела нет» (по умолчанию очередь растёт вместе с нагрузкой), ненулевое значение — фактический лимит из `L2_PROXY_MAX_QUEUED_REQUESTS`. При переполнении очереди httplib отклоняет соединение (`l2_proxy_task_queue_rejected_total`), то есть лимит превращает неограниченное потребление памяти в явные отказы.
 - `l2_worker_nats_connected` — состояние связи воркера с NATS (1/0, gauge).
@@ -662,6 +663,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_bytes_sent_total` | counter | — | Байт, отправлено воркером |
 | `l2_worker_request_duration_seconds` | histogram | — | Длительность обработки запроса |
 | `l2_worker_l2_call_duration_seconds` | histogram | — | Длительность вызова L2-сервера |
+| `l2_worker_l2_server_call_duration_seconds` | histogram | `backend` | Длительность вызова L2-сервера по каждому настроенному бэкенду (метка — базовый URL из `L2_SERVER_URLS`) |
 | `l2_worker_processing_json_errors_total` | counter | — | Ошибки разбора JSON |
 | `l2_worker_processing_validation_errors_total` | counter | — | Ошибки валидации запроса |
 | `l2_worker_l2_response_size_bytes` | histogram | — | Размер ответа L2 |

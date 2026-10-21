@@ -6,6 +6,7 @@
 #include "json_schema_validator.hpp"
 #include "json_utils.hpp"
 #include "l2_routing.hpp"
+#include "metrics_manager.hpp"
 #include "nats_client.hpp"
 #include "pool_executor.hpp"
 #include "time_utils.hpp"
@@ -233,9 +234,20 @@ HttpResponse L2Worker::call_l2_server(
   Logger::debug("Calling L2 server: URL={}", url);
 
   int final_attempt = 0;
+  const auto backend_call_started_at = std::chrono::steady_clock::now();
   HttpResponse http_response =
       execute_l2_call_with_retry(url, query, body, traceparent_result,
                                  forwarded_headers, method, final_attempt);
+  // The aggregate histogram above cannot tell which backend is slow when
+  // several L2_SERVER_URLS are configured, so the same duration is observed
+  // per backend (the label is the configured base URL — a bounded set).
+  const auto backend_call_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                     backend_call_started_at)
+          .count();
+  m_ctx.m_worker.m_metrics->m_l2_server_call_duration_seconds
+      .Add({{"backend", selected_url}}, latency_buckets_5ms_to_10s())
+      .Observe(backend_call_seconds);
   // 5xx from L2 is a server failure (circuit-breaker/retry signal) even
   // when the response carries headers (e.g. JSON error). 4xx is client error
   // and does not trip the breaker.

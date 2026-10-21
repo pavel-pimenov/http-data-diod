@@ -231,6 +231,7 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_worker_not_ready_total", {"reason"}},
       {"l2_common_stats_history_samples_total", {"outcome"}},
       {"l2_proxy_duplicate_cache_evictions_total", {"reason"}},
+      {"l2_worker_l2_server_call_duration_seconds", {"backend"}},
   };
 
   std::map<std::string, std::set<std::string>> actual;

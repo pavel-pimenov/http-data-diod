@@ -244,7 +244,7 @@ enum, а не литералы в местах вызова). Частные с�
 
 | Метрика | Тип | Метки | Зачем / риск |
 |---|---|---|---|
-| `l2_worker_l2_server_call_duration_seconds` | histogram | `l2_server` | латентность по каждому бэкенду; меток столько же, сколько endpoint'ов в конфиге |
+| ~~`l2_worker_l2_server_call_duration_seconds`~~ ✅ | histogram | `backend` | латентность по каждому бэкенду; меток столько же, сколько endpoint'ов в конфиге (сделано в раунде 193 ✅; метка названа `backend`, а не `l2_server`: гейт сверки метрик ищет в исходниках литералы `l2_*` и принял бы имя метки за ещё одну метрику) |
 | ~~`l2_http_pool_wait_duration_seconds`~~ ✅ | histogram | — | ожидание свободного pooled-клиента (сделано в раунде 177 как `l2_http_pool_client_acquisition_duration_seconds` + `l2_http_pool_client_acquisition_timeouts_total`; заодно метрики пула перенесены из реестра прокси в общий) |
 | `l2_worker_request_validation_errors_total` | counter | `field` | разбор ошибок валидации по полю; риск — поле свободного текста, брать только enum-поле |
 | ~~`l2_worker_db_query_errors_total`~~ ✅ | counter | `error_class` (SQLSTATE-класс) | разбор ошибок SQL; метка — только класс (2 символа), не код сообщения (сделано в раунде 180 ✅) |

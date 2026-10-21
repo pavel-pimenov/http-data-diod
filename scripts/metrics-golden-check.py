@@ -88,6 +88,7 @@ CATALOG = [
     "l2_worker_bytes_sent_total",
     "l2_worker_request_duration_seconds",
     "l2_worker_l2_call_duration_seconds",
+    "l2_worker_l2_server_call_duration_seconds",
     "l2_worker_processing_json_errors_total",
     "l2_worker_processing_validation_errors_total",
     "l2_worker_l2_response_size_bytes",

@@ -155,6 +155,10 @@ struct WorkerMetrics {
   prometheus::Counter &m_bytes_sent;
   prometheus::Histogram &m_request_duration_seconds;
   prometheus::Histogram &m_l2_call_duration_seconds;
+  // Latency of the L2 call per backend (label: the configured L2 server URL).
+  // The aggregate histogram cannot tell which backend is slow when several
+  // L2_SERVER_URLS are configured; the label set is bounded by the config.
+  prometheus::Family<prometheus::Histogram> &m_l2_server_call_duration_seconds;
   prometheus::Counter &m_processing_json_errors;
   prometheus::Counter &m_processing_validation_errors;
   prometheus::Histogram &m_l2_response_size_bytes;

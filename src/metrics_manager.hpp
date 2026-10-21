@@ -46,6 +46,14 @@ inline const std::vector<double> &latency_buckets_ms_to_10s() {
   return g_latency_buckets;
 }
 
+// Same for the 5ms..10s table (the bounds of l2_worker_l2_call_duration_seconds).
+inline const std::vector<double> &latency_buckets_5ms_to_10s() {
+  static const std::vector<double> g_latency_buckets = {
+      histogram_buckets::g_buckets.m_latency_5ms_to_10s.begin(),
+      histogram_buckets::g_buckets.m_latency_5ms_to_10s.end()};
+  return g_latency_buckets;
+}
+
 namespace metrics_detail {
 // Maps a metric type to its prometheus-cpp builder, so the create_* wrappers
 // share one implementation instead of repeating the builder chain.

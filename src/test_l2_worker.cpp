@@ -359,6 +359,32 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(L2WorkerTestAccess::extract_l2_server_span_id(R"({"x":1})")
               .empty());
 
+  // The per-backend latency family carries one series per configured L2
+  // server (the set comes from the config, so the cardinality is bounded) and
+  // the samples land on the backend that actually served the call.
+  std::map<std::string, uint64_t> per_backend_samples;
+  for (const auto &family : ctx.m_worker_registry->Collect()) {
+    if (family.name != "l2_worker_l2_server_call_duration_seconds") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      std::string backend;
+      for (const auto &label : metric.label) {
+        if (label.name == "backend") {
+          backend = label.value;
+        }
+      }
+      per_backend_samples[backend] = metric.histogram.sample_count;
+    }
+  }
+  REQUIRE(per_backend_samples.size() == 2);
+  // Four calls reached the loopback backend (POST, GET, GET with a query and
+  // the 404 one); the request denied before the call is not counted.
+  REQUIRE(per_backend_samples[g_l2_backend().api_url()] == 4);
+  // The second configured backend exists in the family from the start (it was
+  // never called).
+  REQUIRE(per_backend_samples["http://127.0.0.1:1/dead"] == 0);
+
   std::string selected_url;
   REQUIRE(L2WorkerTestAccess::validate_l2_server_access(
       worker, "/api/value", selected_url));
