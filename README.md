@@ -256,6 +256,8 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
 - `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
 - `l2_worker_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при инициализации пула): без знаменателя глубина очереди не позволяет судить о насыщении. Предел либо задаётся явно (`L2_WORKER_QUEUE_SIZE`), либо выводится автоматически как 8 задач на поток (`L2_WORKER_THREADS`); воркер с `THREAD_POOL_TYPE=none` принудительно переводится на обычный пул, поэтому ёмкость всегда определена.
+- `l2_proxy_task_queue_size` — глубина очереди задач HTTP-пула прокси (gauge): число принятых соединений, которые ещё не забрал воркер-тред. Считается в обёртке `TimedTaskQueue` (список задач у httplib приватный, поэтому иначе глубину не увидеть).
+- `l2_proxy_task_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при создании пула): `0` означает «предела нет» (по умолчанию очередь растёт вместе с нагрузкой), ненулевое значение — фактический лимит из `L2_PROXY_MAX_QUEUED_REQUESTS`. При переполнении очереди httplib отклоняет соединение (`l2_proxy_task_queue_rejected_total`), то есть лимит превращает неограниченное потребление памяти в явные отказы.
 - `l2_worker_nats_connected` — состояние связи воркера с NATS (1/0, gauge).
 - `l2_worker_health_ready` — готовность воркера по `/health/ready` (1/0, gauge).
 - `l2_server_responses_total{status="..."}` — ответы L2-сервера по HTTP-статусу (counter family).
@@ -566,6 +568,8 @@ HTTP-эндпоинт.
 | `l2_proxy_task_queue_wait_seconds` | histogram | — | Ожидание HTTP-запроса в очереди задач прокси до старта воркер-треда |
 | `l2_proxy_task_queue_enqueued_total` | counter | — | Принято задач пулом прокси |
 | `l2_proxy_task_queue_rejected_total` | counter | — | Отклонено задач пулом прокси (лимит очереди) |
+| `l2_proxy_task_queue_size` | gauge | — | Глубина очереди задач прокси (принятые соединения, которые ещё не забрал воркер-тред) |
+| `l2_proxy_task_queue_capacity` | gauge | — | Предел очереди задач прокси (0 = без предела; из `L2_PROXY_MAX_QUEUED_REQUESTS`) |
 | `l2_proxy_bytes_received_total` | counter | — | Байт, получено от клиентов |
 | `l2_proxy_bytes_sent_total` | counter | — | Байт, отправлено клиентам |
 | `l2_proxy_request_duration_seconds` | histogram | — | Длительность обработки запроса |

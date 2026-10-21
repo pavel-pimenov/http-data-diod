@@ -274,13 +274,15 @@ void run_proxy(AppContext &app_ctx) {
       };
 
   // Proxy-only: measures how long each accepted request waits in the task
-  // queue before a worker thread starts it (see timed_task_queue.hpp).
+  // queue before a worker thread starts it (see timed_task_queue.hpp), and how
+  // many tasks are waiting there right now.
   auto timed_task_queue_factory = [&app_ctx]() -> httplib::TaskQueue * {
     auto &metrics = *app_ctx.m_proxy.m_metrics;
-    return new TimedTaskQueue(metrics.m_task_queue_enqueued_total,
-                              metrics.m_task_queue_rejected_total,
-                              metrics.m_task_queue_wait_seconds,
-                              CPPHTTPLIB_THREAD_POOL_COUNT);
+    return new TimedTaskQueue(
+        metrics.m_task_queue_enqueued_total, metrics.m_task_queue_rejected_total,
+        metrics.m_task_queue_wait_seconds, metrics.m_task_queue_size,
+        metrics.m_task_queue_capacity, CPPHTTPLIB_THREAD_POOL_COUNT, 0,
+        static_cast<size_t>(app_ctx.m_config.m_proxy.m_max_queued_requests));
   };
 
   run_httplib_server(app_ctx, request_handler, app_ctx.m_config.m_proxy.m_port,

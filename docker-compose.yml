@@ -460,6 +460,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - REQUEST_TIMEOUT_SECONDS=30
+      # Limit on the number of HTTP tasks waiting in the proxy's task queue
+      # (0 = unlimited: the queue grows with the load, saturation is visible
+      # through l2_proxy_task_queue_size / l2_proxy_task_queue_wait_seconds).
+      # A non-zero value turns queue overflow into a rejected request instead
+      # of unbounded memory growth.
+      - L2_PROXY_MAX_QUEUED_REQUESTS=${L2_PROXY_MAX_QUEUED_REQUESTS:-0}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
       - ENABLE_TRACING=true
       # NATS Configuration

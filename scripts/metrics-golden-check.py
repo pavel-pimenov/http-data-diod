@@ -59,6 +59,8 @@ CATALOG = [
     "l2_proxy_task_queue_wait_seconds",
     "l2_proxy_task_queue_enqueued_total",
     "l2_proxy_task_queue_rejected_total",
+    "l2_proxy_task_queue_size",
+    "l2_proxy_task_queue_capacity",
     # HTTP client pool (proxy registry)
     "l2_http_pool_active_clients",
     "l2_http_pool_available_clients",

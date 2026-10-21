@@ -152,6 +152,10 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
   check(non_negative(cfg.m_proxy.m_max_retries),
         std::format("Invalid max retries: {} (must be >= 0)",
                     cfg.m_proxy.m_max_retries));
+  check(non_negative(cfg.m_proxy.m_max_queued_requests),
+        std::format("Invalid L2_PROXY_MAX_QUEUED_REQUESTS: {} (must be >= 0, "
+                    "0 = unlimited)",
+                    cfg.m_proxy.m_max_queued_requests));
   check(positive(cfg.m_proxy.m_http_pool_size),
         std::format("Invalid HTTP pool size: {} (must be > 0)",
                     cfg.m_proxy.m_http_pool_size));
@@ -441,6 +445,8 @@ void Config::load_server_timeout_config() {
   m_worker.m_queue_size =
       get_env_int("L2_WORKER_QUEUE_SIZE", m_worker.m_queue_size);
   m_proxy.m_max_retries = get_env_int("MAX_RETRIES", m_proxy.m_max_retries);
+  m_proxy.m_max_queued_requests =
+      get_env_int("L2_PROXY_MAX_QUEUED_REQUESTS", m_proxy.m_max_queued_requests);
   m_ssl.m_enable_server_certificate_verification =
       get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION",
                    m_ssl.m_enable_server_certificate_verification);

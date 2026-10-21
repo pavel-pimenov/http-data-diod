@@ -2105,6 +2105,19 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 87: Task queue depth vs capacity
+    panels.append(create_timeseries_panel(
+        title="Task queue depth (proxy)",
+        id=87,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": 'l2_proxy_task_queue_size{vm=~"${vm:regex}"}', "legendFormat": "depth", "refId": "A"},  # noqa: E501
+            {"expr": 'l2_proxy_task_queue_capacity{vm=~"${vm:regex}"}', "legendFormat": "capacity", "refId": "B"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     # Row 6: Connection Pool
     panels.append(create_row_panel("Пул соединений", 50, y))
     y += 1

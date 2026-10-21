@@ -37,7 +37,7 @@
 | proxy rate limiting | `l2_rate_limiter_tokens`, `l2_rate_limiter_rejected_total`, `l2_per_ip_*` (requests/rejected/ips_tracked), `l2_proxy_per_client_id_*` (requests/rejected/latency), `l2_proxy_per_ip_*` |
 | proxy duplicate | `duplicate_requests_total`, `duplicate_posts_detected_total`, `duplicate_tracked_clients`, `per_client_id_duplicate_requests_total`, `per_client_id_duplicate_rejected_total` |
 | proxy DB/NATS-клиент | `db_requests_total`, `db_request_duration_seconds`, `db_nats_request_duration_seconds`, `nats_connected`, `nats_connection_creates_total`, `nats_connection_errors_total`, `nats_errors_total`, `nats_requests_total`, `nats_request_duration_seconds`, `nats_poll_attempts_total`, `nats_poll_attempt_duration_seconds`, `nats_poll_retry_wait_seconds` |
-| proxy task queue | `l2_proxy_task_queue_enqueued_total`, `_rejected_total`, `_wait_seconds` |
+| proxy task queue | `l2_proxy_task_queue_enqueued_total`, `_rejected_total`, `_wait_seconds`, `_size`, `_capacity` |
 | HTTP-пул (общий) | `l2_http_pool_active_clients`, `_available_clients`, `_client_acquisitions_total`, `_client_releases_total`, `_stale_evictions_total` |
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `queue_capacity`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
@@ -204,7 +204,7 @@ enum, а не литералы в местах вызова). Частные с�
 Отдельный `l2_common_uptime_seconds` не делался: uptime даёт `process_start_time_seconds` из
 стандартного экспортёра процессов, дублировать его своим gauge'ом смысла нет.
 
-### 9. Ёмкость очередей (рядом с существующими gauge'ами) 🟡 частично (round 169: воркер)
+### 9. Ёмкость очередей (рядом с существующими gauge'ами) 🟡 частично (round 169: воркер, round 191: прокси)
 `queue_size` есть, но без знаменателя нет алерта на сатурацию.
 
 | Метрика | Тип | Метки | Что закрывает |
@@ -220,11 +220,19 @@ enum, а не литералы в местах вызова). Частные с�
 × `L2_WORKER_THREADS`; в `ThreadPool` добавлены аксессоры
 `effective_queue_capacity()`/`max_queue_capacity()`).
 
-Остаток (следующий раунд): у прокси очередь задач есть, но **нет метрики
-глубины** (`ThreadPoolWrapper::queue_size()` не экспортируется) — ёмкость без
-числителя бесполезна, поэтому сначала нужна `l2_proxy_task_queue_size`
-(периодический опрос, как `l2_worker_queue_size` в воркере), и только потом
-`l2_proxy_task_queue_capacity`.
+Сделано в round 191: у прокси появились обе величины — `l2_proxy_task_queue_size`
+(глубина: принятые соединения, которые ещё не забрал воркер-тред) и
+`l2_proxy_task_queue_capacity` (предел из нового `L2_PROXY_MAX_QUEUED_REQUESTS`,
+0 = без предела). Считать глубину пришлось в обёртке `TimedTaskQueue`: список
+задач у httplib приватный, а опроса из фонового тикера нет — поэтому глубина
+считается в точке приёма задачи и в точке её старта. Ненулевой предел
+превращает переполнение очереди в отказ соединения вместо неограниченного
+роста памяти.
+
+Остаток (следующий раунд): `l2_worker_task_queue_wait_seconds` — у воркера
+очередь задач тоже есть, но время ожидания в ней не измеряется (воркер
+обрабатывает NATS-сообщения, а не HTTP-запросы, поэтому гистограмма
+работающего HTTP-пула воркера не нужна).
 
 ---
 

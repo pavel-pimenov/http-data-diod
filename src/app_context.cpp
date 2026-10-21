@@ -273,6 +273,14 @@ void AppContext::init_proxy_metrics() {
           "l2_proxy_task_queue_rejected_total",
           "Total number of tasks rejected by the proxy task queue "
           "(queue limit reached, request served with an error)"),
+      reg_proxy.gauge(
+          "l2_proxy_task_queue_size",
+          "Number of tasks waiting in the proxy task queue (accepted "
+          "connections that no worker thread has picked up yet)"),
+      reg_proxy.gauge(
+          "l2_proxy_task_queue_capacity",
+          "Limit on the number of tasks waiting in the proxy task queue "
+          "(0 = unlimited)"),
       reg_proxy.counter(
           "l2_proxy_bytes_received_total",
           "Total number of bytes received from clients"),

@@ -187,6 +187,11 @@ public:
     int m_request_timeout_seconds{30};
     int m_http_timeout_seconds{30};
     int m_max_retries{1};
+    // Limit on the number of tasks waiting in the proxy's HTTP task queue
+    // (accepted connections that no worker thread has picked up yet).
+    // 0 = unlimited (the default: the queue grows with the load and the
+    // saturation signal is the queue depth plus the wait-time histogram).
+    int m_max_queued_requests{0};
   };
 
   // Upstream l2-server HTTP endpoint(s) that the proxy (and the worker when

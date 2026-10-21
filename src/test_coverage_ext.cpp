@@ -1679,6 +1679,10 @@ struct TaskQueueFixture {
   prometheus::Histogram &m_wait =
       MetricsManager::create_histogram(m_registry, "queue_wait_seconds",
                                        "queue wait", latency_buckets_ms_to_10s());
+  prometheus::Gauge &m_queue_size =
+      MetricsManager::create_gauge(m_registry, "queue_size", "pending tasks");
+  prometheus::Gauge &m_queue_capacity = MetricsManager::create_gauge(
+      m_registry, "queue_capacity", "queue limit");
 };
 
 // The timed-task-queue tests watch an atomic flag that flips within
@@ -1706,7 +1710,8 @@ bool wait_for_flag(std::mutex &mutex, bool &flag,
 TEST_CASE("TimedTaskQueue: counts accepted tasks and observes their wait",
           "[timed-task-queue]") {
   TaskQueueFixture fixture;
-  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait, 2);
+  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait,
+                       fixture.m_queue_size, fixture.m_queue_capacity, 2);
 
   std::atomic<int> done{0};
   constexpr int kTasks = 6;
@@ -1722,13 +1727,17 @@ TEST_CASE("TimedTaskQueue: counts accepted tasks and observes their wait",
   const auto collected = fixture.m_wait.Collect();
   REQUIRE(collected.histogram.sample_count == static_cast<std::uint64_t>(kTasks));
   REQUIRE(collected.histogram.sample_sum >= 0.0);
+  // Every task was picked up, so nothing is waiting anymore.
+  REQUIRE(fixture.m_queue_size.Value() == 0.0);
+  // No limit was requested: the capacity gauge mirrors the enforced limit.
+  REQUIRE(fixture.m_queue_capacity.Value() == 0.0);
 }
 
 TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
           "[timed-task-queue]") {
   TaskQueueFixture fixture;
-  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait, 1,
-                       1, 1);
+  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait,
+                       fixture.m_queue_size, fixture.m_queue_capacity, 1, 1, 1);
 
   std::mutex gate;
   std::condition_variable gate_cv;
@@ -1752,6 +1761,9 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
   REQUIRE(wait_for_flag(gate, started, std::chrono::seconds(5)));
   REQUIRE(queue.enqueue([&done]() { done.fetch_add(1); }));
   REQUIRE_FALSE(queue.enqueue([&done]() { done.fetch_add(1); }));
+  // One task is being processed and one is waiting for a worker, so the depth
+  // gauge counts exactly the waiting one; the rejected one never entered.
+  REQUIRE(fixture.m_queue_size.Value() == 1.0);
 
   {
     std::scoped_lock const lock(gate);
@@ -1764,4 +1776,8 @@ TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",
   REQUIRE(fixture.m_enqueued.Value() == 2.0);
   REQUIRE(fixture.m_rejected.Value() == 1.0);
   REQUIRE(fixture.m_wait.Collect().histogram.sample_count == 2);
+  // Everything has been picked up, so nothing waits anymore.
+  REQUIRE(fixture.m_queue_size.Value() == 0.0);
+  // The limit the pool really enforces is mirrored by the capacity gauge.
+  REQUIRE(fixture.m_queue_capacity.Value() == 1.0);
 }

@@ -58,6 +58,11 @@ struct ProxyMetrics {
   prometheus::Histogram &m_task_queue_wait_seconds;
   prometheus::Counter &m_task_queue_enqueued_total;
   prometheus::Counter &m_task_queue_rejected_total;
+  // Depth of the proxy's HTTP task queue (accepted connections waiting for a
+  // worker thread) and the limit that queue enforces (0 = unlimited). The
+  // depth is the numerator of the proxy's saturation ratio.
+  prometheus::Gauge &m_task_queue_size;
+  prometheus::Gauge &m_task_queue_capacity;
   prometheus::Counter &m_bytes_received;
   prometheus::Counter &m_bytes_sent;
   prometheus::Histogram &m_request_duration_seconds;
