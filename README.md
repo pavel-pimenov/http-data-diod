@@ -674,6 +674,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_in_flight_requests` | gauge | — | Обрабатываемые запросы |
 | `l2_worker_queue_size` | gauge | — | Глубина очереди пула потоков |
 | `l2_worker_queue_capacity` | gauge | — | Ёмкость очереди пула потоков (знаменатель для насыщения) |
+| `l2_worker_active_workers` | gauge | — | Воркеры пула потоков, занятые задачей сейчас |
 | `l2_worker_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_worker_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 | `l2_worker_sentry_events_sent_total` | counter | — | Sentry-события успешно доставлены |

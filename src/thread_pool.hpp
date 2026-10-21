@@ -55,6 +55,11 @@ public:
 
   [[nodiscard]] size_t queue_size() const;
   [[nodiscard]] size_t thread_count() const { return m_workers.m_workers.size(); }
+  // Workers currently executing a task: the real load of the pool (the queue
+  // depth alone does not say whether the workers are busy).
+  [[nodiscard]] size_t active_count() const {
+    return m_active_workers.load(std::memory_order_relaxed);
+  }
   // Effective capacity of the task queue: the explicit limit, or the
   // automatic bound (threads * g_max_queue_per_thread) when the limit is 0.
   // The queue depth alone is not a saturation signal without this denominator.
@@ -75,6 +80,8 @@ private:
   static constexpr size_t g_max_queue_per_thread = 8;
 
   // jthread + stop_token: auto-join, cooperative cancellation
+  std::atomic<size_t> m_active_workers{0};
+
   struct Workers {
     std::vector<std::jthread> m_workers;
   } m_workers;
@@ -117,9 +124,11 @@ inline ThreadPool::ThreadPool(size_t threads, size_t max_queue_size)
           }
         }
         this->m_queue.m_not_full.notify_all();
+        this->m_active_workers.fetch_add(1, std::memory_order_relaxed);
         for (const std::function<void()> &task : batch) {
           task();
         }
+        this->m_active_workers.fetch_sub(1, std::memory_order_relaxed);
       }
     });
   }

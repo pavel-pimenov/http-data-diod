@@ -2843,6 +2843,9 @@ def create_worker_dashboard() -> Dict:
         unit="short",
         targets=[
             {"expr": "l2_worker_queue_size{vm=~\"${vm:regex}\"}", "legendFormat": "queue", "refId": "A"},  # noqa: E501
+            # Занятые воркеры: глубина очереди сама по себе не говорит,
+            # работают ли пулы.
+            {"expr": "l2_worker_active_workers{vm=~\"${vm:regex}\"}", "legendFormat": "занято воркеров", "refId": "B"},  # noqa: E501
             # Знаменатель насыщения: без ёмкости глубина очереди ничего не
             # говорит о том, близко ли пул к пределу.
             {"expr": "l2_worker_queue_capacity{vm=~\"${vm:regex}\"}", "legendFormat": "capacity", "refId": "B"}  # noqa: E501

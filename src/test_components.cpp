@@ -1631,6 +1631,47 @@ TEST_CASE("ThreadPool: Void task completes", "[thread-pool]") {
   REQUIRE(counter.load() == 1);
 }
 
+TEST_CASE("ThreadPool: active_count follows the running tasks",
+          "[thread-pool]") {
+  ThreadPool pool(2, 8);
+  REQUIRE(pool.active_count() == 0);
+
+  // The tasks are enqueued one by one: a worker takes the whole batch of
+  // pending tasks, so two tasks enqueued at once would be run by one worker.
+  std::atomic<bool> first_started{false};
+  std::atomic<bool> second_started{false};
+  std::promise<void> first_gate;
+  std::promise<void> second_gate;
+  auto first_future = first_gate.get_future();
+  auto second_future = second_gate.get_future();
+  std::vector<std::future<void>> futures;
+  futures.push_back(pool.enqueue([&] {
+    first_started.store(true);
+    first_future.wait();
+  }));
+  while (!first_started.load()) {
+    std::this_thread::yield();
+  }
+  futures.push_back(pool.enqueue([&] {
+    second_started.store(true);
+    second_future.wait();
+  }));
+  while (!second_started.load()) {
+    std::this_thread::yield();
+  }
+  // Both workers are busy with their task. The value is read before the
+  // assertions and the gates are released first: a failed assertion must not
+  // leave a worker blocked forever.
+  const size_t active_while_busy = pool.active_count();
+  first_gate.set_value();
+  second_gate.set_value();
+  for (auto &f : futures) {
+    f.get();
+  }
+  REQUIRE(active_while_busy == 2);
+  REQUIRE(pool.active_count() == 0);
+}
+
 TEST_CASE("ThreadPool: accessors report queue and thread counts",
           "[thread-pool]") {
   ThreadPool pool(1, 4);

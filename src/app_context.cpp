@@ -429,6 +429,9 @@ void AppContext::init_worker_metrics() {
           "Capacity of the worker thread-pool queue (denominator for the "
           "queue depth)"),
       reg_worker.gauge(
+          "l2_worker_active_workers",
+          "Worker thread-pool workers currently executing a task"),
+      reg_worker.gauge(
           "l2_worker_nats_connected",
           "NATS connection state (1 = connected, 0 = disconnected)"),
       reg_worker.gauge(

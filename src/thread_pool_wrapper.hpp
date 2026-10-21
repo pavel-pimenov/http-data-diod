@@ -48,6 +48,12 @@ public:
     return m_backend.m_custom_pool ? m_backend.m_custom_pool->queue_size() : 0;
   }
 
+  // Workers currently executing a task; 0 for the inline (Type::NONE) backend,
+  // which runs the task in the calling thread.
+  [[nodiscard]] size_t active_count() const {
+    return m_backend.m_custom_pool ? m_backend.m_custom_pool->active_count() : 0;
+  }
+
   // Capacity of the task queue; 0 for the inline (Type::NONE) backend, which
   // has no queue at all.
   [[nodiscard]] size_t max_queue_capacity() const {

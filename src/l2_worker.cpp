@@ -299,6 +299,8 @@ void L2Worker::update_queue_size_metric() const {
   if (m_clients.m_thread_pool) {
     m_ctx.m_worker.m_metrics->m_queue_size.Set(
         static_cast<double>(m_clients.m_thread_pool->queue_size()));
+    m_ctx.m_worker.m_metrics->m_active_workers.Set(
+        static_cast<double>(m_clients.m_thread_pool->active_count()));
   }
 }
 

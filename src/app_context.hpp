@@ -181,6 +181,9 @@ struct WorkerMetrics {
   // Capacity of the worker thread-pool queue: the denominator that turns the
   // depth into a saturation ratio.
   prometheus::Gauge &m_queue_capacity;
+  // Workers of the thread pool currently executing a task: the real load of
+  // the pool (the queue depth alone does not say whether the workers are busy).
+  prometheus::Gauge &m_active_workers;
   // NATS connection state (1 = connected, 0 = disconnected) for availability.
   prometheus::Gauge &m_nats_connected;
   // Readiness state (1 = ready, 0 = not ready) mirrored from /health/ready.
