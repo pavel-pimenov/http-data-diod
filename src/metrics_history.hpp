@@ -1,24 +1,31 @@
 #ifndef METRICS_HISTORY_HPP
 #define METRICS_HISTORY_HPP
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
 #include <deque>
+#include <exception>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <span>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "logger.hpp"
+
+#include <prometheus/client_metric.h>
+#include <prometheus/counter.h>
+#include <prometheus/family.h>
+#include <prometheus/metric_family.h>
+#include <prometheus/registry.h>
 #if __has_include(<generator>)
 #include <generator>
 #endif
-
-#include <prometheus/client_metric.h>
-#include <prometheus/metric_family.h>
-#include <prometheus/registry.h>
 
 // In-process, request-independent ring buffer of recent metric samples so the
 // /stats page can draw small "activity" sparklines (Grafana-like) without ever
@@ -52,15 +59,29 @@ inline std::string mh_format_labels(
 
 class MetricsHistory {
 public:
+  // Outcome of one sampling round: "ok", "error" (the collection threw) or
+  // "no_registry". The list is the single source of truth: the AppContext
+  // pre-creates a series per outcome.
+  static constexpr std::array<const char *, 3> g_sample_outcomes = {"ok", "error",
+                                                                 "no_registry"};
+
+  // The collector is injectable so the failure path is testable: a registry
+  // that throws must be counted, not fatal.
+  using Collector = std::function<std::vector<prometheus::MetricFamily>()>;
+
   explicit MetricsHistory(
       std::shared_ptr<prometheus::Registry> registry,
       std::chrono::seconds interval = std::chrono::seconds(15),
       std::size_t max_series_per_family = 8,
-      std::size_t max_samples = 240)
+      std::size_t max_samples = 240,
+      prometheus::Family<prometheus::Counter> *samples = nullptr,
+      Collector collector = {})
       : m_config{std::move(registry),
                  interval,
                  max_series_per_family,
-                 max_samples} {}
+                 max_samples},
+        m_samples(samples),
+        m_collector(std::move(collector)) {}
 
   ~MetricsHistory() { stop(); }
 
@@ -133,6 +154,15 @@ public:
 #endif
 
 private:
+  prometheus::Family<prometheus::Counter> *m_samples = nullptr;
+  Collector m_collector;
+
+  void count_sample(const char *outcome) {
+    if (m_samples != nullptr) {
+      m_samples->Add({{"outcome", outcome}}).Increment();
+    }
+  }
+
   void run(std::stop_token st) {
     while (!st.stop_requested()) {
       sample();
@@ -144,9 +174,20 @@ private:
 
   void sample() {
     if (!m_config.m_registry) {
+      count_sample("no_registry");
       return;
     }
-    const auto families = m_config.m_registry->Collect();
+    std::vector<prometheus::MetricFamily> families;
+    try {
+      families = m_collector ? m_collector() : m_config.m_registry->Collect();
+    } catch (const std::exception &e) {
+      // A registry that throws would otherwise take the whole process down
+      // (an uncaught exception in the sampler thread calls std::terminate).
+      Logger::error("Metrics history sampling failed: {}", e.what());
+      count_sample("error");
+      return;
+    }
+    count_sample("ok");
     const std::time_t now = std::time(nullptr);
     // span<const MetricFamily> — non-owning view над families, 0 копий
     const std::span<const prometheus::MetricFamily> fam_view(families);

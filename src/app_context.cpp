@@ -12,6 +12,7 @@
 #include "duplicate_detector.hpp"  // IWYU pragma: keep
 #include "sentry_client.hpp"
 #include "trace_logger.hpp" // IWYU pragma: keep
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <prometheus/registry.h>
@@ -70,10 +71,28 @@ void AppContext::init_common() {
   m_common_registry = std::make_shared<prometheus::Registry>();
   MetricRegistrar const reg_common(m_common_registry);
 
-  m_proxy_stats_history = std::make_unique<MetricsHistory>(m_proxy_registry);
-  m_worker_stats_history = std::make_unique<MetricsHistory>(m_worker_registry);
-  m_server_stats_history = std::make_unique<MetricsHistory>(m_server_registry);
-  m_common_stats_history = std::make_unique<MetricsHistory>(m_common_registry);
+  // The metrics history counts its sampling outcomes: a registry that throws
+  // must not take the process down silently.
+  auto &history_samples = reg_common.counter_family(
+      "l2_common_stats_history_samples_total",
+      "Sampling rounds of the metrics history, labeled by outcome (ok/error/"
+      "no_registry)");
+  for (const char *outcome : MetricsHistory::g_sample_outcomes) {
+    history_samples.Add({{"outcome", outcome}});
+  }
+  constexpr std::chrono::seconds kHistoryInterval{15};
+  constexpr std::size_t kHistoryMaxSeriesPerFamily = 8;
+  constexpr std::size_t kHistoryMaxSamples = 240;
+  auto make_history = [&](const std::shared_ptr<prometheus::Registry> &registry) {
+    return std::make_unique<MetricsHistory>(registry, kHistoryInterval,
+                                           kHistoryMaxSeriesPerFamily,
+                                           kHistoryMaxSamples,
+                                           &history_samples);
+  };
+  m_proxy_stats_history = make_history(m_proxy_registry);
+  m_worker_stats_history = make_history(m_worker_registry);
+  m_server_stats_history = make_history(m_server_registry);
+  m_common_stats_history = make_history(m_common_registry);
   m_proxy_stats_history->start();
   m_worker_stats_history->start();
   m_server_stats_history->start();

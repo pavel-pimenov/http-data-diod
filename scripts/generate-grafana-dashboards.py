@@ -2423,6 +2423,19 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 207: семплирование истории метрик. Ненулевая доля «error» означает,
+    # что сбор регистра падает и спарклайны на /stats устаревают.
+    panels.append(create_timeseries_panel(
+        title="Семплирование истории метрик",
+        id=207,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": "sum by (outcome) (rate(l2_common_stats_history_samples_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 

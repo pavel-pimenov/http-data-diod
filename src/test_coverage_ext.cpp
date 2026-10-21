@@ -40,6 +40,7 @@
 #include "trace_context_extractor.hpp"
 #include "tracing_helpers.hpp"
 #include "url_utils.hpp"
+#include <prometheus/metric_family.h>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -807,6 +808,33 @@ TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
            gauge_series[0].m_labels == "{ip=2}"));
 
   REQUIRE(history.has_family("mh_sum"));
+}
+
+TEST_CASE("MetricsHistory: a throwing collector is counted, not fatal",
+          "[metrics-history]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &samples = test_support::make_counter_family(
+      *registry, "l2_common_stats_history_samples_total", "h");
+  samples.Add({{"outcome", "ok"}});
+  samples.Add({{"outcome", "error"}});
+  samples.Add({{"outcome", "no_registry"}});
+
+  // A collector that throws must not take the process down (an uncaught
+  // exception in the sampler thread calls std::terminate).
+  MetricsHistory history(registry, std::chrono::seconds(1), 8, 240, &samples,
+                         []() -> std::vector<prometheus::MetricFamily> {
+                           throw std::runtime_error("collect failed");
+                         });
+  history.start();
+  REQUIRE(test_wait_support::wait_for_condition(
+      [&] {
+        return labeled_counter_value(samples, "outcome", "error") >= 1.0;
+      },
+      5000));
+  history.stop();
+  // The sampler survived the throwing collectable and kept counting.
+  REQUIRE(labeled_counter_value(samples, "outcome", "error") >= 1.0);
+  REQUIRE(labeled_counter_value(samples, "outcome", "ok") == 0.0);
 }
 
 TEST_CASE("MetricsHistory: start is idempotent and null registry is tolerated",

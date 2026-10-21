@@ -202,6 +202,7 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_worker_sentry_events_dropped_total", {"reason"}},
       {"l2_proxy_not_ready_total", {"reason"}},
       {"l2_worker_not_ready_total", {"reason"}},
+      {"l2_common_stats_history_samples_total", {"outcome"}},
   };
 
   std::map<std::string, std::set<std::string>> actual;
