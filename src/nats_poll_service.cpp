@@ -16,6 +16,60 @@
 
 NatsPollService::NatsPollService(AppContext &ctx) : m_ctx(ctx) {}
 
+// Polls for the reply until the deadline: reconnects, resends and records the
+// attempt metrics. Returns an empty reply when the deadline passed.
+NatsPollService::PollOutcome NatsPollService::poll_until_deadline(
+    const std::string &request_id, const std::string &request_json,
+    int timeout_ms) {
+  const auto request_deadline = std::chrono::steady_clock::now() +
+                                std::chrono::milliseconds(timeout_ms);
+  PollOutcome outcome;
+  RetryHandler reconnect_backoff(250, 2000);
+  bool reconnect_logged = false;
+  bool no_responders_logged = false;
+  bool resend_logged = false;
+  bool first_attempt = true;
+
+  while (std::chrono::steady_clock::now() < request_deadline) {
+    if (!poll_ensure_connected(request_id, reconnect_backoff,
+                               reconnect_logged)) {
+      continue;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            request_deadline - now)
+            .count();
+    if (remaining_ms <= 0) {
+      break;
+    }
+
+    poll_notify_resend(request_id, first_attempt, resend_logged);
+
+    m_ctx.m_proxy.m_metrics->m_nats_poll_attempts_total.Increment();
+    const auto attempt_start = std::chrono::steady_clock::now();
+    std::tie(outcome.m_reply, outcome.m_consume_span_id) =
+        m_ctx.m_nats_client->request_with_consume_span_id(
+            m_ctx.m_config.m_nats.m_subject, request_json,
+            static_cast<int>(remaining_ms));
+    m_ctx.m_proxy.m_metrics->m_nats_poll_attempt_duration_seconds.Observe(
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      attempt_start)
+            .count());
+
+    if (!outcome.m_reply.m_data.empty()) {
+      break;
+    }
+
+    const std::string last_error =
+        m_ctx.m_nats_client->get_last_error().value_or("");
+    poll_delay_for_empty_reply(request_id, last_error, no_responders_logged);
+  }
+
+  return outcome;
+}
+
 std::string NatsPollService::poll_response(const std::string &request_id,
                                            const std::string &request_json,
                                            int timeout_seconds,
@@ -57,52 +111,10 @@ std::string NatsPollService::poll_response(const std::string &request_id,
       timeout_ms = 30000;
     }
 
-    const auto request_deadline = std::chrono::steady_clock::now() +
-                                  std::chrono::milliseconds(timeout_ms);
-    NatsReply reply;
-    std::string consume_span_id;
-    RetryHandler reconnect_backoff(250, 2000);
-    bool reconnect_logged = false;
-    bool no_responders_logged = false;
-    bool resend_logged = false;
-    bool first_attempt = true;
-
-    while (std::chrono::steady_clock::now() < request_deadline) {
-      if (!poll_ensure_connected(request_id, reconnect_backoff,
-                                 reconnect_logged)) {
-        continue;
-      }
-
-      const auto now = std::chrono::steady_clock::now();
-      const auto remaining_ms =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              request_deadline - now)
-              .count();
-      if (remaining_ms <= 0) {
-        break;
-      }
-
-      poll_notify_resend(request_id, first_attempt, resend_logged);
-
-      m_ctx.m_proxy.m_metrics->m_nats_poll_attempts_total.Increment();
-      const auto attempt_start = std::chrono::steady_clock::now();
-      std::tie(reply, consume_span_id) =
-          m_ctx.m_nats_client->request_with_consume_span_id(
-              m_ctx.m_config.m_nats.m_subject, request_json,
-              static_cast<int>(remaining_ms));
-      m_ctx.m_proxy.m_metrics->m_nats_poll_attempt_duration_seconds.Observe(
-          std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                        attempt_start)
-              .count());
-
-      if (!reply.m_data.empty()) {
-        break;
-      }
-
-      const std::string last_error =
-          m_ctx.m_nats_client->get_last_error().value_or("");
-      poll_delay_for_empty_reply(request_id, last_error, no_responders_logged);
-    }
+    PollOutcome outcome =
+        poll_until_deadline(request_id, request_json, timeout_ms);
+    NatsReply reply = std::move(outcome.m_reply);
+    std::string const consume_span_id = outcome.m_consume_span_id;
 
     if (reply.m_data.empty()) {
       Logger::error("Failed to get response from NATS for request_id={} before "

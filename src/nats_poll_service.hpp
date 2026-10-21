@@ -3,6 +3,7 @@
 
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "nats_client.hpp"
 #include "retry_handler.hpp"
 #include "trace_logger.hpp"
 #include <atomic>
@@ -10,6 +11,18 @@
 
 class NatsPollService {
 private:
+  // The result of a poll: the reply and the worker's consume span id (read
+  // from the NATS headers).
+  struct PollOutcome {
+    NatsReply m_reply;
+    std::string m_consume_span_id;
+  };
+
+  // Polls for the reply until the deadline: reconnects, resends and records
+  // the attempt metrics. Returns an empty reply when the deadline passed.
+  [[nodiscard]] PollOutcome poll_until_deadline(const std::string &request_id,
+                                                const std::string &request_json,
+                                                int timeout_ms);
   AppContext &m_ctx;
 
   bool poll_ensure_connected(const std::string &request_id,
