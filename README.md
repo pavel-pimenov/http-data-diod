@@ -252,6 +252,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_proxy_nats_connected` — состояние связи прокси с NATS (1/0, gauge).
 - `l2_proxy_health_ready` — готовность прокси по `/health/ready` (1/0, gauge).
 - `l2_proxy_duplicate_tracked_clients` — число client_id, отслеживаемых duplicate-детектором (gauge; ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит `DUPLICATE_DETECTION_CLIENT_TTL_MS`).
+- `l2_proxy_duplicate_cache_evictions_total{reason}` — что вытеснил duplicate-детектор (counter с меткой `reason`): `body_ttl`/`body_cap` (тело забыто — по TTL или по лимиту `DUPLICATE_DETECTION_MAX_ENTRIES`), `client_ttl`/`client_cap` (счётчик client_id забыт — по TTL или по лимиту `DUPLICATE_DETECTION_MAX_CLIENTS`). Каждое вытеснение **молча отключает** детектирование дублей для соответствующего тела или client_id: следующая доставка выглядит как первая. Поэтому ненулевая частота вытеснений — это не «детектор работает», а «детектор забывает» (либо память под контролем, либо дубли перестают ловиться).
 - `l2_worker_responses_total{status="..."}` — ответы воркера, отданные по NATS, по HTTP-статусу (counter family).
 - `l2_worker_in_flight_requests` — запросы, обрабатываемые воркером прямо сейчас (gauge).
 - `l2_worker_queue_size` — глубина очереди пула потоков воркера (gauge, ранний сигнал backpressure); опрашивается фоновым тикером раз в ~5с.
@@ -585,6 +586,7 @@ HTTP-эндпоинт.
 | `l2_proxy_nats_connected` | gauge | — | Связь с NATS (1/0) |
 | `l2_proxy_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 | `l2_proxy_duplicate_tracked_clients` | gauge | — | Число client_id, отслеживаемых duplicate-детектором (ограничено `DUPLICATE_DETECTION_MAX_CLIENTS`, idle-счётчики чистит TTL) |
+| `l2_proxy_duplicate_cache_evictions_total` | counter | `reason` | Вытеснения из duplicate-детектора: `body_ttl`/`body_cap` (тело забыто по TTL/лимиту), `client_ttl`/`client_cap` (счётчик client_id забыт) |
 
 `l2_proxy_rejections_total{reason}` — umbrella-счётчик отказов прокси *до*
 передачи запроса воркеру, с закрытым набором причин:

@@ -1,6 +1,7 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <vector>

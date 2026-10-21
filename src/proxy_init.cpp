@@ -10,8 +10,9 @@
 #include "prometheus/histogram.h"
 #include "rate_limiter.hpp"
 #include "rate_limiter_per_ip.hpp"
-#include <memory>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include <utility>
 
@@ -164,7 +165,17 @@ void init_proxy_components(AppContext &app_ctx) {
   dup_options.m_per_client_ttl_ms =
       app_ctx.m_config.m_duplicate.m_client_ttl_ms;
   app_ctx.m_proxy.m_duplicate_detector =
-      std::make_unique<DuplicateDetector>(dup_options);
+      std::make_unique<DuplicateDetector>(
+          dup_options,
+          [evictions = &app_ctx.m_proxy.m_metrics->m_duplicate_cache_evictions](
+              DuplicateDetector::EvictionReason reason, size_t count) {
+            // Every eviction silently disables duplicate detection for the
+            // dropped body or client id, so the drop is counted by reason.
+            evictions
+                ->Add({{"reason",
+                         DuplicateDetector::eviction_reason_name(reason)}})
+                .Increment(static_cast<double>(count));
+          });
   Logger::info("Duplicate POST detector initialized: enabled={} top_n={} "
                "max_entries={} max_body_bytes={} ttl_ms={} log_threshold={} "
                "max_clients={} client_ttl_ms={}",

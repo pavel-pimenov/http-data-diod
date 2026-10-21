@@ -1842,6 +1842,20 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 88: Вытеснения из duplicate-детектора (по причине): каждое
+    # вытеснение молча отключает детектирование дублей для этого тела или
+    # client_id.
+    panels.append(create_timeseries_panel(
+        title="Вытеснения детектора дублей",
+        id=88,
+        x=0, y=y, w=24, h=8,
+        unit="ops",
+        targets=[
+            {"expr": "sum by (reason) (rate(l2_proxy_duplicate_cache_evictions_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{reason}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     # Row 1: Traffic
     panels.append(create_row_panel("Трафик", 1, y))
     y += 1

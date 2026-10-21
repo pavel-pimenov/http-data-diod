@@ -182,6 +182,33 @@ TEST_CASE("AppContext: proxy pre-creates the rejection reason series",
                                             "rate_limit_per_ip"});
 }
 
+TEST_CASE("AppContext: proxy pre-creates the duplicate eviction reason series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "proxy"}};
+
+  AppContext const ctx;
+
+  REQUIRE(has_family(ctx.m_proxy_registry,
+                      "l2_proxy_duplicate_cache_evictions_total"));
+  std::vector<std::string> reasons;
+  for (const auto &family : ctx.m_proxy_registry->Collect()) {
+    if (family.name != "l2_proxy_duplicate_cache_evictions_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "reason") {
+          reasons.push_back(label.value);
+        }
+      }
+    }
+  }
+  // A healthy proxy never evicts anything, so all reasons must exist as 0.
+  std::ranges::sort(reasons);
+  REQUIRE(reasons == std::vector<std::string>{"body_cap", "body_ttl",
+                                            "client_cap", "client_ttl"});
+}
+
 TEST_CASE("AppContext: labelled families keep their label contract",
           "[app_context]") {
   // The dashboard legends (PromQL {{type}} / {{reason}} / {{outcome}} / ...) are
@@ -203,6 +230,7 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_proxy_not_ready_total", {"reason"}},
       {"l2_worker_not_ready_total", {"reason"}},
       {"l2_common_stats_history_samples_total", {"outcome"}},
+      {"l2_proxy_duplicate_cache_evictions_total", {"reason"}},
   };
 
   std::map<std::string, std::set<std::string>> actual;

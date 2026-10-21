@@ -2,8 +2,10 @@
 #define DUPLICATE_DETECTOR_HPP
 
 #include "nlohmann/json.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <string>
@@ -31,6 +33,32 @@
 // all state is guarded by a mutex.
 class DuplicateDetector {
 public:
+  // Why an entry was dropped from the detector's state. Every eviction
+  // silently disables duplicate detection for that body or client id: the
+  // detector forgot it, so the next delivery looks like a first one.
+  enum class EvictionReason : std::uint8_t {
+    BODY_TTL,
+    BODY_CAP,
+    CLIENT_TTL,
+    CLIENT_CAP,
+  };
+
+  // The metric label values, in the order of EvictionReason.
+  static constexpr std::array<const char *, 4> g_eviction_reason_names = {
+      "body_ttl", "body_cap", "client_ttl", "client_cap"};
+
+  // Called after every eviction with the reason and the number of dropped
+  // entries. Set once at construction, invoked while the state mutex is held.
+  using EvictionSink = std::function<void(EvictionReason, size_t)>;
+
+  static const char *eviction_reason_name(EvictionReason reason) {
+    const auto idx = static_cast<size_t>(reason);
+    if (idx < g_eviction_reason_names.size()) {
+      return g_eviction_reason_names[idx];
+    }
+    return "unknown";
+  }
+
   struct Options {
     bool m_enabled = true;
     size_t m_top_n = 100;          // max duplicates in the report
@@ -53,6 +81,7 @@ public:
   // initializers are not usable in a default argument inside this class body).
   DuplicateDetector();
   explicit DuplicateDetector(const Options &options);
+  DuplicateDetector(const Options &options, EvictionSink eviction_sink);
 
   // Records one request body. Returns {is_duplicate, client_total_count}.
   // is_duplicate is true when this delivery makes the body a duplicate
@@ -102,8 +131,11 @@ private:
   void evict_expired_clients_locked(uint64_t now_ms);
   // Drops the counter idle for the longest (LRU) to honor m_per_client_max_entries.
   void evict_oldest_client_locked();
+  // Reports dropped entries to the sink (if any); count == 0 is not reported.
+  void report_evictions(EvictionReason reason, size_t count);
 
   Options m_options;
+  EvictionSink m_eviction_sink;
   struct State {
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, Entry> m_entries; // key: sha256 hex

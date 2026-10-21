@@ -37,6 +37,7 @@
 #include "url_utils.hpp"
 #include "worker_request_parser.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -2209,6 +2210,94 @@ TEST_CASE("DuplicateDetector: bounded cache evicts the lowest-count body",
   REQUIRE(detector.record("client-a", "10.0.0.1", "hash-1",
                           R"({"v":1})")
               .first == true);
+}
+
+TEST_CASE("DuplicateDetector: dropped bodies are reported by reason",
+          "[duplicate-detector]") {
+  std::array<size_t, 4> evicted{};
+  auto sink = [&evicted](DuplicateDetector::EvictionReason reason,
+                         size_t count) {
+    const auto idx = static_cast<size_t>(reason);
+    if (idx < evicted.size()) {
+      evicted[idx] += count;
+    }
+  };
+  const auto body_ttl =
+      static_cast<size_t>(DuplicateDetector::EvictionReason::BODY_TTL);
+  const auto body_cap =
+      static_cast<size_t>(DuplicateDetector::EvictionReason::BODY_CAP);
+
+  SECTION("TTL expiry drops the body") {
+    DuplicateDetector::Options options;
+    options.m_ttl_ms = 40;
+    DuplicateDetector detector(options, sink);
+
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+
+    REQUIRE(evicted[body_ttl] == 1);
+    REQUIRE(evicted[body_cap] == 0);
+  }
+
+  SECTION("the capacity limit drops the body") {
+    DuplicateDetector::Options options;
+    options.m_max_entries = 1;
+    DuplicateDetector detector(options, sink);
+
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    detector.record("client-a", "10.0.0.1", "hash-2", R"({"v":2})");
+
+    REQUIRE(evicted[body_cap] == 1);
+    REQUIRE(evicted[body_ttl] == 0);
+  }
+}
+
+TEST_CASE("DuplicateDetector: dropped client counters are reported by reason",
+          "[duplicate-detector]") {
+  std::array<size_t, 4> evicted{};
+  auto sink = [&evicted](DuplicateDetector::EvictionReason reason,
+                         size_t count) {
+    const auto idx = static_cast<size_t>(reason);
+    if (idx < evicted.size()) {
+      evicted[idx] += count;
+    }
+  };
+  const auto client_ttl =
+      static_cast<size_t>(DuplicateDetector::EvictionReason::CLIENT_TTL);
+  const auto client_cap =
+      static_cast<size_t>(DuplicateDetector::EvictionReason::CLIENT_CAP);
+
+  SECTION("TTL expiry drops the client counter") {
+    DuplicateDetector::Options options;
+    options.m_per_client_ttl_ms = 40;
+    DuplicateDetector detector(options, sink);
+
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    // The per-client counter appears with the first duplicate delivery.
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+
+    REQUIRE(evicted[client_ttl] == 1);
+    REQUIRE(evicted[client_cap] == 0);
+  }
+
+  SECTION("the capacity limit drops the client counter") {
+    DuplicateDetector::Options options;
+    options.m_per_client_max_entries = 1;
+    DuplicateDetector detector(options, sink);
+
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    detector.record("client-a", "10.0.0.1", "hash-1", R"({"v":1})");
+    detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+    // The counter for client-b overflows the cap and evicts client-a.
+    detector.record("client-b", "10.0.0.2", "hash-2", R"({"v":2})");
+
+    REQUIRE(evicted[client_cap] == 1);
+    REQUIRE(evicted[client_ttl] == 0);
+  }
 }
 
 TEST_CASE("DuplicateDetector: per-client duplicate count increments",

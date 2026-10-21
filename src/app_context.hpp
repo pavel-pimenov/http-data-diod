@@ -6,6 +6,7 @@
 #include "in_flight_tracker.hpp"
 #include "metrics_history.hpp"
 #include "tracing_metrics.hpp"
+#include <array>
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -98,6 +99,10 @@ struct ProxyMetrics {
   // Label values dropped by the per-client-id families (cap or TTL): without
   // the counter the family silently shrinks and the eviction is invisible.
   prometheus::Counter &m_per_client_id_dropped_labels;
+  // Entries dropped from the duplicate-POST detector, labeled by reason (TTL
+  // expiry or capacity limit): every eviction silently disables duplicate
+  // detection for that body or client id.
+  prometheus::Family<prometheus::Counter> &m_duplicate_cache_evictions;
   // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 

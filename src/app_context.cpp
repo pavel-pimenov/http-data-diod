@@ -340,7 +340,11 @@ void AppContext::init_proxy_metrics() {
       reg_proxy.counter(
           "l2_proxy_per_client_id_dropped_labels_total",
           "Label values dropped by the per-client-id metric families (cap or "
-          "TTL)")});
+          "TTL)"),
+      reg_proxy.counter_family(
+          "l2_proxy_duplicate_cache_evictions_total",
+          "Entries dropped from the duplicate-POST detector, labeled by "
+          "reason (TTL expiry or capacity limit)")});
 
   // prometheus-cpp exports a labeled family only after the first Add(), and a
   // healthy proxy refuses nothing, so every enum value gets its zero series up
@@ -356,6 +360,13 @@ void AppContext::init_proxy_metrics() {
   auto &rejections = m_proxy.m_metrics->m_rejections;
   for (const char *reason : error_categorizer::g_rejection_reason_names) {
     rejections.Add({{"reason", reason}});
+  }
+
+  // Same for the duplicate-detector evictions: a healthy proxy never evicts,
+  // so every reason gets its zero series up front.
+  auto &evictions = m_proxy.m_metrics->m_duplicate_cache_evictions;
+  for (const char *reason : DuplicateDetector::g_eviction_reason_names) {
+    evictions.Add({{"reason", reason}});
   }
 }
 

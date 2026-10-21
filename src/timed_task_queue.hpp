@@ -7,6 +7,7 @@
 #include <prometheus/histogram.h>
 #include <chrono>
 #include <cstddef>
+#include <ctime>
 #include <functional>
 #include <utility>
 

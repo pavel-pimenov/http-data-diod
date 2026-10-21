@@ -15,7 +15,11 @@
 DuplicateDetector::DuplicateDetector() : DuplicateDetector(Options{}) {}
 
 DuplicateDetector::DuplicateDetector(const Options &options)
-    : m_options(options) {}
+    : DuplicateDetector(options, EvictionSink{}) {}
+
+DuplicateDetector::DuplicateDetector(const Options &options,
+                                     EvictionSink eviction_sink)
+    : m_options(options), m_eviction_sink(std::move(eviction_sink)) {}
 
 std::pair<bool, size_t> DuplicateDetector::record(std::string_view client_id,
                                                   std::string_view client_ip,
@@ -150,13 +154,16 @@ nlohmann::json DuplicateDetector::report() const {
 }
 
 void DuplicateDetector::evict_expired_locked(uint64_t now_ms) {
+  size_t evicted = 0;
   for (auto it = m_state.m_entries.begin(); it != m_state.m_entries.end();) {
     if (now_ms - it->second.m_last_seen_ms > m_options.m_ttl_ms) {
       it = m_state.m_entries.erase(it);
+      ++evicted;
     } else {
       ++it;
     }
   }
+  report_evictions(EvictionReason::BODY_TTL, evicted);
   evict_expired_clients_locked(now_ms);
 }
 
@@ -164,13 +171,17 @@ void DuplicateDetector::evict_expired_clients_locked(uint64_t now_ms) {
   if (m_options.m_per_client_ttl_ms == 0) {
     return;
   }
-  for (auto it = m_state.m_per_client_count.begin(); it != m_state.m_per_client_count.end();) {
+  size_t evicted = 0;
+  for (auto it = m_state.m_per_client_count.begin();
+       it != m_state.m_per_client_count.end();) {
     if (now_ms - it->second.m_last_seen_ms > m_options.m_per_client_ttl_ms) {
       it = m_state.m_per_client_count.erase(it);
+      ++evicted;
     } else {
       ++it;
     }
   }
+  report_evictions(EvictionReason::CLIENT_TTL, evicted);
 }
 
 void DuplicateDetector::evict_oldest_client_locked() {
@@ -182,6 +193,7 @@ void DuplicateDetector::evict_oldest_client_locked() {
         return a.second.m_last_seen_ms < b.second.m_last_seen_ms;
       });
   m_state.m_per_client_count.erase(victim);
+  report_evictions(EvictionReason::CLIENT_CAP, 1);
 }
 
 void DuplicateDetector::evict_lowest_count_locked() {
@@ -196,4 +208,12 @@ void DuplicateDetector::evict_lowest_count_locked() {
         return a.second.m_first_seen_ms < b.second.m_first_seen_ms;
       });
   m_state.m_entries.erase(victim);
+  report_evictions(EvictionReason::BODY_CAP, 1);
+}
+
+void DuplicateDetector::report_evictions(EvictionReason reason, size_t count) {
+  if (count == 0 || !m_eviction_sink) {
+    return;
+  }
+  m_eviction_sink(reason, count);
 }

@@ -49,6 +49,7 @@ CATALOG = [
     "l2_proxy_duplicate_requests_total",
     "l2_proxy_duplicate_posts_detected_total",
     "l2_proxy_duplicate_tracked_clients",
+    "l2_proxy_duplicate_cache_evictions_total",
     "l2_proxy_responses_total",
     "l2_proxy_in_flight_requests",
     "l2_proxy_nats_connected",
