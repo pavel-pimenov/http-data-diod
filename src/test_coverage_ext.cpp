@@ -539,6 +539,27 @@ TEST_CASE("Stats page: build_stats_html renders banner and tiles",
   REQUIRE(html.find("requests_total") != std::string::npos);
 }
 
+TEST_CASE("Stats page: the render cost is measured when a histogram is passed",
+          "[stats-page-ext]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &gauge = MetricsManager::create_gauge(registry, "health_ready", "ready");
+  gauge.Set(1.0);
+
+  auto render_registry = std::make_shared<prometheus::Registry>();
+  auto &render_duration = MetricsManager::create_histogram(
+      render_registry, "stats_page_render_seconds", "render cost",
+      latency_buckets_ms_to_10s());
+
+  const std::string html =
+      build_stats_html("proxy-test", registry, nullptr, 30, nullptr, nullptr,
+                       &render_duration);
+  REQUIRE(html.find("OPERATIONAL") != std::string::npos);
+  // The page measures its own render: exactly one observation.
+  const auto collected = render_duration.Collect();
+  REQUIRE(collected.histogram.sample_count == 1);
+  REQUIRE(collected.histogram.sample_sum >= 0.0);
+}
+
 TEST_CASE("Stats page: dense labeled family renders the +N more overflow row",
           "[stats-page-ext]") {
   auto registry = std::make_shared<prometheus::Registry>();

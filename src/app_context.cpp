@@ -203,6 +203,14 @@ void AppContext::init_common() {
       "Time to render the /metrics exposition",
       histogram_buckets::g_buckets.m_latency_ms_to_5s);
 
+  // The /stats page cost: the page is rebuilt from scratch on every request,
+  // so the price grows with the number of families and with the sparkline
+  // history. The page measures its own render.
+  m_stats_page_render_duration = &reg_common.histogram(
+      "l2_common_stats_page_render_duration_seconds",
+      "Time to render the /stats HTML page",
+      histogram_buckets::g_buckets.m_latency_ms_to_5s);
+
   // Deployment identity: the value is always 1, the labels carry the build
   // version and the mode, so a dashboard (or an alert) can tell which build an
   // instance runs without relabeling gymnastics. The common registry is

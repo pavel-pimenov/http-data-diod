@@ -514,6 +514,9 @@ def create_tracing_dashboard() -> Dict:
             {"expr": "sum by (reason) (rate(l2_tracing_spans_dropped_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{reason}}", "refId": "C"},  # noqa: E501
             # Стоимость рендера экспозиции: растёт с кардинальностью метрик.
             {"expr": "histogram_quantile(0.95, sum by (le) (rate(l2_common_metrics_render_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m])))", "legendFormat": "Рендер P95", "refId": "E"},  # noqa: E501
+            # Стоимость рендера страницы /stats: страница пересобирается на
+            # каждый запрос, её цена растёт с числом семейств и историей.
+            {"expr": "histogram_quantile(0.95, sum by (le) (rate(l2_common_stats_page_render_duration_seconds_bucket{vm=~\"${vm:regex}\"}[5m])))", "legendFormat": "Рендер /stats P95", "refId": "F"},  # noqa: E501
             # Клиентские traceparent, которые не удалось разобрать: битый клиент
             # или шум, похожий на трассировку.
             {"expr": "rate(l2_tracing_traceparent_invalid_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Битых traceparent/с", "refId": "D"}  # noqa: E501

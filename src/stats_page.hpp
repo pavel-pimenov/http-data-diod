@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <ctime>
 #include <memory>
 #include <ranges>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include <prometheus/client_metric.h>
+#include <prometheus/histogram.h>
 #include <prometheus/metric_family.h>
 #include <prometheus/registry.h>
 
@@ -265,7 +267,9 @@ inline std::string build_stats_html(
     const std::shared_ptr<prometheus::Registry> &registry,
     const MetricsHistory *history = nullptr, int window_minutes = 30,
     const std::shared_ptr<prometheus::Registry> &extra_registry = nullptr,
-    const MetricsHistory *extra_history = nullptr) {
+    const MetricsHistory *extra_history = nullptr,
+    prometheus::Histogram *render_duration = nullptr) {
+  const auto render_started_at = std::chrono::steady_clock::now();
   const auto families = registry->Collect();
   std::span<const prometheus::MetricFamily> const fam_view(families);
 
@@ -333,6 +337,12 @@ inline std::string build_stats_html(
   }
 
   html << "</div>\n</body>\n</html>\n";
+  if (render_duration != nullptr) {
+    render_duration->Observe(
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                       render_started_at)
+            .count());
+  }
   return html.str();
 }
 

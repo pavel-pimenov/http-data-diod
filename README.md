@@ -443,6 +443,7 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 |---|---|---|---|
 | `l2_common_build_info` | gauge | `version`, `mode` | Информация о сборке: значение всегда `1`, версия и режим — в метках |
 | `l2_common_metrics_render_duration_seconds` | histogram | — | Стоимость рендера экспозиции `/metrics` (растёт с кардинальностью метрик) |
+| `l2_common_stats_page_render_duration_seconds` | histogram | — | Стоимость рендера страницы `/stats` (сбор метрик + сборка HTML; растёт с числом семейств и длиной истории спарклайнов) |
 | `l2_common_stats_history_samples_total` | counter | `outcome` | Раунды семплирования истории метрик: `ok` / `error` (сбор бросил) / `no_registry` |
 | `l2_proxy_not_ready_total` | counter | `reason` | Как часто прокси отвечал «не готов» и почему (`nats_unavailable` / `ping_failed` / `health_check_failed`) |
 | `l2_proxy_per_client_id_dropped_labels_total` | counter | — | Значения меток, выброшенные per-client-id семействами (лимит или TTL) |
@@ -453,6 +454,15 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 > позволяют показать версию в панели/алерте без relabel'инга: панель
 > «Версия сборки» на дашборде L2 Прокси рисует `l2_common_build_info` с
 > легендой `{{version}} ({{mode}})`.
+>
+> Две метрики стоимости рендера отвечают на разные вопросы:
+> `l2_common_metrics_render_duration_seconds` — сколько стоит скрейп
+> `/metrics` (растёт с кардинальностью метрик, то есть с числом семейств и
+> серий), а `l2_common_stats_page_render_duration_seconds` — сколько стоит
+> открыть страницу `/stats` в браузере (сбор метрик + сборка HTML + спарклайны
+> по истории; страница пересобирается на каждый запрос). Обе — в общем
+> реестре, обе видны в дашборде трассировки (линии «Рендер P95» и
+> «Рендер /stats P95»).
 
 ### Отслеживание ошибок (Sentry)
 

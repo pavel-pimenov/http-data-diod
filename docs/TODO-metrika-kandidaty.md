@@ -250,7 +250,7 @@ enum, а не литералы в местах вызова). Частные с�
 | ~~`l2_worker_db_query_errors_total`~~ ✅ | counter | `error_class` (SQLSTATE-класс) | разбор ошибок SQL; метка — только класс (2 символа), не код сообщения (сделано в раунде 180 ✅) |
 | `l2_worker_retry_attempts` | histogram | — | распределение числа попыток (цена ретраев) |
 | ~~`l2_common_metrics_render_duration_seconds`~~ ✅ | histogram | — | стоимость рендера `/metrics` (важно при росте кардинальности) (сделано в раунде 184 ✅) |
-| `l2_common_stats_page_render_duration_seconds` | histogram | — | то же для `/stats` |
+| ~~`l2_common_stats_page_render_duration_seconds`~~ ✅ | histogram | — | то же для `/stats` (сделано в раунде 194 ✅) |
 | `l2_common_stats_history_samples_total` | counter | `outcome` (ok/error) | здоровье истории метрик (`metrics_history.hpp`) |
 | `l2_common_stats_history_buffer_size` | gauge | — | заполнение буфера истории |
 | ~~`l2_proxy_not_ready_total`~~ ✅ | counter | `reason` | почему proxy не в ready (диагностика healthcheck) (сделано в раунде 186 ✅) |

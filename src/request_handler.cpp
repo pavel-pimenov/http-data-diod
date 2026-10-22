@@ -80,7 +80,8 @@ void RequestHandler::handle_get(const httplib::Request &req,
                                      m_ctx.m_proxy_stats_history.get(),
                                      parse_stats_window(req.params),
                                      m_ctx.m_common_registry,
-                                     m_ctx.m_common_stats_history.get()),
+                                     m_ctx.m_common_stats_history.get(),
+                                     m_ctx.m_stats_page_render_duration),
                     "text/html; charset=utf-8");
     return;
   }

@@ -331,7 +331,8 @@ void run_worker(AppContext &app_ctx) {
                          app_ctx.m_worker_stats_history.get(),
                          parse_stats_window(req.params),
                          app_ctx.m_common_registry,
-                         app_ctx.m_common_stats_history.get()),
+                         app_ctx.m_common_stats_history.get(),
+                         app_ctx.m_stats_page_render_duration),
         "text/html; charset=utf-8");
   });
 
