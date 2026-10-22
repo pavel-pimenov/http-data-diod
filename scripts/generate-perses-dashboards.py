@@ -55,6 +55,7 @@ PROMETHEUS_URL = gg.PROMETHEUS_URL
 DASHBOARDS: List[Tuple[Any, str]] = [
     (gg.create_tracing_dashboard, 'l2-distributed-tracing'),
     (gg.create_sentry_dashboard, 'l2-sentry-delivery'),
+    (gg.create_alerts_dashboard, 'l2-alerts'),
     (gg.create_proxy_dashboard, 'l2-proxy'),
     (gg.create_worker_dashboard, 'l2-worker'),
     (gg.create_server_dashboard, 'l2-server'),

@@ -790,6 +790,7 @@ URL datasource берётся с приоритетом: `--datasource-url` (CLI
 |---|---|---|
 | Распределённая трассировка | `l2-distributed-tracing` | `l2_tracing_*` |
 | Доставка ошибок в Sentry | `l2-sentry-delivery` | `l2_worker_sentry_events_sent_total` / `l2_worker_sentry_events_failed_total` / `l2_worker_sentry_queue_size` |
+| Алерты (оповещения) | `l2-alerts` | `ALERTS` (состояние алертов, пишет `vmalert`) |
 | L2 Прокси | `l2-proxy` | proxy + NATS + http-pool + rate limiter (global + per-IP) |
 | L2 Воркер | `l2-worker` | все `l2_worker_*` |
 | L2 Сервер | `l2-server` | все `l2_server_*` |
@@ -839,9 +840,46 @@ row/grid-секций, а затем прогоняет выборку запр�
 нагрузке, нет дубликатов, NATS-ретраев или per-client трафика) — панель не рисует линию. Это не
 баг конвертера: при появлении соответствующего трафика панель заполняется.
 
-### Мониторинг (VictoriaMetrics, без Prometheus/алертов)
+### Мониторинг и алерты (VictoriaMetrics + vmalert)
 
-Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Алерты (`vmalert`/`prometheus/alerts.yml`/`8880`) удалены — в стеке нет Alertmanager, правила с `-notifier.blackhole` никто не видел. Для алертинга подключите внешний `vmalert`/`alertmanager` к VictoriaMetrics отдельно.
+Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Правила оповещений вычисляет **vmalert** (`victoriametrics/vmalert`, порт `8880`), поднятый в `docker-compose.yml`.
+
+Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 26 правил в трёх группах:
+
+| Группа | Что покрывает | Примеры правил |
+|---|---|---|
+| `l2-proxy` | граница прокси: отказы, лимиты, очередь задач, NATS, латентность, сгорание бюджета ошибок | `L2ProxyErrorBudgetBurnFast`, `L2ProxyTaskQueueRejected`, `L2ProxyNatsDisconnected` |
+| `l2-worker` | воркер: готовность, circuit breaker, вызовы L2, ретраи, пул БД, валидация запросов | `L2WorkerNotReady`, `L2WorkerCircuitBreakerOpen`, `L2WorkerRetriesExhausted` |
+| `l2-common` | общие: рендер `/metrics` и `/stats`, потери спанов и событий Sentry, HTTP-пул | `L2MetricsRenderSlow`, `L2TracingSpansDropped` |
+
+| Что | Как устроено |
+|---|---|
+| Вычисление | `vmalert` читает правила из файла и перечитывает его раз в минуту (`--configCheckInterval=1m`) |
+| Источник данных | VictoriaMetrics (`victoria-metrics:8428`) — те же данные, что на дашбордах |
+| Уведомления | `--notifier.blackhole`: Alertmanager в стеке нет, наружу ничего не отправляется |
+| Видимость | `vmalert` пишет состояние алертов в VictoriaMetrics (`--remoteWrite.url`) → метрика `ALERTS` → дашборд «Алерты (оповещения)» (`l2-alerts`) |
+| Активные алерты | `curl http://localhost:8880/api/v1/alerts` |
+
+> **Почему алерты вернулись.** До раунда 196 они уже были в стеке и были удалены: правила вычислялись с `--notifier.blackhole`, а **сработавший алерт никто не видел** (Alertmanager в стеке нет). Закрыто именно это — состояние алерта теперь пишется в VictoriaMetrics и видно на дашборде (и в Perses). Для настоящих уведомлений достаточно подключить внешний Alertmanager: `vmalert` уже умеет слать в `-notifier.url`, менять в compose ничего не нужно.
+
+Пороги правил **мягче** целей SLO (доступность 99.9%, P95 < 50 мс, P99 < 100 мс на дашборде `l2-slo-tracking`): SLO — это цель, а не «сбой». По бюджету ошибок пороги совпадают с дашбордом — сгорание ×20 к SLO это critical, ×5 — warning.
+
+### Проверка правил оповещения
+
+Правила — шестое место, где встречается имя метрики (C++, Grafana, Perses, README, golden check), поэтому у них свой гейт:
+
+```bash
+python3 scripts/alerts-consistency-check.py --offline   # без контейнеров
+python3 scripts/alerts-consistency-check.py --runtime   # + VictoriaMetrics и vmalert
+```
+
+Что проверяется:
+
+- **каждая метрика в `expr` зарегистрирована в C++** — правило на переименованную или удалённую метрику не «молчит вечно», а валит гейт;
+- **у правила есть `for`, `labels.severity`, `labels.service`, `annotations.summary/description/runbook`** — алерт без инструкции «что делать» бесполезен;
+- **PromQL валидна** (в runtime-режиме — запросом в VictoriaMetrics), а `vmalert` загрузил правила и не накопил ошибок вычисления.
+
+Гейт висит в `scripts/ci-gate.sh` (offline + runtime), то есть в CI и в pre-commit.
 
 ### Выбор виртуальных машин
 

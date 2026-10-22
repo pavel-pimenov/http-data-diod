@@ -1,0 +1,331 @@
+# Правила оповещений (alerts) для сервисов http-data-diod.
+#
+# Формат — Prometheus alerting rules: файл читается vmalert (сервис `vmalert`
+# в docker-compose.yml) и Grafana (импорт через Prometheus-совместимый
+# datasource). Один источник истины: правила не дублируются в дашбордах.
+#
+# Что проверяет scripts/alerts-consistency-check.py:
+#   - каждая метрика в expr существует в C++-регистрации (src/app_context.cpp);
+#   - у правила есть for, severity, service, summary, description, runbook;
+#   - PromQL валидна (в runtime-режиме — запросом в VictoriaMetrics).
+# Гейт висит в scripts/ci-gate.sh, поэтому правило на несуществующую метрику
+# валит сборку, а не «молчит» в проде.
+#
+# Пороги: SLO-цели проекта — доступность 99.9%, P95 < 50 мс, P99 < 100 мс
+# (дашборд «SLO (уровень обслуживания)», uid l2-slo-tracking). Пороги
+# оповещений заметно мягче целей: SLO — это цель, а не «сбой». Ошибка
+# выстреливает по бюджету ошибок (×20 от SLO — критично, ×5 — предупреждение),
+# как и на дашборде бюджета ошибок.
+#
+# Серии не фильтруются по метке `vm`: правило должно работать в любом
+# окружении (в том числе без vmagent), а суммирование по всем экземплярам
+# даёт один алерт на правило, а не по одному на каждый инстанс.
+
+groups:
+  - name: l2-proxy
+    interval: 30s
+    rules:
+      - alert: L2ProxyErrorBudgetBurnFast
+        expr: |
+          (sum(rate(l2_proxy_client_request_errors_total[5m]))
+            / sum(rate(l2_proxy_client_requests_total[5m]))) / 0.001 > 20
+        for: 5m
+        labels:
+          severity: critical
+          service: proxy
+        annotations:
+          summary: "Бюджет ошибок прокси сгорает быстро (×20 к SLO)"
+          description: "Доля ошибок клиентских запросов в 20 раз превышает SLO 99.9% (текущее значение {{ $value }}×). Ошибки идут 5 минут подряд — клиенты получают отказы прямо сейчас."
+          runbook: "README.md → «Алерты (оповещения)»: разберите l2_proxy_client_request_errors_total{type} — по типу ошибки видно, клиент это или бэкенд."
+
+      - alert: L2ProxyErrorBudgetBurnSlow
+        expr: |
+          (sum(rate(l2_proxy_client_request_errors_total[30m]))
+            / sum(rate(l2_proxy_client_requests_total[30m]))) / 0.001 > 5
+        for: 30m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Бюджет ошибок прокси сгорает устойчиво (×5 к SLO)"
+          description: "Доля ошибок в 5 раз превышает SLO 99.9% на горизонте 30 минут (текущее значение {{ $value }}×). Ошибка не самовосстановилась — ищите причину, а не всплеск."
+          runbook: "README.md → «Алерты (оповещения)»: разберите l2_proxy_client_request_errors_total{type} — по типу ошибки видно, клиент это или бэкенд."
+
+      - alert: L2ProxyLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(l2_proxy_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "P95 ответа прокси выше 1 с"
+          description: "95-й перцентиль времени ответа прокси — {{ $value }} с (цель проекта — 50 мс; базовый замер под нагрузкой 2000×100 даёт P95 ≈ 320 мс, то есть это втрое хуже измеренного baseline)."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте l2_proxy_task_queue_size (очередь задач) и l2_worker_queue_size (очередь пула воркера) — рост очереди даёт именно такую задержку."
+
+      - alert: L2ProxyLatencyP99High
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(l2_proxy_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: critical
+          service: proxy
+        annotations:
+          summary: "P99 ответа прокси выше 2 с"
+          description: "99-й перцентиль времени ответа прокси — {{ $value }} с (цель проекта — 100 мс). Хвост растёт, когда concurrency превышает пул воркера."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте l2_worker_active_workers и l2_worker_queue_capacity — пул воркера исчерпан."
+
+      - alert: L2ProxyRejectionSpike
+        expr: sum(rate(l2_proxy_rejections_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Прокси отклоняет больше 1 запроса в секунду"
+          description: "Частота отказов на границе прокси — {{ $value }}/с. Отказ — это запрос, до которого не дошёл ни воркер."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_proxy_rejections_total{reason} — rate_limit_global, rate_limit_per_ip, duplicate или invalid_json."
+
+      - alert: L2ProxyRateLimitRejections
+        expr: sum(rate(l2_proxy_rejections_total{reason=~"rate_limit.*"}[5m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Прокси отклоняет запросы по rate limit"
+          description: "Отказы по лимитам — {{ $value }}/с (rate_limit_global или rate_limit_per_ip). Либо поток упёрся в лимит, либо клиент шлёт больше, чем настроено."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте l2_rate_limiter_tokens и l2_per_ip_rate_limiter_ips_tracked — сработал ли глобальный или per-IP лимит."
+
+      - alert: L2ProxyTaskQueueRejected
+        expr: sum(rate(l2_proxy_task_queue_rejected_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: proxy
+        annotations:
+          summary: "Прокси отклоняет соединения из-за переполненной очереди задач"
+          description: "Прокси не принял соединений из-за очереди задач: {{ $value }}/с. Клиенты получают отказ на входе."
+          runbook: "README.md → «Алерты (оповещения)»: увеличьте L2_PROXY_MAX_QUEUED_REQUESTS или число потоков воркера (L2_WORKER_THREADS)."
+
+      - alert: L2ProxyTaskQueueSaturated
+        expr: |
+          (sum(l2_proxy_task_queue_capacity) > 0)
+            and (sum(l2_proxy_task_queue_size) / sum(l2_proxy_task_queue_capacity) > 0.8)
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Очередь задач прокси заполнена больше чем на 80%"
+          description: "Очередь задач прокси — {{ $value }} от предела. Пока предел не достигнут (L2_PROXY_MAX_QUEUED_REQUESTS=0 — без предела), правило молчит."
+          runbook: "README.md → «Алерты (оповещения)»: если дорастёт до 100% — сработает L2ProxyTaskQueueRejected; увеличьте L2_PROXY_MAX_QUEUED_REQUESTS."
+
+      - alert: L2ProxyNatsDisconnected
+        expr: min(l2_proxy_nats_connected) < 1
+        for: 2m
+        labels:
+          severity: critical
+          service: proxy
+        annotations:
+          summary: "Прокси потерял связь с NATS"
+          description: "Прокси не подключён к NATS (l2_proxy_nats_connected = {{ $value }}). Запросы клиентов не доходят до воркера."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте контейнер nats-server и L2ProxyNatsReconnects — ищите сетевые разрывы."
+
+      - alert: L2ProxyNatsReconnects
+        expr: sum(rate(l2_proxy_nats_reconnects_total[10m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Прокси переподключается к NATS"
+          description: "Переподключений к NATS — {{ $value }}/с. Соединение рвётся — проверьте брокер и сеть."
+          runbook: "README.md → «Алерты (оповещения)»: docker compose logs nats-server; если реконнекты идут волнами — смотрите L2ProxyNatsTimeouts."
+
+      - alert: L2ProxyNatsTimeouts
+        expr: sum(rate(l2_proxy_nats_timeouts_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Прокси не дожидается ответа NATS"
+          description: "Таймаутов ожидания ответа NATS — {{ $value }}/с. Воркер не успевает ответить вовремя."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_worker_request_duration_seconds и l2_worker_queue_size — воркер не успевает разбирать очередь."
+
+      - alert: L2ProxyDuplicateCacheEvictions
+        expr: sum(rate(l2_proxy_duplicate_cache_evictions_total[5m])) > 1
+        for: 15m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Дедуп-кэш прокси постоянно вытесняет записи"
+          description: "Вытеснений из дедуп-кэша — {{ $value }}/с. Каждое вытеснение отключает детектирование дублей для тела или client_id, то есть дубли начинают проходить на воркер."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_proxy_duplicate_cache_evictions_total{reason} — body_ttl/body_cap/client_ttl/client_cap; для cap поднимите лимиты дедуп-кэша."
+
+  - name: l2-worker
+    interval: 30s
+    rules:
+      - alert: L2WorkerNotReady
+        expr: sum(rate(l2_worker_not_ready_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "Воркер не готов принимать работу"
+          description: "Воркер сообщил о неготовности — {{ $value }}/с. /health/ready не проходит, клиенты получают отказы."
+          runbook: "README.md → «Алерты (оповещения)»: причина в l2_worker_not_ready_total{reason} — nats_unavailable, ping_failed или health_check_failed."
+
+      - alert: L2WorkerCircuitBreakerOpen
+        expr: max(l2_worker_circuit_breaker_state) == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "Circuit breaker вызова L2 открыт"
+          description: "Брейкер на вызов L2 в состоянии open (l2_worker_circuit_breaker_state = {{ $value }}). Запросы к L2 отбрасываются без попытки обращения."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_worker_l2_call_errors_total{type} — по типу видно, почему L2 недоступен."
+
+      - alert: L2WorkerCircuitBreakerFlapping
+        expr: sum(rate(l2_worker_circuit_breaker_transitions_total[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Circuit breaker вызова L2 часто переключается"
+          description: "Переходов состояния брейкера — {{ $value }}/с. Брейкер открывается и восстанавливается — L2 работает на грани."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_worker_circuit_breaker_transitions_total{to} и l2_worker_l2_call_duration_seconds{backend}."
+
+      - alert: L2WorkerL2CallErrorRatioHigh
+        expr: |
+          sum(rate(l2_worker_l2_call_errors_total[5m]))
+            / clamp_min(sum(rate(l2_worker_l2_calls_total[5m])), 0.001) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Больше 10% вызовов L2 заканчиваются ошибкой"
+          description: "Доля неуспешных вызовов L2 — {{ $value }}. Ошибки типизированы в l2_worker_l2_call_errors_total{type}."
+          runbook: "README.md → «Алерты (оповещения)»: разберите l2_worker_l2_call_errors_total{type} — TIMEOUT_ERROR, CONNECTION_ERROR, RESPONSE_ERROR или RETRY_EXHAUSTED."
+
+      - alert: L2WorkerRetriesExhausted
+        expr: sum(rate(l2_worker_retries_total{outcome="exhausted"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Воркер исчерпал попытки повторного вызова L2"
+          description: "Повторов с исчерпанием попыток — {{ $value }}/с. Каждый такой запрос воркер сдаёт с ошибкой."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_worker_l2_server_call_duration_seconds{backend} — какой именно бэкенд не отвечает."
+
+      - alert: L2WorkerDbPoolExhausted
+        expr: sum(rate(l2_worker_db_pool_exhausted_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Пул соединений к БД исчерпан"
+          description: "Отказов из-за занятого пула БД — {{ $value }}/с. Запросы к шлюзу БД отклоняются без попытки выполнить SQL."
+          runbook: "README.md → «Алерты (оповещения)»: сравните l2_worker_db_pool_connections{db,state} с l2_worker_db_pool_capacity{db}."
+
+      - alert: L2WorkerValidationErrors
+        expr: sum(rate(l2_worker_request_validation_errors_total[5m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Клиенты массово шлют запросы, не проходящие валидацию"
+          description: "Отказов по валидации — {{ $value }}/с. Разбивка по отвергнутому полю — в l2_worker_request_validation_errors_total{field}."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите метку field — method/path/body или имя обязательного поля; сверьте контракт клиента."
+
+      - alert: L2WorkerQueueSaturated
+        expr: sum(l2_worker_queue_size) / clamp_min(sum(l2_worker_queue_capacity), 1) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Очередь пула потоков воркера заполнена больше чем на 80%"
+          description: "Очередь задач воркера — {{ $value }} от предела. Воркер не успевает разбирать сообщения NATS, клиенты ждут."
+          runbook: "README.md → «Алерты (оповещения)»: увеличьте L2_WORKER_THREADS или L2_WORKER_QUEUE_SIZE; см. также L2WorkerLatencyP95High."
+
+      - alert: L2WorkerLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(l2_worker_request_duration_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "P95 обработки запроса воркером выше 5 с"
+          description: "95-й перцентиль обработки запроса воркером — {{ $value }} с. Воркер отвечает медленно — клиенты это видят."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_worker_l2_server_call_duration_seconds{backend} — задержка может быть в вызове L2."
+
+  - name: l2-common
+    interval: 30s
+    rules:
+      - alert: L2MetricsRenderSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(l2_common_metrics_render_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Рендер /metrics занимает больше 500 мс"
+          description: "P95 времени рендера страницы /metrics — {{ $value }} с. Экспозитор отдаёт метрики медленно — скрейперы отстают, а с ними и алерты."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте l2_common_metrics_render_duration_seconds — рост стоимости рендера означает рост числа семейств/серий."
+
+      - alert: L2StatsPageRenderSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(l2_common_stats_page_render_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Рендер страницы /stats занимает больше 2 с"
+          description: "P95 времени рендера страницы /stats — {{ $value }} с. Страница пересобирается с нуля на каждый запрос, поэтому растёт вместе с числом метрик и длиной истории."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_common_stats_history_samples_total{outcome} — если сбор истории падает, /stats теряет спарклайны."
+
+      - alert: L2TracingSpansDropped
+        expr: sum(rate(l2_tracing_spans_dropped_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Трассировки теряются"
+          description: "Потерянных спанов — {{ $value }}/с. Причина в метке reason: queue_full, breaker_open, export_error или shutdown_flush."
+          runbook: "README.md → «Алерты (оповещения)»: разберите l2_tracing_spans_dropped_total{reason} и l2_tracing_queue_size."
+
+      - alert: L2SentryEventsDropped
+        expr: sum(rate(l2_worker_sentry_events_dropped_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "События Sentry теряются"
+          description: "Потерянных событий Sentry — {{ $value }}/с. Ошибки не попадают в GlitchTip — инциденты будут без контекста."
+          runbook: "README.md → «Алерты (оповещения)»: разберите l2_worker_sentry_events_dropped_total{reason} (queue_full/disabled) и l2_worker_sentry_queue_size."
+
+      - alert: L2HttpPoolAcquisitionTimeouts
+        expr: sum(rate(l2_http_pool_client_acquisition_timeouts_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "HTTP-пул не выдаёт клиента — исчерпан"
+          description: "Таймаутов ожидания свободного pooled-клиента — {{ $value }}/с. Исходящие HTTP-запросы (в том числе к L2) падают."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_http_pool_active_clients и l2_http_pool_available_clients."

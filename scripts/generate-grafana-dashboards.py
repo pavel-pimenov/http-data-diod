@@ -731,6 +731,112 @@ def create_sentry_dashboard() -> Dict:
 
     return dashboard
 
+def create_alerts_dashboard() -> Dict:
+    """Create the alerting dashboard.
+
+    The panels read the ALERTS series that vmalert writes into VictoriaMetrics
+    (remote write). That is what makes a fired alert visible: without it the
+    rules are computed and nobody sees the result.
+    """
+    dashboard = create_dashboard_base(
+        title="Алерты (оповещения)",
+        uid="l2-alerts",
+        tags=["l2-alerts", "observability"]
+    )
+
+    panels = dashboard["dashboard"]["panels"]
+    y = 0
+
+    # Row 1: Alert overview
+    panels.append(create_row_panel("Обзор алертов", 1, y))
+    y += 1
+
+    # Panel 2: firing alerts
+    panels.append(create_stat_panel(
+        title="Активных алертов (firing)",
+        id=2,
+        x=0, y=y, w=8, h=5,
+        unit="short",
+        targets=[
+            {"expr": 'count(ALERTS{alertstate="firing"})', "legendFormat": "Активных", "refId": "A"}  # noqa: E501
+        ],
+        color_mode="value",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 1}
+            ]
+        }
+    ))
+
+    # Panel 3: pending alerts
+    panels.append(create_stat_panel(
+        title="Ожидающих алертов (pending)",
+        id=3,
+        x=8, y=y, w=8, h=5,
+        unit="short",
+        targets=[
+            {"expr": 'count(ALERTS{alertstate="pending"})', "legendFormat": "Ожидающих", "refId": "A"}  # noqa: E501
+        ],
+        color_mode="value",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "yellow", "value": 1}
+            ]
+        }
+    ))
+
+    # Panel 4: critical alerts
+    panels.append(create_stat_panel(
+        title="Критичных алертов",
+        id=4,
+        x=16, y=y, w=8, h=5,
+        unit="short",
+        targets=[
+            {"expr": 'count(ALERTS{alertstate="firing", severity="critical"})', "legendFormat": "Критичных", "refId": "A"}  # noqa: E501
+        ],
+        color_mode="value",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "green", "value": None},
+                {"color": "red", "value": 1}
+            ]
+        }
+    ))
+    y += 8
+
+    # Row 2: Which alerts are firing
+    panels.append(create_row_panel("Какие алерты горят", 10, y))
+    y += 1
+
+    # Panel 11: by alert name
+    panels.append(create_timeseries_panel(
+        title="Активные алерты по названию",
+        id=11,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": 'count by (alertname) (ALERTS{alertstate="firing"})', "legendFormat": "{{alertname}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 12: by severity
+    panels.append(create_timeseries_panel(
+        title="Активные алерты по критичности",
+        id=12,
+        x=12, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": 'count by (severity) (ALERTS{alertstate="firing"})', "legendFormat": "{{severity}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    return dashboard
+
 # ============================================================================
 # Dashboard Definitions
 # ============================================================================
@@ -3221,6 +3327,7 @@ Examples:
     dashboard_definitions = [
         (create_tracing_dashboard, 'l2-distributed-tracing'),
         (create_sentry_dashboard, 'l2-sentry-delivery'),
+        (create_alerts_dashboard, 'l2-alerts'),
         (create_proxy_dashboard, 'l2-proxy'),
         (create_worker_dashboard, 'l2-worker'),
         (create_server_dashboard, 'l2-server'),

@@ -8,13 +8,15 @@
 #   ./scripts/ci-gate.sh unit       Python unit tests (no containers)
 #   ./scripts/ci-gate.sh offline    Offline gates: lint-python, Perses dashboard
 #                                   converter --check, metric-name consistency,
-#                                   env-var <-> compose, docker build-context
+#                                   alert-rules consistency, env-var <->
+#                                   compose, docker build-context
 #   ./scripts/ci-gate.sh runtime    Runtime gates against a live stack:
 #                                   message counter, DB gateway e2e, golden
 #                                   metrics (--traffic --db), /metrics
-#                                   consistency, Grafana <-> Perses dashboard
-#                                   parity. Warns (rc=0) when the stack is down
-#                                   or postgres is unavailable.
+#                                   consistency, alert rules (PromQL + vmalert),
+#                                   Grafana <-> Perses dashboard parity. Warns
+#                                   (rc=0) when the stack is down or postgres
+#                                   is unavailable.
 #   ./scripts/ci-gate.sh all        unit + offline + runtime
 #
 # SKIP_METRICS_CHECK=1 skips the metric-name gates (offline+runtime).
@@ -69,6 +71,13 @@ g_offline() {
             return 1
         fi
         log_info "✓ Metric consistency (offline) passed"
+
+        log_info "Running alert-rules consistency check (offline)..."
+        if ! python3 scripts/alerts-consistency-check.py --offline; then
+            log_error "Alert rules reference metrics that are not registered!"
+            return 1
+        fi
+        log_info "✓ Alert-rules consistency (offline) passed"
     fi
 
     log_info "Running env-var <-> docker-compose consistency check..."
@@ -130,6 +139,13 @@ g_runtime() {
             return 1
         fi
         log_info "✓ Metric consistency (runtime) passed"
+
+        log_info "Running alert-rules runtime check..."
+        if ! python3 scripts/alerts-consistency-check.py --runtime; then
+            log_error "Alert rules are invalid, or vmalert does not evaluate them!"
+            return 1
+        fi
+        log_info "✓ Alert-rules runtime check passed"
     fi
 
     log_info "Running Grafana <-> Perses dashboard parity check..."

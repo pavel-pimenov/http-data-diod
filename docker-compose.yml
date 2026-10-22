@@ -151,6 +151,36 @@ services:
       retries: 3
       start_period: 15s
 
+  # vmalert - выполняет правила оповещений из alerts/l2-alerts.yml.
+  # Без Alertmanager уведомления уходят в blackhole: правила вычисляются,
+  # активные алерты видно в /api/v1/alerts и в метриках vmalert_*.
+  vmalert:
+    container_name: vmalert
+    image: victoriametrics/vmalert:v1.97.0
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./alerts/l2-alerts.yml:/etc/vmalert/rules.yml:ro
+    command:
+      - '--datasource.url=http://victoria-metrics:8428'
+      - '--rule=/etc/vmalert/rules.yml'
+      - '--notifier.blackhole'
+      - '--remoteWrite.url=http://victoria-metrics:8428'
+      - '--httpListenAddr=:8880'
+      - '--loggerLevel=WARN'
+      - '--configCheckInterval=1m'
+    networks:
+      - l2_network
+    depends_on:
+      - victoria-metrics
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8880/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   l2-server:
     container_name: l2-server
     image: http-data-diod-l2-proxy:latest
