@@ -1,6 +1,7 @@
 #include "app_context.hpp"
 #include "db_query_utils.hpp"
 #include "error_categorizer.hpp"
+#include "json_schema_validator.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
 #include "tracing_metrics.hpp"
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <memory>
 #include <prometheus/registry.h>
+#include <set>
 
 // Build version, defined in version.cpp. Declared here the same way config.cpp
 // does it (crash_handler.hpp declares it too, but that header drags in the
@@ -418,6 +420,10 @@ void AppContext::init_worker_metrics() {
       reg_worker.counter(
           "l2_worker_processing_validation_errors_total",
           "Request validation errors"),
+      reg_worker.counter_family(
+          "l2_worker_request_validation_errors_total",
+          "Request validation failures by the rejected request field (the "
+          "reason text is not used as a label: it embeds client values)"),
       reg_worker.histogram(
           "l2_worker_l2_response_size_bytes",
           "Histogram of L2 response sizes in bytes",
@@ -540,6 +546,20 @@ void AppContext::init_worker_metrics() {
   auto &per_backend = m_worker.m_metrics->m_l2_server_call_duration_seconds;
   for (const auto &url : m_config.m_server.m_urls) {
     per_backend.Add({{"backend", url}}, latency_buckets_5ms_to_10s());
+  }
+
+  // The validation failures are split by the rejected request field. The
+  // series exist up front (a healthy worker rejects nothing), so the family is
+  // exported before the first bad request. The set comes from the standard
+  // validator: its required fields plus the value-level checks.
+  RequestValidator const validator = create_standard_request_validator();
+  std::set<std::string> validation_fields{"method", "path", "body"};
+  for (const auto &field : validator.required_fields()) {
+    validation_fields.insert(field);
+  }
+  auto &validation_errors = m_worker.m_metrics->m_request_validation_errors;
+  for (const auto &field : validation_fields) {
+    validation_errors.Add({{"field", field}});
   }
 }
 

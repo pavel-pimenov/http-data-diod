@@ -38,6 +38,14 @@ private:
     size_t m_max_path_length;
   } m_limits;
 
+  // Writes the rejected field name into the caller's out-parameter, if any.
+  static void set_failed_field(std::string *failed_field,
+                               std::string_view field) {
+    if (failed_field != nullptr) {
+      *failed_field = field;
+    }
+  }
+
 public:
   RequestValidator()
       : m_allowed(),
@@ -69,10 +77,24 @@ public:
     return *this;
   }
 
-  bool validate(const json &request, std::string &error) const {
+  // The required field names (from the validator configuration). The set is
+  // bounded by the configuration, so its values may be used as a metric label.
+  [[nodiscard]] std::vector<std::string> required_fields() const {
+    return {m_allowed.m_required_fields.begin(),
+            m_allowed.m_required_fields.end()};
+  }
+
+  // Validates the request. On failure `error` gets the human-readable reason
+  // and `failed_field` (optional) gets the name of the rejected request field
+  // — a name from the validator's own bounded set ("method", "path", "body"
+  // or a required field). The reason text embeds client-controlled values (a
+  // path, a method), so it must never be used as a label.
+  bool validate(const json &request, std::string &error,
+                std::string *failed_field = nullptr) const {
     for (const auto &field : m_allowed.m_required_fields) {
       if (!request.contains(field)) {
         error = "Missing required field: " + field;
+        set_failed_field(failed_field, field);
         return false;
       }
     }
@@ -87,6 +109,7 @@ public:
               m_allowed.m_allowed_methods.end()) {
 #endif
         error = "Method not allowed: " + method;
+        set_failed_field(failed_field, "method");
         return false;
       }
     }
@@ -98,6 +121,7 @@ public:
       if (path.length() > m_limits.m_max_path_length) {
         error = std::format("Path too long: {} > {}", path.length(),
                             m_limits.m_max_path_length);
+        set_failed_field(failed_field, "path");
         return false;
       }
 
@@ -110,6 +134,7 @@ public:
                                 });
         if (!path_allowed) {
           error = "Path not allowed: " + path;
+          set_failed_field(failed_field, "path");
           return false;
         }
       }
@@ -121,6 +146,7 @@ public:
       if (body.length() > m_limits.m_max_body_size) {
         error = std::format("Body too large: {} > {}", body.length(),
                             m_limits.m_max_body_size);
+        set_failed_field(failed_field, "body");
         return false;
       }
     }

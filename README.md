@@ -676,6 +676,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_worker_l2_server_call_duration_seconds` | histogram | `backend` | Длительность вызова L2-сервера по каждому настроенному бэкенду (метка — базовый URL из `L2_SERVER_URLS`) |
 | `l2_worker_processing_json_errors_total` | counter | — | Ошибки разбора JSON |
 | `l2_worker_processing_validation_errors_total` | counter | — | Ошибки валидации запроса |
+| `l2_worker_request_validation_errors_total` | counter | `field` | Ошибки валидации по отвергнутому полю запроса (`method` / `path` / `body` / обязательное поле) |
 | `l2_worker_l2_response_size_bytes` | histogram | — | Размер ответа L2 |
 | `l2_worker_circuit_breaker_state` | gauge | — | Состояние CB (0=closed,1=open,2=half-open) |
 | `l2_worker_circuit_breaker_transitions_total` | counter | `to` | Переходы CB по целевому состоянию (open/half_open/closed) |

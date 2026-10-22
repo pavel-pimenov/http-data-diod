@@ -209,6 +209,34 @@ TEST_CASE("AppContext: proxy pre-creates the duplicate eviction reason series",
                                             "client_cap", "client_ttl"});
 }
 
+TEST_CASE("AppContext: worker pre-creates the validation field series",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "worker"}};
+
+  AppContext const ctx;
+
+  REQUIRE(has_family(ctx.m_worker_registry,
+                      "l2_worker_request_validation_errors_total"));
+  std::vector<std::string> fields;
+  for (const auto &family : ctx.m_worker_registry->Collect()) {
+    if (family.name != "l2_worker_request_validation_errors_total") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "field") {
+          fields.push_back(label.value);
+        }
+      }
+    }
+  }
+  // A healthy worker rejects nothing, so every field the validator can report
+  // must exist as 0.
+  std::ranges::sort(fields);
+  REQUIRE(fields == std::vector<std::string>{"body", "method", "path",
+                                             "request_id"});
+}
+
 TEST_CASE("AppContext: labelled families keep their label contract",
           "[app_context]") {
   // The dashboard legends (PromQL {{type}} / {{reason}} / {{outcome}} / ...) are
@@ -232,6 +260,7 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_common_stats_history_samples_total", {"outcome"}},
       {"l2_proxy_duplicate_cache_evictions_total", {"reason"}},
       {"l2_worker_l2_server_call_duration_seconds", {"backend"}},
+      {"l2_worker_request_validation_errors_total", {"field"}},
   };
 
   std::map<std::string, std::set<std::string>> actual;

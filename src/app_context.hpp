@@ -161,6 +161,11 @@ struct WorkerMetrics {
   prometheus::Family<prometheus::Histogram> &m_l2_server_call_duration_seconds;
   prometheus::Counter &m_processing_json_errors;
   prometheus::Counter &m_processing_validation_errors;
+  // Request validation failures split by the rejected request field ("method",
+  // "path", "body" or a required field). The label set is bounded by the
+  // validator configuration — the free-text reason embeds client-controlled
+  // values and must never become a label.
+  prometheus::Family<prometheus::Counter> &m_request_validation_errors;
   prometheus::Histogram &m_l2_response_size_bytes;
   prometheus::Gauge &m_circuit_breaker_state;
   // Breaker transitions labelled by target state ("open"/"half_open"/"closed")

@@ -1372,6 +1372,77 @@ TEST_CASE("RequestValidator: Path not in allowed list fails", "[validator]") {
   REQUIRE(error.find("not allowed") != std::string::npos);
 }
 
+TEST_CASE("RequestValidator: the rejected field is reported for the metric",
+          "[validator]") {
+  // The reason text embeds client-controlled values (a path, a method), so
+  // the metric label must be the field name from the validator's own bounded
+  // set — never the text.
+  std::string failed_field;
+
+  SECTION("a missing required field names the field") {
+    RequestValidator v;
+    v.add_required_field("method").add_required_field("request_id");
+    json const req = {{"method", "GET"}};
+    std::string error;
+    REQUIRE_FALSE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field == "request_id");
+  }
+
+  SECTION("a disallowed method names the method field") {
+    RequestValidator v;
+    v.add_allowed_method("GET");
+    json const req = {{"method", "DELETE"}, {"path", "/api"}};
+    std::string error;
+    REQUIRE_FALSE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field == "method");
+  }
+
+  SECTION("a too long path names the path field") {
+    RequestValidator v;
+    v.set_max_path_length(10);
+    json const req = {{"method", "GET"}, {"path", "/this/path/is/very/long"}};
+    std::string error;
+    REQUIRE_FALSE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field == "path");
+  }
+
+  SECTION("a forbidden path names the path field") {
+    RequestValidator v;
+    v.add_allowed_path("/api");
+    json const req = {{"method", "GET"}, {"path", "/admin"}};
+    std::string error;
+    REQUIRE_FALSE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field == "path");
+  }
+
+  SECTION("a too large body names the body field") {
+    RequestValidator v;
+    v.set_max_body_size(4);
+    json const req = {{"method", "GET"}, {"body", "way too long"}};
+    std::string error;
+    REQUIRE_FALSE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field == "body");
+  }
+
+  SECTION("a valid request reports no field") {
+    RequestValidator v;
+    v.add_required_field("method");
+    json const req = {{"method", "GET"}};
+    std::string error;
+    REQUIRE(v.validate(req, error, &failed_field));
+    REQUIRE(failed_field.empty());
+  }
+}
+
+TEST_CASE("RequestValidator: required_fields lists the configured fields",
+          "[validator]") {
+  RequestValidator const v = create_standard_request_validator();
+  const auto fields = v.required_fields();
+  REQUIRE(std::ranges::find(fields, "method") != fields.end());
+  REQUIRE(std::ranges::find(fields, "path") != fields.end());
+  REQUIRE(std::ranges::find(fields, "request_id") != fields.end());
+}
+
 TEST_CASE("RequestValidator: Path with allowed prefix passes", "[validator]") {
   RequestValidator v;
   v.add_allowed_path("/api");

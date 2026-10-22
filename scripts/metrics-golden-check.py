@@ -91,6 +91,7 @@ CATALOG = [
     "l2_worker_l2_server_call_duration_seconds",
     "l2_worker_processing_json_errors_total",
     "l2_worker_processing_validation_errors_total",
+    "l2_worker_request_validation_errors_total",
     "l2_worker_l2_response_size_bytes",
     "l2_worker_circuit_breaker_state",
     "l2_worker_circuit_breaker_transitions_total",

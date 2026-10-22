@@ -2660,7 +2660,11 @@ def create_worker_dashboard() -> Dict:
             ]
         },
         targets=[
-            {"expr": "rate(l2_worker_processing_validation_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки валидации/с", "refId": "A"}  # noqa: E501
+            {"expr": "rate(l2_worker_processing_validation_errors_total{vm=~\"${vm:regex}\"}[1m])", "legendFormat": "Ошибки валидации/с", "refId": "A"},  # noqa: E501
+            # Разбор по отвергнутому полю запроса: метка ограничена
+            # конфигурацией валидатора (текст ошибки в метку не годится —
+            # он содержит клиентские значения).
+            {"expr": "sum by (field) (rate(l2_worker_request_validation_errors_total{vm=~\"${vm:regex}\"}[1m]))", "legendFormat": "{{field}}/с", "refId": "B"}  # noqa: E501
         ]
     ))
 

@@ -489,9 +489,11 @@ bool L2Worker::parse_request_data(const std::string &request_json,
   auto validated = validate_and_parse_json(request_json, "Worker")
                        .and_then([&](json j) -> std::expected<json, std::string> {
                          std::string parse_error;
+                         std::string failed_field;
                          static RequestValidator const g_validator =
                              create_standard_request_validator();
-                         if (!g_validator.validate(j, parse_error)) {
+                         if (!g_validator.validate(j, parse_error,
+                                                   &failed_field)) {
                            Logger::error("Worker request validation failed: {}",
                                          parse_error);
                            handle_processing_error_with_category(
@@ -504,6 +506,12 @@ bool L2Worker::parse_request_data(const std::string &request_json,
                                        &m_ctx.m_worker.m_metrics
                                             ->m_processing_validation_errors},
                                "Request Schema Validation");
+                           // Which field the client got wrong: the reason text
+                           // cannot be a label (it embeds the client's own
+                           // path and method).
+                           m_ctx.m_worker.m_metrics->m_request_validation_errors
+                               .Add({{"field", failed_field}})
+                               .Increment();
                            if (m_ctx.m_sentry) {
                              m_ctx.m_sentry->capture_message(
                                  std::format(
