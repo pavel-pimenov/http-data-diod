@@ -31,6 +31,13 @@ MetricsExposer::MetricsExposer(int port,
     // Bind here (not in the serving thread) so the caller learns the port
     // before the first scrape.
     m_port = m_server.bind_to_any_port("0.0.0.0");
+    if (m_port < 0) {
+      m_port = 0;
+    }
+  } else {
+    if (!m_server.bind_to_port("0.0.0.0", m_port)) {
+      // Keep m_port for logging/debugging; listen_after_bind will fail fast.
+    }
   }
   m_thread = std::thread([this] { serve(); });
 }
@@ -44,7 +51,7 @@ MetricsExposer::~MetricsExposer() {
 
 void MetricsExposer::serve() {
   Logger::info("Metrics exposer listening on 0.0.0.0:{}", m_port);
-  m_server.listen("0.0.0.0", m_port);
+  m_server.listen_after_bind();
 }
 
 void MetricsExposer::register_collectable(
