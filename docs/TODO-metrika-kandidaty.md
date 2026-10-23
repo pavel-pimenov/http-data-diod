@@ -253,7 +253,6 @@ enum, а не литералы в местах вызова). Частные с�
 | ~~`l2_common_stats_page_render_duration_seconds`~~ ✅ | histogram | — | то же для `/stats` (сделано в раунде 194 ✅) |
 | ~~`l2_common_stats_history_samples_total`~~ ✅ | counter | `outcome` (ok/error/no_registry) | здоровье истории метрик (`metrics_history.hpp`) (сделано в раунде 190 ✅) |
 | `l2_common_stats_history_buffer_size` | gauge | `history` (proxy/worker/server/common) | заполнение буфера истории ✅ (round 200; метка `history` добавлена вынужденно: один процесс держит четыре истории, без метки значения четырёх сэмплеров перетирали бы друг друга) |
-| `l2_common_stats_history_buffer_size` | gauge | — | заполнение буфера истории |
 | ~~`l2_proxy_not_ready_total`~~ ✅ | counter | `reason` | почему proxy не в ready (диагностика healthcheck) (сделано в раунде 186 ✅) |
 | ~~`l2_worker_not_ready_total`~~ ✅ | counter | `reason` | то же для worker (сделано в раунде 186 ✅) |
 | ~~`l2_common_crash_dumps_total`~~ ✅ | gauge | — | записанные стектрейсы (`src/crash_handler.hpp`) (сделано в раунде 200 как **gauge** `l2_common_crash_dumps`, а не counter: процесс, записавший дамп, тут же завершается через `raise()`, поэтому инкремент в обработчике сигнала никто не успел бы соскрейпить; значение — снимок каталога дампов, читается с диска перед каждой экспозицией; каталог общий для всех сервисов, поэтому в панелях/алертах нужен `max()`) |

@@ -861,13 +861,13 @@ row/grid-секций, а затем прогоняет выборку запр�
 
 Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Правила оповещений вычисляет **vmalert** (`victoriametrics/vmalert`, порт `8880`), поднятый в `docker-compose.yml`.
 
-Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 26 правил в трёх группах:
+Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 29 правил в трёх группах:
 
 | Группа | Что покрывает | Примеры правил |
 |---|---|---|
 | `l2-proxy` | граница прокси: отказы, лимиты, очередь задач, NATS, латентность, сгорание бюджета ошибок | `L2ProxyErrorBudgetBurnFast`, `L2ProxyTaskQueueRejected`, `L2ProxyNatsDisconnected` |
 | `l2-worker` | воркер: готовность, circuit breaker, вызовы L2, ретраи, пул БД, валидация запросов | `L2WorkerNotReady`, `L2WorkerCircuitBreakerOpen`, `L2WorkerRetriesExhausted` |
-| `l2-common` | общие: рендер `/metrics` и `/stats`, потери спанов и событий Sentry, HTTP-пул | `L2MetricsRenderSlow`, `L2TracingSpansDropped` |
+| `l2-common` | общие: рендер `/metrics` и `/stats`, потери спанов и событий Sentry, HTTP-пул, crash-дампы, здоровье истории метрик | `L2MetricsRenderSlow`, `L2TracingSpansDropped`, `L2CommonCrashDumpWritten` |
 
 | Что | Как устроено |
 |---|---|

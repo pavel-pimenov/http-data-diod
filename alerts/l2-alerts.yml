@@ -329,3 +329,43 @@ groups:
           summary: "HTTP-пул не выдаёт клиента — исчерпан"
           description: "Таймаутов ожидания свободного pooled-клиента — {{ $value }}/с. Исходящие HTTP-запросы (в том числе к L2) падают."
           runbook: "README.md → «Алерты (оповещения)»: смотрите l2_http_pool_active_clients и l2_http_pool_available_clients."
+
+      # Crash-дамп пишется в момент падения, а процесс сразу умирает, поэтому
+      # счётчика «сколько раз падали» в процессе нет: gauge — снимок каталога
+      # дампов, а событие — изменение этого снимка. Каталог ./crash-dumps общий
+      # для всех сервисов, поэтому max() нужен, чтобы один дамп не дал три алерта.
+      - alert: L2CommonCrashDumpWritten
+        expr: max(changes(l2_common_crash_dumps[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: common
+        annotations:
+          summary: "Записан crash-дамп — сервис падал"
+          description: "За последние 5 минут число файлов в каталоге дампов изменилось ({{ $value }} изменение). Дампы лежат в ./crash-dumps на хосте; каталог общий для proxy/worker/l2-server, поэтому значение одинаково у всех и max() даёт один алерт на событие."
+          runbook: "README.md → «Мониторинг и алерты»: возьмите самый свежий дамп (scripts/resolve-crash.sh <файл>) — в стек-трейсе видно место падения; событие также уходит в Sentry при заданном SENTRY_DSN."
+
+      # Буфер истории наполняется первым же раундом сэмплирования (в реестре
+      # любого режима есть метрики), поэтому долгий ноль означает, что история
+      # не складывается: спарклайны на /stats будут пустыми.
+      - alert: L2CommonStatsHistoryEmpty
+        expr: sum(l2_common_stats_history_buffer_size) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "История метрик не наполняется"
+          description: "Во всех буферах истории (proxy/worker/server/common) ноль точек. Спарклайны на странице /stats будут пустыми, а стоимость рендера /stats не с чем сравнить."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_common_stats_history_samples_total{outcome} — при outcome=ok и нулевом буфере точки не складываются; при outcome=error сэмплер падает."
+
+      - alert: L2CommonStatsHistorySamplingErrors
+        expr: sum(rate(l2_common_stats_history_samples_total{outcome="error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Сэмплер истории метрик падает"
+          description: "Раундов сбора истории с исключением — {{ $value }}/с. Спарклайны на /stats устаревают, хотя процесс жив (с round 190 падение сэмплера не фатально, поэтому его видно только по метрике)."
+          runbook: "README.md → «Алерты (оповещения)»: ищите в логе сервиса 'Metrics history sampling failed' — там текст исключения из registry->Collect()."
