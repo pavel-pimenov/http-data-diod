@@ -49,20 +49,11 @@ KEEP = {
     "prometheus-cpp": [
         ("core/include", "prometheus-cpp/core/include"),
         ("core/src", "prometheus-cpp/core/src"),
-        ("pull/include", "prometheus-cpp/pull/include"),
-        ("pull/src", "prometheus-cpp/pull/src"),
         ("push/include", "prometheus-cpp/push/include"),
         ("push/src", "prometheus-cpp/push/src"),
         ("util/include", "prometheus-cpp/util/include"),
         ("LICENSE", "prometheus-cpp/LICENSE"),
         ("README.md", "prometheus-cpp/README.md"),
-    ],
-    "civetweb": [
-        # prometheus-cpp не носит civetweb в своём дереве (подтягивает при
-        # сборке); здесь он завендорен отдельно для pull-экспозера
-        ("include", "prometheus-cpp/3rdparty/civetweb/include"),
-        ("src", "prometheus-cpp/3rdparty/civetweb/src"),
-        ("LICENSE.md", "prometheus-cpp/3rdparty/civetweb/LICENSE.txt"),
     ],
     "nats.c": [
         # примеры и тесты апстрима не переносятся; добавление их в сборку
@@ -100,7 +91,6 @@ KEEP = {
 REFS = {
     "nlohmann-json": "v3.12.0",
     "prometheus-cpp": "66b615591d17808437fc1ed8a6b6624fdc34b77e",
-    "civetweb": "v1.16",
     "nats.c": "v3.14.0",
     "cpp-httplib": "v0.63.0",
     "base64": "master",
@@ -110,7 +100,6 @@ REFS = {
 GIT_REPOS = {
     "nlohmann-json": "https://github.com/nlohmann/json.git",
     "prometheus-cpp": "https://github.com/jupp0r/prometheus-cpp.git",
-    "civetweb": "https://github.com/civetweb/civetweb.git",
     "nats.c": "https://github.com/nats-io/nats.c.git",
     "cpp-httplib": "https://github.com/yhirose/cpp-httplib.git",
     "base64": "https://github.com/tobiaslocker/base64.git",
@@ -128,9 +117,6 @@ PATCHED = {
         "NOLINT-комментарии, GCC C++20 modules workaround, SPDX-хедер",
     "json/nlohmann/json_fwd.hpp": "точечные правки, как у json.hpp",
     "nats/CMakeLists.txt": "examples/test за опциями (каталоги не вендорены)",
-    "prometheus-cpp/3rdparty/civetweb/src/civetweb.c":
-        "из civetweb.c v1.16 убран #include \"handle_form.inl\" (файл не "
-        "вендорится — нужен только для legacy mg_upload)",
     "prometheus-cpp/core/include/prometheus/detail/core_export.h":
         "генерируется апстримным CMake (generate_export_header), в git-дереве "
         "его нет — не удалять при --prune",

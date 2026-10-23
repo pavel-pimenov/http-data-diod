@@ -14,13 +14,10 @@
 #include <vector>
 
 // A minimal /metrics endpoint built on httplib (already vendored for the
-// proxy's own HTTP server). It replaces prometheus-cpp's pull module, whose
-// Exposer is built on civetweb: about a megabyte of vendored C plus a separate
-// C build step just to serve one text endpoint.
-//
+// proxy's own HTTP server). It replaces prometheus-cpp's pull module.
 // The exposition text itself is produced by prometheus-cpp's own TextSerializer
 // (the core module, already linked), so the output stays byte-identical to the
-// pull module's.
+// previous implementation.
 class MetricsExposer {
 public:
   // A zero port binds an ephemeral one (the bound port is then available via
