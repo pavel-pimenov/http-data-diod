@@ -102,7 +102,7 @@ REFS = {
     "prometheus-cpp": "66b615591d17808437fc1ed8a6b6624fdc34b77e",
     "civetweb": "v1.16",
     "nats.c": "v3.14.0",
-    "cpp-httplib": "v0.61.0",
+    "cpp-httplib": "v0.63.0",
     "base64": "master",
     "odpi": "v26.0.0",
 }
