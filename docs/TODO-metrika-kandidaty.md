@@ -42,7 +42,7 @@
 | worker | `requests_processed_total`, `responses_total`, `request_duration_seconds`, `in_flight_requests`, `queue_size`, `queue_capacity`, `bytes_*`, `nats_connected`, `health_ready`, `graceful_shutdown_seconds`, `processing_json_errors_total`, `processing_validation_errors_total` |
 | worker DB | `db_requests_total`, `db_query_duration_seconds`, `db_pool_connections`, `db_pool_capacity`, `db_pool_exhausted_total`, `db_pool_acquire_duration_seconds`, `db_gateway_ready` |
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
-| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_spans_dropped_total{reason}`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}` |
+| tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_spans_dropped_total{reason}`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}`, `l2_common_stats_history_samples_total{outcome}`, `l2_common_stats_history_buffer_size{history}`, `l2_common_crash_dumps` |
 
 ---
 
@@ -251,11 +251,12 @@ enum, а не литералы в местах вызова). Частные с�
 | `l2_worker_retry_attempts` | histogram | — | распределение числа попыток (цена ретраев) |
 | ~~`l2_common_metrics_render_duration_seconds`~~ ✅ | histogram | — | стоимость рендера `/metrics` (важно при росте кардинальности) (сделано в раунде 184 ✅) |
 | ~~`l2_common_stats_page_render_duration_seconds`~~ ✅ | histogram | — | то же для `/stats` (сделано в раунде 194 ✅) |
-| `l2_common_stats_history_samples_total` | counter | `outcome` (ok/error) | здоровье истории метрик (`metrics_history.hpp`) |
+| ~~`l2_common_stats_history_samples_total`~~ ✅ | counter | `outcome` (ok/error/no_registry) | здоровье истории метрик (`metrics_history.hpp`) (сделано в раунде 190 ✅) |
+| `l2_common_stats_history_buffer_size` | gauge | `history` (proxy/worker/server/common) | заполнение буфера истории ✅ (round 200; метка `history` добавлена вынужденно: один процесс держит четыре истории, без метки значения четырёх сэмплеров перетирали бы друг друга) |
 | `l2_common_stats_history_buffer_size` | gauge | — | заполнение буфера истории |
 | ~~`l2_proxy_not_ready_total`~~ ✅ | counter | `reason` | почему proxy не в ready (диагностика healthcheck) (сделано в раунде 186 ✅) |
 | ~~`l2_worker_not_ready_total`~~ ✅ | counter | `reason` | то же для worker (сделано в раунде 186 ✅) |
-| `l2_common_crash_dumps_total` | counter | — | записанные стектрейсы (`src/crash_handler.hpp`) |
+| ~~`l2_common_crash_dumps_total`~~ ✅ | gauge | — | записанные стектрейсы (`src/crash_handler.hpp`) (сделано в раунде 200 как **gauge** `l2_common_crash_dumps`, а не counter: процесс, записавший дамп, тут же завершается через `raise()`, поэтому инкремент в обработчике сигнала никто не успел бы соскрейпить; значение — снимок каталога дампов, читается с диска перед каждой экспозицией; каталог общий для всех сервисов, поэтому в панелях/алертах нужен `max()`) |
 | ~~`l2_proxy_duplicate_cache_evictions_total`~~ ✅ | counter | `reason` (ttl/cap) | вытеснение из дедуп-кэша (косвенно — повторные посты) (сделано в раунде 192 ✅ — четыре причины: `body_ttl`/`body_cap`/`client_ttl`/`client_cap`) |
 | `l2_proxy_per_client_id_dropped_labels_total` | counter | — | срабатывание cap в `dynamic_labeled_family.hpp` (иначе потеря кардинальности молчалива) |
 | `l2_worker_thread_pool_active_workers` | gauge | — | загрузка исполнителя (`thread_pool.hpp`) |

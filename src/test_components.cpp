@@ -3183,12 +3183,21 @@ TEST_CASE("MetricsExposer: serves the registered registries in text format",
   prometheus::Registry render_registry;
   auto &render_duration = test_support::make_histogram(
       render_registry, "l2_common_metrics_render_duration_seconds", "h");
+  auto &external_gauge =
+      test_support::make_gauge(*registry, "l2_test_exposer_refreshed", "h");
+  std::atomic<int> refresh_calls{0};
 
   {
     // Port 0: the exposer binds an ephemeral port and publishes it.
     MetricsExposer exposer(0, &render_duration);
     REQUIRE(exposer.port() > 0);
     exposer.register_collectable(registry);
+    // Filesystem-backed gauges are stale between scrapes unless the hook
+    // refreshes them right before the exposition is collected.
+    exposer.set_refresh_hook([&] {
+      external_gauge.Set(42.0);
+      refresh_calls.fetch_add(1);
+    });
 
     std::string body;
     bool ok = false;
@@ -3208,6 +3217,8 @@ TEST_CASE("MetricsExposer: serves the registered registries in text format",
     REQUIRE(body.find("l2_test_exposer_counter 7") != std::string::npos);
     REQUIRE(body.find("# TYPE l2_test_exposer_counter counter") !=
             std::string::npos);
+    REQUIRE(body.find("l2_test_exposer_refreshed 42") != std::string::npos);
+    REQUIRE(refresh_calls.load() >= 1);
     // The exposition cost is measured: the scrape price grows with the metric
     // cardinality, so it has to be visible.
     REQUIRE(render_duration.Collect().histogram.sample_count >= 1);

@@ -2572,6 +2572,33 @@ def create_proxy_dashboard() -> Dict:
     ))
     y += 8
 
+    # Panel 208: заполнение буфера истории метрик (точки спарклайнов на /stats).
+    # Плоская линия при растущем числе раундов семплирования означает, что
+    # история не наполняется и спарклайны устаревают.
+    panels.append(create_timeseries_panel(
+        title="Заполнение истории метрик",
+        id=208,
+        x=0, y=y, w=12, h=8,
+        unit="short",
+        targets=[
+            {"expr": "l2_common_stats_history_buffer_size{vm=~\"${vm:regex}\"}", "legendFormat": "{{history}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 209: аварийные дампы на диске. Каталог ./crash-dumps смонтирован во
+    # все сервисы, поэтому max(): один и тот же дамп не считается трижды.
+    panels.append(create_stat_panel(
+        title="Crash-дампы на диске",
+        id=209,
+        x=12, y=y, w=8, h=8,
+        unit="short",
+        color_mode="background",
+        targets=[
+            {"expr": "max(l2_common_crash_dumps{vm=~\"${vm:regex}\"})", "legendFormat": "дампов", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
     return dashboard
 
 

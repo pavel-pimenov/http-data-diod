@@ -831,6 +831,30 @@ TEST_CASE("MetricsHistory: samples registry into a bounded ring buffer",
   REQUIRE(history.has_family("mh_sum"));
 }
 
+TEST_CASE("MetricsHistory: exports the fill level of the ring buffers",
+          "[metrics-history]") {
+  auto registry = std::make_shared<prometheus::Registry>();
+  auto &cnt = test_support::make_counter(*registry, "mh_fill_count", "h");
+  cnt.Increment();
+  auto &buffer = test_support::make_gauge(*registry, "mh_buffer_size", "h");
+
+  MetricsHistory history(registry, std::chrono::seconds(1), 8, 240, nullptr,
+                         &buffer);
+  REQUIRE(history.buffer_size() == 0);
+  REQUIRE(buffer.Collect().gauge.value == 0.0);
+
+  history.start();
+  REQUIRE(test_wait_support::wait_for_condition(
+      [&] { return history.buffer_size() >= 2; }, 5000));
+  history.stop();
+
+  const std::size_t stored = history.buffer_size();
+  REQUIRE(stored >= 2);
+  // The gauge reports exactly what the store holds, so a flat line means the
+  // sampler stopped filling the sparkline history.
+  REQUIRE(buffer.Collect().gauge.value == static_cast<double>(stored));
+}
+
 TEST_CASE("MetricsHistory: a throwing collector is counted, not fatal",
           "[metrics-history]") {
   auto registry = std::make_shared<prometheus::Registry>();
@@ -843,6 +867,7 @@ TEST_CASE("MetricsHistory: a throwing collector is counted, not fatal",
   // A collector that throws must not take the process down (an uncaught
   // exception in the sampler thread calls std::terminate).
   MetricsHistory history(registry, std::chrono::seconds(1), 8, 240, &samples,
+                         nullptr,
                          []() -> std::vector<prometheus::MetricFamily> {
                            throw std::runtime_error("collect failed");
                          });

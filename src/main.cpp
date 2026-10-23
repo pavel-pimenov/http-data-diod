@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "crash_dump_counter.hpp"
 #include "crash_handler.hpp"
 #include "error_types.hpp"
 #include "json_response_utils.hpp"
@@ -18,6 +19,7 @@
 #include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "cpp_httplib_config.h"
 #include "httplib/httplib.h"
@@ -196,9 +198,13 @@ void run_httplib_server(
 std::unique_ptr<MetricsExposer> create_metrics_exposer(
     int port, const std::shared_ptr<prometheus::Registry> &registry,
     const std::shared_ptr<prometheus::Registry> &common = nullptr,
-    prometheus::Histogram *render_duration = nullptr) {
+    prometheus::Histogram *render_duration = nullptr,
+    std::function<void()> refresh = {}) {
   auto exposer =
       std::make_unique<MetricsExposer>(port, render_duration);
+  if (refresh) {
+    exposer->set_refresh_hook(std::move(refresh));
+  }
   exposer->register_collectable(registry);
   if (common) {
     // Cross-cutting observability (l2_tracing_*, l2_worker_sentry_*) served
@@ -212,6 +218,14 @@ std::unique_ptr<StatsLogger> start_stats_logging(AppContext &app_ctx) {
   auto sl = std::make_unique<StatsLogger>(app_ctx, g_shutdown_flag);
   sl->start_periodic_logging();
   return sl;
+}
+
+void refresh_crash_dumps(AppContext &app_ctx) {
+  if (app_ctx.m_crash_dumps == nullptr || app_ctx.m_crash_dump_dir.empty()) {
+    return;
+  }
+  app_ctx.m_crash_dumps->Set(static_cast<double>(
+      crash_dump_counter::count_files(app_ctx.m_crash_dump_dir)));
 }
 
 // Response accounting shared by the proxy and server HTTP servers: every
@@ -237,7 +251,8 @@ void run_proxy(AppContext &app_ctx) {
       create_metrics_exposer(service_port::kProxyMetrics,
                              app_ctx.m_proxy_registry,
                              app_ctx.m_common_registry,
-                             app_ctx.m_metrics_render_duration);
+                             app_ctx.m_metrics_render_duration,
+                             [&app_ctx] { refresh_crash_dumps(app_ctx); });
 
   init_proxy_components(app_ctx);
 
@@ -304,7 +319,8 @@ void run_worker(AppContext &app_ctx) {
       create_metrics_exposer(service_port::kWorkerMetrics,
                              app_ctx.m_worker_registry,
                              app_ctx.m_common_registry,
-                             app_ctx.m_metrics_render_duration);
+                             app_ctx.m_metrics_render_duration,
+                             [&app_ctx] { refresh_crash_dumps(app_ctx); });
 
   L2Worker worker(app_ctx);
 
@@ -369,10 +385,10 @@ void run_l2_server(AppContext &app_ctx) {
 
   ServerHandler server_handler(app_ctx);
 
-  auto exposer = create_metrics_exposer(service_port::kServerMetrics,
-                                        app_ctx.m_server_registry,
-                                          app_ctx.m_common_registry,
-                                          app_ctx.m_metrics_render_duration);
+  auto exposer = create_metrics_exposer(
+      service_port::kServerMetrics, app_ctx.m_server_registry,
+      app_ctx.m_common_registry, app_ctx.m_metrics_render_duration,
+      [&app_ctx] { refresh_crash_dumps(app_ctx); });
 
   Logger::info("C++ L2 Server listening on {}://0.0.0.0:{}",
                app_ctx.m_config.m_server.m_protocol,
@@ -476,6 +492,9 @@ int main() { // NOLINT(bugprone-exception-escape)
     CrashHandler::install(crash_dump_dir ? crash_dump_dir
                                          : g_default_crash_dump_dir,
                           app_ctx.m_config.m_sentry.m_dsn);
+    // The crash dump gauge is refreshed from this directory on every scrape.
+    app_ctx.m_crash_dump_dir =
+        crash_dump_dir ? crash_dump_dir : g_default_crash_dump_dir;
 
     // Crash test mode: raise SIGSEGV to test crash handler
     if (app_ctx.m_config.m_app.m_crash_test) {

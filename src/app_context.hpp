@@ -344,6 +344,11 @@ public:
   // rebuilds the whole HTML on every request, so its price grows with the
   // number of metric families and with the length of the sparkline history.
   prometheus::Histogram *m_stats_page_render_duration = nullptr;
+  // Crash dump count: the dumps are files on a volume shared by every service,
+  // so the gauge is refreshed from disk before each scrape (by the exposer hook
+  // installed with the dump directory).
+  prometheus::Gauge *m_crash_dumps = nullptr;
+  std::string m_crash_dump_dir;
   std::unique_ptr<SentryMetrics> m_sentry_metrics;
   std::shared_ptr<NatsClient> m_nats_client;
   InFlightTracker m_in_flight_tracker;

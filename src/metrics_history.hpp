@@ -21,6 +21,7 @@
 #include <prometheus/client_metric.h>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
+#include <prometheus/gauge.h>
 #include <prometheus/metric_family.h>
 #include <prometheus/registry.h>
 #if __has_include(<generator>)
@@ -83,12 +84,14 @@ public:
           g_metrics_history_max_series_per_family,
       std::size_t max_samples = g_metrics_history_max_samples,
       prometheus::Family<prometheus::Counter> *samples = nullptr,
+      prometheus::Gauge *buffer_size = nullptr,
       Collector collector = {})
       : m_config{std::move(registry),
                  interval,
                  max_series_per_family,
                  max_samples},
         m_samples(samples),
+        m_buffer_size(buffer_size),
         m_collector(std::move(collector)) {}
 
   ~MetricsHistory() { stop(); }
@@ -116,6 +119,13 @@ public:
   bool has_family(const std::string &family) const {
     const std::scoped_lock lk(m_store.m_mutex);
     return m_store.m_data.contains(family);
+  }
+
+  // Number of samples currently stored across every series of every family
+  // (the fill level of the ring buffers behind the /stats sparklines).
+  [[nodiscard]] std::size_t buffer_size() const {
+    const std::scoped_lock lk(m_store.m_mutex);
+    return stored_points_locked();
   }
 
   // Returns up to `limit` series (insertion order) for a metric family.
@@ -163,7 +173,18 @@ public:
 
 private:
   prometheus::Family<prometheus::Counter> *m_samples = nullptr;
+  prometheus::Gauge *m_buffer_size = nullptr;
   Collector m_collector;
+
+  std::size_t stored_points_locked() const {
+    std::size_t total = 0;
+    for (const auto &family_entry : m_store.m_data) {
+      for (const auto &series_entry : family_entry.second) {
+        total += series_entry.second.size();
+      }
+    }
+    return total;
+  }
 
   void count_sample(const char *outcome) {
     if (m_samples != nullptr) {
@@ -224,6 +245,9 @@ private:
         }
         ++stored;
       }
+    }
+    if (m_buffer_size != nullptr) {
+      m_buffer_size->Set(static_cast<double>(stored_points_locked()));
     }
   }
 

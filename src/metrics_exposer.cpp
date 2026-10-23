@@ -60,11 +60,19 @@ void MetricsExposer::register_collectable(
   m_collectables.push_back(std::move(collectable));
 }
 
+void MetricsExposer::set_refresh_hook(std::function<void()> hook) {
+  const std::scoped_lock lock(m_mutex);
+  m_refresh_hook = std::move(hook);
+}
+
 std::string MetricsExposer::serialize() const {
   const auto start = std::chrono::steady_clock::now();
   std::vector<prometheus::MetricFamily> metrics;
   {
     const std::scoped_lock lock(m_mutex);
+    if (m_refresh_hook) {
+      m_refresh_hook();
+    }
     for (const auto &collectable : m_collectables) {
       auto collected = collectable->Collect();
       metrics.insert(metrics.end(), std::make_move_iterator(collected.begin()),

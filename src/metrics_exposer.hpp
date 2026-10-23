@@ -7,6 +7,7 @@
 #include <prometheus/histogram.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -36,6 +37,11 @@ public:
   // dynamic per-client-id families (all of them are Collectables).
   void register_collectable(std::shared_ptr<prometheus::Collectable> collectable);
 
+  // Optional hook run right before the exposition is collected: it refreshes
+  // gauges whose value comes from outside the process (files on disk), so the
+  // scrape sees the current state instead of the state at the last tick.
+  void set_refresh_hook(std::function<void()> hook);
+
   [[nodiscard]] int port() const { return m_port; }
 
 private:
@@ -45,6 +51,7 @@ private:
   httplib::Server m_server;
   int m_port;
   prometheus::Histogram *m_render_duration = nullptr;
+  std::function<void()> m_refresh_hook;
   std::vector<std::shared_ptr<prometheus::Collectable>> m_collectables;
   mutable std::mutex m_mutex;
   std::thread m_thread;

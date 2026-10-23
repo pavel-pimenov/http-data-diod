@@ -88,16 +88,23 @@ void AppContext::init_common() {
       g_metrics_history_max_series_per_family;
   constexpr std::size_t kHistoryMaxSamples =
       g_metrics_history_max_samples;
-  auto make_history = [&](const std::shared_ptr<prometheus::Registry> &registry) {
-    return std::make_unique<MetricsHistory>(registry, kHistoryInterval,
-                                           kHistoryMaxSeriesPerFamily,
-                                           kHistoryMaxSamples,
-                                           &history_samples);
+  // The fill level of the sparkline buffers: it grows until every stored series
+  // holds max_samples points and then stays flat, so a stalled sampler shows up
+  // as a flat (or zero) line next to the sampling rounds counter.
+  auto &history_buffer = reg_common.gauge_family(
+      "l2_common_stats_history_buffer_size",
+      "Samples stored in the in-process metrics history, labeled by registry");
+  auto make_history = [&](const std::shared_ptr<prometheus::Registry> &registry,
+                          const char *name) {
+    return std::make_unique<MetricsHistory>(
+        registry, kHistoryInterval, kHistoryMaxSeriesPerFamily,
+        kHistoryMaxSamples, &history_samples,
+        &history_buffer.Add({{"history", name}}));
   };
-  m_proxy_stats_history = make_history(m_proxy_registry);
-  m_worker_stats_history = make_history(m_worker_registry);
-  m_server_stats_history = make_history(m_server_registry);
-  m_common_stats_history = make_history(m_common_registry);
+  m_proxy_stats_history = make_history(m_proxy_registry, "proxy");
+  m_worker_stats_history = make_history(m_worker_registry, "worker");
+  m_server_stats_history = make_history(m_server_registry, "server");
+  m_common_stats_history = make_history(m_common_registry, "common");
   m_proxy_stats_history->start();
   m_worker_stats_history->start();
   m_server_stats_history->start();
@@ -215,6 +222,13 @@ void AppContext::init_common() {
       "l2_common_stats_page_render_duration_seconds",
       "Time to render the /stats HTML page",
       histogram_buckets::g_buckets.m_latency_ms_to_5s);
+
+  // Crash dumps are files on a volume shared by all services (./crash-dumps is
+  // mounted into every container), so the value is refreshed on each scrape by
+  // the exposer instead of a background ticker.
+  m_crash_dumps = &reg_common.gauge(
+      "l2_common_crash_dumps",
+      "Crash dump files present in the crash dump directory");
 
   // Deployment identity: the value is always 1, the labels carry the build
   // version and the mode, so a dashboard (or an alert) can tell which build an

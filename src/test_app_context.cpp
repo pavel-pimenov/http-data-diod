@@ -41,6 +41,8 @@ const std::vector<std::string> &common_l2_families() {
       "l2_worker_sentry_events_failed_total",
       "l2_worker_sentry_queue_size",
       "l2_common_build_info",
+      "l2_common_stats_history_buffer_size",
+      "l2_common_crash_dumps",
   };
   return g_k_families;
 }
@@ -237,6 +239,34 @@ TEST_CASE("AppContext: worker pre-creates the validation field series",
                                              "request_id"});
 }
 
+TEST_CASE("AppContext: history buffer pre-creates a series per registry",
+          "[app_context]") {
+  EnvGuard const mode{{"MODE", "proxy"}};
+
+  AppContext const ctx;
+
+  REQUIRE(has_family(ctx.m_common_registry,
+                     "l2_common_stats_history_buffer_size"));
+  std::vector<std::string> histories;
+  for (const auto &family : ctx.m_common_registry->Collect()) {
+    if (family.name != "l2_common_stats_history_buffer_size") {
+      continue;
+    }
+    for (const auto &metric : family.metric) {
+      for (const auto &label : metric.label) {
+        if (label.name == "history") {
+          histories.push_back(label.value);
+        }
+      }
+    }
+  }
+  // Every registry's fill level is exported from the start (as 0) so the
+  // sparkline health is visible before the first sample lands.
+  std::ranges::sort(histories);
+  REQUIRE(histories == std::vector<std::string>{"common", "proxy", "server",
+                                                "worker"});
+}
+
 TEST_CASE("AppContext: labelled families keep their label contract",
           "[app_context]") {
   // The dashboard legends (PromQL {{type}} / {{reason}} / {{outcome}} / ...) are
@@ -258,6 +288,7 @@ TEST_CASE("AppContext: labelled families keep their label contract",
       {"l2_proxy_not_ready_total", {"reason"}},
       {"l2_worker_not_ready_total", {"reason"}},
       {"l2_common_stats_history_samples_total", {"outcome"}},
+      {"l2_common_stats_history_buffer_size", {"history"}},
       {"l2_proxy_duplicate_cache_evictions_total", {"reason"}},
       {"l2_worker_l2_server_call_duration_seconds", {"backend"}},
       {"l2_worker_request_validation_errors_total", {"field"}},
