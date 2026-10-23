@@ -861,13 +861,13 @@ row/grid-секций, а затем прогоняет выборку запр�
 
 Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Правила оповещений вычисляет **vmalert** (`victoriametrics/vmalert`, порт `8880`), поднятый в `docker-compose.yml`.
 
-Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 29 правил в трёх группах:
+Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 34 правила в трёх группах:
 
 | Группа | Что покрывает | Примеры правил |
 |---|---|---|
 | `l2-proxy` | граница прокси: отказы, лимиты, очередь задач, NATS, латентность, сгорание бюджета ошибок | `L2ProxyErrorBudgetBurnFast`, `L2ProxyTaskQueueRejected`, `L2ProxyNatsDisconnected` |
-| `l2-worker` | воркер: готовность, circuit breaker, вызовы L2, ретраи, пул БД, валидация запросов | `L2WorkerNotReady`, `L2WorkerCircuitBreakerOpen`, `L2WorkerRetriesExhausted` |
-| `l2-common` | общие: рендер `/metrics` и `/stats`, потери спанов и событий Sentry, HTTP-пул, crash-дампы, здоровье истории метрик | `L2MetricsRenderSlow`, `L2TracingSpansDropped`, `L2CommonCrashDumpWritten` |
+| `l2-worker` | воркер: готовность и связь с NATS, circuit breaker, вызовы L2, ретраи, пул БД, валидация и разбор запросов | `L2WorkerNotReady`, `L2WorkerNatsDisconnected`, `L2WorkerCircuitBreakerOpen`, `L2WorkerInvalidJson` |
+| `l2-common` | общие: рендер `/metrics` и `/stats`, потери и недоставка спанов/Sentry, битый `traceparent`, HTTP-пул, crash-дампы, здоровье истории метрик | `L2MetricsRenderSlow`, `L2HttpPoolAcquisitionSlow`, `L2SentryDeliveryFailing`, `L2CommonCrashDumpWritten` |
 
 | Что | Как устроено |
 |---|---|
@@ -880,6 +880,23 @@ row/grid-секций, а затем прогоняет выборку запр�
 > **Почему алерты вернулись.** До раунда 196 они уже были в стеке и были удалены: правила вычислялись с `--notifier.blackhole`, а **сработавший алерт никто не видел** (Alertmanager в стеке нет). Закрыто именно это — состояние алерта теперь пишется в VictoriaMetrics и видно на дашборде (и в Perses). Для настоящих уведомлений достаточно подключить внешний Alertmanager: `vmalert` уже умеет слать в `-notifier.url`, менять в compose ничего не нужно.
 
 Пороги правил **мягче** целей SLO (доступность 99.9%, P95 < 50 мс, P99 < 100 мс на дашборде `l2-slo-tracking`): SLO — это цель, а не «сбой». По бюджету ошибок пороги совпадают с дашбордом — сгорание ×20 к SLO это critical, ×5 — warning.
+
+### Какие метрики намеренно без алертов
+
+Аудит round 202: в каталоге 117 метрик, правила используют 46 семейств. Остальные — не забытые, а осознанно оставленные без правил: алерт оправдан, только если у события есть **действие** и **порог**, а не просто число на дашборде.
+
+| Категория | Метрики | Почему без правила |
+|---|---|---|
+| Объёмы и размеры | `*_bytes_received_total`, `*_bytes_sent_total`, `*_request_size_bytes`, `*_response_size_bytes`, `l2_worker_l2_response_size_bytes`, `l2_worker_in_flight_requests` | это трафик, а не сбой: рост байтов — следствие нагрузки. Правило на объём срабатывает на каждом пике RPS и не имеет действия. |
+| Счётчики-знаменатели и производные | `*_requests_total`, `*_responses_total`, `l2_worker_requests_processed_total`, `l2_worker_db_requests_total`, `l2_proxy_nats_requests_total`, `l2_http_pool_client_{acquisitions,releases}_total`, `l2_proxy_task_queue_enqueued_total` | сами по себе не означают проблему; их аномалии видны через ratio/P95-правила (`L2WorkerL2CallErrorRatioHigh`, `L2HttpPoolAcquisitionSlow`, `L2ProxyTaskQueueSaturated`). |
+| Внутренние латентности без SLO | `l2_proxy_nats_{request,poll_attempt}_duration_seconds`, `l2_proxy_task_queue_wait_seconds`, `l2_worker_db_{pool_acquire,query}_duration_seconds`, `l2_tracing_{send_latency,queue_time,last_send}_seconds` | латентность транспорта уже покрыта пользовательскими P95/P99 на границе (`L2ProxyLatencyP95High`, `L2WorkerLatencyP95High`); отдельный порог на внутренний хоп даёт шум без действия. DB-гистограммы относятся к опциональному профилю `postgres`. |
+| Пер-клиент и пер-IP разбивки | `l2_proxy_per_client_id_*`, `l2_proxy_per_ip_*`, `l2_worker_duplicate_requests_total`, `l2_proxy_duplicate_{requests,posts_detected}_total`, `l2_proxy_duplicate_tracked_clients` | кардинальность зависит от числа клиентов: правило потребовало бы порога «на клиента» и шумело бы. Общий всплеск отказов ловит `L2ProxyRejectionSpike`, лимиты — `L2ProxyRateLimitRejections`. |
+| Дубли-агрегаты | `l2_worker_l2_errors_total`, `l2_worker_processing_validation_errors_total`, `l2_worker_circuit_breaker_rejected_total`, `l2_per_ip_rate_limiter_rejected_total` | те же события уже в разбитых семействах (`l2_worker_l2_call_errors_total`, `l2_worker_request_validation_errors_total`), а fast-fail в OPEN — следствие `L2WorkerCircuitBreakerOpen`, а не отдельная причина. |
+| Потеря кардинальности | `l2_proxy_per_client_id_dropped_labels_total` | TTL-эвикция — нормальный churn клиентов, а метки `reason` нет: cap и TTL не разделить, правило «счётчик вырос» горело бы постоянно. Значение видно на дашборде. |
+| Готовность и жизненный цикл | `l2_common_build_info`, `*_health_ready`, `l2_proxy_not_ready_total`, `l2_worker_graceful_shutdown_seconds`, `l2_proxy_nats_subscriptions` | `/health/*` опрашивает docker healthcheck, а неготовность прокси и воркера выводят `L2ProxyNatsDisconnected` и `L2WorkerNotReady`; `build_info` — версия, `graceful_shutdown_seconds` — одно событие при остановке. |
+| `l2-server` | все `l2_server_*` | режим `l2-server` — тестовый стаб для проверки воркера, не продакшен; его метрики экспонируются для отладки и в алерты не заводятся. |
+
+Отдельно про БД-шлюз: `l2_worker_db_gateway_ready{db=...}` намеренно без алерта, потому что профили `postgres`/`oracle` опциональны — в дефолтном стеке шлюз не поднят, gauge равен `0`, и правило `min(...) < 1` горело бы всегда. Готовность шлюза проверяет e2e-гейт `scripts/ci-gate.sh`, а не алерт.
 
 ### Проверка правил оповещения
 

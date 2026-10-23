@@ -179,6 +179,21 @@ groups:
           description: "Воркер сообщил о неготовности — {{ $value }}/с. /health/ready не проходит, клиенты получают отказы."
           runbook: "README.md → «Алерты (оповещения)»: причина в l2_worker_not_ready_total{reason} — nats_unavailable, ping_failed или health_check_failed."
 
+      # Готовность ловит уже отказы снаружи, а это правило — саму причину:
+      # воркер без NATS не получает запросов вовсе, поэтому его собственные
+      # счётчики ответов молчат и инцидент виден только на стороне прокси
+      # (таймауты L2ProxyNatsTimeouts) — с задержкой в десятки секунд.
+      - alert: L2WorkerNatsDisconnected
+        expr: min(l2_worker_nats_connected) < 1
+        for: 2m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "Воркер потерял связь с NATS"
+          description: "Воркер не подключён к NATS (l2_worker_nats_connected = {{ $value }}). Запросы прокси не доходят до исполнителя и завершаются таймаутом."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте контейнер nats-server и связь воркера с ним; лог воркера содержит причину реконнекта."
+
       - alert: L2WorkerCircuitBreakerOpen
         expr: max(l2_worker_circuit_breaker_state) == 1
         for: 5m
@@ -247,6 +262,21 @@ groups:
           description: "Отказов по валидации — {{ $value }}/с. Разбивка по отвергнутому полю — в l2_worker_request_validation_errors_total{field}."
           runbook: "README.md → «Алерты (оповещения)»: смотрите метку field — method/path/body или имя обязательного поля; сверьте контракт клиента."
 
+      # Валидация проверяет структуру запроса, но не его JSON: битый JSON
+      # отсекается раньше и считается отдельно, поэтому у него своё правило —
+      # иначе «клиент шлёт мусор» и «клиент шлёт не то поле» сливаются в один
+      # алерт, хотя чинятся по-разному.
+      - alert: L2WorkerInvalidJson
+        expr: sum(rate(l2_worker_processing_json_errors_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Клиенты шлют неразбираемый JSON"
+          description: "Ошибок разбора JSON — {{ $value }}/с. Такие запросы отбрасываются до валидации, в l2_worker_request_validation_errors_total они не попадают."
+          runbook: "README.md → «Алерты (оповещения)»: сверьте тело запроса клиента с контрактом (Content-Type/JSON), при росте — ищите клиента по логу воркера."
+
       - alert: L2WorkerQueueSaturated
         expr: sum(l2_worker_queue_size) / clamp_min(sum(l2_worker_queue_capacity), 1) > 0.8
         for: 10m
@@ -308,6 +338,17 @@ groups:
           description: "Потерянных спанов — {{ $value }}/с. Причина в метке reason: queue_full, breaker_open, export_error или shutdown_flush."
           runbook: "README.md → «Алерты (оповещения)»: разберите l2_tracing_spans_dropped_total{reason} и l2_tracing_queue_size."
 
+      - alert: L2TracingBadTraceparent
+        expr: sum(rate(l2_tracing_traceparent_invalid_total[5m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Клиенты шлют битый traceparent"
+          description: "Неразбираемых заголовков traceparent — {{ $value }}/с. Такие запросы обрабатываются, но становятся корнем нового трейса: сквозная трассировка клиент→прокси→воркер рвётся."
+          runbook: "README.md → «Алерты (оповещения)»: сверьте формат заголовка с W3C Trace Context (версия-трейс-спан-флаги, hex, 55 символов); при массовости — проблема в клиентском SDK/прокси перед сервисом."
+
       - alert: L2SentryEventsDropped
         expr: sum(rate(l2_worker_sentry_events_dropped_total[5m])) > 0
         for: 10m
@@ -319,6 +360,21 @@ groups:
           description: "Потерянных событий Sentry — {{ $value }}/с. Ошибки не попадают в GlitchTip — инциденты будут без контекста."
           runbook: "README.md → «Алерты (оповещения)»: разберите l2_worker_sentry_events_dropped_total{reason} (queue_full/disabled) и l2_worker_sentry_queue_size."
 
+      # dropped — событие не дошло даже до попытки отправки (очередь/выключено),
+      # failed — попытка отправки была и провалилась (сеть, DSN, 4xx/5xx от
+      # GlitchTip). Второе важнее: процесс жив и считает, что ошибки уходят,
+      # но в трекере их нет — тихая потеря видимости инцидентов.
+      - alert: L2SentryDeliveryFailing
+        expr: sum(rate(l2_worker_sentry_events_failed_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Sentry-события не доставляются"
+          description: "Неудачных попыток отправки — {{ $value }}/с. Ошибки сервисов не появляются в GlitchTip, хотя очередь событий не переполнена."
+          runbook: "README.md → «Алерты (оповещения)»: проверьте доступность SENTRY_DSN из контейнера (DNS/прокси/сертификат), затем l2_worker_sentry_events_sent_total — если он тоже ноль, отправка не идёт вовсе."
+
       - alert: L2HttpPoolAcquisitionTimeouts
         expr: sum(rate(l2_http_pool_client_acquisition_timeouts_total[5m])) > 0
         for: 10m
@@ -329,6 +385,21 @@ groups:
           summary: "HTTP-пул не выдаёт клиента — исчерпан"
           description: "Таймаутов ожидания свободного pooled-клиента — {{ $value }}/с. Исходящие HTTP-запросы (в том числе к L2) падают."
           runbook: "README.md → «Алерты (оповещения)»: смотрите l2_http_pool_active_clients и l2_http_pool_available_clients."
+
+      # Таймаут — пул уже исчерпан, а медленный захват — ранний сигнал: пул
+      # ещё выдаёт клиентов, но очередь ожидания растёт. Гистограмма есть и у
+      # прокси, и у воркера, поэтому sum by (le) объединяет их в один P95.
+      - alert: L2HttpPoolAcquisitionSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(l2_http_pool_client_acquisition_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: common
+        annotations:
+          summary: "Захват HTTP-клиента из пула занимает больше секунды"
+          description: "P95 ожидания свободного соединения — {{ $value }} с. Пул почти исчерпан: запросы к L2 начинают ждать, хотя таймаутов пока нет."
+          runbook: "README.md → «Алерты (оповещения)»: сравните l2_http_pool_active_clients с l2_http_pool_size и рост l2_http_pool_client_acquisition_timeouts_total; при устойчивом потолке поднимите HTTP_POOL_SIZE."
 
       # Crash-дамп пишется в момент падения, а процесс сразу умирает, поэтому
       # счётчика «сколько раз падали» в процессе нет: gauge — снимок каталога

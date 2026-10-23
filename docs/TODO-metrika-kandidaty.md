@@ -44,6 +44,11 @@
 | worker L2 | `l2_calls_total`, `l2_call_duration_seconds`, `l2_errors_total`, `l2_call_errors_total{type}`, `l2_response_size_bytes`, `circuit_breaker_state`, `circuit_breaker_transitions_total{to}`, `circuit_breaker_rejected_total` |
 | tracing/sentry (`l2_common`) | `l2_tracing_spans_sent_total`, `_failed_total`, `_spans_dropped_total{reason}`, `_queue_size`, `_queue_time_seconds`, `_send_latency_seconds`, `_last_send_duration_seconds`, `sentry_transactions_sent_total`/`_failed_total`, worker `sentry_events_sent_total`/`_failed_total`/`sentry_queue_size`, `l2_common_build_info{version,mode}`, `l2_common_stats_history_samples_total{outcome}`, `l2_common_stats_history_buffer_size{history}`, `l2_common_crash_dumps` |
 
+> **Очередь P1–P2 закрыта в round 202.** Все пункты ниже либо реализованы, либо отклонены с
+> причиной — открытых кандидатов нет (P3 остаётся списком «не спешить»). Аудит правил и
+> политика «какие метрики осознанно без алертов и почему» — в README, раздел «Какие метрики
+> намеренно без алертов».
+
 ---
 
 ## P1 — высокая ценность, низкий риск (внедрять первыми)
@@ -204,14 +209,14 @@ enum, а не литералы в местах вызова). Частные с�
 Отдельный `l2_common_uptime_seconds` не делался: uptime даёт `process_start_time_seconds` из
 стандартного экспортёра процессов, дублировать его своим gauge'ом смысла нет.
 
-### 9. Ёмкость очередей (рядом с существующими gauge'ами) 🟡 частично (round 169: воркер, round 191: прокси)
+### 9. Ёмкость очередей (рядом с существующими gauge'ами) ✅ реализовано (round 169: воркер, round 191: прокси)
 `queue_size` есть, но без знаменателя нет алерта на сатурацию.
 
 | Метрика | Тип | Метки | Что закрывает |
 |---|---|---|---|
 | `l2_worker_queue_capacity` | gauge | — | лимит очереди воркера |
 | `l2_proxy_task_queue_capacity` | gauge | — | лимит очереди задач proxy |
-| `l2_worker_task_queue_wait_seconds` | histogram | — | ожидание в очереди воркера (у proxy есть, у воркера нет) |
+| ~~`l2_worker_task_queue_wait_seconds`~~ | — | — | **не применимо**: `TimedTaskQueue` оборачивает только HTTP-сервер прокси; воркер обрабатывает NATS-сообщения и своей очереди задач не имеет (глубина пула — `l2_worker_queue_size`/`l2_worker_queue_capacity`) |
 
 Регистрация: `app_context.cpp` (ёмкость — из конфига, `timed_task_queue`/`thread_pool_wrapper`).
 
@@ -229,14 +234,15 @@ enum, а не литералы в местах вызова). Частные с�
 превращает переполнение очереди в отказ соединения вместо неограниченного
 роста памяти.
 
-Остаток (следующий раунд): `l2_worker_task_queue_wait_seconds` — у воркера
-очередь задач тоже есть, но время ожидания в ней не измеряется (воркер
-обрабатывает NATS-сообщения, а не HTTP-запросы, поэтому гистограмма
-работающего HTTP-пула воркера не нужна).
+Остаток закрыт в round 202: `l2_worker_task_queue_wait_seconds` **отклонена** — у воркера
+нет HTTP-очереди задач (`TimedTaskQueue` оборачивает только httplib-сервер прокси), а
+ожидание в пуле потоков уже видно по `l2_worker_queue_size`/`l2_worker_queue_capacity`.
 
 ---
 
 ## P2 — полезно, но требует аккуратности
+
+> Все пункты закрыты в round 202: реализованы либо отклонены с причиной в таблице.
 
 > Пункт про ожидание в HTTP-пуле закрыт в раунде 177: пул эти величины уже
 > считал, но воркер их не отдавал, а сами метрики пула жили в реестре прокси
@@ -248,7 +254,7 @@ enum, а не литералы в местах вызова). Частные с�
 | ~~`l2_http_pool_wait_duration_seconds`~~ ✅ | histogram | — | ожидание свободного pooled-клиента (сделано в раунде 177 как `l2_http_pool_client_acquisition_duration_seconds` + `l2_http_pool_client_acquisition_timeouts_total`; заодно метрики пула перенесены из реестра прокси в общий) |
 | ~~`l2_worker_request_validation_errors_total`~~ ✅ | counter | `field` | разбор ошибок валидации по полю; риск — поле свободного текста, брать только enum-поле (сделано в раунде 195 ✅ — метка берётся из закрытого набора валидатора: `method`/`path`/`body` + обязательные поля, текст причины в метку не попадает: он содержит клиентские значения) |
 | ~~`l2_worker_db_query_errors_total`~~ ✅ | counter | `error_class` (SQLSTATE-класс) | разбор ошибок SQL; метка — только класс (2 символа), не код сообщения (сделано в раунде 180 ✅) |
-| `l2_worker_retry_attempts` | histogram | — | распределение числа попыток (цена ретраев) |
+| ~~`l2_worker_retry_attempts`~~ | — | — | **отклонено в round 202**: число попыток выводится из `l2_calls_total` и `l2_worker_retries_total{outcome="retried"}`; отдельная гистограмма дублировала бы их и шумела (почти все вызовы — 1 попытка) |
 | ~~`l2_common_metrics_render_duration_seconds`~~ ✅ | histogram | — | стоимость рендера `/metrics` (важно при росте кардинальности) (сделано в раунде 184 ✅) |
 | ~~`l2_common_stats_page_render_duration_seconds`~~ ✅ | histogram | — | то же для `/stats` (сделано в раунде 194 ✅) |
 | ~~`l2_common_stats_history_samples_total`~~ ✅ | counter | `outcome` (ok/error/no_registry) | здоровье истории метрик (`metrics_history.hpp`) (сделано в раунде 190 ✅) |
@@ -257,9 +263,9 @@ enum, а не литералы в местах вызова). Частные с�
 | ~~`l2_worker_not_ready_total`~~ ✅ | counter | `reason` | то же для worker (сделано в раунде 186 ✅) |
 | ~~`l2_common_crash_dumps_total`~~ ✅ | gauge | — | записанные стектрейсы (`src/crash_handler.hpp`) (сделано в раунде 200 как **gauge** `l2_common_crash_dumps`, а не counter: процесс, записавший дамп, тут же завершается через `raise()`, поэтому инкремент в обработчике сигнала никто не успел бы соскрейпить; значение — снимок каталога дампов, читается с диска перед каждой экспозицией; каталог общий для всех сервисов, поэтому в панелях/алертах нужен `max()`) |
 | ~~`l2_proxy_duplicate_cache_evictions_total`~~ ✅ | counter | `reason` (ttl/cap) | вытеснение из дедуп-кэша (косвенно — повторные посты) (сделано в раунде 192 ✅ — четыре причины: `body_ttl`/`body_cap`/`client_ttl`/`client_cap`) |
-| `l2_proxy_per_client_id_dropped_labels_total` | counter | — | срабатывание cap в `dynamic_labeled_family.hpp` (иначе потеря кардинальности молчалива) |
-| `l2_worker_thread_pool_active_workers` | gauge | — | загрузка исполнителя (`thread_pool.hpp`) |
-| `l2_worker_timed_task_queue_pending` | gauge | — | глубина очереди отложенных задач |
+| `l2_proxy_per_client_id_dropped_labels_total` | counter | — | срабатывание cap в `dynamic_labeled_family.hpp` (иначе потеря кардинальности молчалива) ✅ round 187; алерт не заводим — TTL-эвикция это нормальный churn, а `reason` в метке нет (см. README «Какие метрики намеренно без алертов») |
+| ~~`l2_worker_thread_pool_active_workers`~~ | — | — | ✅ круг 188 как `l2_worker_active_workers` (занятые воркеры пула); в round 202 сверено, что дубля не осталось |
+| ~~`l2_worker_timed_task_queue_pending`~~ | — | — | **не применимо**: `TimedTaskQueue` есть только у HTTP-сервера прокси, у воркера такой очереди нет |
 
 ## P3 — под вопросом / не спешить
 
