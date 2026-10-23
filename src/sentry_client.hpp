@@ -21,6 +21,10 @@ namespace sentry {
 // Why a Sentry event was dropped before a delivery attempt was made.
 inline constexpr const char *kDropReasonQueueFull = "queue_full";
 
+// Wire-format and endpoint defaults shared by the DSN parser and the sender.
+inline constexpr std::size_t kEventIdHexLen = 32;
+inline constexpr std::size_t kSenderBatchSize = 8;
+
 enum class EventLevel : std::uint8_t { Debug, Info, Warning, Error, Fatal };
 
 // Parsed parts of a Sentry DSN

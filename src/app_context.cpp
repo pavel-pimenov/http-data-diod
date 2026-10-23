@@ -82,9 +82,12 @@ void AppContext::init_common() {
   for (const char *outcome : MetricsHistory::g_sample_outcomes) {
     history_samples.Add({{"outcome", outcome}});
   }
-  constexpr std::chrono::seconds kHistoryInterval{15};
-  constexpr std::size_t kHistoryMaxSeriesPerFamily = 8;
-  constexpr std::size_t kHistoryMaxSamples = 240;
+  constexpr std::chrono::seconds kHistoryInterval =
+      g_metrics_history_default_interval;
+  constexpr std::size_t kHistoryMaxSeriesPerFamily =
+      g_metrics_history_max_series_per_family;
+  constexpr std::size_t kHistoryMaxSamples =
+      g_metrics_history_max_samples;
   auto make_history = [&](const std::shared_ptr<prometheus::Registry> &registry) {
     return std::make_unique<MetricsHistory>(registry, kHistoryInterval,
                                            kHistoryMaxSeriesPerFamily,

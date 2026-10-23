@@ -9,6 +9,10 @@
 
 class TimeUtils {
 public:
+  static constexpr int64_t kUsPerMs = 1000;
+  static constexpr int64_t kMsPerSecond = 1000;
+  static constexpr int64_t kUsPerSecond = kUsPerMs * kMsPerSecond;
+
   static int64_t epoch_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
@@ -59,7 +63,7 @@ public:
         std::chrono::microseconds(static_cast<int64_t>(epoch_us)));
     const auto tp_s =
         std::chrono::time_point_cast<std::chrono::seconds>(tp);
-    const auto ms = (epoch_us / 1000) % 1000;
+    const auto ms = (epoch_us / static_cast<uint64_t>(kUsPerMs)) % 1000;
     return std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}Z", tp_s, ms);
   }
 
@@ -76,7 +80,7 @@ public:
   // Converts a microsecond interval into seconds. Shared by the latency
   // bookkeeping that previously repeated the /1000000.0 division by hand.
   static double duration_seconds(uint64_t start_us, uint64_t end_us) {
-    return static_cast<double>(end_us - start_us) / 1000000.0;
+    return static_cast<double>(end_us - start_us) / kUsPerSecond;
   }
 };
 

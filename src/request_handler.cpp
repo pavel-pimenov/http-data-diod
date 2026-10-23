@@ -3,6 +3,7 @@
 #include "common_utils.hpp"
 #include "error_categorizer.hpp"
 #include "config.hpp"
+#include "constants.hpp"
 #include "crash_handler.hpp"
 #include "db_gateway_routing.hpp"
 #include "stats_logger.hpp"
@@ -42,6 +43,10 @@
 #include <format>
 #include <nlohmann/json.hpp>
 #include <prometheus/counter.h>
+
+// Depth of the /debug/stacktrace dump and the widest textual frame address.
+constexpr int kMaxBacktraceFrames = 32;
+constexpr std::size_t kPointerTextLength = 32;
 
 // Named struct for RAII active client tracking
 struct ActiveClientTracker {
@@ -120,7 +125,7 @@ void RequestHandler::handle_crash_test(const httplib::Request &req,
   // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
   // not remotely SIGSEGV the proxy.
   if (!m_ctx.m_config.m_app.m_enable_crash_test_endpoint) {
-    res.status = 404;
+    res.status = http_status::kNotFound;
     res.set_content(
         R"json({"error": "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)"})json",
         "application/json");
@@ -144,18 +149,20 @@ void RequestHandler::handle_stacktrace(httplib::Response &res) {
                  {"source_line", e.source_line()}});
   }
   CrashHandler::log_current_stacktrace();
-  send_json_response(res, 200, {{"stacktrace", j}, {"frames", trace.size()}});
+  send_json_response(res, http_status::kOk,
+                     {{"stacktrace", j}, {"frames", trace.size()}});
 #else
-  void *callstack[32];
-  int frames = backtrace(callstack, 32);
+  void *callstack[kMaxBacktraceFrames];
+  int frames = backtrace(callstack, kMaxBacktraceFrames);
   nlohmann::json j = nlohmann::json::array();
   for (int i = 0; i < frames; ++i) {
-    char buf[32];
+    char buf[kPointerTextLength];
     snprintf(buf, sizeof(buf), "%p", callstack[i]);
     j.push_back({{"index", i}, {"address", buf}});
   }
   CrashHandler::log_current_stacktrace();
-  send_json_response(res, 200, {{"stacktrace", j}, {"frames", frames}});
+  send_json_response(res, http_status::kOk,
+                     {{"stacktrace", j}, {"frames", frames}});
 #endif
 }
 
@@ -216,13 +223,13 @@ void RequestHandler::handle_duplicates(httplib::Response &res) const {
   // detector is absent (non-proxy mode) or disabled this endpoint answers 404
   // so callers can distinguish "not supported here" from "empty report".
   if (!m_ctx.m_proxy.m_duplicate_detector) {
-    res.status = 404;
+    res.status = http_status::kNotFound;
     res.set_content(
         R"({"error": "duplicate detection not available in this mode"})",
         "application/json");
     return;
   }
-  res.status = 200;
+  res.status = http_status::kOk;
   res.set_content(m_ctx.m_proxy.m_duplicate_detector->report().dump(2),
                   "application/json");
 }
@@ -249,7 +256,8 @@ void RequestHandler::handle_post(const httplib::Request &req,
 
   if (!body.empty() && !nlohmann::json::accept(body)) {
     count_rejection(error_categorizer::RejectionReason::INVALID_JSON);
-    fail_request_categorized(res, 400, "Invalid JSON in request body",
+    fail_request_categorized(res, http_status::kBadRequest,
+                             "Invalid JSON in request body",
                              &m_ctx.m_proxy.m_metrics->m_client_errors);
     return;
   }
@@ -343,7 +351,7 @@ bool RequestHandler::record_and_maybe_reject_duplicate(
   increment_per_client_metric(
       m_ctx.m_proxy.m_per_client_id_duplicate_collector, client_id, 1);
   count_rejection(error_categorizer::RejectionReason::DUPLICATE);
-  res.status = 409;
+  res.status = http_status::kConflict;
   send_json_response(res, res.status, make_error_json("duplicate request"));
   return true;
 }
@@ -401,7 +409,7 @@ bool RequestHandler::reject_rate_limited(
   RateLimitSpanLogger::log_rate_limit_rejection(
       m_ctx.m_tracer.get(), reason, client_ip, traceparent_raw,
       std::to_string(limit), std::to_string(remaining));
-  return fail_request_categorized(res, 429, message,
+  return fail_request_categorized(res, http_status::kTooManyRequests, message,
                                   &m_ctx.m_proxy.m_metrics->m_client_errors);
 }
 
@@ -479,7 +487,7 @@ void RequestHandler::send_response(
   Logger::info("Request completed: request_id={} path={} status={} "
                "response_size={} bytes duration_ms={}",
                request_id, path, res.status, response_size,
-               (end_us - start_us) / 1000);
+               (end_us - start_us) / TimeUtils::kUsPerMs);
 }
 
 // ============================================================================
@@ -545,10 +553,10 @@ void RequestHandler::process_request(const std::string &method,
       push_to_backend(std::move(request_data), request_id, trace_id,
                       backend_push_span_id, trace_ctx);
   if (request_json.empty()) {
-    fail_backend_request(
-        res, method, path, 500, "Failed to queue request", "queue_failed",
-        "Failed to queue request via NATS", request_timing.start_us(),
-        trace_ctx, request_id);
+    fail_backend_request(res, method, path, http_status::kInternalServerError,
+                         "Failed to queue request", "queue_failed",
+                         "Failed to queue request via NATS",
+                         request_timing.start_us(), trace_ctx, request_id);
     return;
   }
 
@@ -558,8 +566,8 @@ void RequestHandler::process_request(const std::string &method,
 
   if (response_data_str.empty()) {
     fail_backend_request(
-        res, method, path, 504, "Timeout waiting for response",
-        "empty_response",
+        res, method, path, http_status::kGatewayTimeout,
+        "Timeout waiting for response", "empty_response",
         std::format("Empty response received from NATS for request_id={}",
                     request_id),
         request_timing.start_us(), trace_ctx, request_id);
@@ -575,7 +583,8 @@ void RequestHandler::process_request(const std::string &method,
                   request_timing.start_us());
   } else {
     fail_backend_request(
-        res, method, path, 500, "Invalid response format", "invalid_response",
+        res, method, path, http_status::kInternalServerError,
+        "Invalid response format", "invalid_response",
         std::format("Failed to parse response for request_id={}: {}",
                     request_id, parse_result.error()),
         request_timing.start_us(), trace_ctx, request_id);
@@ -677,7 +686,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   };
 
   if (!m_ctx.m_config.m_db_query.m_enabled) {
-    reject_gateway(404, "NOT_FOUND", "DB gateway is disabled", "", "");
+    reject_gateway(http_status::kNotFound, "NOT_FOUND",
+                   "DB gateway is disabled", "", "");
     return;
   }
 
@@ -694,8 +704,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   const auto &db_name = parsed.m_db_name;
   const auto &action = parsed.m_action;
   if (!parsed.m_valid) {
-    reject_gateway(404, "NOT_FOUND", "Unknown DB gateway path", db_name,
-                   action);
+    reject_gateway(http_status::kNotFound, "NOT_FOUND",
+                   "Unknown DB gateway path", db_name, action);
     return;
   }
 
@@ -703,7 +713,7 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
       m_ctx.m_config.m_db_query.m_databases,
       [&db_name](const DbConfig &db) { return db.m_name == db_name; });
   if (!known_db) {
-    reject_gateway(404, "UNKNOWN_DATABASE",
+    reject_gateway(http_status::kNotFound, "UNKNOWN_DATABASE",
                    std::format("Unknown database '{}'", db_name),
                    db_name, action);
     return;
@@ -712,7 +722,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
   if (action == "query" && method == "POST") {
     const auto parsed_body = JsonUtils::try_parse(body);
     if (!parsed_body) {
-      reject_gateway(400, "BAD_REQUEST", "Invalid JSON body", db_name, action);
+      reject_gateway(http_status::kBadRequest, "BAD_REQUEST",
+                     "Invalid JSON body", db_name, action);
       return;
     }
     json request = build_db_query_request(DbQueryContract::kTypeQuery,
@@ -720,7 +731,8 @@ void RequestHandler::handle_db_gateway(const httplib::Request &req,
     add_trace_fields(request);
     const auto validated = parse_db_query_request(request);
     if (!validated) {
-      reject_gateway(400, "BAD_REQUEST", validated.error(), db_name, action);
+      reject_gateway(http_status::kBadRequest, "BAD_REQUEST",
+                     validated.error(), db_name, action);
       return;
     }
     route_db_request(res, request, method, req.path, start_us, trace_ctx,
@@ -754,17 +766,18 @@ void RequestHandler::handle_db_gateway_list(
     const std::string &path, uint64_t start_us, const TraceContext &trace_ctx,
     const std::string &request_id) {
   if (method != "GET") {
-    send_db_gateway_error(res, 405, "METHOD_NOT_ALLOWED", "Use GET", method,
-                          path, start_us, trace_ctx, request_id);
+    send_db_gateway_error(res, http_status::kMethodNotAllowed,
+                          "METHOD_NOT_ALLOWED", "Use GET", method, path,
+                          start_us, trace_ctx, request_id);
     record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
-                              "list", 405);
+                              "list", http_status::kMethodNotAllowed);
     return;
   }
   json names = db_gateway_routing::databases_list_json(m_ctx.m_config.m_db_query.m_databases);
-  res.status = 200;
+  res.status = http_status::kOk;
   send_json_response(res, res.status, json{{"databases", names}});
   record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
-                            "list", 200);
+                            "list", http_status::kOk);
 }
 
 void RequestHandler::send_db_gateway_error(
@@ -809,10 +822,10 @@ void RequestHandler::route_db_request(
                                int status, const std::string &message) {
     std::string code;
     switch (status) {
-      case 503:
+      case http_status::kServiceUnavailable:
         code = "DB_UNAVAILABLE";
         break;
-      case 504:
+      case http_status::kGatewayTimeout:
         code = "TIMEOUT";
         break;
       default:
@@ -824,7 +837,8 @@ void RequestHandler::route_db_request(
   };
 
   if (!m_ctx.m_nats_client) {
-    reject_db_request(503, "NATS client is not available");
+    reject_db_request(http_status::kServiceUnavailable,
+                      "NATS client is not available");
     return;
   }
 
@@ -857,7 +871,8 @@ void RequestHandler::route_db_request(
       attrs["nats.last_error"] = last_error;
     }
     JaegerSpanLogger::log_nats_span(
-        m_ctx.m_tracer.get(), "NATS_db_request", success ? 200 : 500,
+        m_ctx.m_tracer.get(), "NATS_db_request",
+        success ? http_status::kOk : http_status::kInternalServerError,
         request_id, trace_id, nats_db_span_id, nats_parent_id, nats_start_us,
         attrs);
   };
@@ -886,9 +901,11 @@ void RequestHandler::route_db_request(
         m_ctx.m_nats_client->get_last_error().value_or("");
     log_db_nats_roundtrip(false, last_error, 0, nats_end_us);
     if (!m_ctx.m_nats_client->is_connected()) {
-      reject_db_request(503, "NATS connection is not available");
+      reject_db_request(http_status::kServiceUnavailable,
+                        "NATS connection is not available");
     } else {
-      reject_db_request(504, "DB worker did not respond in time");
+      reject_db_request(http_status::kGatewayTimeout,
+                        "DB worker did not respond in time");
     }
     record_db_nats_duration(nats_end_us);
     return;
@@ -902,11 +919,13 @@ void RequestHandler::route_db_request(
 
   const auto envelope = JsonUtils::try_parse(reply.m_data);
   if (!envelope || !envelope->is_object()) {
-    reject_db_request(502, "Invalid response envelope from DB worker");
+    reject_db_request(http_status::kBadGateway,
+                      "Invalid response envelope from DB worker");
     return;
   }
   const int status =
-      JsonUtils::safe_get_int(*envelope, DbQueryContract::kStatus, 502);
+      JsonUtils::safe_get_int(*envelope, DbQueryContract::kStatus,
+                             http_status::kBadGateway);
   json response_body = json::object();
   if (envelope->contains(DbQueryContract::kBody)) {
     response_body = (*envelope)[DbQueryContract::kBody];

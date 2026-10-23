@@ -19,6 +19,21 @@
 
 #include "metrics_history.hpp"
 
+// Tuning of the status page itself: lookback window, auto-refresh cadence and
+// sparkline geometry. Kept together so the HTML renderer has no loose literals.
+namespace stats_page {
+inline constexpr int kDefaultWindowMinutes = 30;
+inline constexpr int kMinWindowMinutes = 1;
+inline constexpr int kMaxWindowMinutes = 120;
+inline constexpr int kRefreshSeconds = 5;
+inline constexpr int kSparklineWidth = 188;
+inline constexpr int kSparklineHeight = 26;
+inline constexpr std::size_t kMinSparklineSamples = 2;
+inline constexpr std::size_t kSeriesCandidates = 16;
+inline constexpr double kMinSparklineRange = 1e-12;
+inline constexpr long kSecondsPerMinute = 60;
+} // namespace stats_page
+
 // Builds a self-contained HTML status page from a Prometheus registry so service
 // health can be assessed without Grafana. Pulls current gauge/counter values via
 // Registry::Collect(); histograms/summaries are summarized by count+sum. The page
@@ -90,16 +105,18 @@ inline std::string format_labels(const std::vector<prometheus::ClientMetric::Lab
 // Returns empty string if there are not enough samples to draw a line.
 inline std::string build_sparkline_svg(
     const std::vector<std::pair<std::time_t, double>> &raw_pts, bool as_rate,
-    int window_minutes, int width = 188, int height = 26) {
+    int window_minutes, int width = stats_page::kSparklineWidth,
+    int height = stats_page::kSparklineHeight) {
   const std::time_t cutoff =
-      (raw_pts.empty() ? 0 : raw_pts.back().first) - (window_minutes * 60L);
+      (raw_pts.empty() ? 0 : raw_pts.back().first) -
+      (window_minutes * stats_page::kSecondsPerMinute);
   std::vector<std::pair<std::time_t, double>> pts;
   for (const auto &p : raw_pts) {
     if (p.first >= cutoff) {
       pts.push_back(p);
     }
   }
-  if (pts.size() < 2) {
+  if (pts.size() < stats_page::kMinSparklineSamples) {
     return "";
   }
   std::vector<double> vals;
@@ -123,7 +140,9 @@ inline std::string build_sparkline_svg(
     min_v = std::min(min_v, v);
     max_v = std::max(max_v, v);
   }
-  const double range = (max_v - min_v) > 1e-12 ? (max_v - min_v) : 1.0;
+  const double range = (max_v - min_v) > stats_page::kMinSparklineRange
+                           ? (max_v - min_v)
+                           : 1.0;
   const auto w = static_cast<double>(width);
   const auto h = static_cast<double>(height);
   std::ostringstream pts_attr;
@@ -145,13 +164,16 @@ inline std::string build_sparkline_svg(
 // Parses the optional ?window=N (minutes, default 30, clamped to 1..120)
 // lookback parameter shared by the proxy and worker stats pages.
 template <typename ParamsT>
-inline int parse_stats_window(const ParamsT &params, int default_min = 30) {
+inline int parse_stats_window(
+    const ParamsT &params,
+    int default_min = stats_page::kDefaultWindowMinutes) {
   int window_min = default_min;
   if (const auto wit = params.find("window"); wit != params.end()) {
     const auto raw = wit->second;
     const auto digits = raw.substr(0, raw.find_first_not_of("0123456789"));
     if (!digits.empty()) {
-      window_min = std::clamp(std::stoi(digits), 1, 120);
+      window_min = std::clamp(std::stoi(digits), stats_page::kMinWindowMinutes,
+                              stats_page::kMaxWindowMinutes);
     }
   }
   return window_min;
@@ -235,7 +257,8 @@ inline void render_stats_tile(std::ostringstream &html,
         (family.type == prometheus::MetricType::Counter ||
          family.type == prometheus::MetricType::Histogram ||
          family.type == prometheus::MetricType::Summary);
-    const auto series = hist->get_series(family.name, 16);
+    const auto series =
+        hist->get_series(family.name, stats_page::kSeriesCandidates);
     const MetricsHistory::Series *repr = nullptr;
     double best = -1.0;
     for (const auto &s : series) {
@@ -265,7 +288,8 @@ inline void render_stats_tile(std::ostringstream &html,
 inline std::string build_stats_html(
     const std::string &service_name,
     const std::shared_ptr<prometheus::Registry> &registry,
-    const MetricsHistory *history = nullptr, int window_minutes = 30,
+    const MetricsHistory *history = nullptr,
+    int window_minutes = stats_page::kDefaultWindowMinutes,
     const std::shared_ptr<prometheus::Registry> &extra_registry = nullptr,
     const MetricsHistory *extra_history = nullptr,
     prometheus::Histogram *render_duration = nullptr) {
@@ -280,7 +304,8 @@ inline std::string build_stats_html(
   std::ostringstream html;
   html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
   html << "<meta charset=\"utf-8\">\n";
-  html << "<meta http-equiv=\"refresh\" content=\"5\">\n";
+  html << "<meta http-equiv=\"refresh\" content=\""
+       << stats_page::kRefreshSeconds << "\">\n";
   html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   html << "<title>" << escape_html(service_name) << " — status</title>\n";
   const std::time_t now = std::time(nullptr);

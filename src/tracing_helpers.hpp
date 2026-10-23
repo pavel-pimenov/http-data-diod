@@ -2,6 +2,7 @@
 #define TRACING_HELPERS_HPP
 
 #include "app_context.hpp"
+#include "constants.hpp"
 #include "common_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -160,7 +161,7 @@ public:
 
     const int64_t end_us = TimeUtils::epoch_us();
     nlohmann::json attrs = extra_attrs;
-    attrs["nats.success"] = nlohmann::json(status_code == 200);
+    attrs["nats.success"] = nlohmann::json(status_code == http_status::kOk);
     // NATS ops are not HTTP calls; drop the "HTTP " prefix wired into
     // log_request (e.g. "NATS_poll" -> "NATS poll /nats").
     const std::string span_name =
@@ -239,7 +240,8 @@ public:
     // The rejection span doubles as the proxy span for the request (same
     // convention as log_proxy_response: span_id = derived proxy span, parent
     // = the client span from the traceparent header, if any).
-    tracer->log_request("POST", "/", 429, now_us, now_us, "l2-proxy-proxy", "",
+    tracer->log_request("POST", "/", http_status::kTooManyRequests, now_us,
+                        now_us, "l2-proxy-proxy", "",
                         trace_ctx.m_trace_id, trace_ctx.m_span_id,
                         trace_ctx.m_parent_id, attrs);
   }
@@ -284,7 +286,7 @@ inline std::string log_incoming_span(JaegerLogger *tracer,
   }
   const std::string trace_id = resolve_trace_id(tracer, trace_ctx);
   const std::string span_id = JaegerLogger::generate_span_id();
-  tracer->log_request("INCOMING", path, 200, start_us, start_us,
+  tracer->log_request("INCOMING", path, http_status::kOk, start_us, start_us,
                       "l2-proxy-proxy", request_id, trace_id, span_id,
                       trace_ctx.m_parent_id, nlohmann::json({}));
   return span_id;

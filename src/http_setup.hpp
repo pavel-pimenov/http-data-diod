@@ -1,6 +1,7 @@
 #ifndef HTTP_SETUP_HPP
 #define HTTP_SETUP_HPP
 
+#include "constants.hpp"
 #include "httplib/httplib.h"
 #include <string>
 
@@ -23,7 +24,7 @@ void setup_ssl_client(httplib::SSLClient &client, int timeout_seconds,
 template <typename ClientT>
 void setup_http_connection(ClientT &client, int timeout_seconds,
                            bool enable_connection_reuse) {
-  client.set_connection_timeout(5, 0);
+  client.set_connection_timeout(http_timeouts::kConnectTimeoutSeconds, 0);
   client.set_read_timeout(timeout_seconds, 0);
   client.set_write_timeout(timeout_seconds, 0);
   if (enable_connection_reuse) {

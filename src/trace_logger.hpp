@@ -36,6 +36,21 @@ inline constexpr int g_tracing_retry_base_delay_ms =
     100; // Base delay for exponential backoff
 inline constexpr int g_tracing_send_timeout_ms =
     5000; // HTTP send timeout in ms
+// W3C Trace Context: version(2) "-" trace-id(32) "-" span-id(16) "-" flags(2)
+inline constexpr std::size_t g_traceparent_length = 55;
+inline constexpr std::size_t g_traceparent_version_len = 2;
+inline constexpr std::size_t g_traceparent_trace_id_pos = 3;
+inline constexpr std::size_t g_traceparent_trace_id_end_pos = 34;
+inline constexpr std::size_t g_traceparent_sep_after_trace_id_pos = 35;
+inline constexpr std::size_t g_traceparent_span_id_pos = 36;
+inline constexpr std::size_t g_traceparent_span_id_end_pos = 51;
+inline constexpr std::size_t g_traceparent_sep_after_span_id_pos = 52;
+inline constexpr std::size_t g_traceparent_flags_pos = 53;
+inline constexpr std::size_t g_traceparent_flags_end_pos = 54;
+inline constexpr std::size_t g_trace_id_hex_len = 32;
+inline constexpr std::size_t g_span_id_hex_len = 16;
+// Cap on the cooldown shift so base << shift cannot overflow uint64_t.
+inline constexpr int g_tracing_max_cooldown_shift = 20;
 // Tuning of the tracing outage circuit-breaker (предохранитель). After
 // m_failure_threshold consecutive delivery failures the target (Jaeger or the
 // optional Sentry/GlitchTip performance sink) is considered out of order and

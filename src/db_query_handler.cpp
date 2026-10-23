@@ -1,5 +1,6 @@
 #include "db_query_handler.hpp"
 #include "config.hpp"
+#include "constants.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
@@ -100,7 +101,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
                                     json &body) {
   auto parsed = parse_db_query_request(request);
   if (!parsed) {
-    status_code = 400;
+    status_code = http_status::kBadRequest;
     body = make_db_error_body("BAD_REQUEST", parsed.error());
     return;
   }
@@ -117,7 +118,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
     }
   }
   if (!executor) {
-    status_code = 404;
+    status_code = http_status::kNotFound;
     body = make_db_error_body("UNKNOWN_DATABASE",
                               std::format("Unknown database '{}'", req.m_db));
     return;
@@ -127,7 +128,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
     const uint64_t start_ms = TimeUtils::steady_ms();
     const bool ok = executor->ping(req.m_timeout_ms);
     const uint64_t latency_ms = TimeUtils::steady_ms() - start_ms;
-    status_code = ok ? 200 : 503;
+    status_code = ok ? http_status::kOk : http_status::kServiceUnavailable;
     body = ok ? make_db_ping_response(executor->db_name(), latency_ms)
               : make_db_error_body("DB_UNAVAILABLE",
                                    "Database ping failed");
@@ -138,7 +139,7 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
       resolve_positive_or(req.m_timeout_ms, executor->default_timeout_ms());
   const int max_rows =
       resolve_positive_or(req.m_max_rows, executor->default_max_rows());
-  int exec_status = 200;
+  int exec_status = http_status::kOk;
   const json exec_body =
       executor->execute_query(req.m_sql, req.m_params, timeout_ms, max_rows,
                               exec_status);

@@ -1,4 +1,5 @@
 #include "common_utils.hpp"
+#include "constants.hpp"
 #include "db_gateway_routing.hpp"
 #include "db_query_handler.hpp"
 #include "db_query_utils.hpp"
@@ -70,9 +71,10 @@ void log_nats_consume_span(JaegerLogger *tracer, const std::string &request_id,
       {"messaging.destination", destination},
       {"messaging.reply_to", reply_to},
   };
-  log_span_to_jaeger(tracer, "NATS_consume", "/nats", 200, start_us, start_us,
-                     service_name, request_id, trace_id, consume_span_id,
-                     proxy_span_id, attrs, "NATS consume /nats");
+  log_span_to_jaeger(tracer, "NATS_consume", "/nats", http_status::kOk,
+                     start_us, start_us, service_name, request_id, trace_id,
+                     consume_span_id, proxy_span_id, attrs,
+                     "NATS consume /nats");
 }
 
 // Builds the response headers carrying the worker's consume span id (or an
@@ -120,6 +122,15 @@ bool L2Worker::subscribe_nats_subject(const std::string &subject,
 // keeps picking up late-starting databases (Oracle cold start) without
 // spamming logs while they are still unreachable.
 inline constexpr int kDbInitRetryEveryPasses = 50;
+// Reconnect loop cadence: the RetryHandler state counts loop passes, each pass
+// is slept as kLoopPassMs with a jitter of kReconnectJitterPercent.
+inline constexpr int kLoopPassMs = 200;
+inline constexpr int kReconnectJitterPercent = 25;
+inline constexpr int kReconnectBackoffMinPasses = 1;
+inline constexpr int kReconnectBackoffMaxPasses = 150;
+inline constexpr int kNatsDrainTimeoutMs = 5000;
+inline constexpr int kSendMaxRetries = 3;
+inline constexpr int kSendRetryDelayMs = 100;
 
 void L2Worker::run_with_nats() {
   Logger::info("Starting NATS worker mode. Subscribing to subject: {} with "
@@ -139,7 +150,8 @@ void L2Worker::run_with_nats() {
         &m_ctx.m_worker.m_metrics->m_db_pool_acquire_duration_seconds);
   }
 
-  RetryHandler backoff(1, 150);
+  RetryHandler backoff(kReconnectBackoffMinPasses,
+                       kReconnectBackoffMaxPasses);
   bool subscription_active = false;
   bool db_subscription_active = false;
   bool was_connected = m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
@@ -226,8 +238,9 @@ void L2Worker::run_with_nats() {
     }
 
     {
-      const int base_sleep_ms = backoff.get_current_delay_ms() * 200;
-      const int sleep_ms = calculate_jitter_delay(base_sleep_ms, 25);
+      const int base_sleep_ms = backoff.get_current_delay_ms() * kLoopPassMs;
+      const int sleep_ms =
+          calculate_jitter_delay(base_sleep_ms, kReconnectJitterPercent);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
 
@@ -242,7 +255,7 @@ void L2Worker::run_with_nats() {
   Logger::info("NATS worker shutting down...");
   if (m_clients.m_nats_client) {
     // Drain waits for in-flight messages to finish processing before closing
-    m_clients.m_nats_client->drain(5000);
+    m_clients.m_nats_client->drain(kNatsDrainTimeoutMs);
   }
 }
 
@@ -321,7 +334,7 @@ namespace {
 struct WorkerActivityGuard {
   prometheus::Gauge &m_in_flight;
   prometheus::Family<prometheus::Counter> *m_responses;
-  int m_status = 500;
+  int m_status = http_status::kInternalServerError;
 
   WorkerActivityGuard(prometheus::Gauge &in_flight,
                       prometheus::Family<prometheus::Counter> *responses)
@@ -376,7 +389,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     nlohmann::json request_data;
     if (!parse_request_data(request_json, request_data)) {
       Logger::error("Failed to parse request JSON for NATS request");
-      task.m_activity.m_status = 400;
+      task.m_activity.m_status = http_status::kBadRequest;
       send_nats_response(reply_to,
                          make_error_json("Invalid request format").dump());
       return;
@@ -402,11 +415,11 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
           metadata.m_request_id, reply_to);
 
       log_worker_response_span(
-          m_ctx.m_tracer.get(), metadata.m_method, metadata.m_path, 200,
-          start_us, m_ctx.m_config.m_app.m_mode, metadata.m_request_id,
-          metadata.m_trace_ctx, nats_consume_span_id,
+          m_ctx.m_tracer.get(), metadata.m_method, metadata.m_path,
+          http_status::kOk, start_us, m_ctx.m_config.m_app.m_mode,
+          metadata.m_request_id, metadata.m_trace_ctx, nats_consume_span_id,
           metadata.m_proxy_span_id, {{"dedup.cached", true}});
-      task.m_activity.m_status = 200;
+      task.m_activity.m_status = http_status::kOk;
       send_nats_response(reply_to, *cached_response);
       record_bytes_sent(cached_response->size());
       return;
@@ -428,7 +441,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
 
   } catch (const std::exception &e) {
     Logger::error("Error processing NATS request: {}", e.what());
-    task.m_activity.m_status = 500;
+    task.m_activity.m_status = http_status::kInternalServerError;
 
     nlohmann::json error_json = make_error_json("Internal server error");
     error_json["message"] = e.what();
@@ -504,10 +517,7 @@ void L2Worker::send_nats_response(const std::string &reply_to,
 void L2Worker::send_nats_response_impl(const std::string &reply_to,
                                        const std::string &response_json,
                                        const NatsHeaders *headers) const {
-  constexpr int max_retries = 3;
-  constexpr int retry_delay_ms = 100;
-
-  for (int attempt = 0; attempt < max_retries; ++attempt) {
+  for (int attempt = 0; attempt < kSendMaxRetries; ++attempt) {
     if (!m_clients.m_nats_client) {
       Logger::error("Cannot send NATS response: client not initialized");
       return;
@@ -525,21 +535,22 @@ void L2Worker::send_nats_response_impl(const std::string &reply_to,
       }
     } catch (const std::exception &e) {
       Logger::warn("NATS publish attempt {}/{} failed: {}", attempt + 1,
-                   max_retries, e.what());
+                   kSendMaxRetries, e.what());
     }
 
-    if (attempt < max_retries - 1) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+    if (attempt < kSendMaxRetries - 1) {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kSendRetryDelayMs));
     }
   }
 
   Logger::error("NATS response delivery failed after {} attempts to: {}",
-                max_retries, reply_to);
+                kSendMaxRetries, reply_to);
 }
 
 void L2Worker::process_db_query_from_nats(const std::string &request_json,
                                           const std::string &reply_to) {
-  int status = 500;
+  int status = http_status::kInternalServerError;
   json body;
   std::string consume_span_id;
 
@@ -552,7 +563,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
     TraceContext trace_ctx;
     const auto parsed = JsonUtils::try_parse(request_json);
     if (!parsed) {
-      status = 400;
+      status = http_status::kBadRequest;
       body = make_db_error_body("BAD_REQUEST", "Invalid JSON body");
     } else {
       request_data = *parsed;
@@ -577,7 +588,7 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
           m_ctx.m_config.m_db_query.m_subject, reply_to);
 
       if (!m_db_query_handler) {
-        status = 503;
+        status = http_status::kServiceUnavailable;
         body = make_db_error_body("DB_UNAVAILABLE",
                                   "DB gateway is not initialized");
       } else {
@@ -592,8 +603,8 @@ void L2Worker::process_db_query_from_nats(const std::string &request_json,
   } catch (const std::exception &e) {
     Logger::error("Error processing DB query (reply_to={}): {}", reply_to,
                   e.what());
-    status = 500;
-    task.m_activity.m_status = 500;
+    status = http_status::kInternalServerError;
+    task.m_activity.m_status = http_status::kInternalServerError;
     body = make_db_error_body("INTERNAL_ERROR", e.what());
     if (m_ctx.m_sentry) {
       m_ctx.m_sentry->capture_message(
@@ -615,7 +626,7 @@ void L2Worker::observe_db_query_outcome(
       JsonUtils::safe_get_string(request_data, DbQueryContract::kDb);
   const std::string type =
       JsonUtils::safe_get_string(request_data, DbQueryContract::kType);
-  if (status >= 500 && m_ctx.m_sentry) {
+  if (status >= http_status::kServerErrorMin && m_ctx.m_sentry) {
     // Operational DB-gateway failures (DB down / pool exhausted / internal):
     // client-side 4xx/SQL_ERROR are deliberately not captured to avoid noise.
     std::string db_code;

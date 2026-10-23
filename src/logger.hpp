@@ -75,6 +75,12 @@ private:
   } m_previous;
 };
 
+// Log timestamp precision and rotating-file sink limits.
+constexpr std::chrono::milliseconds::rep g_log_ms_per_second = 1000;
+constexpr std::size_t g_log_file_max_bytes =
+    std::size_t{10} * 1024 * 1024;
+constexpr std::size_t g_log_file_rotate_count = 3;
+
 // Custom JSON formatter for structured logging
 namespace spdlog::custom {
 class JsonFormatter : public formatter {
@@ -159,7 +165,7 @@ public:
     const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
                             msg.time.time_since_epoch())
                             .count() %
-                        1000;
+                        g_log_ms_per_second;
     auto ts = std::format("{:%Y-%m-%d %H:%M:%S}.{:03}", now_s, millis);
     append(dest, ts);
 
@@ -282,7 +288,8 @@ public:
 
       // Create rotating file sink (10MB max, 3 files)
       auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-          "logs/l2-proxy.log", 10 * 1024 * 1024, 3);
+          "logs/l2-proxy.log", g_log_file_max_bytes,
+          g_log_file_rotate_count);
       file_sink->set_level(spdlog::level::debug);
 
       // Create multi-sink logger

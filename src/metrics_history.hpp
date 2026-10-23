@@ -57,6 +57,13 @@ inline std::string mh_format_labels(
 
 } // namespace
 
+// Defaults for the history ring used by the stats pages and the
+// l2_metrics_history_* series: 15s cadence, 8 series per family, 240 samples
+// (one hour of history).
+inline constexpr std::chrono::seconds g_metrics_history_default_interval{15};
+inline constexpr std::size_t g_metrics_history_max_series_per_family = 8;
+inline constexpr std::size_t g_metrics_history_max_samples = 240;
+
 class MetricsHistory {
 public:
   // Outcome of one sampling round: "ok", "error" (the collection threw) or
@@ -71,9 +78,10 @@ public:
 
   explicit MetricsHistory(
       std::shared_ptr<prometheus::Registry> registry,
-      std::chrono::seconds interval = std::chrono::seconds(15),
-      std::size_t max_series_per_family = 8,
-      std::size_t max_samples = 240,
+      std::chrono::seconds interval = g_metrics_history_default_interval,
+      std::size_t max_series_per_family =
+          g_metrics_history_max_series_per_family,
+      std::size_t max_samples = g_metrics_history_max_samples,
       prometheus::Family<prometheus::Counter> *samples = nullptr,
       Collector collector = {})
       : m_config{std::move(registry),

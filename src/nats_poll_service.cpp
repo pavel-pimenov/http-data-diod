@@ -1,6 +1,7 @@
 #include "nats_poll_service.hpp"
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "constants.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"
 #include "retry_handler.hpp"
@@ -14,6 +15,16 @@
 #include <tuple>
 #include <utility>
 
+namespace {
+// Poll-loop timing: reconnect backoff bounds and per-attempt retry delays.
+constexpr int kReconnectBackoffMinMs = 250;
+constexpr int kReconnectBackoffMaxMs = 2000;
+constexpr int kDefaultTimeoutMs = 30000;
+constexpr int kNoRespondersRetryDelayMs = 1000;
+constexpr int kEmptyResponseRetryDelayMs = 250;
+constexpr int kMsPerSecond = static_cast<int>(TimeUtils::kMsPerSecond);
+} // namespace
+
 NatsPollService::NatsPollService(AppContext &ctx) : m_ctx(ctx) {}
 
 // Polls for the reply until the deadline: reconnects, resends and records the
@@ -24,7 +35,8 @@ NatsPollService::PollOutcome NatsPollService::poll_until_deadline(
   const auto request_deadline = std::chrono::steady_clock::now() +
                                 std::chrono::milliseconds(timeout_ms);
   PollOutcome outcome;
-  RetryHandler reconnect_backoff(250, 2000);
+  RetryHandler reconnect_backoff(kReconnectBackoffMinMs,
+                                 kReconnectBackoffMaxMs);
   bool reconnect_logged = false;
   bool no_responders_logged = false;
   bool resend_logged = false;
@@ -86,10 +98,10 @@ std::string NatsPollService::poll_response(const std::string &request_id,
     Logger::error("NATS client not initialized");
     m_ctx.m_proxy.m_metrics->m_nats_connection_errors.Increment();
 
-    JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_poll", 500,
-                                    request_id, trace_ctx.m_trace_id,
-                                    op_span_id, parent_id, nats_poll_start,
-                                    {{"nats.client_not_initialized", true}});
+    JaegerSpanLogger::log_nats_span(
+        m_ctx.m_tracer.get(), "NATS_poll", http_status::kInternalServerError,
+        request_id, trace_ctx.m_trace_id, op_span_id, parent_id,
+        nats_poll_start, {{"nats.client_not_initialized", true}});
     return "";
   }
 
@@ -106,9 +118,9 @@ std::string NatsPollService::poll_response(const std::string &request_id,
 
     Logger::debug("poll_response: initial parent_id: {}", parent_id);
 
-    int timeout_ms = timeout_seconds * 1000;
+    int timeout_ms = timeout_seconds * kMsPerSecond;
     if (timeout_ms <= 0) {
-      timeout_ms = 30000;
+      timeout_ms = kDefaultTimeoutMs;
     }
 
     PollOutcome outcome =
@@ -123,8 +135,9 @@ std::string NatsPollService::poll_response(const std::string &request_id,
                     m_ctx.m_nats_client->get_last_error().value_or(""));
 
       JaegerSpanLogger::log_nats_span(
-          m_ctx.m_tracer.get(), "NATS_poll", 500, request_id,
-          trace_ctx.m_trace_id, op_span_id, parent_id, nats_poll_start,
+          m_ctx.m_tracer.get(), "NATS_poll",
+          http_status::kInternalServerError, request_id, trace_ctx.m_trace_id,
+          op_span_id, parent_id, nats_poll_start,
           {{"nats.empty_response", true},
            {"nats.last_error",
             m_ctx.m_nats_client->get_last_error().value_or("")}});
@@ -150,7 +163,7 @@ std::string NatsPollService::poll_response(const std::string &request_id,
             static_cast<uint64_t>(nats_poll_start), end_us));
 
     JaegerSpanLogger::log_nats_span(
-        m_ctx.m_tracer.get(), "NATS_poll", 200, request_id,
+        m_ctx.m_tracer.get(), "NATS_poll", http_status::kOk, request_id,
         trace_ctx.m_trace_id, op_span_id, parent_id, nats_poll_start,
         {{"nats.response_size", reply.m_data.size()},
          {"nats.duration_us", duration_us}});
@@ -161,10 +174,10 @@ std::string NatsPollService::poll_response(const std::string &request_id,
     Logger::error("NATS poll exception: {}", e.what());
     m_ctx.m_proxy.m_metrics->m_nats_errors.Increment();
 
-    JaegerSpanLogger::log_nats_span(m_ctx.m_tracer.get(), "NATS_poll", 500,
-                                    request_id, trace_ctx.m_trace_id,
-                                    op_span_id, parent_id, nats_poll_start,
-                                    {{"nats.error", e.what()}});
+    JaegerSpanLogger::log_nats_span(
+        m_ctx.m_tracer.get(), "NATS_poll", http_status::kInternalServerError,
+        request_id, trace_ctx.m_trace_id, op_span_id, parent_id,
+        nats_poll_start, {{"nats.error", e.what()}});
     return "";
   }
 }
@@ -239,17 +252,17 @@ void NatsPollService::poll_delay_for_empty_reply(
                    request_id);
       no_responders_logged = true;
     }
-    poll_sleep_backoff(1000);
+    poll_sleep_backoff(kNoRespondersRetryDelayMs);
   } else {
     Logger::warn("NATS request returned empty response for request_id={}, "
                  "will retry while timeout budget remains. Last error: {}",
                  request_id, last_error);
-    poll_sleep_backoff(250);
+    poll_sleep_backoff(kEmptyResponseRetryDelayMs);
   }
 }
 
 void NatsPollService::poll_sleep_backoff(int delay_ms) const {
   m_ctx.m_proxy.m_metrics->m_nats_poll_retry_wait_seconds.Observe(
-      static_cast<double>(delay_ms) / 1000.0);
+      static_cast<double>(delay_ms) / kMsPerSecond);
   std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 }

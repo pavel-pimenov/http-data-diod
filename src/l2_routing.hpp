@@ -1,6 +1,7 @@
 #ifndef L2_ROUTING_HPP
 #define L2_ROUTING_HPP
 
+#include "constants.hpp"
 #include "logger.hpp"
 #include "url_utils.hpp"
 #include <cstddef>
@@ -71,7 +72,8 @@ namespace l2_routing {
     const ParsedUrl parsed = parse_url(url);
     std::string result = parsed.m_is_https ? "https://" : "http://";
     result += parsed.m_host;
-    const int default_port = parsed.m_is_https ? 443 : 80;
+    const int default_port = parsed.m_is_https ? net_limits::kHttpsPort
+                                               : net_limits::kHttpPort;
     if (parsed.m_port != default_port) {
       result += std::format(":{}", parsed.m_port);
     }

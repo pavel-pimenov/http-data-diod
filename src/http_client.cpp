@@ -1,4 +1,5 @@
 #include "http_client.hpp"
+#include "constants.hpp"
 #include "common_utils.hpp"
 #include "http_setup.hpp"
 #include "logger.hpp"
@@ -60,7 +61,7 @@ void HttpClient::setup_client(const ParsedUrl &parsed_url) {
   // parse_url() (the only producer of ParsedUrl) rejects an empty host and an
   // out-of-range port, so here only the port bound is re-checked: the host is
   // guaranteed non-empty.
-  if (parsed_url.m_port <= 0 || parsed_url.m_port > 65535) {
+  if (parsed_url.m_port <= 0 || parsed_url.m_port > net_limits::kMaxTcpPort) {
     throw std::runtime_error("Invalid URL: port out of range");
   }
 

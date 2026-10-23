@@ -15,6 +15,11 @@
 #include <string_view>
 #include <utility>
 
+namespace {
+// Longest request body fragment kept in logs before truncation.
+constexpr std::size_t kBodyPreviewMaxLength = 100;
+} // namespace
+
 std::string compute_sha256_hex(std::string_view data) {
   static constexpr std::string_view g_hex = "0123456789abcdef";
   std::array<unsigned char, SHA256_DIGEST_LENGTH> hash{};
@@ -43,8 +48,8 @@ std::expected<json, std::string> parse_json(std::string_view body) {
     return result;
   }
   auto body_preview = std::string(body);
-  if (body_preview.length() > 100) {
-    body_preview = std::string(body.substr(0, 100)) + "...";
+  if (body_preview.length() > kBodyPreviewMaxLength) {
+    body_preview = std::string(body.substr(0, kBodyPreviewMaxLength)) + "...";
   }
   return std::unexpected(
       std::format("Failed to parse JSON: {}\nBody preview: {}", result.error(),

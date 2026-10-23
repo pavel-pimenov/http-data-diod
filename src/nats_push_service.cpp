@@ -1,6 +1,7 @@
 #include "nats_push_service.hpp"
 #include "app_context.hpp"
 #include "common_utils.hpp"
+#include "constants.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "nlohmann/json.hpp"
@@ -52,8 +53,8 @@ std::string NatsPushService::push_request(nlohmann::json request_data,
   m_ctx.m_proxy.m_metrics->m_nats_requests.Increment();
 
   JaegerSpanLogger::log_nats_span(
-      m_ctx.m_tracer.get(), "NATS_push", 200, request_id, trace_id, op_span_id,
-      parent_id, nats_push_start,
+      m_ctx.m_tracer.get(), "NATS_push", http_status::kOk, request_id, trace_id,
+      op_span_id, parent_id, nats_push_start,
       {{"nats.request_size", nats_request_json.size()}});
 
   return nats_request_json;

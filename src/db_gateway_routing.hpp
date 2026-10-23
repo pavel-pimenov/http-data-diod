@@ -1,6 +1,7 @@
 #ifndef DB_GATEWAY_ROUTING_HPP
 #define DB_GATEWAY_ROUTING_HPP
 
+#include "constants.hpp"
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -70,12 +71,12 @@ inline MethodDecision classify_method(const std::string &action,
                                       const std::string &method) {
   if ((action == "query" && method != "POST") ||
       (action == "ping" && method != "GET")) {
-    return {true, 405, "METHOD_NOT_ALLOWED",
+    return {true, http_status::kMethodNotAllowed, "METHOD_NOT_ALLOWED",
             std::format("Unsupported method '{}' for action '{}'", method,
                         action)};
   }
   if (action != "query" && action != "ping") {
-    return {true, 404, "NOT_FOUND",
+    return {true, http_status::kNotFound, "NOT_FOUND",
             std::format("Unsupported DB gateway action '{}' for {}", action,
                         method)};
   }

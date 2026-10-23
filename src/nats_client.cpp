@@ -23,6 +23,14 @@
 #include <utility>
 
 namespace {
+// Connection-level NATS tuning: wait between reconnect attempts, poll cadence
+// while waiting for the async thread to deliver a closed callback, and the
+// buffer size natsConnection_GetConnectedUrl expects for the server URL.
+constexpr int kNatsReconnectWaitMs = 1000;
+constexpr int kClosedCallbackPollIntervalMs = 5;
+constexpr int kClosedCallbackTimeoutMs = 3000;
+constexpr std::size_t kNatsUrlMaxLength = 256;
+
 // Converts a NATS status to a loggable string, guarding against null text.
 std::string nats_status_text(natsStatus status) {
   const char *text = natsStatus_GetText(status);
@@ -107,12 +115,14 @@ void NatsClient::wait_for_closed_callback() {
   }
   // Bounded poll: on a healthy connection the callback is delivered within
   // milliseconds; the timeout only guards a pathological async-thread stall.
-  constexpr auto kWaitTimeout = std::chrono::milliseconds(3000);
+  constexpr auto kWaitTimeout =
+      std::chrono::milliseconds(kClosedCallbackTimeoutMs);
   const auto deadline = std::chrono::steady_clock::now() + kWaitTimeout;
   while (m_state.m_closed_callbacks_delivered.load(std::memory_order_acquire) <
              expected &&
          std::chrono::steady_clock::now() < deadline) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(kClosedCallbackPollIntervalMs));
   }
 }
 
@@ -231,7 +241,8 @@ bool NatsClient::setup_options(const std::string &url) {
   CHECK_NATS_OK(natsOptions_SetRetryOnFailedConnect(m_connection.m_opts, false, nullptr,
                                                     nullptr),
                 "Failed to disable NATS retry-on-failed-connect");
-  CHECK_NATS_OK(natsOptions_SetReconnectWait(m_connection.m_opts, 1000),
+  CHECK_NATS_OK(natsOptions_SetReconnectWait(m_connection.m_opts,
+                                             kNatsReconnectWaitMs),
                 "Failed to set NATS reconnect wait");
   CHECK_NATS_OK(natsOptions_SetClosedCB(m_connection.m_opts, &NatsClient::closed_cb, this),
                 "Failed to set NATS closed callback");
@@ -305,7 +316,7 @@ void NatsClient::on_reconnected(natsConnection *nc) {
 
     std::string connected_url_suffix;
     if (nc != nullptr) {
-      std::array<char, 256> connected_url{};
+      std::array<char, kNatsUrlMaxLength> connected_url{};
       if (natsConnection_GetConnectedUrl(nc, connected_url.data(),
                                          connected_url.size()) == NATS_OK &&
           connected_url[0] != '\0') {

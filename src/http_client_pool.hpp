@@ -1,6 +1,7 @@
 #ifndef HTTP_CLIENT_POOL_HPP
 #define HTTP_CLIENT_POOL_HPP
 
+#include "constants.hpp"
 #include "http_client.hpp"
 #include <atomic>
 #include <chrono>
@@ -79,7 +80,7 @@ public:
   // Constructor with acquire timeout (default 30 seconds)
   explicit HttpClientPool(
       size_t max_pool_size = 10, int timeout_seconds = 10,
-      int acquire_timeout_seconds = 30,
+      int acquire_timeout_seconds = http_timeouts::kPoolAcquireTimeoutSeconds,
       bool enable_connection_reuse = true, // Changed default to true
       bool enable_ssl_server_certificate_verification = false,
       bool enable_ssl_server_hostname_verification = false,

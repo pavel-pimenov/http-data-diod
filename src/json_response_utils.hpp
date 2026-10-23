@@ -1,6 +1,7 @@
 #ifndef JSON_RESPONSE_UTILS_HPP
 #define JSON_RESPONSE_UTILS_HPP
 
+#include "constants.hpp"
 #include "httplib/httplib.h"
 #include <format>
 #include <nlohmann/json.hpp>
@@ -36,7 +37,7 @@ inline void send_json_response(httplib::Response &res, int status,
 
 inline void set_health_alive(httplib::Response &res,
                              std::string_view service) {
-  res.status = 200;
+  res.status = http_status::kOk;
   res.set_content(
       std::format(R"({{"status": "alive", "service": "{}"}})", service),
       "application/json");
@@ -44,7 +45,7 @@ inline void set_health_alive(httplib::Response &res,
 
 inline void set_health_ready(httplib::Response &res,
                              std::string_view service) {
-  res.status = 200;
+  res.status = http_status::kOk;
   res.set_content(
       std::format(R"({{"status": "ready", "service": "{}"}})", service),
       "application/json");
@@ -55,7 +56,7 @@ inline void set_health_ready(httplib::Response &res,
 // endpoints used to inline the identical JSON template.
 inline void set_health_ready_nats(httplib::Response &res,
                                   std::string_view service) {
-  res.status = 200;
+  res.status = http_status::kOk;
   res.set_content(
       std::format(
           R"({{"status": "ready", "service": "{}", "messaging": "nats"}})",
@@ -63,13 +64,14 @@ inline void set_health_ready_nats(httplib::Response &res,
       "application/json");
 }
 
-// Readiness failure body for the NATS-backed services: 503 plus the same shape
+// Readiness failure body for the NATS-backed services: 503
+// (kServiceUnavailable) plus the same shape
 // as set_health_ready_nats with "error" instead of "messaging". The worker used
 // a raw string literal and the proxy an nlohmann object for the very same body.
 inline void set_health_not_ready_nats(httplib::Response &res,
                                       std::string_view service,
                                       std::string_view error) {
-  res.status = 503;
+  res.status = http_status::kServiceUnavailable;
   res.set_content(
       std::format(
           R"({{"status": "not_ready", "service": "{}", "error": "{}"}})",

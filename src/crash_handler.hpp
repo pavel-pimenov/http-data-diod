@@ -1,6 +1,7 @@
 #ifndef CRASH_HANDLER_HPP
 #define CRASH_HANDLER_HPP
 
+#include "constants.hpp"
 #include "crash_utils.hpp"
 #include "logger.hpp"
 #include "l2-proxy-version.h"
@@ -29,6 +30,11 @@
 
 // Crash dump directory (overridable via CRASH_DUMP_DIR env var)
 constexpr const char *g_default_crash_dump_dir = "/crash-dumps";
+
+// The crash-report child (dladdr, addr2line, Sentry POST) gets ~4s before the
+// container restart kills the whole cgroup: 80 sleeps of 50ms.
+constexpr long g_crash_report_poll_interval_ns = 50L * 1000L * 1000L;
+constexpr int g_crash_report_poll_iterations = 80;
 
 extern const char *g_l2_proxy_version;
 
@@ -110,7 +116,8 @@ private:
     } else {
       SentryDsnConfig::m_host = host_port;
       SentryDsnConfig::m_port =
-          (dsn.substr(0, scheme_end) == "https") ? 443 : 80;
+          (dsn.substr(0, scheme_end) == "https") ? net_limits::kHttpsPort
+                                                 : net_limits::kHttpPort;
     }
     if (slash_pos != std::string::npos) {
       SentryDsnConfig::m_project = dsn.substr(slash_pos + 1);
@@ -201,7 +208,7 @@ private:
     const char *stack_header = "\n=== STACK TRACE (raw addresses) ===\n";
     write(fd, stack_header, strlen(stack_header));
 
-    std::array<void *, 128> callstack{};
+    std::array<void *, CrashFrames::kMaxFrames> callstack{};
     int const frames = backtrace(callstack.data(), static_cast<int>(callstack.size()));
 
     for (int i = 0; i < frames; ++i) {
@@ -478,8 +485,8 @@ private:
     // before the container restart kills the whole cgroup (the parent is
     // PID 1). waitpid/nanosleep are async-signal-safe; bounded ~4s worst case.
     struct timespec wait_ts {};
-    wait_ts.tv_nsec = 50LL * 1000 * 1000;
-    for (int i = 0; i < 80; ++i) {
+    wait_ts.tv_nsec = g_crash_report_poll_interval_ns;
+    for (int i = 0; i < g_crash_report_poll_iterations; ++i) {
       int wstatus = 0;
       const pid_t r = waitpid(child, &wstatus, WNOHANG);
       if (r == child || r == -1) {

@@ -13,6 +13,13 @@
 
 #include "json_utils.hpp"
 
+// Body/path limits of the request/response contract validators.
+inline constexpr std::size_t g_validator_default_max_body_bytes =
+    std::size_t{10} * 1024 * 1024; // 10 MB
+inline constexpr std::size_t g_validator_default_max_path_length = 2048;
+inline constexpr std::size_t g_validator_max_response_body_bytes =
+    std::size_t{50} * 1024 * 1024; // 50 MB
+
 #if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
 #include <flat_set>
 #endif
@@ -49,7 +56,8 @@ private:
 public:
   RequestValidator()
       : m_allowed(),
-        m_limits{static_cast<size_t>(10) * 1024 * 1024, 2048} // 10MB, 2KB defaults
+        m_limits{g_validator_default_max_body_bytes,
+                 g_validator_default_max_path_length} // 10MB, 2KB defaults
   {}
 
   RequestValidator &add_required_field(const std::string &field) {
@@ -181,7 +189,7 @@ private:
 
 public:
   ResponseValidator()
-      : m_limits({false, static_cast<size_t>(50) * 1024 * 1024}) // 50MB default
+      : m_limits({false, g_validator_max_response_body_bytes}) // 50MB default
   {}
 
   ResponseValidator &add_allowed_status_code(int code) {
@@ -247,15 +255,15 @@ inline RequestValidator create_standard_request_validator() {
       .add_required_field("request_id")
       .add_allowed_method("GET")
       .add_allowed_method("POST")
-      .set_max_body_size(static_cast<size_t>(10) * 1024 * 1024) // 10MB
-      .set_max_path_length(2048);
+      .set_max_body_size(g_validator_default_max_body_bytes) // 10MB
+      .set_max_path_length(g_validator_default_max_path_length);
   return validator;
 }
 
 inline ResponseValidator create_standard_response_validator() {
   ResponseValidator validator;
-  validator.require_body(true).set_max_body_size(static_cast<size_t>(50) *
-                                                 1024 * 1024); // 50MB
+  validator.require_body(true).set_max_body_size(
+      g_validator_max_response_body_bytes); // 50MB
   return validator;
 }
 

@@ -29,6 +29,7 @@
 #include "stats_page.hpp"
 
 #include "app_context.hpp"
+#include "constants.hpp"
 #include "l2_worker.hpp"
 #include "proxy_init.hpp"
 #include "request_handler.hpp"
@@ -48,16 +49,16 @@ std::condition_variable g_shutdown_cv;
 void configure_httplib_server(httplib::Server &server, const Config &config) {
   // Configure server for better performance - match previous CivetServer
   // settings
-  server.set_keep_alive_max_count(100); // Allow more keep-alive connections
-  server.set_keep_alive_timeout(5);     // Keep connections alive for 5 seconds
+  // Allow more keep-alive connections, keep them alive for 5 seconds.
+  server.set_keep_alive_max_count(http_server_limits::kKeepAliveMaxCount);
+  server.set_keep_alive_timeout(http_server_limits::kKeepAliveTimeoutSeconds);
   server.set_read_timeout(config.m_proxy.m_request_timeout_seconds,
                           0); // Match m_proxy.m_request_timeout_seconds from config
   server.set_write_timeout(config.m_proxy.m_http_timeout_seconds,
                            0);  // Match http_timeout_seconds from config
   server.set_tcp_nodelay(true); // Disable Nagle's algorithm for lower latency
-  server.set_payload_max_length(
-      static_cast<size_t>(10) * 1024 *
-      1024); // 10MB max payload to handle larger requests
+  // 10MB max payload to handle larger requests
+  server.set_payload_max_length(http_server_limits::kMaxRequestPayloadBytes);
 }
 
 template <typename ServerType, typename HandlerType>
@@ -126,8 +127,10 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
     // variable, so each wait_for must re-check the predicate after the timeout
     // (the while-loop retries until the flag is actually set).
     while (!g_shutdown_flag.load()) {
-      g_shutdown_cv.wait_for(lock, std::chrono::milliseconds(100),
-                             []() { return g_shutdown_flag.load(); });
+      g_shutdown_cv.wait_for(
+          lock,
+          std::chrono::milliseconds(http_timeouts::kShutdownPollIntervalMs),
+          []() { return g_shutdown_flag.load(); });
     }
     Logger::info("Received signal {}, exiting...", g_signal_number.load());
   }
@@ -140,7 +143,7 @@ void run_server(ServerType &server, AppContext &app_ctx, HandlerType &handler,
   if (use_in_flight_tracker) {
     Logger::info("Waiting for in-flight requests to complete...");
     if (app_ctx.m_in_flight_tracker.wait_for_completion(
-            std::chrono::seconds(30))) {
+            std::chrono::seconds(http_timeouts::kGracefulShutdownSeconds))) {
       Logger::info("All in-flight requests completed gracefully");
     } else {
       Logger::warn("Some in-flight requests did not complete within timeout");
@@ -230,9 +233,11 @@ void run_proxy(AppContext &app_ctx) {
   // AppContext stays constructible in unit tests without the NATS library.
   // Exposer first: :19090/metrics stays up while init_proxy_components blocks
   // on NATS connect; per-IP/client collectors register below once created.
-  auto exposer = create_metrics_exposer(19090, app_ctx.m_proxy_registry,
-                                          app_ctx.m_common_registry,
-                                          app_ctx.m_metrics_render_duration);
+  auto exposer =
+      create_metrics_exposer(service_port::kProxyMetrics,
+                             app_ctx.m_proxy_registry,
+                             app_ctx.m_common_registry,
+                             app_ctx.m_metrics_render_duration);
 
   init_proxy_components(app_ctx);
 
@@ -261,7 +266,8 @@ void run_proxy(AppContext &app_ctx) {
   Logger::info("C++ DMZ Proxy listening on {}://0.0.0.0:{}",
                app_ctx.m_config.m_proxy.m_protocol,
                app_ctx.m_config.m_proxy.m_port);
-  Logger::info("Prometheus metrics available at http://0.0.0.0:19090/metrics");
+  Logger::info("Prometheus metrics available at http://0.0.0.0:{}/metrics",
+               service_port::kProxyMetrics);
 
   auto on_proxy_request_start = [&app_ctx]() {
     app_ctx.m_proxy.m_metrics->m_in_flight_requests.Increment();
@@ -294,9 +300,11 @@ void run_proxy(AppContext &app_ctx) {
 void run_worker(AppContext &app_ctx) {
   auto stats_logger = start_stats_logging(app_ctx);
 
-  auto exposer = create_metrics_exposer(19091, app_ctx.m_worker_registry,
-                                          app_ctx.m_common_registry,
-                                          app_ctx.m_metrics_render_duration);
+  auto exposer =
+      create_metrics_exposer(service_port::kWorkerMetrics,
+                             app_ctx.m_worker_registry,
+                             app_ctx.m_common_registry,
+                             app_ctx.m_metrics_render_duration);
 
   L2Worker worker(app_ctx);
 
@@ -337,14 +345,17 @@ void run_worker(AppContext &app_ctx) {
   });
 
   std::thread health_thread([&health_server]() {
-    Logger::info("Worker health server started on port 19093");
-    health_server.listen("0.0.0.0", 19093);
+    Logger::info("Worker health server started on port {}",
+                 service_port::kWorkerHealth);
+    health_server.listen("0.0.0.0", service_port::kWorkerHealth);
   });
 
   Logger::info("C++ L2 Worker Prometheus metrics available at "
-               "http://0.0.0.0:19091/metrics");
+               "http://0.0.0.0:{}/metrics",
+               service_port::kWorkerMetrics);
   Logger::info("C++ L2 Worker health check available at "
-               "http://0.0.0.0:19093/health/ready");
+               "http://0.0.0.0:{}/health/ready",
+               service_port::kWorkerHealth);
   worker.run();
 
   health_server.stop();
@@ -358,7 +369,8 @@ void run_l2_server(AppContext &app_ctx) {
 
   ServerHandler server_handler(app_ctx);
 
-  auto exposer = create_metrics_exposer(19092, app_ctx.m_server_registry,
+  auto exposer = create_metrics_exposer(service_port::kServerMetrics,
+                                        app_ctx.m_server_registry,
                                           app_ctx.m_common_registry,
                                           app_ctx.m_metrics_render_duration);
 
@@ -366,7 +378,8 @@ void run_l2_server(AppContext &app_ctx) {
                app_ctx.m_config.m_server.m_protocol,
                app_ctx.m_config.m_server.m_port);
   Logger::info("C++ L2 Server Prometheus metrics available at "
-               "http://0.0.0.0:19092/metrics");
+               "http://0.0.0.0:{}/metrics",
+               service_port::kServerMetrics);
 
   Logger::info("Using cpp-httplib for L2 server");
 

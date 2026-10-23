@@ -9,6 +9,8 @@
 #include <string>
 #include <string_view>
 
+#include "constants.hpp"
+
 struct ParsedUrl {
   std::string m_host;
   std::string m_path;
@@ -34,7 +36,7 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
   ParsedUrl result;
   result.m_host.clear();
   result.m_path = "/";
-  result.m_port = 80;
+  result.m_port = net_limits::kHttpPort;
 
   if (url.empty()) {
     throw std::runtime_error("Invalid URL: empty string");
@@ -65,7 +67,8 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
       } catch (...) {
         // Fallback: non-numeric port in URL → use default for scheme
         Logger::debug("URL port parse failed, using default for scheme");
-        result.m_port = result.m_is_https ? 443 : 80;
+        result.m_port = result.m_is_https ? net_limits::kHttpsPort
+                                          : net_limits::kHttpPort;
       }
       result.m_path =
           (path_start != std::string_view::npos) ? std::string(url.substr(path_start)) : "/";
@@ -73,7 +76,8 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
       result.m_host = std::string(url.substr(host_start, path_start != std::string_view::npos
                                                  ? path_start - host_start
                                                  : std::string_view::npos));
-      result.m_port = result.m_is_https ? 443 : 80;
+      result.m_port = result.m_is_https ? net_limits::kHttpsPort
+                                        : net_limits::kHttpPort;
       result.m_path =
           (path_start != std::string_view::npos) ? std::string(url.substr(path_start)) : "/";
     }

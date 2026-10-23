@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <mutex>
 
+// Token-bucket refill is accounted in whole milliseconds.
+constexpr int64_t g_rate_limiter_ms_per_second = 1000;
+
 // Token Bucket Rate Limiter
 // Controls request rate to prevent overload
 //
@@ -115,8 +118,9 @@ private:
                              now - m_bucket.m_last_refill)
                              .count();
 
-    if (elapsed >= 1000) {
-      const auto ticks = static_cast<uint64_t>(elapsed / 1000);
+    if (elapsed >= g_rate_limiter_ms_per_second) {
+      const auto ticks =
+          static_cast<uint64_t>(elapsed / g_rate_limiter_ms_per_second);
       const uint64_t tokens_to_add =
           ticks * m_config.m_refill_tokens_per_second;
       // CAS loop so concurrent acquire() decrements are not lost.
@@ -129,7 +133,8 @@ private:
       } while (!m_bucket.m_tokens.compare_exchange_weak(
           cur, desired, std::memory_order_acq_rel, std::memory_order_relaxed));
       // Advance by whole seconds only, keep leftover ms to avoid drift.
-      m_bucket.m_last_refill += std::chrono::milliseconds(ticks * 1000);
+      m_bucket.m_last_refill +=
+          std::chrono::milliseconds(ticks * g_rate_limiter_ms_per_second);
 
       Logger::debug("RateLimiter refilled: +{} tokens, total={}", tokens_to_add,
                     desired);

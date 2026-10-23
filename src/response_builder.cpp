@@ -1,5 +1,6 @@
 #include "response_builder.hpp"
 #include "common_utils.hpp"
+#include "constants.hpp"
 #include "app_context.hpp"
 #include "error_types.hpp"
 #include "json_response_utils.hpp"
@@ -19,8 +20,10 @@ void set_response_content(httplib::Response &res,
                           uint64_t start_us, AppContext &ctx) {
   if (!parsed_response_data.is_object()) {
     handle_client_error("Invalid response format",
-                        &ctx.m_proxy.m_metrics->m_client_errors, 500);
-    set_json_error_response(res, 500, "Invalid response format", request_id);
+                        &ctx.m_proxy.m_metrics->m_client_errors,
+                        http_status::kInternalServerError);
+    set_json_error_response(res, http_status::kInternalServerError,
+                            "Invalid response format", request_id);
     return;
   }
 
@@ -31,7 +34,8 @@ void set_response_content(httplib::Response &res,
   // a 500, never throw (nlohmann operator[] on a const object throws
   // out_of_range, which would escape into the httplib handler thread).
   const int status_code = JsonUtils::safe_get_int(
-      parsed_response_data, NatsResponseContract::kStatus, 500);
+      parsed_response_data, NatsResponseContract::kStatus,
+      http_status::kInternalServerError);
   res.status = status_code;
 
   // Check if response contains binary data (base64 encoded)

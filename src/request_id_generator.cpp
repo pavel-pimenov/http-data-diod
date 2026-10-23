@@ -8,6 +8,12 @@
 
 thread_local std::string RequestIdGenerator::cached_date_str;
 
+namespace {
+// tm_year counts from 1900; the random suffix is zero-padded to 6 digits.
+constexpr int g_epoch_to_calendar_year = 1900;
+constexpr int g_max_random_suffix = 999999;
+} // namespace
+
 // Request ID format: YYYY-MM-DD~<counter>~<6-digit-zero-padded-random>.
 // The date part is cached per-thread for up to an hour to avoid a system call
 // on every request while keeping the counter/random suffixes unique.
@@ -22,12 +28,12 @@ std::string RequestIdGenerator::generate_uuid() {
     std::tm tm_now;
     // Use thread-safe localtime_r instead of localtime
     localtime_r(&time_t_now, &tm_now);
-    cached_date_str = std::format("{:04d}-{:02d}-{:02d}",
-                                  tm_now.tm_year + 1900, tm_now.tm_mon + 1,
-                                  tm_now.tm_mday);
+    cached_date_str = std::format(
+        "{:04d}-{:02d}-{:02d}", tm_now.tm_year + g_epoch_to_calendar_year,
+        tm_now.tm_mon + 1, tm_now.tm_mday);
     last_date_update = steady_now;
   }
 
   return std::format("{}~{}~{:06d}", cached_date_str, m_counter++,
-                     RandomUtils::between(0, 999999));
+                     RandomUtils::between(0, g_max_random_suffix));
 }

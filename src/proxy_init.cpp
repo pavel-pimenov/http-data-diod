@@ -124,7 +124,10 @@ void init_proxy_components(AppContext &app_ctx) {
                "header"},
               {"l2_proxy_per_client_id_rejected_total",
                "Total number of requests rejected by rate limiters per "
-               "X-DataHub-Client-Id header"}}, DynamicLabeledFamily<prometheus::Counter>::Provider{}, 300, 10000,
+               "X-DataHub-Client-Id header"}},
+          DynamicLabeledFamily<prometheus::Counter>::Provider{},
+          g_dynamic_label_default_ttl_seconds,
+          g_dynamic_label_default_max_entries,
           std::vector<double>{}, &dropped_labels);
 
   app_ctx.m_proxy.m_per_client_id_latency_collector =
@@ -133,7 +136,9 @@ void init_proxy_components(AppContext &app_ctx) {
           std::vector<DynamicLabeledFamily<prometheus::Histogram>::Series>{
               {"l2_proxy_per_client_id_latency_seconds",
                "Request processing latency per X-DataHub-Client-Id header"}},
-          DynamicLabeledFamily<prometheus::Histogram>::Provider{}, 300, 10000,
+          DynamicLabeledFamily<prometheus::Histogram>::Provider{},
+          g_dynamic_label_default_ttl_seconds,
+          g_dynamic_label_default_max_entries,
           std::vector<double>(
               histogram_buckets::g_buckets.m_latency_5ms_to_10s.begin(),
               histogram_buckets::g_buckets.m_latency_5ms_to_10s.end()),
@@ -148,7 +153,10 @@ void init_proxy_components(AppContext &app_ctx) {
                "again) detected per X-DataHub-Client-Id header"},
               {"l2_proxy_per_client_id_duplicate_rejected_total",
                "Reserved: rejected duplicate POSTs per X-DataHub-Client-Id "
-               "header"}}, DynamicLabeledFamily<prometheus::Counter>::Provider{}, 300, 10000,
+               "header"}},
+          DynamicLabeledFamily<prometheus::Counter>::Provider{},
+          g_dynamic_label_default_ttl_seconds,
+          g_dynamic_label_default_max_entries,
           std::vector<double>{}, &dropped_labels);
 
   DuplicateDetector::Options dup_options;

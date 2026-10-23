@@ -1,5 +1,6 @@
 #include "trace_logger.hpp"
 #include "async_sender_queue.hpp"
+#include "constants.hpp"
 #include "http_client_pool.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -37,6 +38,8 @@ namespace {
 constexpr size_t kJaegerPoolMaxSize = 3;
 constexpr int kJaegerPoolTimeoutSeconds = 2;
 constexpr int kJaegerPoolAcquireTimeoutSeconds = 3;
+// Length of the "HTTP " prefix that log_request() puts in front of spans.
+constexpr std::size_t kHttpSpanPrefixLength = 5;
 }
 
 JaegerLogger::JaegerLogger(const std::string &endpoint,
@@ -85,9 +88,13 @@ JaegerLogger::~JaegerLogger() {
   }
 }
 
-std::string JaegerLogger::generate_trace_id() { return random_hex_fast(32); }
+std::string JaegerLogger::generate_trace_id() {
+  return random_hex_fast(g_trace_id_hex_len);
+}
 
-std::string JaegerLogger::generate_span_id() { return random_hex_fast(16); }
+std::string JaegerLogger::generate_span_id() {
+  return random_hex_fast(g_span_id_hex_len);
+}
 
 // W3C Trace Context helpers
 std::string JaegerLogger::generate_traceparent(std::string_view trace_id,
@@ -98,8 +105,8 @@ std::string JaegerLogger::generate_traceparent(std::string_view trace_id,
 
 // Simplified validation - check key positions only
 bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
-  // Format: 00-{32hex}-{16hex}-{2hex} = 55 chars
-  if (traceparent.size() != 55) {
+  // Format: 00-{32hex}-{16hex}-{2hex}
+  if (traceparent.size() != g_traceparent_length) {
     return false;
   }
 
@@ -109,7 +116,8 @@ bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   }
 
   // Check separators at key positions
-  if (traceparent[35] != '-' || traceparent[52] != '-') {
+  if (traceparent[g_traceparent_sep_after_trace_id_pos] != '-' ||
+      traceparent[g_traceparent_sep_after_span_id_pos] != '-') {
     return false;
   }
 
@@ -119,23 +127,27 @@ bool JaegerLogger::validate_traceparent(std::string_view traceparent) {
   };
 
   // Check trace_id start and end
-  if (!is_hex(traceparent[3]) || !is_hex(traceparent[34])) {
+  if (!is_hex(traceparent[g_traceparent_trace_id_pos]) ||
+      !is_hex(traceparent[g_traceparent_trace_id_end_pos])) {
     return false;
   }
   // Check span_id start and end
-  if (!is_hex(traceparent[36]) || !is_hex(traceparent[51])) {
+  if (!is_hex(traceparent[g_traceparent_span_id_pos]) ||
+      !is_hex(traceparent[g_traceparent_span_id_end_pos])) {
     return false;
   }
   // Check flags
-  if (!is_hex(traceparent[53]) || !is_hex(traceparent[54])) {
+  if (!is_hex(traceparent[g_traceparent_flags_pos]) ||
+      !is_hex(traceparent[g_traceparent_flags_end_pos])) {
     return false;
   }
 
   // Validate flags (must be 00 or 01)
-  if (traceparent[53] != '0') {
+  if (traceparent[g_traceparent_flags_pos] != '0') {
     return false;
   }
-  if (traceparent[54] != '0' && traceparent[54] != '1') {
+  if (traceparent[g_traceparent_flags_end_pos] != '0' &&
+      traceparent[g_traceparent_flags_end_pos] != '1') {
     return false;
   }
 
@@ -154,11 +166,17 @@ bool JaegerLogger::parse_traceparent(std::string_view traceparent,
   }
 
   // Extract trace-id (32 chars after "00-")
-  trace_id = std::string(traceparent.substr(3, 32));
+  trace_id =
+      std::string(traceparent.substr(g_traceparent_trace_id_pos,
+                                     g_trace_id_hex_len));
   // Extract parent-id (16 chars after trace-id and "-")
-  parent_span_id = std::string(traceparent.substr(36, 16));
+  parent_span_id =
+      std::string(traceparent.substr(g_traceparent_span_id_pos,
+                                     g_span_id_hex_len));
   // Extract flags (2 chars at end)
-  auto flags = traceparent.substr(53, 2);
+  auto flags = traceparent.substr(
+      g_traceparent_flags_pos,
+      g_traceparent_flags_end_pos - g_traceparent_flags_pos + 1);
 
   sampled = (flags == "01");
 
@@ -190,9 +208,11 @@ bool JaegerLogger::should_sample(bool is_error) const {
 
 std::string JaegerLogger::sentry_span_op(const std::string &name) {
   if (name.starts_with("HTTP ")) {
-    const size_t sp = name.find(' ', 5);
+    const size_t sp = name.find(' ', kHttpSpanPrefixLength);
     const std::string token =
-        sp == std::string::npos ? name.substr(5) : name.substr(5, sp - 5);
+        sp == std::string::npos ? name.substr(kHttpSpanPrefixLength)
+                                  : name.substr(kHttpSpanPrefixLength,
+                                                sp - kHttpSpanPrefixLength);
     if (token.starts_with("NATS")) {
       return "messaging";
     }
@@ -214,7 +234,7 @@ std::string JaegerLogger::sentry_span_op(const std::string &name) {
 }
 
 std::string JaegerLogger::sentry_transaction_status(int status_code) {
-  if (status_code >= 500) {
+  if (status_code >= http_status::kServerErrorMin) {
     return "internal_error";
   }
   return "ok";
@@ -227,7 +247,7 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     const std::string &environment, const nlohmann::json &attributes,
     const std::string &release, const std::string &product) {
   nlohmann::json root = nlohmann::json::object();
-  root["event_id"] = random_hex_fast(32);
+  root["event_id"] = random_hex_fast(sentry::kEventIdHexLen);
   root["type"] = "transaction";
   root["start_timestamp"] = TimeUtils::format_rfc3339_us(start_us);
   root["timestamp"] = TimeUtils::format_rfc3339_us(end_us);
@@ -238,7 +258,7 @@ nlohmann::json JaegerLogger::build_sentry_transaction_json(
     root["release"] = release;
   }
 
-  int status_code = 200;
+  int status_code = http_status::kOk;
   if (attributes.is_object() && attributes.contains("http.status_code")) {
     const auto &code = attributes["http.status_code"];
     if (code.is_number_integer() || code.is_number_unsigned()) {
@@ -324,7 +344,9 @@ void JaegerLogger::record_sink_failure(ExponentialBreaker &breaker,
   }
   const uint64_t cooldown_ms = std::min<uint64_t>(
       static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_base_ms)
-          << (std::min(breaker.m_consecutive_failures.load(), 20) - 1),
+          << (std::min(breaker.m_consecutive_failures.load(),
+                       g_tracing_max_cooldown_shift) -
+              1),
       static_cast<uint64_t>(m_breaker.m_settings.m_cooldown_max_ms));
   breaker.m_cooldown_until_steady_ms = now_steady_ms + cooldown_ms;
   Logger::warn("{} breaker opened, shedding for {}ms", sink_name, cooldown_ms);
@@ -436,7 +458,7 @@ void JaegerLogger::log_request(
     const nlohmann::json &additional_attributes,
     const std::string &name_override) {
   // Apply sampling - always sample errors (4xx and 5xx status codes)
-  bool const is_error = (status_code >= 400);
+  bool const is_error = (status_code >= http_status::kClientErrorMin);
   if (!should_sample(is_error)) {
     return;
   }

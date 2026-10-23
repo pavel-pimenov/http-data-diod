@@ -1,6 +1,7 @@
 #ifndef DB_QUERY_UTILS_HPP
 #define DB_QUERY_UTILS_HPP
 
+#include "constants.hpp"
 #include "json_utils.hpp"
 #include "string_utils.hpp"
 #include <array>
@@ -167,11 +168,12 @@ inline json make_db_error_body(const std::string &code,
             {DbResponseContract::kMessage, message}}}};
 }
 
-// Sets status_code to 503 and returns a DB_UNAVAILABLE error body.
+// Sets status_code to kServiceUnavailable and returns a DB_UNAVAILABLE
+// error body.
 // detail (e.g. the driver error text) is appended to the standard message.
 inline json make_db_unavailable(int &status_code,
                                 const std::string &detail = "") {
-  status_code = 503;
+  status_code = http_status::kServiceUnavailable;
   return make_db_error_body(
       "DB_UNAVAILABLE",
       detail.empty() ? "Failed to acquire a database connection"
@@ -200,11 +202,12 @@ inline constexpr std::array<const char *, 15> g_db_error_classes = {
     "08", "22", "23", "25", "42", "53", "55", "57", "58",
     "72", "F0", "HV", "P0", "XX", "unknown"};
 
-// Sets status_code to 422 and returns a SQL_ERROR body. Shared by the twelve
+// Sets status_code to kUnprocessableEntity and returns a SQL_ERROR body.
+// Shared by the twelve
 // error paths in the pg/oracle executors that repeated the identical
 // status+code+body triple.
 inline json make_db_sql_error(int &status_code, const std::string &message) {
-  status_code = 422;
+  status_code = http_status::kUnprocessableEntity;
   return make_db_error_body("SQL_ERROR", message);
 }
 

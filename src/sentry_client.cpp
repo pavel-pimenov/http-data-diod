@@ -1,4 +1,5 @@
 #include "sentry_client.hpp"
+#include "constants.hpp"
 
 #include "async_sender_queue.hpp"
 #include "http_setup.hpp"
@@ -79,7 +80,8 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
   if (host.empty() || host.find_first_of("[] \t") != std::string::npos) {
     return std::nullopt;
   }
-  int port = scheme == "https" ? 443 : 80;
+  int port = scheme == "https" ? net_limits::kHttpsPort
+                               : net_limits::kHttpPort;
   if (port_sep != std::string::npos && port_sep + 1 < host_port.size()) { //-V1051
     const std::string_view port_str =
         std::string_view(host_port).substr(port_sep + 1);
@@ -91,7 +93,7 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
     for (const char digit : port_str) {
       parsed_port = parsed_port * 10 + (digit - '0');
     }
-    if (parsed_port <= 0 || parsed_port > 65535) {
+    if (parsed_port <= 0 || parsed_port > net_limits::kMaxTcpPort) {
       return std::nullopt;
     }
     port = parsed_port;
@@ -167,7 +169,7 @@ nlohmann::json build_event_json(const SentryEvent &event,
                                 const std::string &environment,
                                 const std::string &release) {
   nlohmann::json root = nlohmann::json::object();
-  root["event_id"] = RandomUtils::hex_string(32);
+  root["event_id"] = RandomUtils::hex_string(sentry::kEventIdHexLen);
   root["timestamp"] = TimeUtils::format_rfc3339();
   root["platform"] = "native";
   root["level"] = level_to_string(event.m_level);
@@ -304,7 +306,8 @@ void SentryClient::flush() {
 void SentryClient::sender_loop(const std::stop_token &st) {
   while (true) {
     std::vector<sentry::SentryEvent> batch;
-    const auto result = m_queue.wait_and_take(st, 0, 8, true, batch);
+    const auto result =
+        m_queue.wait_and_take(st, 0, sentry::kSenderBatchSize, true, batch);
     if (result ==
         AsyncSenderQueue<sentry::SentryEvent>::TakeResult::Stopped) {
       break;
@@ -348,7 +351,8 @@ bool SentryClient::send_envelope(const std::string &envelope) {
   // is required; the legacy secret key goes after the slash if present.
   httplib::Headers const headers{
       {"X-Sentry-Auth", sentry::auth_header(*m_config.m_dsn_data)}};
-  const int timeout_seconds = m_config.m_timeout_ms / 1000;
+  const int timeout_seconds =
+      m_config.m_timeout_ms / static_cast<int>(TimeUtils::kMsPerSecond);
 
   httplib::Result res;
   if (m_config.m_dsn_data->m_scheme == "https") {
@@ -364,5 +368,6 @@ bool SentryClient::send_envelope(const std::string &envelope) {
     res = client.Post(path, headers, envelope,
                       "application/x-sentry-envelope");
   }
-  return res && res->status >= 200 && res->status < 300;
+  return res && res->status >= http_status::kSuccessMin &&
+         res->status < http_status::kSuccessMax;
 }

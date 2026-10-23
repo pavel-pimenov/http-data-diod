@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "constants.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"
@@ -75,10 +76,12 @@ bool one_of(const std::string &val,
 
 void validate_ports_and_timeouts(const Config &cfg, ConfigChecker &check) {
   // Ports
-  check(in_range(cfg.m_proxy.m_port, 1, 65535),
+  check(in_range(cfg.m_proxy.m_port, net_limits::kMinTcpPort,
+                net_limits::kMaxTcpPort),
         std::format("Invalid proxy port: {} (must be 1-65535)",
                     cfg.m_proxy.m_port));
-  check(in_range(cfg.m_server.m_port, 1, 65535),
+  check(in_range(cfg.m_server.m_port, net_limits::kMinTcpPort,
+                net_limits::kMaxTcpPort),
         std::format("Invalid L2 server port: {} (must be 1-65535)",
                     cfg.m_server.m_port));
 
@@ -159,7 +162,8 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
   check(positive(cfg.m_proxy.m_http_pool_size),
         std::format("Invalid HTTP pool size: {} (must be > 0)",
                     cfg.m_proxy.m_http_pool_size));
-  check(cfg.m_proxy.m_http_pool_size <= 1000,
+  check(cfg.m_proxy.m_http_pool_size <=
+              net_limits::kRecommendedHttpPoolSize,
         std::format("Very large HTTP pool size: {} (recommended: < 1000)",
                     cfg.m_proxy.m_http_pool_size),
         false);
@@ -171,7 +175,8 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
 void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
   // NATS (used only in proxy/worker modes)
   if (cfg.m_app.m_mode == "proxy" || cfg.m_app.m_mode == "worker") {
-    check(in_range(cfg.m_nats.m_port, 1, 65535),
+    check(in_range(cfg.m_nats.m_port, net_limits::kMinTcpPort,
+                net_limits::kMaxTcpPort),
           std::format("Invalid NATS port: {} (must be 1-65535)",
                       cfg.m_nats.m_port));
     check(!cfg.m_nats.m_host.empty(), "NATS host cannot be empty");
@@ -215,7 +220,8 @@ void validate_nats_and_db_query(const Config &cfg, ConfigChecker &check) {
         }
         check(!db.m_host.empty(),
               std::format("DB '{}': host cannot be empty", db.m_name));
-        check(in_range(db.m_port, 1, 65535),
+        check(in_range(db.m_port, net_limits::kMinTcpPort,
+                net_limits::kMaxTcpPort),
               std::format("DB '{}': invalid port {} (must be 1-65535)",
                           db.m_name, db.m_port));
         if (db.m_driver == "oracle") {

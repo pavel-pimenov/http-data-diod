@@ -40,6 +40,11 @@
 //  - snapshot provider (Gauge only): on every Collect() the provided label set
 //    replaces the exported series via Gauge::Set, so a value that stops being
 //    reported disappears immediately.
+// Defaults for the per-label series caches: drop a label value after 5 minutes
+// of inactivity and cap the family at 10k values (oldest evicted first).
+inline constexpr uint64_t g_dynamic_label_default_ttl_seconds = 300;
+inline constexpr std::size_t g_dynamic_label_default_max_entries = 10000;
+
 template <typename T>
 class DynamicLabeledFamily : public prometheus::Collectable {
 public:
@@ -63,8 +68,11 @@ public:
   // the TTL silently shrink the family otherwise).
   // histogram_buckets: required bucket boundaries when T = Histogram.
   DynamicLabeledFamily(std::string label_name, std::vector<Series> series,
-                       Provider provider = {}, uint64_t ttl_seconds = 300,
-                       size_t max_entries = 10000,
+                       Provider provider = {},
+                       uint64_t ttl_seconds =
+                           g_dynamic_label_default_ttl_seconds,
+                       size_t max_entries =
+                           g_dynamic_label_default_max_entries,
                        std::vector<double> histogram_buckets = {},
                        prometheus::Counter *dropped_labels = nullptr)
       : m_config{std::move(label_name), std::move(series),

@@ -1,5 +1,6 @@
 #include "l2_worker.hpp"
 #include "app_context.hpp"
+#include "constants.hpp"
 #include "error_types.hpp"
 #include "header_utils.hpp"
 #include "http_client_pool.hpp"
@@ -51,7 +52,7 @@ L2Worker::L2Worker(AppContext &context)
     : m_clients{.m_http_client_pool = std::make_unique<HttpClientPool>(
                     context.m_config.m_proxy.m_http_pool_size,       // max connections
                     context.m_config.m_proxy.m_http_timeout_seconds, // request timeout
-                    30,   // acquire timeout (30 seconds)
+                    http_timeouts::kPoolAcquireTimeoutSeconds, // acquire
                     true, // enable connection reuse (keep-alive)
                     context.m_config.m_ssl.m_enable_server_certificate_verification,
                     context.m_config.m_ssl.m_enable_server_hostname_verification,
@@ -202,7 +203,7 @@ HttpResponse L2Worker::call_l2_server(
   std::string selected_url;
   if (!validate_l2_server_access(path, selected_url)) {
     return make_error_response(
-        403,
+        http_status::kForbidden,
         "Access to arbitrary L2 server address is forbidden! path=" + path);
   }
 
@@ -251,11 +252,12 @@ HttpResponse L2Worker::call_l2_server(
   // 5xx from L2 is a server failure (circuit-breaker/retry signal) even
   // when the response carries headers (e.g. JSON error). 4xx is client error
   // and does not trip the breaker.
-  const bool success = http_response.m_status < 500;
+  const bool success = http_response.m_status < http_status::kServerErrorMin;
 
   if (m_ctx.m_tracer && !l2_trace_ctx.m_trace_id.empty()) {
     const auto end_us = get_current_timestamp_us();
-    const int span_status = success ? http_response.m_status : 500;
+    const int span_status =
+        success ? http_response.m_status : http_status::kInternalServerError;
     nlohmann::json attrs;
     if (!success) {
       // Expose how many L2 server attempts were made before giving up so the
@@ -322,15 +324,15 @@ void L2Worker::record_bytes_sent(size_t bytes) const {
 }
 
 void L2Worker::metrics_ticker_loop(const std::stop_token &st) {
-  const auto step = std::chrono::milliseconds(100);
-  const int steps_per_sample = 50; // ~5s between samples
+  constexpr auto kStep = std::chrono::milliseconds(100);
+  constexpr int kStepsPerSample = 50; // ~5s between samples
   int step_count = 0;
   while (!st.stop_requested()) {
-    if (++step_count >= steps_per_sample) {
+    if (++step_count >= kStepsPerSample) {
       step_count = 0;
       update_queue_size_metric();
     }
-    std::this_thread::sleep_for(step);
+    std::this_thread::sleep_for(kStep);
   }
 }
 
@@ -365,7 +367,8 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         "(state={})",
         url, m_circuit_breaker.state_name());
     return make_error_response(
-        503, "L2 server circuit breaker open, service temporarily unavailable");
+        http_status::kServiceUnavailable,
+        "L2 server circuit breaker open, service temporarily unavailable");
   }
 
   const int max_retries = m_ctx.m_config.m_proxy.m_max_retries;
@@ -411,7 +414,9 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
                    method, url, http_code, response_size, body.size(),
                    x_real_ip, x_datahub_client_id, user_agent);
 
-      if ((http_code == 502 || http_code == 503 || http_code == 504) &&
+      if ((http_code == http_status::kBadGateway ||
+           http_code == http_status::kServiceUnavailable ||
+           http_code == http_status::kGatewayTimeout) &&
           attempt < max_retries) {
         Logger::warn("L2 server returned {} on attempt {} url: {}. Retrying...",
                      http_code, attempt, url);
@@ -419,11 +424,12 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
         sleep_for_attempt_jitter(attempt);
         continue;
       }
-      if (http_code >= 500 && attempt >= max_retries) {
+      if (http_code >= http_status::kServerErrorMin && attempt >= max_retries) {
         count_retry("exhausted");
       }
 
-      if (http_code >= 200 && http_code < 400) {
+      if (http_code >= http_status::kSuccessMin &&
+          http_code < http_status::kRedirectMax) {
         m_circuit_breaker.record_success();
       } else {
         m_circuit_breaker.record_failure();
@@ -459,7 +465,7 @@ HttpResponse L2Worker::execute_l2_call_with_retry(
 
   m_circuit_breaker.record_failure();
   return make_error_response(
-      500,
+      http_status::kInternalServerError,
       std::format("Failed to call L2 server ( url: {} ) after {} attempts: {}",
                   url, max_retries, last_error.what()));
 }

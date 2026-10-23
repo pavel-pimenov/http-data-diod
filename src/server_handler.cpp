@@ -1,5 +1,6 @@
 #include "server_handler.hpp"
 #include "app_context.hpp"
+#include "constants.hpp"
 #include "common_utils.hpp"
 #include "httplib/httplib.h"
 #include "json_response_utils.hpp"
@@ -64,7 +65,8 @@ void ServerHandler::send_response_with_trace(const httplib::Request &req,
         "ServerHandler: logging span to Jaeger - trace_id={} span_id={}",
         trace_ctx.m_trace_id, trace_ctx.m_span_id);
     const auto end_us = get_current_timestamp_us();
-    m_ctx.m_tracer->log_request(req.method, "/", 200, start_us, end_us,
+    m_ctx.m_tracer->log_request(req.method, "/", http_status::kOk, start_us,
+                                end_us,
                                 "l2-server", "", trace_ctx.m_trace_id,
                                 trace_ctx.m_span_id, trace_ctx.m_parent_id);
   } else {
@@ -76,9 +78,9 @@ void ServerHandler::send_response_with_trace(const httplib::Request &req,
                 log_body_preview(response_str));
 
   increment_and_log_response_sent(m_ctx.m_server.m_metrics->m_bytes_sent,
-                                  "Server", "", 200);
+                                  "Server", "", http_status::kOk);
 
-  send_json_response(res, 200, response_json);
+  send_json_response(res, http_status::kOk, response_json);
   set_traceparent_response_header(res, trace_ctx);
 }
 
@@ -107,7 +109,7 @@ void ServerHandler::handle_post(const httplib::Request &req,
           std::format("Server request validation failed: {}", json_exp.error()),
           "", {"server_validation_error", "schema"});
     }
-    fail_request(res, 400, "Invalid JSON",
+    fail_request(res, http_status::kBadRequest, "Invalid JSON",
                  &m_ctx.m_server.m_metrics->m_request_errors, "", json_exp.error());
     return;
   }

@@ -1,6 +1,7 @@
 #ifndef ERROR_CATEGORIZER_HPP
 #define ERROR_CATEGORIZER_HPP
 
+#include "constants.hpp"
 #include "string_utils.hpp"
 #include <array>
 #include <cstdint>
@@ -167,13 +168,13 @@ inline constexpr std::array<const char *, 7> g_processing_error_names = {
 
 inline HttpErrorType categorize_http_error(const std::string &error_msg,
                                            int status_code = 0) {
-  if (status_code >= 500) {
+  if (status_code >= http_status::kServerErrorMin) {
     return HttpErrorType::SERVER_ERROR;
   }
-  if (status_code == 429) {
+  if (status_code == http_status::kTooManyRequests) {
     return HttpErrorType::RATE_LIMIT_ERROR;
   }
-  if (status_code >= 400) {
+  if (status_code >= http_status::kClientErrorMin) {
     return HttpErrorType::CLIENT_ERROR;
   }
   return categorize_by_keywords(to_lower(error_msg), g_http_keyword_rules);
