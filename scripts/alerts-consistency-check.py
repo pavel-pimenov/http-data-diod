@@ -47,7 +47,7 @@ DURATION = re.compile(r"^(?:\d+(?:ms|s|m|h|d|w|y))+$")
 ALERT_NAME = re.compile(r"^L2[A-Z][A-Za-z0-9]*$")
 SEVERITIES = ("warning", "critical")
 REQUIRED_ANNOTATIONS = ("summary", "description", "runbook")
-VM_URL = "http://localhost:8428"
+VM_URL = "http://localhost:8430"
 VMALERT_URL = "http://localhost:8880"
 
 

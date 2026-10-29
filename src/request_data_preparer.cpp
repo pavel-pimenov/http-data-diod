@@ -1,4 +1,5 @@
 #include "request_data_preparer.hpp"
+#include <base64.hpp>
 #include "header_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
@@ -24,8 +25,16 @@ prepare_request_data(const std::string &request_id, const std::string &method,
   request_data[NatsContract::kClientIp] = extract_client_ip(req);
   request_data[NatsContract::kProxyIp] = extract_proxy_ip(req);
 
-  // Include request body as-is
-  request_data[NatsContract::kBody] = body;
+  // JSON bodies travel verbatim; anything else (zlib-compressed legacy
+  // test-port payloads, opaque binary) is base64-encoded because a raw
+  // std::string with invalid UTF-8 cannot be serialized by nlohmann::json.
+  // The worker decodes it back byte-for-byte (see kBodyIsBinary).
+  if (!body.empty() && !nlohmann::json::accept(body)) {
+    request_data[NatsContract::kBody] = base64::to_base64(body);
+    request_data[NatsContract::kBodyIsBinary] = true;
+  } else {
+    request_data[NatsContract::kBody] = body;
+  }
 
   // Include client headers, filtering out some
   nlohmann::json headers_json = nlohmann::json::object();

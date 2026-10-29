@@ -97,11 +97,6 @@ CATALOG = [
     "l2_worker_circuit_breaker_transitions_total",
     "l2_worker_circuit_breaker_rejected_total",
     "l2_worker_duplicate_requests_total",
-    "l2_worker_db_pool_connections",
-    "l2_worker_db_pool_capacity",
-    "l2_worker_db_pool_exhausted_total",
-    "l2_worker_db_pool_acquire_duration_seconds",
-    "l2_worker_db_gateway_ready",
     "l2_worker_responses_total",
     "l2_worker_in_flight_requests",
     "l2_worker_queue_size",
@@ -153,6 +148,15 @@ CONDITIONAL = [
     # are required exclusively under --all (feature + traffic dependent).
     "l2_proxy_per_ip_requests_total",
     "l2_proxy_per_ip_rejected_total",
+    # DB pool/gateway families are created by the DB query handler: with
+    # DB_QUERY_ENABLED=false (the live data-diode override) the handler never
+    # exists, so no label combination is ever observed and prometheus-cpp
+    # exposes nothing. They are required exclusively under --db/--all.
+    "l2_worker_db_pool_connections",
+    "l2_worker_db_pool_capacity",
+    "l2_worker_db_pool_exhausted_total",
+    "l2_worker_db_pool_acquire_duration_seconds",
+    "l2_worker_db_gateway_ready",
     # Labeled families (status/db/type): prometheus-cpp emits nothing until the
     # first label combination is observed, and DB Gateway traffic needs a live
     # DB, so they are required exclusively under --all.
@@ -282,8 +286,8 @@ def poll_catalogue_families(vm_url: str, required: list) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8428"),
-        help="VictoriaMetrics URL (default http://localhost:8428)")
+        "--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8430"),
+        help="VictoriaMetrics URL (default http://localhost:8430)")
     parser.add_argument("--traffic", action="store_true",
                         help="also require the core happy-path counters to be non-zero")
     parser.add_argument(

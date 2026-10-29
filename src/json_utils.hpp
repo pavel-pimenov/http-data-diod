@@ -18,6 +18,8 @@ inline constexpr const char *kMethod = "method";
 inline constexpr const char *kPath = "path";
 inline constexpr const char *kQuery = "query";
 inline constexpr const char *kBody = "body";
+// true when kBody carries base64 of a non-JSON (binary / zlib) request body.
+inline constexpr const char *kBodyIsBinary = "body_is_binary";
 inline constexpr const char *kClientIp = "client_ip";
 inline constexpr const char *kProxyIp = "proxy_ip";
 inline constexpr const char *kTraceparent = "traceparent";

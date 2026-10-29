@@ -17,7 +17,10 @@ services:
       - NATS_ENABLE_TLS=${NATS_ENABLE_TLS:-false}
     command: >
       sh -c "
-        CMD='-js -m 8222 -sd /data';
+        # Ports, JetStream store dir and max_payload (16 MiB) live in
+        # nats/nats.conf: the payload limit has no CLI flag in nats-server.
+        # Auth/TLS stay on the command line because they depend on env vars.
+        CMD='-c /etc/nats/nats.conf';
         if [ -n \"$${NATS_TOKEN}\" ]; then
           CMD=\"$${CMD} --auth $${NATS_TOKEN}\";
         elif [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; then
@@ -30,6 +33,7 @@ services:
       "
     volumes:
       - nats-data:/data
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
       - ./certs_nats:/etc/nats/certs_nats:ro
     networks:
       - l2_network
@@ -101,11 +105,14 @@ services:
 
   # VictoriaMetrics - Prometheus-compatible metrics storage (lighter than Prometheus)
   victoria-metrics:
-    container_name: victoria-metrics
+    # Renamed host-side: the FlylinkDC++ hub stack already owns a container
+    # named `victoria-metrics` and host port 8428. Service DNS on l2_network
+    # stays `victoria-metrics:8428` for vmagent/vmalert/Perses.
+    container_name: l2-victoria-metrics
     image: victoriametrics/victoria-metrics:v1.97.0
     restart: unless-stopped
     ports:
-      - "8428:8428"
+      - "8430:8428"
     volumes:
       - victoria-metrics-data:/victoria-metrics-data
     command:
@@ -474,7 +481,9 @@ services:
       - SETUID
       - SETGID
     ports:
-      - "8888:8888"
+      # Host 8888 belongs to the FlylinkDC++ hub (ptokax). Inside the compose
+      # network the proxy keeps 8888, which is what nginx/worker use.
+      - "8890:8888"
       - "19090:19090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -496,6 +505,11 @@ services:
       # A non-zero value turns queue overflow into a rejected request instead
       # of unbounded memory growth.
       - L2_PROXY_MAX_QUEUED_REQUESTS=${L2_PROXY_MAX_QUEUED_REQUESTS:-0}
+      # Forward non-JSON request bodies (zlib-compressed FlylinkDC++ test-port
+      # payloads) verbatim: they are base64-encoded over NATS and decoded by
+      # the worker. false = legacy behaviour (400 Invalid JSON). The bundled
+      # l2-server stub speaks JSON, so only the live chain enables this.
+      - PROXY_RAW_BODY_PASSTHROUGH=${PROXY_RAW_BODY_PASSTHROUGH:-false}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
       - ENABLE_TRACING=true
       # NATS Configuration
@@ -681,9 +695,12 @@ services:
       # Optimized timeouts for faster failure detection
       - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-128}
       - HTTP_POOL_IDLE_TIMEOUT_SECONDS=${HTTP_POOL_IDLE_TIMEOUT_SECONDS:-300}
-      - L2_SERVER_PROTOCOL=http
-      - L2_SERVER_HOST=l2-server
-      - L2_SERVER_PORT=8088
+      # Upstream HTTP backend. Defaults to the bundled l2-server test stub;
+      # the live chain override (docker-compose.live.yml) points it at the
+      # real PTOKAX hub (ptokax:37014).
+      - L2_SERVER_PROTOCOL=${L2_SERVER_PROTOCOL:-http}
+      - L2_SERVER_HOST=${L2_SERVER_HOST:-l2-server}
+      - L2_SERVER_PORT=${L2_SERVER_PORT:-8088}
       - L2_SERVER_URLS=${L2_SERVER_URLS:-}
       - HTTP_TIMEOUT_SECONDS=10
       - L2_WORKER_THREADS=${L2_WORKER_THREADS:-128}
@@ -790,44 +807,19 @@ services:
       nats-server:
         condition: service_healthy
 
-  # Grafana for metrics visualization
-  grafana:
-    container_name: grafana
-    image: grafana/grafana:12.4
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    depends_on:
-      - l2-proxy
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      # GF_INSTALL_PLUGINS=grafana-piechart-panel  # Deprecated - Angular plugins no longer supported
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-    volumes:
-      - grafana-storage:/var/lib/grafana
-    networks:
-      - l2_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-#    profiles:
-#      - nostart
-
-  # Perses — лёгкая альтернатива Grafana для просмотра метрик (порт 8089/8080).
+  # Perses — единственный UI дашбордов (порт 8089/8080). Grafana из стека
+  # удалена: 847-МБ образ и второй источник дашбордов ничего не добавляли к
+  # Perses, который читает те же определения через
+  # scripts/generate-perses-dashboards.py.
   # Хост-порт 8080 занят сторонними процессами, поэтому наружу пробрасываем 8089.
   # Дашборды и глобальный Prometheus-датасорс (proxy на VictoriaMetrics)
   # накатываются скриптом scripts/generate-perses-dashboards.py по REST API.
   # Docker-healthcheck не вешаем: базовый образ distroless (без curl/sh),
   # готовность проверяем в rebuild-and-run.sh через host-curl.
   perses:
-    container_name: perses
+    # Renamed host-side: the FlylinkDC++ hub stack already runs a `perses`
+    # container. Host port 8089 stays the diode instance's entry point.
+    container_name: l2-perses
     image: persesdev/perses:v0.54.0
     restart: unless-stopped
     ports:
@@ -847,8 +839,6 @@ networks:
         - subnet: 172.24.0.0/16
 
 volumes:
-  grafana-storage:
-    driver: local
   perses-data:
     driver: local
   victoria-metrics-data:

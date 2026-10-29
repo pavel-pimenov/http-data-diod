@@ -230,7 +230,11 @@ void RequestHandler::handle_duplicates(httplib::Response &res) const {
     return;
   }
   res.status = http_status::kOk;
-  res.set_content(m_ctx.m_proxy.m_duplicate_detector->report().dump(2),
+  // Stored body samples may be binary (raw-body pass-through mode), which is
+  // not valid UTF-8: replace undecodable bytes instead of throwing out of the
+  // handler.
+  res.set_content(m_ctx.m_proxy.m_duplicate_detector->report().dump(
+                      2, ' ', false, nlohmann::json::error_handler_t::replace),
                   "application/json");
 }
 
@@ -254,7 +258,11 @@ void RequestHandler::handle_post(const httplib::Request &req,
     return;
   }
 
-  if (!body.empty() && !nlohmann::json::accept(body)) {
+  // Real FlylinkDC++ test-port traffic carries zlib-compressed bodies; with
+  // raw pass-through enabled they are forwarded verbatim (base64 over NATS)
+  // instead of being rejected as invalid JSON.
+  if (!body.empty() && !nlohmann::json::accept(body) &&
+      !m_ctx.m_config.m_proxy.m_raw_body_passthrough) {
     count_rejection(error_categorizer::RejectionReason::INVALID_JSON);
     fail_request_categorized(res, http_status::kBadRequest,
                              "Invalid JSON in request body",

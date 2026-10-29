@@ -34,8 +34,8 @@ HEALTH_POLLS = 30
 # Container name -> (health URL, flood URL or None, log markers)
 SERVICES = {
     "l2-proxy": (
-        "http://localhost:8888/health",
-        "http://localhost:8888",
+        "http://localhost:8890/health",
+        "http://localhost:8890",
         [
             "Received signal 15",
             "All in-flight requests completed gracefully",

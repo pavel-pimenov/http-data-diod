@@ -128,6 +128,58 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 ---
 
+## Живая цепочка FlylinkDC++ (nginx 37015 → ptokax 37014)
+
+На боевом узле публичный вход PTOKAX test-port обслуживает nginx
+(`ptokax-testport-proxy`, хост-порт **37015**), который раньше проксировал
+напрямую в контейнер хаба (`ptokax:37014`). Диод встраивается между ними:
+
+```text
+client -> testport-proxy:37015 -> l2-proxy:8888 -> NATS -> l2-worker -> ptokax:37014
+client <- testport-proxy:37015 <- l2-proxy:8888 <- NATS <- l2-worker <- ptokax:37014
+```
+
+Запуск в этом режиме:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.live.yml ./rebuild-and-run.sh
+```
+
+Что делает `docker-compose.live.yml`:
+
+- `l2-proxy` и `l2-worker` дополнительно подключаются к внешней сети
+  `flylinkdc-hub_default` (её владелец — стек хаба, поэтому `down` диода не
+  ломает сетевые привязки nginx);
+- `l2-worker` ходит в реальный бэкенд `http://ptokax:37014`
+  (`L2_SERVER_*`);
+- `PROXY_RAW_BODY_PASSTHROUGH=true` — реальные клиенты FlylinkDC++ присылают
+  на `/fly-stat`, `/fly-zget`, `/fly-download`, `/fly-error-sql`
+  **zlib-сжатые** тела (`0x78 0xDA ...`), а не JSON. Такие тела
+  base64-кодируются в NATS-конверте (`body_is_binary=true`), воркер
+  декодирует их байт-в-байт и отправляет в хаб. JSON-тела
+  (`/fly-test-port`, `/fly-login`) идут как есть. В базовом
+  `docker-compose.yml` флаг по умолчанию **выключен** (стенд с `l2-server`
+  работает с JSON) — включает его только live-override;
+- `DB_QUERY_ENABLED=false` (прокси и воркер) и `DB_POSTGRES_ENABLED=false`
+  (воркер): в живой цепочке нет узла БД, а включённый шлюз заставляет воркер
+  бесконечно переподключаться к `postgres:5432` и писать две строки ошибки
+  каждые ~0.5 с (≈178 тыс. строк в сутки при простое);
+- `MAX_RETRIES=2` — PTOKAX закрывает соединение после каждого ответа, не
+  присылая `Connection: close`, поэтому первый вызов на переиспользованном
+  keep-alive сокете может упасть с `Error::Connection`; вторая попытка идёт
+  на свежем сокете.
+
+`nginx` хаба при этом резолвит `l2-proxy` через Docker DNS с коротким TTL
+(`resolver 127.0.0.11 valid=10s`), поэтому пересоздание контейнера диода не
+требует ручного рестарта nginx. Откат — вернуть в `flylinkdc-hub/nginx.conf`
+`proxy_pass http://ptokax:37014;`.
+
+NATS поднимается с `max_payload: 16777216` в `nats/nats.conf` (у nats-server
+нет CLI-флага для этого лимита), чтобы 8 MiB тело test-port (лимит
+nginx/хаба) умещалось в base64-конверт.
+
+---
+
 ## Практическая рекомендация
 
 Текущая реализация и деплой-конфигурация ориентированы на **NATS-only** сценарий.  
@@ -243,7 +295,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
  - `l2_proxy_per_ip_rejected_total{ip="..."}` — отказы по каждому IP (gauge; label `ip`, native `Family<Gauge>` со снапшот-провайдером из per-IP лимитера).
  - `l2_proxy_per_client_id_requests_total{client_id="..."}` — запросы по значению заголовка `X-DataHub-Client-Id` (counter; label `client_id`, native `Family<Counter>`). Позволяет различать клиентов, работающих из-под одного IP.
  - `l2_proxy_per_client_id_rejected_total{client_id="..."}` — отказы по каждому клиенту `X-DataHub-Client-Id` (counter; label `client_id`, native `Family<Counter>`).
- - `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, native `Family<Histogram>`) — p50/p95/p99 по клиентам в Grafana.
+ - `l2_proxy_per_client_id_latency_seconds{client_id="..."}` — задержка обработки запроса по каждому клиенту `X-DataHub-Client-Id` (histogram; label `client_id`, native `Family<Histogram>`) — p50/p95/p99 по клиентам в Perses.
 
 #### Насыщенность и доступность (observability-обогащение)
 
@@ -271,7 +323,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `nats_connected == 0` и `health_ready == 0` за >1м (недоступность/потеря связи);
 - рост `in_flight_requests` / `queue_size` выше нормы (backpressure до отказов).
 
-Панель «Хот-клиенты» в Grafana (bar gauge) показывает топ client-id с нагрузкой, нормированной к самому горячему клиенту (1.0): горячие клиенты красные, длинный хвост обычных — зелёный. Эмуляцию хот-клиентов в нагрузочном тесте включают `--hot-clients N --hot-share 0.8` (доля запросов от фиксированных id `hot-client-1..N`). Для непрерывной нагрузки заданной длительности (например, чтобы наполнить 5m-окно rate) вместо `--iterations` используют `--duration <секунды>` — тест шлёт запросы без пауз с конвейером «в полёте ≤ `--concurrent`», пока не истечёт время.
+Панель «Хот-клиенты» в Perses (bar gauge) показывает топ client-id с нагрузкой, нормированной к самому горячему клиенту (1.0): горячие клиенты красные, длинный хвост обычных — зелёный. Эмуляцию хот-клиентов в нагрузочном тесте включают `--hot-clients N --hot-share 0.8` (доля запросов от фиксированных id `hot-client-1..N`). Для непрерывной нагрузки заданной длительности (например, чтобы наполнить 5m-окно rate) вместо `--iterations` используют `--duration <секунды>` — тест шлёт запросы без пауз с конвейером «в полёте ≤ `--concurrent`», пока не истечёт время.
 
 ### Трейсинг отказов rate limiter
 
@@ -742,15 +794,15 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 ---
 
-## Статус-страница сервисов (`/stats`, без Grafana)
+## Статус-страница сервисов (`/stats`, без веб-GUI)
 
-Для оперативной оценки состояния без Grafana у `l2-proxy` и `l2-worker`
+Для оперативной оценки состояния без веб-GUI у `l2-proxy` и `l2-worker`
 есть самодостаточная HTML-страница, сгенерированная прямо из Prometheus-
 реестра текущего процесса (`build_stats_html` в `src/stats_page.hpp`):
 
 | Сервис | URL | Порт |
 |---|---|---|
-| `l2-proxy` | `http://localhost:8888/stats` (или через nginx `:7777/stats`) | 8888 |
+| `l2-proxy` | `http://localhost:8890/stats` (или через nginx `:7777/stats`) | 8890 (внутри сети — 8888) |
 | `l2-worker` | `http://localhost:19093/stats` | 19093 |
 
 Особенности:
@@ -765,7 +817,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
   Плитки свёрстаны через CSS-grid с `height:100vh; overflow:hidden`, поэтому
   вся страница влезает на экран **без вертикального скроллера**; у плотных
   family (per-IP, per-client-id) лишние серии скрываются пометкой `+N more`.
-- **Спарклайны активности** — под значениями каждой плитки мини-Grafana график
+- **Спарклайны активности** — под значениями каждой плитки мини-график
   за последние N минут (по умолчанию 30, параметр `?window=N`, до 120). Данные
   берутся из **внутрипроцессного кольцевого буфера** (`MetricsHistory`):
   фоновый сэмплер раз в 15 с снимает значения registry, `/stats` лишь читает
@@ -776,30 +828,25 @@ Rate limiter (прокси, режим `MODE=proxy`):
 - **Автообновление** каждые 5 c (`<meta http-equiv="refresh">`), офлайн-friendly
   (inline CSS, без внешних ресурсов).
 - Источник данных — тот же реестр, что и у `/metrics`, поэтому страница и
-  дашборды Grafana никогда не расходятся.
+  дашборды Perses никогда не расходятся.
 
 > Сторонний доступ к `:19093` ограничьте сетью — на порту отдаётся только
 > `/health/*` и `/stats` (без аутентификации).
 
 ---
 
-## Grafana-дашборды (генерация скриптом)
+## Дашборды (Perses, генерация скриптом)
 
-Все дашборды генерируются скриптом `scripts/generate-grafana-dashboards.py` — панели вручную в Grafana не правятся (правит только скрипт):
+Grafana из стека удалена (round 204): 847-МБ образ дублировал Perses и требовал
+второго синка дашбордов. Единственный UI — **Perses** на `http://localhost:8089`.
+Определения панелей по-прежнему живут в `scripts/generate-grafana-dashboards.py`
+(историческое имя): этот модуль — источник структуры панелей и PromQL, из него
+`scripts/generate-perses-dashboards.py` строит нативные Perses-дашборды. Вручную
+панели не правятся — правится генератор.
 
-> **Датасорс** (VictoriaMetrics) больше не конфигурируется через
-> `grafana/provisioning/datasources` — он создаётся тем же скриптом через Grafana API
-> (UID `prometheus`, URL `http://victoria-metrics:8428`). Провижиниг-каталог удалён.
-
-```bash
-python3 scripts/generate-grafana-dashboards.py                 # создать/обновить дашборды + datasource
-python3 scripts/generate-grafana-dashboards.py --correct-dashboards  # выровнять расхождения
-```
-
-URL datasource берётся с приоритетом: `--datasource-url` (CLI) > `prometheus_url`
-в конфиг-файле/`PROMETHEUS_URL` env > значение по умолчанию
-(`http://victoria-metrics:8428`). Для discovery метрик используется
-`--prometheus_url` (тот же fallback на `prometheus_url` из конфига).
+> **Датасорс** (VictoriaMetrics, URL `http://victoria-metrics:8428`) создаётся
+> скриптом Perses-синка как глобальный `prometheus`; провижининг-каталог Grafana
+> удалён ещё в round 66.
 
 Дашборды и их UID:
 
@@ -815,45 +862,40 @@ URL datasource берётся с приоритетом: `--datasource-url` (CLI
 | NATS-сервер | `nats-dashboard` | `gnatsd_*` (генерируется скриптом) |
 | NGINX Метрики | `nginx-metrics` | nginx `stub_status` (из `grafana-nginx.json`) |
 
-Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка покрытия: `python3 scripts/test-grafana-generator.sh` (поднимает временный Grafana и прогоняет генератор).
+Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка структуры без сети: `python3 scripts/generate-perses-dashboards.py --check`.
 
-### Perses-дашборды (`http://localhost:8089`, лёгкая альтернатива Grafana)
+### Perses-дашборды (`http://localhost:8089`)
 
-Помимо Grafana те же дашборды синкаются в **Perses** (статичный контейнер, файловая
-БД, без залогина): проект `l2`, глобальный Prometheus-датасорс `prometheus` (HTTP-прокси на
+Perses — статичный контейнер, файловая БД, без залогина: проект `l2`,
+глобальный Prometheus-датасорс `prometheus` (HTTP-прокси на
 `http://victoria-metrics:8428`). Дашборды строятся **нативно** — конвертер
-`scripts/generate-perses-dashboards.py` берёт те же определения, что и Grafana-генератор, поэтому
-панели, PromQL и метрики не расходятся (это проверяется в offline-гейте и в
-`scripts/metrics-consistency-check.py`):
+`scripts/generate-perses-dashboards.py` берёт те же определения, что и
+генератор, поэтому панели, PromQL и метрики не расходятся (это проверяется в
+offline-гейте и в `scripts/metrics-consistency-check.py`):
 
 ```bash
 python3 scripts/generate-perses-dashboards.py              # нативный конвертер + синк на :8089
 python3 scripts/generate-perses-dashboards.py --check      # offline-проверка конвертера (без сети)
 python3 scripts/generate-perses-dashboards.py --output-dir ./monitoring/perses/generated  # GitOps-экспорт
-python3 scripts/compare-grafana-perses.py                  # живое сравнение Grafana ↔ Perses
-python3 scripts/compare-grafana-perses.py --no-live         # только структура (панели/PromQL/секции)
 ```
 
-`scripts/compare-grafana-perses.py` сверяет **запущенные** инстансы: набор дашбордов, число
-панелей, множество PromQL-запросов (после нормализации `${vm:regex}` ↔ `$vm`), заголовки
-row/grid-секций, а затем прогоняет выборку запросов каждой доски через оба API
-(Grafana `/api/ds/query`, Perses `/proxy/globaldatasources/prometheus/api/v1/query`) и
-сравнивает лейблы и значения (с допуском — запросы выполняются с интервалом в мс).
-Запускается в runtime-гейте `scripts/ci-gate.sh runtime` (с `--allow-down`: контейнеры
-упали — чек пропускается с предупреждением).
-
-В CI стек поднимается **без** подмены `GRAFANA_URL`, поэтому `rebuild-and-run.sh`
-действительно накатывает дашборды в контейнер Grafana (`:3000`) и живое сравнение
-выполняется по-настоящему. Раньше CI указывал `GRAFANA_URL` на мёртвый порт: блок
-обновления дашбордов пропускался, Grafana оставалась пустой, и гейт падал на каждом
-прогоне (с раунда 68, когда он появился) сообщением «Grafana=0 Perses=8».
+`rebuild-and-run.sh` после поднятия стека синкает дашборды в Perses; живое
+сравнение с Grafana больше не запускается (её контейнера нет), но
+`scripts/compare-grafana-perses.py` и `scripts/test-grafana-generator.sh`
+оставлены в репозитории на случай возврата второго UI. В CI дашборды создаются с
+нуля при каждом прогоне, поэтому `Perses=0` означает сломанный синк, а не
+пустой кэш.
 
 Сервис `perses` в `docker-compose.yml` слушает `8089:8080` и использует named volume
-`perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-имидемпотентно).
+`perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-идемпотентно).
 Режим `--mode migrate` (через `POST /api/migrate`) оставлен как fallback.
 
+Генератор `generate-grafana-dashboards.py` сохраняет и старый режим отправки в
+Grafana по API (`GRAFANA_URL`/`--correct-dashboards`): это только опциональный
+экспорт во внешний инстанс, в compose Grafana больше не входит.
+
 **Замечание про «пустые» панели.** Панели используют фиксированные окна `rate[1m]`/`rate[5m]`
-(как и в Grafana): если счётчик события не рос в окне (например, нет 4xx/5xx при здоровой
+(как и раньше): если счётчик события не рос в окне (например, нет 4xx/5xx при здоровой
 нагрузке, нет дубликатов, NATS-ретраев или per-client трафика) — панель не рисует линию. Это не
 баг конвертера: при появлении соответствующего трафика панель заполняется.
 
@@ -900,7 +942,7 @@ row/grid-секций, а затем прогоняет выборку запр�
 
 ### Проверка правил оповещения
 
-Правила — шестое место, где встречается имя метрики (C++, Grafana, Perses, README, golden check), поэтому у них свой гейт:
+Правила — шестое место, где встречается имя метрики (C++, генератор, Perses, README, golden check), поэтому у них свой гейт:
 
 ```bash
 python3 scripts/alerts-consistency-check.py --offline   # без контейнеров
@@ -1153,6 +1195,6 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 - `nats-server` — транспорт сообщений
 - `nats-exporter` — экспорт метрик NATS
 - `l2-proxy` и `l2-worker` — прикладные сервисы
-- `nginx`, `nginx-exporter`, `jaeger`, `grafana`, `victoria-*` — сопутствующая инфраструктура
+- `nginx`, `nginx-exporter`, `jaeger`, `perses`, `victoria-*` — сопутствующая инфраструктура
 
 Отсутствие NATS-сервисов в активной конфигурации следует рассматривать как проблему эксплуатации, так как текущий контур работает через NATS.

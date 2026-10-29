@@ -713,6 +713,18 @@ TEST_CASE("Config: load_from_env reads Sentry DSN settings", "[config]") {
   REQUIRE(config.m_sentry.m_max_queue_size == 512);
 }
 
+TEST_CASE("Config: PROXY_RAW_BODY_PASSTHROUGH toggles raw body forwarding",
+          "[config]") {
+  Config defaults;
+  defaults.load_from_env();
+  REQUIRE_FALSE(defaults.m_proxy.m_raw_body_passthrough);
+
+  EnvGuard const raw{{"PROXY_RAW_BODY_PASSTHROUGH", "true"}};
+  Config config;
+  config.load_from_env();
+  REQUIRE(config.m_proxy.m_raw_body_passthrough);
+}
+
 TEST_CASE("Config: L2_SERVER_URLS JSON array replaces single URL", "[config]") {
   EnvGuard const urls{{"L2_SERVER_URLS",
                        R"(["http://host1:8088","http://host2:8089"])"}};
@@ -1309,6 +1321,22 @@ TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
   REQUIRE(res.body == raw_binary);
   REQUIRE(res.get_header_value("Content-Type") ==
           "application/octet-stream");
+}
+
+TEST_CASE("ResponseBuilder: non-binary envelope keeps upstream Content-Type",
+          "[response-builder]") {
+  EnvGuard const mode{{"MODE", "proxy"}};
+  AppContext ctx;
+  httplib::Response res;
+  const json env = build_nats_response_envelope(
+      200, "req-h", "<html>legacy</html>", 0, false, "text/html",
+      json::object(), "");
+
+  set_response_content(res, env, "req-h", TraceContext{}, "POST", "/fly-stat",
+                       0, ctx);
+  REQUIRE(res.status == 200);
+  REQUIRE(res.body == "<html>legacy</html>");
+  REQUIRE(res.get_header_value("Content-Type") == "text/html");
 }
 
 TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {
@@ -3529,6 +3557,32 @@ TEST_CASE("Request data: prepare_request_data assembles the full envelope",
   REQUIRE_FALSE(data[NatsContract::kHeaders].contains("host"));
 }
 
+TEST_CASE("Request data: non-JSON body is base64-encoded and flagged binary",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  // zlib stream with bytes that are not valid UTF-8 (real FlylinkDC++ body).
+  const std::string raw_body("\x78\xDA\x00\x01\xff\xfe", 6);
+
+  const auto data =
+      prepare_request_data("req-bin", "POST", "/fly-stat", raw_body, req, "");
+
+  REQUIRE(data[NatsContract::kBodyIsBinary] == true);
+  REQUIRE(data[NatsContract::kBody] == base64::to_base64(raw_body));
+  REQUIRE(base64::from_base64(data[NatsContract::kBody].get<std::string>()) ==
+          raw_body);
+}
+
+TEST_CASE("Request data: JSON body stays verbatim and is not binary flagged",
+          "[request-data]") {
+  const httplib::Request req;
+  const auto data =
+      prepare_request_data("req-json", "POST", "/fly-test-port", "{\"a\":1}",
+                           req, "");
+  REQUIRE(data[NatsContract::kBody] == "{\"a\":1}");
+  REQUIRE_FALSE(data.contains(NatsContract::kBodyIsBinary));
+}
+
 TEST_CASE("Request data: prepare_request_data omits headers when all are "
           "skipped", "[request-data]") {
   httplib::Request req;
@@ -3806,6 +3860,33 @@ TEST_CASE("RequestIdGenerator: counter increments per call", "[request-id]") {
     return std::stoll(s.substr(a + 1, b - a - 1));
   };
   REQUIRE(middle(second) == middle(first) + 1);
+}
+
+TEST_CASE("WorkerRequestParser: base64 binary body is decoded back to bytes",
+          "[worker-nats]") {
+  const std::string raw_body("\x78\xDA\x00\x01\xff\xfe", 6);
+  const json request_data = {
+      {NatsContract::kRequestId, "req-bin"},
+      {NatsContract::kMethod, "POST"},
+      {NatsContract::kPath, "/fly-stat"},
+      {NatsContract::kBody, base64::to_base64(raw_body)},
+      {NatsContract::kBodyIsBinary, true}};
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_body == raw_body);
+}
+
+TEST_CASE("WorkerRequestParser: text body is not base64-decoded",
+          "[worker-nats]") {
+  const json request_data = {
+      {NatsContract::kRequestId, "req-text"},
+      {NatsContract::kMethod, "POST"},
+      {NatsContract::kPath, "/fly-test-port"},
+      {NatsContract::kBody, "{\"a\":1}"},
+      {NatsContract::kBodyIsBinary, false}};
+  const auto metadata =
+      worker_request_parser::decode_nats_request(request_data);
+  REQUIRE(metadata.m_body == "{\"a\":1}");
 }
 
 TEST_CASE("WorkerRequestParser: decodes required NATS contract fields",

@@ -1,6 +1,7 @@
 #ifndef WORKER_REQUEST_PARSER_HPP
 #define WORKER_REQUEST_PARSER_HPP
 
+#include <base64.hpp>
 #include "header_utils.hpp"
 #include "httplib/httplib.h"
 #include "json_utils.hpp"
@@ -36,8 +37,13 @@ struct WorkerRequestData {
   metadata.m_query = request_data.value(NatsContract::kQuery, std::string{});
   metadata.m_method = request_data[NatsContract::kMethod].get<std::string>();
 
-  // Extract body as-is
+  // JSON bodies are carried verbatim; non-JSON bodies are base64 in the
+  // envelope (see prepare_request_data) and must be decoded back to bytes
+  // before the upstream HTTP call.
   metadata.m_body = request_data[NatsContract::kBody].get<std::string>();
+  if (request_data.value(NatsContract::kBodyIsBinary, false)) {
+    metadata.m_body = base64::from_base64(metadata.m_body);
+  }
 
   // Extract optional fields with defaults
   metadata.m_client_ip =

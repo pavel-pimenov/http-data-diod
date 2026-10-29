@@ -111,8 +111,7 @@ docker compose down --remove-orphans 2>/dev/null || true
 
 # Clean up any conflicting containers (e.g., Grafana)
 echo "Cleaning up conflicting containers..."
-docker rm -f grafana 2>/dev/null || true
-docker rm -f perses 2>/dev/null || true
+docker rm -f l2-perses 2>/dev/null || true
 docker rm -f l2-proxy l2-worker l2-server nginx jaeger nginx-exporter postgres oracle 2>/dev/null || true
 sleep 1
 
@@ -337,62 +336,7 @@ if [ "${ENABLE_ASAN:-false}" = true ]; then
 fi
 echo "=========================================="
 
-# Update Grafana dashboards if Grafana is accessible
-echo ""
-if [ -f "scripts/generate-grafana-dashboards.py" ]; then
-    # Check if GRAFANA_URL is set, otherwise try localhost:3000
-    GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
-
-    # Wait for Grafana to be fully ready (may take 10-15 seconds after container starts).
-    # 30 tries: in CI the dashboards are provisioned from scratch and the live
-    # Grafana <-> Perses parity gate needs them, so a cold Grafana must not be
-    # skipped silently. Breaking on the first healthy response keeps local runs fast.
-    echo "⏳ Waiting for Grafana to be fully ready..."
-    GRAFANA_READY=false
-    for i in $(seq 1 30); do
-        if curl -s --connect-timeout 2 --max-time 5 "$GRAFANA_URL/api/health" > /dev/null 2>&1; then
-            # Grafana responds, but may still be initializing
-            sleep 3
-            GRAFANA_READY=true
-            break
-        fi
-        sleep 1
-    done
-
-    # Check if Grafana is running
-    if [ "$GRAFANA_READY" = true ] && curl -s --connect-timeout 2 --max-time 5 "$GRAFANA_URL/api/health" > /dev/null 2>&1; then
-        echo "📊 Grafana detected at $GRAFANA_URL"
-
-        echo ""
-        echo "Updating dashboards and datasource..."
-
-        # Run dashboard generator with credentials from environment or defaults
-        if [ -n "${GRAFANA_API_KEY:-}" ]; then
-            python3 scripts/generate-grafana-dashboards.py --correct-dashboards
-        elif [ -n "${GRAFANA_USER:-}" ] && [ -n "${GRAFANA_PASSWORD:-}" ]; then
-            GRAFANA_URL="$GRAFANA_URL" GRAFANA_USER="$GRAFANA_USER" GRAFANA_PASSWORD="$GRAFANA_PASSWORD" \
-                python3 scripts/generate-grafana-dashboards.py --correct-dashboards
-        else
-            # Try default credentials. No `| head -N` here: the script runs with
-            # `set -o pipefail`, and truncating the generator's stdout makes it
-            # die on EPIPE (python exits 120), which would abort the whole
-            # rebuild after the stack is already up.
-            GRAFANA_URL="$GRAFANA_URL" GRAFANA_USER=admin GRAFANA_PASSWORD=admin \
-                python3 scripts/generate-grafana-dashboards.py --correct-dashboards
-        fi
-
-        echo ""
-        echo "✅ Dashboard update complete!"
-        echo "View dashboards at: $GRAFANA_URL/dashboards"
-        echo "   Login: admin/admin"
-    else
-        echo "ℹ️  Grafana not detected at $GRAFANA_URL"
-        echo "   To update dashboards later, run:"
-        echo "   python3 scripts/generate-grafana-dashboards.py --correct-dashboards"
-    fi
-fi
-
-# Sync Perses dashboards (лёгкая альтернатива Grafana) пока Perses доступен
+# Sync Perses dashboards (единственный UI после удаления Grafana)
 echo ""
 if [ -f "scripts/generate-perses-dashboards.py" ]; then
     PERSES_URL="${PERSES_URL:-http://localhost:8089}"

@@ -67,7 +67,10 @@ void set_response_content(httplib::Response &res,
                   content_type, decoded_binary_response.size());
     res.set_content(decoded_binary_response, content_type);
   } else {
-    res.set_content(l2_response, "application/json");
+    // Preserve the upstream Content-Type (the legacy test-port answers
+    // text/html on unknown paths); application/json remains the default when
+    // the backend sent none.
+    res.set_content(l2_response, content_type);
   }
 
   set_traceparent_response_header(res, trace_ctx);

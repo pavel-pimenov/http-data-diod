@@ -374,6 +374,14 @@ class GoldenRequiredTest(unittest.TestCase):
         "l2_worker_db_requests_total",
         "l2_worker_db_query_duration_seconds",
         "l2_worker_db_query_errors_total",
+        # Emitted only when the DB query handler exists (DB_QUERY_ENABLED=true
+        # and at least one database configured), so a live chain with the DB
+        # gateway disabled exposes none of them.
+        "l2_worker_db_pool_connections",
+        "l2_worker_db_pool_capacity",
+        "l2_worker_db_pool_exhausted_total",
+        "l2_worker_db_pool_acquire_duration_seconds",
+        "l2_worker_db_gateway_ready",
     }
 
     def test_default_requires_full_catalogue(self):

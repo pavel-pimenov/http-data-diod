@@ -453,6 +453,9 @@ void Config::load_server_timeout_config() {
   m_proxy.m_max_retries = get_env_int("MAX_RETRIES", m_proxy.m_max_retries);
   m_proxy.m_max_queued_requests =
       get_env_int("L2_PROXY_MAX_QUEUED_REQUESTS", m_proxy.m_max_queued_requests);
+  m_proxy.m_raw_body_passthrough =
+      get_env_bool("PROXY_RAW_BODY_PASSTHROUGH",
+                   m_proxy.m_raw_body_passthrough);
   m_ssl.m_enable_server_certificate_verification =
       get_env_bool("ENABLE_SSL_SERVER_CERTIFICATE_VERIFICATION",
                    m_ssl.m_enable_server_certificate_verification);

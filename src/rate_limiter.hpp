@@ -71,8 +71,11 @@ public:
   RateLimiter(uint64_t max_tokens, uint64_t refill_tokens_per_second)
       : m_config{max_tokens, refill_tokens_per_second},
         m_bucket(max_tokens) {
-    Logger::info("RateLimiter initialized: max={} tokens, refill={}/sec",
-                 max_tokens, refill_tokens_per_second);
+    // Per-client limiters are created lazily for every new IP; at real traffic
+    // levels an INFO line here dominates the proxy log. The global limiter
+    // instance still logs at INFO once at startup.
+    Logger::debug("RateLimiter initialized: max={} tokens, refill={}/sec",
+                  max_tokens, refill_tokens_per_second);
   }
 
   // Returns true if request is allowed, false if rate limited

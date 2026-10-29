@@ -1,0 +1,56 @@
+# Live chain override: public nginx -> data diode -> real PTOKAX test-port.
+#
+#   client -> testport-proxy (37015) -> l2-proxy:8888 -> NATS -> l2-worker
+#          -> ptokax:37014
+#
+# The FlylinkDC++ hub stack owns the `flylinkdc-hub_default` network, so the
+# diode containers join it as an external network instead of the hub stack
+# depending on the diode's l2_network. That keeps `docker compose down` on
+# this project from invalidating the reverse proxy's network attachment.
+#
+# Usage:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.live.yml ./rebuild-and-run.sh
+#
+# Fall back to the bundled l2-server stub by dropping COMPOSE_FILE (the hub
+# nginx then needs its direct ptokax:37014 upstream restored, see
+# flylinkdc-hub/nginx.conf).
+services:
+  l2-proxy:
+    networks:
+      - l2_network
+      - hub_network
+    environment:
+      # Mapping form (not list): Compose merges mapping keys with the base file
+      # and the override wins, so the values below are unambiguous.
+      PROXY_RAW_BODY_PASSTHROUGH: "true"
+      # The live chain has no PostgreSQL/Oracle node. Leaving the DB gateway on
+      # makes the proxy advertise /v1/sql routes to a worker that retries the
+      # connection forever, and the worker logs two error lines every ~0.5 s
+      # (~178k lines/day at idle) while the diode serves traffic.
+      DB_QUERY_ENABLED: "false"
+
+  l2-worker:
+    networks:
+      - l2_network
+      - hub_network
+    environment:
+      L2_SERVER_PROTOCOL: http
+      L2_SERVER_HOST: ptokax
+      L2_SERVER_PORT: "37014"
+      L2_SERVER_URLS: '["http://ptokax:37014"]'
+      # PTOKAX closes the HTTP connection after every response but does not send
+      # `Connection: close`, so a pooled keep-alive socket is dead by the time it
+      # is reused (httplib reports Error::Connection). Every failed request
+      # invalidates its client, so one retry always runs on a fresh socket.
+      # MAX_RETRIES counts total attempts: with 1 the connection error became a
+      # 500 and, after five in a row, opened the circuit breaker (503 burst).
+      MAX_RETRIES: "2"
+      # No DB node in the live chain: keep the DB gateway fully off instead of
+      # retrying a non-existent `postgres:5432` forever.
+      DB_QUERY_ENABLED: "false"
+      DB_POSTGRES_ENABLED: "false"
+
+networks:
+  hub_network:
+    external: true
+    name: flylinkdc-hub_default

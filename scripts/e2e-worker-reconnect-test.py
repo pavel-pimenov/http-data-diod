@@ -30,7 +30,7 @@ from pathlib import Path
 
 import aiohttp
 
-PROXY_URL = "http://localhost:8888"
+PROXY_URL = "http://localhost:8890"
 WORKER_HEALTH = "http://localhost:19093/health/ready"
 NATS_HOST = "localhost"
 NATS_PORT = 4222

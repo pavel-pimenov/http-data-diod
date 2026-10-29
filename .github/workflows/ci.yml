@@ -43,12 +43,9 @@ jobs:
       # buildx docker-container driver enables the GitHub Actions cache backend;
       # rebuild-and-run.sh then builds via `docker buildx bake` (L2_BAKE_CACHE=gha)
       # so layers produced on this run warm the next CI run.
-      # GRAFANA_URL is NOT redirected to a dead port here: the stack's Grafana
-      # lives at the published localhost:3000, rebuild-and-run.sh provisions the
-      # dashboards into it, and the runtime gate's live Grafana <-> Perses
-      # parity check then has both sides to compare. (Pointing GRAFANA_URL at a
-      # dead port used to skip the update block and left Grafana empty, which
-      # made the parity gate fail on every run since round 68.)
+      # Dashboards are provisioned into Perses only (Grafana was removed from the
+      # compose stack in round 204), so rebuild-and-run.sh no longer needs
+      # GRAFANA_URL and the runtime gate has no Grafana side to compare.
       - name: Set up Buildx with GitHub Actions cache
         uses: docker/setup-buildx-action@v3
         with:

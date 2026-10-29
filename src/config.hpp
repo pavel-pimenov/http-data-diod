@@ -193,6 +193,11 @@ public:
     // 0 = unlimited (the default: the queue grows with the load and the
     // saturation signal is the queue depth plus the wait-time histogram).
     int m_max_queued_requests{0};
+    // Forward non-JSON request bodies (zlib-compressed legacy test-port
+    // payloads, binary blobs) instead of rejecting them with 400. Such bodies
+    // are base64-encoded in the NATS envelope (body_is_binary) and decoded by
+    // the worker, so arbitrary bytes survive the JSON transport.
+    bool m_raw_body_passthrough{false};
   };
 
   // Upstream l2-server HTTP endpoint(s) that the proxy (and the worker when
