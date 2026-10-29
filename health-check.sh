@@ -4,15 +4,20 @@
 # Usage: ./health-check.sh [service] [max_retries] [interval]
 #
 # Services:
-#   proxy  - L2 Service Proxy (port 8888)
-#   worker - L2 Service Worker (health 19093, metrics 19091)
-#   server - L2 Server (port 8088 or 3333)
-#   all    - Check all services (default)
-#   watch  - Continuous monitoring mode
+#   proxy   - L2 Service Proxy (port 8890)
+#   worker  - L2 Service Worker (health 19093, metrics 19091)
+#   server  - L2 Server (port 8088 or 3333)
+#   metrics - observability stack: VictoriaMetrics, vmagent, vmalert,
+#             NATS, nats-exporter, Perses
+#   disk    - free space on the Docker root filesystem
+#   all     - Check all services (default)
+#   watch   - Continuous monitoring mode
 #
 # Examples:
 #   ./health-check.sh              # Check all services, 3 retries
 #   ./health-check.sh proxy 5      # Check proxy, 5 retries
+#   ./health-check.sh metrics      # Only the observability stack
+#   ./health-check.sh disk         # Only free disk space
 #   ./health-check.sh watch 30     # Watch mode, check every 30s
 #   ./health-check.sh watch        # Watch mode, default 60s interval
 
@@ -32,6 +37,21 @@ WORKER_METRICS_PORT="${WORKER_METRICS_PORT:-19091}"
 WORKER_HEALTH_PORT="${WORKER_HEALTH_PORT:-19093}"
 SERVER_PORT="${SERVER_PORT:-8088}"
 PROXY_METRICS_PORT="${PROXY_METRICS_PORT:-19090}"
+
+# Observability stack (base compose; host ports differ from container ports
+# because the FlylinkDC++ hub stack owns 8428/8080 on this host).
+VM_PORT="${VM_PORT:-8430}"
+VMAGENT_PORT="${VMAGENT_PORT:-8429}"
+VMALERT_PORT="${VMALERT_PORT:-8880}"
+NATS_HTTP_PORT="${NATS_HTTP_PORT:-8222}"
+NATS_EXPORTER_PORT="${NATS_EXPORTER_PORT:-7778}"
+PERSES_PORT="${PERSES_PORT:-8089}"
+
+# Disk guard: the 2026-10-27 VictoriaMetrics crash was `no space left on
+# device` at ~0.9 GB free, so the critical line is above that.
+DISK_WARN_MB="${DISK_WARN_MB:-2048}"
+DISK_CRIT_MB="${DISK_CRIT_MB:-1024}"
+DISK_CHECK_PATH="${DISK_CHECK_PATH:-/}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -79,17 +99,19 @@ check_metrics() { check_http "$1" "$2" "/metrics"; }
 # Restart a service — точное совпадение имени, без подстрок (grep -w)
 restart_service() {
     local name="$1"
+    local container="${2:-$1}"
     log_warn "Attempting to restart $name..."
     if [ -f "docker-compose.yml" ]; then
-        if docker compose ps 2>/dev/null | grep -wq "$name"; then
+        # `-a`: a stopped container is exactly the case we need to restart.
+        if docker compose ps -a 2>/dev/null | grep -wq "$name"; then
             docker compose restart "$name" 2>/dev/null || docker-compose restart "$name" 2>/dev/null || true
             log_info "Waiting for $name to restart (10 seconds)..."
             sleep 10
             return 0
         fi
     fi
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -wq "$name" || docker ps 2>/dev/null | grep -wq "$name"; then
-        docker restart "$name" 2>/dev/null || true
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -wq "$container" || docker ps -a 2>/dev/null | grep -wq "$container"; then
+        docker restart "$container" 2>/dev/null || true
         log_info "Waiting for $name to restart (10 seconds)..."
         sleep 10
         return 0
@@ -103,11 +125,12 @@ check_and_restart() {
     local name="$1"
     local port="$2"
     local endpoint="${3:-/health}"
+    local container="${4:-$1}"
 
     if ! check_health "$name" "$port" "$endpoint"; then
         # Try metrics as fallback
         if ! check_metrics "$name" "$port"; then
-            restart_service "$name"
+            restart_service "$name" "$container"
 
             # Re-check after restart
             if ! check_health "$name" "$port" "$endpoint"; then
@@ -117,6 +140,75 @@ check_and_restart() {
         fi
     fi
 
+    return 0
+}
+
+# Health-only variant for services without a /metrics endpoint (Perses, NATS).
+check_and_restart_health() {
+    local name="$1"
+    local port="$2"
+    local endpoint="$3"
+    local container="${4:-$1}"
+
+    if ! check_health "$name" "$port" "$endpoint"; then
+        restart_service "$name" "$container"
+        if ! check_health "$name" "$port" "$endpoint"; then
+            log_error "Service $name failed to recover after restart!"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# Observability stack. VictoriaMetrics and vmagent are fatal: when either is
+# down, dashboards and alerts silently freeze while every service still looks
+# healthy (round 205: VictoriaMetrics was dead for ~43 h and nothing noticed).
+# Perses (UI) and nats-exporter (extra NATS metrics) are reported but do not
+# fail the check — traffic and metrics storage do not depend on them.
+check_metrics_stack() {
+    local failed=0
+
+    if ! check_and_restart "victoria-metrics" "$VM_PORT" "/health" "l2-victoria-metrics"; then
+        failed=1
+    fi
+    if ! check_and_restart "vmagent" "$VMAGENT_PORT" "/health"; then
+        failed=1
+    fi
+    if ! check_and_restart "vmalert" "$VMALERT_PORT" "/health"; then
+        failed=1
+    fi
+    if ! check_and_restart_health "nats-server" "$NATS_HTTP_PORT" "/healthz"; then
+        failed=1
+    fi
+
+    if ! check_metrics "nats-exporter" "$NATS_EXPORTER_PORT"; then
+        log_warn "nats-exporter is down (NATS metrics only, not fatal)"
+    fi
+    if ! check_and_restart_health "perses" "$PERSES_PORT" "/api/v1/projects" "l2-perses"; then
+        log_warn "perses is down (dashboard UI only, not fatal)"
+    fi
+
+    return $failed
+}
+
+check_disk_space() {
+    local avail_mb
+    avail_mb=$(df -P "$DISK_CHECK_PATH" 2>/dev/null | awk 'NR==2 {print int($4/1024)}')
+    if [ -z "$avail_mb" ]; then
+        log_warn "Could not read free space for $DISK_CHECK_PATH (df failed)"
+        return 0
+    fi
+
+    if [ "$avail_mb" -lt "$DISK_CRIT_MB" ]; then
+        log_error "✗ Disk space CRITICAL: ${avail_mb} MB free on $DISK_CHECK_PATH (< ${DISK_CRIT_MB} MB)"
+        return 1
+    fi
+    if [ "$avail_mb" -lt "$DISK_WARN_MB" ]; then
+        log_warn "⚠ Disk space low: ${avail_mb} MB free on $DISK_CHECK_PATH (< ${DISK_WARN_MB} MB)"
+        return 0
+    fi
+    log_info "✓ Disk space OK: ${avail_mb} MB free on $DISK_CHECK_PATH"
     return 0
 }
 
@@ -167,6 +259,19 @@ run_health_checks() {
         else
             unhealthy_services+=("jaeger")
         fi
+    fi
+
+    # Observability stack: metrics storage, collection and alerting. Without
+    # this check a dead VictoriaMetrics is invisible (round 205).
+    if ! check_metrics_stack; then
+        unhealthy_services+=("observability")
+        exit_code=1
+    fi
+
+    # Disk guard: a full filesystem killed VictoriaMetrics on 2026-10-27.
+    if ! check_disk_space; then
+        unhealthy_services+=("disk")
+        exit_code=1
     fi
 
     echo ""
@@ -227,6 +332,20 @@ main() {
             fi
             ;;
 
+        metrics|observability)
+            if ! check_metrics_stack; then
+                unhealthy_services+=("observability")
+                exit_code=1
+            fi
+            ;;
+
+        disk)
+            if ! check_disk_space; then
+                unhealthy_services+=("disk")
+                exit_code=1
+            fi
+            ;;
+
         watch)
             # Continuous monitoring mode
             local interval="${2:-60}"
@@ -260,6 +379,17 @@ main() {
             exit_code=$?
             ;;
     esac
+
+    if [ "$SERVICE" != "all" ] && [ "$SERVICE" != "watch" ]; then
+        echo ""
+        echo "=========================================="
+        if [ ${#unhealthy_services[@]} -eq 0 ]; then
+            log_info "Requested checks passed ($SERVICE)"
+        else
+            log_error "Unhealthy: ${unhealthy_services[*]}"
+        fi
+        echo "=========================================="
+    fi
 
     return $exit_code
 }

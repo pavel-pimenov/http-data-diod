@@ -178,6 +178,44 @@ NATS поднимается с `max_payload: 16777216` в `nats/nats.conf` (у n
 нет CLI-флага для этого лимита), чтобы 8 MiB тело test-port (лимит
 nginx/хаба) умещалось в base64-конверт.
 
+### Проверка прозрачности цепочки
+
+`scripts/live-chain-check.py` отправляет один и тот же запрос двумя путями —
+напрямую в `ptokax:37014` (из контейнера в сети хаба) и через
+`nginx:37015 → диод` — и сравнивает статус, тело побайтово и `Content-Type`
+апстрима. Сценарии: JSON, plain text, zlib-сжатое тело, бинарь с невалидным
+UTF-8 и тело 1 MiB. `/fly-test-port` эхом возвращает IP вызывающего, поэтому
+для прямого запроса подставляется тот же `X-Real-IP`, который видит цепочка
+(значение определяется пробой, а не хардкодом адреса Docker-сети).
+
+```bash
+./scripts/live-chain-check.py                  # 5 сценариев
+./scripts/live-chain-check.py --skip-large     # без 1 MiB
+```
+
+Скрипт рассчитан на живой режим (`docker-compose.live.yml`) и в CI не входит:
+ему нужен контейнер в сети `flylinkdc-hub_default` и реальный PTOKAX.
+
+### Здоровье стека и диска
+
+`./health-check.sh all` проверяет не только прикладные сервисы, но и
+наблюдаемость: `victoria-metrics`, `vmagent`, `vmalert`, `nats-server`,
+`nats-exporter`, `perses`, плюс свободное место на диске. При падении
+`victoria-metrics`/`vmagent`/`vmalert`/`nats-server` выполняется попытка
+рестарта (включая остановленные контейнеры), `perses` и `nats-exporter`
+считаются некритичными.
+
+```bash
+./health-check.sh all        # всё, включая метрики и диск
+./health-check.sh metrics    # только VictoriaMetrics/vmagent/vmalert/NATS/Perses
+./health-check.sh disk       # только свободное место
+```
+
+Порог диска: предупреждение ниже `DISK_WARN_MB` (по умолчанию 2048 МБ),
+ошибка ниже `DISK_CRIT_MB` (1024 МБ). Причина появления проверки — инцидент
+2026-10-27: VictoriaMetrics упал с `no space left on device` и оставался
+мёртвым ~43 часа, пока `docker ps` показывал `Up (healthy)`.
+
 ---
 
 ## Практическая рекомендация

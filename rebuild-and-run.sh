@@ -65,7 +65,7 @@ done
 # apt/cmake steps fail with "not enough free space". Prune the cache
 # automatically when free space drops below the threshold.
 ensure_free_disk_space() {
-    local threshold_mb=1024
+    local threshold_mb=2048
     local docker_root
     docker_root=$(docker system info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
     local check_path="/"
