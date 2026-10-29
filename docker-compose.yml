@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
 
   # NATS Server for messaging
   nats-server:
     container_name: nats-server
+    logging: *default-logging
     image: nats:2.14-alpine
     restart: unless-stopped
     ports:
@@ -50,6 +57,7 @@ services:
   # NATS Exporter for Prometheus metrics
   nats-exporter:
     container_name: nats-exporter
+    logging: *default-logging
     image: natsio/prometheus-nats-exporter:0.20.0
     restart: unless-stopped
     ports:
@@ -72,6 +80,7 @@ services:
 
   nats-gui:
     container_name: nats-gui
+    logging: *default-logging
     image: sphqxe/nats-webui:latest
     restart: unless-stopped
     ports:
@@ -87,6 +96,7 @@ services:
 
   jaeger:
     container_name: jaeger
+    logging: *default-logging
     image: jaegertracing/jaeger:2.15.1
     restart: unless-stopped
     ports:
@@ -109,6 +119,7 @@ services:
     # named `victoria-metrics` and host port 8428. Service DNS on l2_network
     # stays `victoria-metrics:8428` for vmagent/vmalert/Perses.
     container_name: l2-victoria-metrics
+    logging: *default-logging
     image: victoriametrics/victoria-metrics:v1.97.0
     restart: unless-stopped
     ports:
@@ -132,6 +143,7 @@ services:
   # VictoriaMetrics Agent - scrapes metrics (VictoriaMetrics, без Prometheus)
   vmagent:
     container_name: vmagent
+    logging: *default-logging
     image: victoriametrics/vmagent:v1.97.0
     restart: unless-stopped
     ports:
@@ -163,6 +175,7 @@ services:
   # активные алерты видно в /api/v1/alerts и в метриках vmalert_*.
   vmalert:
     container_name: vmalert
+    logging: *default-logging
     image: victoriametrics/vmalert:v1.97.0
     restart: unless-stopped
     ports:
@@ -190,6 +203,7 @@ services:
 
   l2-server:
     container_name: l2-server
+    logging: *default-logging
     image: http-data-diod-l2-proxy:latest
     restart: unless-stopped
     mem_limit: ${L2_SERVER_MEM_LIMIT:-1g}
@@ -265,11 +279,6 @@ services:
       start_period: 5s
     networks:
       - l2_network
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
 #    profiles:
 #      - nostart
 
@@ -301,6 +310,7 @@ services:
   #   docker compose --profile databases up -d oracle
   oracle:
     container_name: oracle
+    logging: *default-logging
     image: gvenzl/oracle-xe:21.3.0-slim
     restart: unless-stopped
     profiles:
@@ -335,6 +345,7 @@ services:
   # the main postgres service stays untouched (DB gateway).
   glitchtip-db:
     container_name: glitchtip-db
+    logging: *default-logging
     image: postgres:17-alpine
     restart: unless-stopped
     profiles:
@@ -357,6 +368,7 @@ services:
 
   glitchtip:
     container_name: glitchtip
+    logging: *default-logging
     image: glitchtip/glitchtip:6
     restart: unless-stopped
     profiles:
@@ -404,6 +416,7 @@ services:
   #   docker compose --profile databases up -d postgres
   postgres:
     container_name: postgres
+    logging: *default-logging
     # Pinned to 17: postgres-data volume was re-initialized by PG17, and 16
     # refuses to start on it ("database files are incompatible"). Do NOT bump
     # without pg_upgrade or wiping the volume (data loss).
@@ -435,6 +448,7 @@ services:
   # interactive documentation on the root page.
   swagger-ui:
     container_name: swagger-ui
+    logging: *default-logging
     image: swaggerapi/swagger-ui:v5.17.14
     restart: unless-stopped
     ports:
@@ -456,6 +470,7 @@ services:
 
   l2-proxy:
     container_name: l2-proxy
+    logging: *default-logging
     build:
       context: ./src
       dockerfile: Dockerfile
@@ -597,11 +612,6 @@ services:
       - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
     networks:
       - l2_network
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
     healthcheck:
       test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:8888/health/ready"]
       interval: 10s
@@ -614,6 +624,7 @@ services:
 
   nginx:
     container_name: nginx
+    logging: *default-logging
     image: nginx:alpine
     restart: unless-stopped
     ports:
@@ -634,6 +645,7 @@ services:
   # Nginx metrics exporter for Prometheus
   nginx-exporter:
     container_name: nginx-exporter
+    logging: *default-logging
     image: nginx/nginx-prometheus-exporter:1.1
     restart: unless-stopped
     ports:
@@ -649,6 +661,7 @@ services:
 
   l2-worker:
     container_name: l2-worker
+    logging: *default-logging
     build:
       context: ./src
       dockerfile: Dockerfile
@@ -792,11 +805,6 @@ services:
       - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
     networks:
       - l2_network
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
     healthcheck:
       test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19093/health/ready"]
       interval: 10s
@@ -820,6 +828,7 @@ services:
     # Renamed host-side: the FlylinkDC++ hub stack already runs a `perses`
     # container. Host port 8089 stays the diode instance's entry point.
     container_name: l2-perses
+    logging: *default-logging
     image: persesdev/perses:v0.54.0
     restart: unless-stopped
     ports:

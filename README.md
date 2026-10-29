@@ -216,6 +216,33 @@ UTF-8 и тело 1 MiB. `/fly-test-port` эхом возвращает IP вы�
 2026-10-27: VictoriaMetrics упал с `no space left on device` и оставался
 мёртвым ~43 часа, пока `docker ps` показывал `Up (healthy)`.
 
+### Внешний сторож: cron + лимиты логов
+
+`health-check.sh` — это проверка, а не сторож: без регулярного запуска она не
+работает, а `vmalert` не может сообщить о падении VictoriaMetrics, потому что
+сам спрашивает тот же VictoriaMetrics. Поэтому проверка ставится в **пользовательский
+crontab** (sudo на хосте нет):
+
+```bash
+./scripts/install-health-cron.sh            # поставить/обновить (идемпотентно)
+./scripts/install-health-cron.sh --print    # показать строку crontab
+./scripts/install-health-cron.sh --status   # стоит ли + последние строки лога
+./scripts/install-health-cron.sh --remove   # снять
+```
+
+По умолчанию — каждые 15 минут `./health-check.sh all 2`, лог
+`/tmp/http-data-diod-health.log` (усекается при превышении 1 МиБ), `flock -n`
+не даёт прогонам наслаиваться. Параметры переопределяются переменными
+`HEALTH_CRON_INTERVAL`, `HEALTH_CRON_LOG`, `HEALTH_CRON_RETRIES`,
+`HEALTH_CRON_MAX_LOG`, `HEALTH_CRON_LOCK`.
+
+Вторая часть раунда — лимиты логов Docker: у всех долгоживущих сервисов
+`docker-compose.yml` теперь общий якорь `x-logging` (`json-file`, `20m` × `5`,
+то есть не более ~100 МБ на контейнер). Раньше лимит был только у
+`l2-proxy`/`l2-worker`/`l2-server`, а логи `nats-server`, `nginx`, `jaeger`,
+`victoria-metrics` и остальных росли без ограничения — это один из путей к
+`no space left on device`.
+
 ---
 
 ## Практическая рекомендация
