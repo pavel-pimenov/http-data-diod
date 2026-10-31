@@ -19,6 +19,7 @@
 #include "test_metrics_support.hpp"
 #include "test_wait_support.hpp"
 #include "url_utils.hpp"
+#include "utf8_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstddef>
@@ -620,6 +621,27 @@ TEST_CASE("Header utils: headers_to_json preserves all pairs",
   REQUIRE(out.size() == 2);
   REQUIRE(out["A"] == "1");
   REQUIRE(out["B"] == "2");
+}
+
+TEST_CASE("Header utils: non-UTF-8 header values stay serializable",
+          "[header-utils]") {
+  // PTOKAX answers errors with a Windows-1251 Date header ("Сб" = D1 E1);
+  // putting it into the NATS envelope verbatim aborted the whole response with
+  // json type_error.316, so the client got 500 instead of the upstream status.
+  httplib::Headers const source = {
+      {"Content-Type", "text/plain; charset=utf-8"},
+      {"Date", std::string("\xD1\xE1, 31 \xEE\xEA\xF2 2026 10:38:36 GMT")},
+  };
+  const auto out = HeaderUtils::headers_to_json(source);
+  REQUIRE(out["Content-Type"] == "text/plain; charset=utf-8");
+  REQUIRE(utf8_utils::is_valid_utf8(out["Date"].get<std::string>()));
+  REQUIRE(out["Date"].get<std::string>().contains("\xEF\xBF\xBD"));
+  REQUIRE_NOTHROW(out.dump());
+
+  nlohmann::json filtered;
+  HeaderUtils::filter_headers_to_json(source, filtered);
+  REQUIRE(utf8_utils::is_valid_utf8(filtered["Date"].get<std::string>()));
+  REQUIRE_NOTHROW(filtered.dump());
 }
 
 TEST_CASE("Header utils: should_skip_header with custom set",

@@ -4,6 +4,7 @@
 #include "httplib/httplib.h"
 #include "logger.hpp"
 #include "string_utils.hpp"
+#include "utf8_utils.hpp"
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -179,7 +180,7 @@ public:
           }
         },
         [&dest_json](const std::string &name, const std::string &value) {
-          dest_json[name] = value;
+          dest_json[name] = utf8_utils::sanitize_invalid(value);
         });
   }
 
@@ -187,7 +188,9 @@ public:
   headers_to_json(const httplib::Headers &source_headers) {
     nlohmann::json dest_json = nlohmann::json::object();
     for (const auto &header : source_headers) {
-      dest_json[header.first] = header.second;
+      // Header values are raw bytes: legacy upstreams answer with a localized
+      // (Windows-1251) Date, which cannot be serialized into the NATS envelope.
+      dest_json[header.first] = utf8_utils::sanitize_invalid(header.second);
     }
     return dest_json;
   }

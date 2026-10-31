@@ -12,6 +12,10 @@ executed inside a container attached to the hub network (`docker exec -i
 <container> curl ...`, body on stdin). Chain requests go to the public nginx
 port from the host.
 
+Scenarios cover both success and error paths: `GET /favicon.ico` answers 404 and
+carries a Windows-1251 `Date` header from the hub HTTP layer, which used to be
+serialized into the NATS envelope verbatim and turned the 404 into a 500.
+
 `/fly-test-port` echoes the caller IP, so the direct request sets the same
 `X-Real-IP` the chain derives from the nginx connection; the value is learned
 with a probe request instead of hardcoding a Docker network address.
@@ -20,6 +24,7 @@ Usage:
     scripts/live-chain-check.py
     scripts/live-chain-check.py --chain-url http://localhost:37015 \
         --direct-container l2-worker --direct-url http://ptokax:37014
+    scripts/live-chain-check.py --diode-url http://localhost:7777  # GET-сценарий
     scripts/live-chain-check.py --skip-large      # no 1 MiB scenario
 
 Exit code 0 = every scenario matched, 1 = mismatch or transport error.
@@ -68,6 +73,16 @@ def build_scenarios(include_large=True):
             "body": binary_body,
         },
     ]
+    # The hub nginx in front of test-port rejects GET outright (405 "Only POST
+    # is allowed"), so the error path is reached through the diode's own nginx.
+    scenarios.append({
+        "name": "404 /favicon.ico",
+        "method": "GET",
+        "entry": "diode",
+        "path": "/favicon.ico",
+        "content_type": "text/plain",
+        "body": b"",
+    })
     if include_large:
         scenarios.append({
             "name": "1 MiB /fly-download",
@@ -95,8 +110,10 @@ def chain_request(base_url, scenario, timeout, real_ip=None):
     }
     if real_ip:
         headers["X-Real-IP"] = real_ip
+    method = scenario.get("method", "POST")
     try:
-        conn.request("POST", scenario["path"], body=scenario["body"],
+        conn.request(method, scenario["path"],
+                     body=scenario["body"] if method != "GET" else None,
                      headers=headers)
         resp = conn.getresponse()
         body = resp.read()
@@ -110,12 +127,15 @@ def chain_request(base_url, scenario, timeout, real_ip=None):
 
 def direct_request(container, direct_url, scenario, timeout, real_ip=None):
     url = direct_url.rstrip("/") + scenario["path"]
+    method = scenario.get("method", "POST")
     curl = [
         "curl", "-sS", "-i", "--max-time", str(timeout),
-        "-X", "POST", "--data-binary", "@-",
+        "-X", method,
         "-H", f"Content-Type: {scenario['content_type']}",
         "-H", f"User-Agent: {USER_AGENT}",
     ]
+    if method != "GET":
+        curl += ["--data-binary", "@-"]
     if real_ip:
         curl += ["-H", f"X-Real-IP: {real_ip}"]
     curl.append(url)
@@ -190,6 +210,9 @@ def main(argv):
     parser.add_argument("--direct-container", default="l2-worker",
                         help="container on the hub network used for direct "
                              "requests (default: %(default)s)")
+    parser.add_argument("--diode-url", default="http://localhost:7777",
+                        help="diode's own nginx entry, used for scenarios the "
+                             "hub nginx cannot route, e.g. GET (default: %(default)s)")
     parser.add_argument("--direct-url", default="http://ptokax:37014",
                         help="hub test-port as seen from the container "
                              "(default: %(default)s)")
@@ -207,6 +230,7 @@ def main(argv):
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     print(f"chain:  {args.chain_url}")
+    print(f"diode:  {args.diode_url}")
     print(f"direct: docker exec {args.direct_container} -> {args.direct_url}")
     print(f"X-Real-IP for direct requests: {real_ip or '(not set)'}")
     print()
@@ -216,7 +240,9 @@ def main(argv):
     failures = 0
     for scenario in scenarios:
         try:
-            chain = chain_request(args.chain_url, scenario, args.timeout, real_ip)
+            base_url = (args.diode_url if scenario.get("entry") == "diode"
+                        else args.chain_url)
+            chain = chain_request(base_url, scenario, args.timeout, real_ip)
             direct = direct_request(args.direct_container, args.direct_url,
                                     scenario, args.timeout, real_ip)
         except CheckError as exc:

@@ -23,6 +23,7 @@
 #include "retry_handler.hpp"
 #include "metrics_manager.hpp"
 #include "test_support.hpp"
+#include "utf8_utils.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -34,6 +35,7 @@
 #include <optional>
 #include <stdlib.h>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -221,9 +223,11 @@ public:
     return L2Worker::prepare_response_headers(response);
   }
 
-  static json prepare_response_data(const httplib::Headers &headers) {
+  static json prepare_response_data(const httplib::Headers &headers,
+                                    const std::string &body = "") {
     L2Worker::L2Response l2_response;
     l2_response.m_headers = headers;
+    l2_response.m_body = body;
     L2Worker::TracingSpans const spans;
     const L2Worker::ResponseData data =
         L2Worker::prepare_response_data(l2_response, spans);
@@ -405,6 +409,35 @@ TEST_CASE("L2Worker: outbound call routing, forwarded headers and span id",
   REQUIRE(spans["traceparent"].get<std::string>().size() == 55);
 }
 
+TEST_CASE("utf8_utils: validator matches what nlohmann::json accepts",
+          "[utf8]") {
+  REQUIRE(utf8_utils::is_valid_utf8(""));
+  REQUIRE(utf8_utils::is_valid_utf8("plain ascii"));
+  REQUIRE(utf8_utils::is_valid_utf8("\xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82"));
+  REQUIRE(utf8_utils::is_valid_utf8("\xF0\x9F\x98\x80"));
+  REQUIRE(utf8_utils::is_valid_utf8(std::string_view("\x00\x01\x7F", 3)));
+
+  // Lone continuation byte, as in the PTOKAX 404 page that broke the worker.
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8(std::string("\x00\xE1", 2)));
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xC3"));
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xC3\x28"));
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xE0\x80\xAF"));      // overlong
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xED\xA0\x80"));      // surrogate
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xF4\x90\x80\x80"));  // > U+10FFFF
+  REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xFF"));
+
+  // Sanitizer keeps valid text and replaces every invalid byte with U+FFFD, so
+  // the value can be serialized (cp1251 Date header from PTOKAX errors).
+  REQUIRE(utf8_utils::sanitize_invalid("plain ascii") == "plain ascii");
+  REQUIRE(utf8_utils::sanitize_invalid("\xD0\xBF\xD1\x80\xD0\xB8") ==
+          "\xD0\xBF\xD1\x80\xD0\xB8");
+  const std::string cleaned = utf8_utils::sanitize_invalid("\xD1\xE1, 31");
+  REQUIRE(utf8_utils::is_valid_utf8(cleaned));
+  REQUIRE(cleaned == "\xEF\xBF\xBD\xEF\xBF\xBD, 31");
+  REQUIRE(utf8_utils::sanitize_invalid(std::string("\x00\xE1", 2)) ==
+          std::string("\x00\xEF\xBF\xBD", 4));
+}
+
 // ============================================================================
 // retry, circuit breaker, failure handling
 // ============================================================================
@@ -451,6 +484,19 @@ TEST_CASE("L2Worker: retries, circuit breaker and failure handling",
     const json binary_type = L2WorkerTestAccess::prepare_response_data(
         {{"Content-Type", "application/octet-stream"}});
     REQUIRE(binary_type["is_binary"].get<bool>());
+
+    // A text/* body with invalid UTF-8 (legacy upstream 404 page) must not be
+    // pushed into the JSON envelope as is: it is treated as binary and
+    // base64-encoded by the worker.
+    const json text_binary_body = L2WorkerTestAccess::prepare_response_data(
+        {{"Content-Type", "text/html"}}, std::string("\x00\xE1", 2));
+    REQUIRE(text_binary_body["is_binary"].get<bool>());
+    REQUIRE(text_binary_body["content_type"] == "text/html");
+
+    const json text_utf8_body = L2WorkerTestAccess::prepare_response_data(
+        {{"Content-Type", "text/html; charset=utf-8"}},
+        "<html><body>Not Found</body></html>");
+    REQUIRE_FALSE(text_utf8_body["is_binary"].get<bool>());
   }
 
   // 502 on the first attempt is retried and succeeds on the second.

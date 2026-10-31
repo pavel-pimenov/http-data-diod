@@ -11,6 +11,7 @@
 #include "nats_client.hpp"
 #include "pool_executor.hpp"
 #include "time_utils.hpp"
+#include "utf8_utils.hpp"
 #include "worker_request_parser.hpp"
 #include <base64.hpp>
 #include <cstdint>
@@ -627,9 +628,14 @@ L2Worker::prepare_response_data(const L2Response &l2_response,
 
   const auto content_type_it = l2_response.m_headers.find("Content-Type");
   data.m_content_type = (content_type_it != l2_response.m_headers.end())
-                            ? content_type_it->second
+                            ? utf8_utils::sanitize_invalid(content_type_it->second)
                             : "";
-  data.m_is_binary = HeaderUtils::is_binary_content_type(data.m_content_type);
+  // Content-Type alone is not enough: legacy upstreams answer unknown paths
+  // with text/html bodies that are not valid UTF-8 (e.g. PTOKAX 404 pages).
+  // Such a body cannot go into the JSON envelope as is, so it is base64-encoded
+  // and forwarded byte-for-byte instead of failing with type_error.316.
+  data.m_is_binary = HeaderUtils::is_binary_content_type(data.m_content_type) ||
+                     !utf8_utils::is_valid_utf8(l2_response.m_body);
 
   Logger::debug("Worker checking response type: content_type={} is_binary={}",
                 data.m_content_type, data.m_is_binary);
