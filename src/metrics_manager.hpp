@@ -16,24 +16,35 @@
 #include <vector>
 
 namespace histogram_buckets {
+// Bounds live in their own arrays so the table sizes below are deduced from the
+// initializer: adding or removing a bound can no longer leave a stale
+// std::array<double, N> behind (that mismatch used to be a manual edit).
+inline constexpr auto g_latency_ms_to_5s = std::to_array<double>(
+    {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0});
+inline constexpr auto g_latency_ms_to_10s = std::to_array<double>(
+    {0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0});
+inline constexpr auto g_latency_5ms_to_10s = std::to_array<double>(
+    {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0});
+inline constexpr auto g_size_100b_to_5mb = std::to_array<double>(
+    {100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000});
+// Sub-millisecond resolution for micro-latencies (task-queue wait, single
+// NATS round-trip): starts at 100us so "instant" and "queued" are separable.
+inline constexpr auto g_latency_100us_to_1s = std::to_array<double>({
+    0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01,
+    0.025, 0.05, 0.1, 0.25, 0.5, 1.0});
+
 // Histogram bucket bounds grouped in one struct so the related latency/size
 // tables stay together and are exposed through a single global instance.
 struct Buckets {
-  std::array<double, 11> m_latency_ms_to_5s;
-  std::array<double, 12> m_latency_ms_to_10s;
-  std::array<double, 11> m_latency_5ms_to_10s;
-  std::array<double, 10> m_size_100b_to_5mb;
-  // Sub-millisecond resolution for micro-latencies (task-queue wait, single
-  // NATS round-trip): starts at 100us so "instant" and "queued" are separable.
-  std::array<double, 13> m_latency_100us_to_1s;
+  std::array<double, g_latency_ms_to_5s.size()> m_latency_ms_to_5s;
+  std::array<double, g_latency_ms_to_10s.size()> m_latency_ms_to_10s;
+  std::array<double, g_latency_5ms_to_10s.size()> m_latency_5ms_to_10s;
+  std::array<double, g_size_100b_to_5mb.size()> m_size_100b_to_5mb;
+  std::array<double, g_latency_100us_to_1s.size()> m_latency_100us_to_1s;
 };
-inline constexpr Buckets g_buckets = {
-    {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0}},
-    {{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
-    {{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}},
-    {{100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000}},
-    {{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1,
-      0.25, 0.5, 1.0}}};
+inline constexpr Buckets g_buckets = {g_latency_ms_to_5s, g_latency_ms_to_10s,
+                                      g_latency_5ms_to_10s, g_size_100b_to_5mb,
+                                      g_latency_100us_to_1s};
 } // namespace histogram_buckets
 
 // Histogram families need the bucket bounds on every Family::Add call (the

@@ -1,5 +1,6 @@
 #include "db_query_executor_postgres.hpp"
 #include "config.hpp"
+#include "constants.hpp"
 #include "db_query_executor_base.hpp"
 #include "db_query_utils.hpp"
 #include "json_utils.hpp"
@@ -195,7 +196,7 @@ void PostgresQueryExecutor::refresh_pool_gauges() {
 json PostgresQueryExecutor::execute_query(const std::string &sql,
                                           const json &params, int timeout_ms,
                                           int max_rows, int &status_code) {
-  status_code = 200;
+  status_code = http_status::kOk;
   const uint64_t start_ms = TimeUtils::steady_ms();
 
   auto maybe_conn = m_impl->acquire_conn();

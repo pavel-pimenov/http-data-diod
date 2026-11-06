@@ -10,6 +10,14 @@
 #include <string>
 #include <thread>
 
+namespace retry_defaults {
+inline constexpr int kBaseDelayMs = 100;
+inline constexpr int kJitterPercent = 50;
+inline constexpr int kMaxRetries = 3;
+inline constexpr int kMaxDelayMs = 2000;
+inline constexpr int kJitterMs = 50;
+} // namespace retry_defaults
+
 // ============================================================================
 // Exponential Backoff with Jitter
 // ============================================================================
@@ -24,7 +32,7 @@ inline int calculate_retry_delay_with_jitter(int base_delay_ms, int jitter_ms,
 }
 
 // Base delay plus a jitter of up to jitter_percent% of the base delay.
-inline int calculate_jitter_delay(int base_delay_ms, int jitter_percent = 50) {
+inline int calculate_jitter_delay(int base_delay_ms, int jitter_percent = retry_defaults::kJitterPercent) {
   if (base_delay_ms <= 0) {
     return 0;
   }
@@ -39,22 +47,23 @@ inline int calculate_jitter_delay(int base_delay_ms, int jitter_percent = 50) {
 // Computes a per-attempt delay (base*attempt plus jitter) and sleeps the
 // calling thread before the next retry attempt. Shared by retry loops that
 // otherwise duplicated the identical delay+sleep pair.
-inline void sleep_for_attempt_jitter(int attempt, int base_delay_ms = 100,
-                                     int jitter_percent = 50) {
+inline void sleep_for_attempt_jitter(
+    int attempt, int base_delay_ms = retry_defaults::kBaseDelayMs,
+    int jitter_percent = retry_defaults::kJitterPercent) {
   const int delay_ms =
       calculate_jitter_delay(base_delay_ms * attempt, jitter_percent);
   std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-}
-
-// ============================================================================
+}// ============================================================================
 // Retry Loop Helper
 // ============================================================================
-
+// NB: Result is the return type, Operation is a callable object.
 template <typename Result, typename Operation>
-inline Result execute_with_retry(Operation &&operation,
-                                 const std::string &operation_name,
-                                 int max_retries = 3, int base_delay_ms = 100,
-                                 int max_delay_ms = 2000, int jitter_ms = 50) {
+inline Result execute_with_retry(
+    Operation &&operation, const std::string &operation_name,
+    int max_retries = retry_defaults::kMaxRetries,
+    int base_delay_ms = retry_defaults::kBaseDelayMs,
+    int max_delay_ms = retry_defaults::kMaxDelayMs,
+    int jitter_ms = retry_defaults::kJitterMs) {
   std::string last_error;
 
   for (int attempt = 1; attempt <= max_retries; ++attempt) {
@@ -78,4 +87,6 @@ inline Result execute_with_retry(Operation &&operation,
                   max_retries, last_error));
 }
 
+
 #endif // RETRY_UTILS_HPP
+

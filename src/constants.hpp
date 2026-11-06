@@ -30,10 +30,20 @@ inline constexpr int kServerErrorMin = 500;
 
 namespace service_port {
 inline constexpr int kProxyMetrics = 19090;
-inline constexpr int kWorkerMetrics = 19091;
-inline constexpr int kServerMetrics = 19092;
-inline constexpr int kWorkerHealth = 19093;
-} // namespace service_port
+inline constexpr int kWorkerMetrics = 19091;inline constexpr int kServerMetrics = 19092;
+ inline constexpr int kWorkerHealth = 19093;
+ } // namespace service_port
+
+namespace url_constants {
+// Length of "://" — the scheme separator every URL parser skips over.
+inline constexpr std::size_t kSchemeSeparatorLength = 3;
+} // namespace url_constants
+namespace file_mode {
+// Permission bits for crash dumps and their directory (Linux only code paths).
+inline constexpr int kDirectory = 0755;
+inline constexpr int kFile = 0644;
+} // namespace file_mode
+
 
 namespace http_server_limits {
 inline constexpr int kKeepAliveMaxCount = 100;

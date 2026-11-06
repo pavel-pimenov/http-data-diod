@@ -425,7 +425,7 @@ void Config::load_server_timeout_config() {
       get_env_double("SENTRY_SAMPLE_RATE", m_sentry.m_sample_rate);
   m_sentry.m_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry.m_timeout_ms);
   m_sentry.m_max_queue_size =
-      get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);
+      get_env_int("SENTRY_MAX_QUEUE_SIZE", m_sentry.m_max_queue_size);
   if (!m_sentry.m_dsn.empty()) {
     Logger::info(
         "Sentry DSN configured: project={} release={} environment={} "
@@ -653,12 +653,12 @@ void Config::load_db_query_config() {
     db.m_name = "oracle";
     db.m_driver = "oracle";
     db.m_host = get_env_string("DB_ORACLE_HOST", "oracle");
-    db.m_port = get_env_int("DB_ORACLE_PORT", 1521);
+    db.m_port = get_env_int("DB_ORACLE_PORT", db.m_port);
     db.m_service = get_env_string("DB_ORACLE_SERVICE", "XEPDB1");
     db.m_user = get_env_string("DB_ORACLE_USER", "");
     db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
-    db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
-    db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
+    db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", db.m_pool_min);
+    db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", db.m_pool_max);
     db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
     db.m_max_rows = m_db_query.m_default_max_rows;
     m_db_query.m_databases.push_back(db);
@@ -671,12 +671,12 @@ void Config::load_db_query_config() {
     db.m_name = "postgres";
     db.m_driver = "postgres";
     db.m_host = get_env_string("DB_POSTGRES_HOST", "postgres");
-    db.m_port = get_env_int("DB_POSTGRES_PORT", 5432);
+    db.m_port = get_env_int("DB_POSTGRES_PORT", config_defaults::kPostgresPort);
     db.m_database = get_env_string("DB_POSTGRES_DB", "postgres");
     db.m_user = get_env_string("DB_POSTGRES_USER", "");
     db.m_password = get_env_string("DB_POSTGRES_PASSWORD", "");
-    db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", 1);
-    db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", 5);
+    db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", db.m_pool_min);
+    db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", db.m_pool_max);
     db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
     db.m_max_rows = m_db_query.m_default_max_rows;
     m_db_query.m_databases.push_back(db);

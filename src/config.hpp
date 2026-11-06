@@ -8,6 +8,13 @@
 
 struct NatsConfig;
 
+namespace config_defaults {
+// DbConfig::m_port defaults to the Oracle listener; PostgreSQL gets its own
+// default, named so the env fallback and the struct cannot drift apart.
+inline constexpr int kOraclePort = 1521;
+inline constexpr int kPostgresPort = 5432;
+} // namespace config_defaults
+
 // Connection settings of a single named database exposed by the HTTP DB
 // Gateway (endpoint /v1/sql/{db}/query). Multiple databases are supported by
 // the routing layer; config populates the built-in "oracle" and "postgres"
@@ -16,7 +23,7 @@ struct DbConfig {
   std::string m_name;
   std::string m_driver; // "oracle" (ODPI-C) | "postgres" (libpq)
   std::string m_host;
-  int m_port = 1521;
+  int m_port = config_defaults::kOraclePort;
   // Oracle service name (host:port/service connect string). PostgreSQL uses
   // m_database instead.
   std::string m_service;
