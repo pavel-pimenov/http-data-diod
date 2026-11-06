@@ -386,7 +386,7 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 - `l2_worker_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при инициализации пула): без знаменателя глубина очереди не позволяет судить о насыщении. Предел либо задаётся явно (`L2_WORKER_QUEUE_SIZE`), либо выводится автоматически как 8 задач на поток (`L2_WORKER_THREADS`); воркер с `THREAD_POOL_TYPE=none` принудительно переводится на обычный пул, поэтому ёмкость всегда определена.
 - `l2_worker_l2_server_call_duration_seconds{backend}` — латентность вызова L2 по каждому настроенному бэкенду (histogram с меткой `backend` = базовый URL из `L2_SERVER_URLS`). Агрегатная `l2_worker_l2_call_duration_seconds` не отвечает на вопрос «какой из бэкендов медленный», когда их несколько; число серий ограничено конфигом, одна нулевая серия на каждый URL создаётся при старте.
 - `l2_proxy_task_queue_size` — глубина очереди задач HTTP-пула прокси (gauge): число принятых соединений, которые ещё не забрал воркер-тред. Считается в обёртке `TimedTaskQueue` (список задач у httplib приватный, поэтому иначе глубину не увидеть).
-- `l2_proxy_task_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при создании пула): `0` означает «предела нет» (по умолчанию очередь растёт вместе с нагрузкой), ненулевое значение — фактический лимит из `L2_PROXY_MAX_QUEUED_REQUESTS`. При переполнении очереди httplib отклоняет соединение (`l2_proxy_task_queue_rejected_total`), то есть лимит превращает неограниченное потребление памяти в явные отказы.
+- `l2_proxy_task_queue_capacity` — ёмкость той же очереди (gauge, ставится один раз при создании пула): либо явный лимит из `L2_PROXY_MAX_QUEUED_REQUESTS`, либо — при `0` (значение по умолчанию) — автоматический предел «8 задач на поток» (`threads * 8`, как у пула воркера). Нулевого значения у gauge не бывает: «предела нет» означало бы неограниченный рост памяти при всплеске, причём алерт `L2ProxyTaskQueueSaturated` не сработал бы никогда (деление на ноль). При переполнении очереди httplib отклоняет соединение (`l2_proxy_task_queue_rejected_total`), то есть предел превращает неограниченное потребление памяти в явные отказы.
 - `l2_worker_nats_connected` — состояние связи воркера с NATS (1/0, gauge).
 - `l2_worker_health_ready` — готовность воркера по `/health/ready` (1/0, gauge).
 - `l2_server_responses_total{status="..."}` — ответы L2-сервера по HTTP-статусу (counter family).
@@ -725,7 +725,7 @@ HTTP-эндпоинт.
 | `l2_proxy_task_queue_enqueued_total` | counter | — | Принято задач пулом прокси |
 | `l2_proxy_task_queue_rejected_total` | counter | — | Отклонено задач пулом прокси (лимит очереди) |
 | `l2_proxy_task_queue_size` | gauge | — | Глубина очереди задач прокси (принятые соединения, которые ещё не забрал воркер-тред) |
-| `l2_proxy_task_queue_capacity` | gauge | — | Предел очереди задач прокси (0 = без предела; из `L2_PROXY_MAX_QUEUED_REQUESTS`) |
+| `l2_proxy_task_queue_capacity` | gauge | — | Предел очереди задач прокси (`L2_PROXY_MAX_QUEUED_REQUESTS`; при 0 — автоматически 8 задач на поток) |
 | `l2_proxy_bytes_received_total` | counter | — | Байт, получено от клиентов |
 | `l2_proxy_bytes_sent_total` | counter | — | Байт, отправлено клиентам |
 | `l2_proxy_request_duration_seconds` | histogram | — | Длительность обработки запроса |
@@ -978,7 +978,7 @@ Grafana по API (`GRAFANA_URL`/`--correct-dashboards`): это только о�
 
 Стек использует **VictoriaMetrics** (`victoria-metrics:8428`) + `vmagent` (`8429`) вместо Prometheus. Правила оповещений вычисляет **vmalert** (`victoriametrics/vmalert`, порт `8880`), поднятый в `docker-compose.yml`.
 
-Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 34 правила в трёх группах:
+Правила лежат в **`alerts/l2-alerts.yml`** (формат Prometheus alerting rules) — 35 правил в трёх группах:
 
 | Группа | Что покрывает | Примеры правил |
 |---|---|---|
@@ -1000,13 +1000,13 @@ Grafana по API (`GRAFANA_URL`/`--correct-dashboards`): это только о�
 
 ### Какие метрики намеренно без алертов
 
-Аудит round 202: в каталоге 117 метрик, правила используют 46 семейств. Остальные — не забытые, а осознанно оставленные без правил: алерт оправдан, только если у события есть **действие** и **порог**, а не просто число на дашборде.
+Аудит round 202: в каталоге 117 метрик, правила используют 47 семейств. Остальные — не забытые, а осознанно оставленные без правил: алерт оправдан, только если у события есть **действие** и **порог**, а не просто число на дашборде.
 
 | Категория | Метрики | Почему без правила |
 |---|---|---|
 | Объёмы и размеры | `*_bytes_received_total`, `*_bytes_sent_total`, `*_request_size_bytes`, `*_response_size_bytes`, `l2_worker_l2_response_size_bytes`, `l2_worker_in_flight_requests` | это трафик, а не сбой: рост байтов — следствие нагрузки. Правило на объём срабатывает на каждом пике RPS и не имеет действия. |
 | Счётчики-знаменатели и производные | `*_requests_total`, `*_responses_total`, `l2_worker_requests_processed_total`, `l2_worker_db_requests_total`, `l2_proxy_nats_requests_total`, `l2_http_pool_client_{acquisitions,releases}_total`, `l2_proxy_task_queue_enqueued_total` | сами по себе не означают проблему; их аномалии видны через ratio/P95-правила (`L2WorkerL2CallErrorRatioHigh`, `L2HttpPoolAcquisitionSlow`, `L2ProxyTaskQueueSaturated`). |
-| Внутренние латентности без SLO | `l2_proxy_nats_{request,poll_attempt}_duration_seconds`, `l2_proxy_task_queue_wait_seconds`, `l2_worker_db_{pool_acquire,query}_duration_seconds`, `l2_tracing_{send_latency,queue_time,last_send}_seconds` | латентность транспорта уже покрыта пользовательскими P95/P99 на границе (`L2ProxyLatencyP95High`, `L2WorkerLatencyP95High`); отдельный порог на внутренний хоп даёт шум без действия. DB-гистограммы относятся к опциональному профилю `postgres`. |
+| Внутренние латентности без SLO | `l2_proxy_nats_{request,poll_attempt}_duration_seconds`, `l2_worker_db_{pool_acquire,query}_duration_seconds`, `l2_tracing_{send_latency,queue_time,last_send}_seconds` | латентность транспорта уже покрыта пользовательскими P95/P99 на границе (`L2ProxyLatencyP95High`, `L2WorkerLatencyP95High`); отдельный порог на внутренний хоп даёт шум без действия. DB-гистограммы относятся к опциональному профилю `postgres`. `l2_proxy_task_queue_wait_seconds` — исключение: это не транспортный хоп, а собственное время ожидания потока, поэтому у него есть отдельное правило `L2ProxyTaskQueueWaitP99High`. |
 | Пер-клиент и пер-IP разбивки | `l2_proxy_per_client_id_*`, `l2_proxy_per_ip_*`, `l2_worker_duplicate_requests_total`, `l2_proxy_duplicate_{requests,posts_detected}_total`, `l2_proxy_duplicate_tracked_clients` | кардинальность зависит от числа клиентов: правило потребовало бы порога «на клиента» и шумело бы. Общий всплеск отказов ловит `L2ProxyRejectionSpike`, лимиты — `L2ProxyRateLimitRejections`. |
 | Дубли-агрегаты | `l2_worker_l2_errors_total`, `l2_worker_processing_validation_errors_total`, `l2_worker_circuit_breaker_rejected_total`, `l2_per_ip_rate_limiter_rejected_total` | те же события уже в разбитых семействах (`l2_worker_l2_call_errors_total`, `l2_worker_request_validation_errors_total`), а fast-fail в OPEN — следствие `L2WorkerCircuitBreakerOpen`, а не отдельная причина. |
 | Потеря кардинальности | `l2_proxy_per_client_id_dropped_labels_total` | TTL-эвикция — нормальный churn клиентов, а метки `reason` нет: cap и TTL не разделить, правило «счётчик вырос» горело бы постоянно. Значение видно на дашборде. |

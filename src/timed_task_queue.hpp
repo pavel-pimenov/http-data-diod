@@ -1,6 +1,7 @@
 #ifndef TIMED_TASK_QUEUE_HPP
 #define TIMED_TASK_QUEUE_HPP
 
+#include "constants.hpp"
 #include "httplib/httplib.h"
 #include <prometheus/counter.h>
 #include <prometheus/gauge.h>
@@ -31,14 +32,26 @@ public:
                  prometheus::Gauge &queue_capacity, size_t thread_count,
                  size_t max_thread_count = 0, size_t max_queued_requests = 0,
                  time_t idle_timeout_sec = CPPHTTPLIB_THREAD_POOL_IDLE_TIMEOUT)
-      : m_pool(thread_count, max_thread_count, max_queued_requests,
+      : m_pool(thread_count, max_thread_count,
+               effective_queue_capacity(thread_count, max_queued_requests),
                idle_timeout_sec),
         m_enqueued(enqueued), m_rejected(rejected), m_wait_seconds(wait_seconds),
         m_queue_size(queue_size), m_queue_capacity(queue_capacity) {
-    // 0 means "no limit enforced by the pool": the gauge mirrors the limit
-    // that is actually in force, so an operator can tell "unlimited" from
-    // "the queue is full".
-    m_queue_capacity.Set(static_cast<double>(max_queued_requests));
+    // 0 selects the automatic bound (threads * kQueuedTasksPerThread), the same
+    // rule the custom thread pool applies: an unbounded queue would turn a
+    // traffic burst into memory growth instead of explicit rejections, and the
+    // saturation alert needs a non-zero capacity to have a denominator.
+    m_queue_capacity.Set(
+        static_cast<double>(effective_queue_capacity(thread_count, max_queued_requests)));
+  }
+
+  // Effective capacity of the task queue: the explicit limit, or the automatic
+  // bound when the configured limit is 0.
+  [[nodiscard]] static size_t effective_queue_capacity(
+      size_t thread_count, size_t max_queued_requests) {
+    return max_queued_requests == 0
+               ? thread_count * http_server_limits::kQueuedTasksPerThread
+               : max_queued_requests;
   }
 
   bool enqueue(std::function<void()> fn) override {

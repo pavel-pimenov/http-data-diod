@@ -157,7 +157,7 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
                     cfg.m_proxy.m_max_retries));
   check(non_negative(cfg.m_proxy.m_max_queued_requests),
         std::format("Invalid L2_PROXY_MAX_QUEUED_REQUESTS: {} (must be >= 0, "
-                    "0 = unlimited)",
+                    "0 = automatic bound)",
                     cfg.m_proxy.m_max_queued_requests));
   check(positive(cfg.m_proxy.m_http_pool_size),
         std::format("Invalid HTTP pool size: {} (must be > 0)",

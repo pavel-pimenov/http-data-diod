@@ -1,6 +1,7 @@
 #ifndef THREAD_POOL_HPP
 #define THREAD_POOL_HPP
 
+#include "constants.hpp"
 #include <algorithm>
 #include <condition_variable>
 #include <functional>
@@ -77,7 +78,8 @@ private:
   // contention by batching (worker drains the queue in chunks)
   static constexpr size_t g_dequeue_batch = 16;
   // Automatic queue bound per worker thread when max_queue_size == 0
-  static constexpr size_t g_max_queue_per_thread = 8;
+  static constexpr size_t g_max_queue_per_thread =
+      http_server_limits::kQueuedTasksPerThread;
 
   // jthread + stop_token: auto-join, cooperative cancellation
   std::atomic<size_t> m_active_workers{0};

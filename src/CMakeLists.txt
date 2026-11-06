@@ -228,6 +228,10 @@ add_executable(l2-proxy
  config.cpp
  string_utils.cpp
  request_handler.cpp
+ request_handler_admin.cpp
+ request_handler_limits.cpp
+ request_handler_pipeline.cpp
+ request_handler_db_gateway.cpp
  request_id_generator.cpp
  trace_context_extractor.cpp
  request_data_preparer.cpp
@@ -277,7 +281,9 @@ set_target_properties(l2-proxy PROPERTIES UNITY_BUILD_MODE GROUP)
 set_source_files_properties(
     app_context.cpp common_utils.cpp config.cpp string_utils.cpp
     proxy_init.cpp
-    request_handler.cpp
+    request_handler.cpp request_handler_admin.cpp
+    request_handler_limits.cpp request_handler_pipeline.cpp
+    request_handler_db_gateway.cpp
     request_id_generator.cpp trace_context_extractor.cpp
     request_data_preparer.cpp response_builder.cpp server_handler.cpp
     duplicate_detector.cpp
@@ -434,6 +440,10 @@ if(BUILD_TESTS)
         # the parts the tests happened to link before.
         proxy_init.cpp
         request_handler.cpp
+        request_handler_admin.cpp
+        request_handler_limits.cpp
+        request_handler_pipeline.cpp
+        request_handler_db_gateway.cpp
         server_handler.cpp
         l2_worker.cpp
         l2_worker_nats.cpp

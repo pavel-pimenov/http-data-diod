@@ -197,8 +197,9 @@ public:
     int m_max_retries{1};
     // Limit on the number of tasks waiting in the proxy's HTTP task queue
     // (accepted connections that no worker thread has picked up yet).
-    // 0 = unlimited (the default: the queue grows with the load and the
-    // saturation signal is the queue depth plus the wait-time histogram).
+    // 0 = automatic bound (threads * kQueuedTasksPerThread, the same rule the
+    // worker pool applies): a full queue rejects the connection instead of
+    // growing memory, and the saturation alert gets a denominator.
     int m_max_queued_requests{0};
     // Forward non-JSON request bodies (zlib-compressed legacy test-port
     // payloads, binary blobs) instead of rejecting them with 400. Such bodies

@@ -514,11 +514,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - REQUEST_TIMEOUT_SECONDS=30
-      # Limit on the number of HTTP tasks waiting in the proxy's task queue
-      # (0 = unlimited: the queue grows with the load, saturation is visible
-      # through l2_proxy_task_queue_size / l2_proxy_task_queue_wait_seconds).
-      # A non-zero value turns queue overflow into a rejected request instead
-      # of unbounded memory growth.
+      # Limit on the number of HTTP tasks waiting in the proxy's task queue.
+      # 0 selects the automatic bound (8 tasks per worker thread, the same rule
+      # the worker pool applies); a non-zero value sets it explicitly. Either
+      # way queue overflow becomes a rejected request instead of unbounded
+      # memory growth, and l2_proxy_task_queue_saturated has a denominator.
       - L2_PROXY_MAX_QUEUED_REQUESTS=${L2_PROXY_MAX_QUEUED_REQUESTS:-0}
       # Forward non-JSON request bodies (zlib-compressed FlylinkDC++ test-port
       # payloads) verbatim: they are base64-encoded over NATS and decoded by

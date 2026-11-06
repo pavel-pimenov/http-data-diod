@@ -110,16 +110,28 @@ groups:
 
       - alert: L2ProxyTaskQueueSaturated
         expr: |
-          (sum(l2_proxy_task_queue_capacity) > 0)
-            and (sum(l2_proxy_task_queue_size) / sum(l2_proxy_task_queue_capacity) > 0.8)
+          sum(l2_proxy_task_queue_size)
+            / clamp_min(sum(l2_proxy_task_queue_capacity), 1) > 0.8
         for: 10m
         labels:
           severity: warning
           service: proxy
         annotations:
           summary: "Очередь задач прокси заполнена больше чем на 80%"
-          description: "Очередь задач прокси — {{ $value }} от предела. Пока предел не достигнут (L2_PROXY_MAX_QUEUED_REQUESTS=0 — без предела), правило молчит."
-          runbook: "README.md → «Алерты (оповещения)»: если дорастёт до 100% — сработает L2ProxyTaskQueueRejected; увеличьте L2_PROXY_MAX_QUEUED_REQUESTS."
+          description: "Очередь задач прокси — {{ $value }} от предела. Предел — L2_PROXY_MAX_QUEUED_REQUESTS, а при 0 (по умолчанию) автоматический: число потоков × 8, то есть минимум 1024 задачи."
+          runbook: "README.md → «Алерты (оповещения)»: если дорастёт до 100% — сработает L2ProxyTaskQueueRejected; увеличьте L2_PROXY_MAX_QUEUED_REQUESTS или число потоков (CPPHTTPLIB_THREAD_POOL_COUNT)."
+
+      - alert: L2ProxyTaskQueueWaitP99High
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(l2_proxy_task_queue_wait_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "P99 ожидания в очереди задач прокси выше 0,5 с"
+          description: "99-й перцентиль времени между приёмом соединения и стартом обработки — {{ $value }} с (цель проекта — P99 < 100 мс). Это чистое ожидание свободного потока: downstream (NATS/воркер) в нём не участвует, поэтому рост означает насыщение пула потоков прокси задолго до того, как запросы начнут падать (L2ProxyTaskQueueRejected)."
+          runbook: "README.md → «Алерты (оповещения)»: сравните l2_proxy_task_queue_wait_seconds с l2_proxy_request_duration_seconds — если растёт только ожидание, расширяйте пул потоков прокси или ставьте L2_PROXY_MAX_QUEUED_REQUESTS."
 
       - alert: L2ProxyNatsDisconnected
         expr: min(l2_proxy_nats_connected) < 1
