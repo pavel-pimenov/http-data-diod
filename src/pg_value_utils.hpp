@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <exception>
 #include <format>
+#include <optional>
 #include <string>
+#include <vector>
 
 // Pure Postgres type-OID helpers of the DB gateway. Header-only and free of
 // libpq so the unit tests can exercise the text-format value conversion
@@ -116,6 +118,31 @@ inline std::string hex_to_bytes(const std::string &hex) {
     out.push_back(static_cast<char>((nibble(hex[i]) << 4) | nibble(hex[i + 1])));
   }
   return out;
+}
+
+// Converts JSON bind parameters into PostgreSQL text-format values in the order
+// the executor binds them ($1..$N; nlohmann::json object keys are sorted):
+// nullopt is SQL NULL, and non-scalar values are skipped — the request contract
+// rejects them before execution, so the numbering can never shift silently.
+inline std::vector<std::optional<std::string>>
+pg_text_values(const json &params) {
+  std::vector<std::optional<std::string>> values;
+  values.reserve(params.size());
+  for (const auto &[name, value] : params.items()) {
+    (void)name;
+    if (value.is_null()) {
+      values.emplace_back(std::nullopt);
+    } else if (value.is_boolean()) {
+      values.emplace_back(value.get<bool>() ? "t" : "f");
+    } else if (value.is_number_integer()) {
+      values.emplace_back(std::to_string(value.get<int64_t>()));
+    } else if (value.is_number_float()) {
+      values.emplace_back(std::to_string(value.get<double>()));
+    } else if (value.is_string()) {
+      values.emplace_back(value.get<std::string>());
+    }
+  }
+  return values;
 }
 
 // Converts a text-format value to the JSON value matching the column type.

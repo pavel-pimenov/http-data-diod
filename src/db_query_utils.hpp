@@ -48,6 +48,9 @@ inline std::string strip_sql_comments(const std::string &sql) {
 // Reads the next whitespace-delimited word starting at pos, lower-cased.
 inline std::string next_word_lower(const std::string &s, size_t &pos) {
   const size_t n = s.size();
+  if (pos > n) {
+    pos = n;
+  }
   while (pos < n && std::isspace(static_cast<unsigned char>(s[pos]))) {
     ++pos;
   }

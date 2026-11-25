@@ -3621,6 +3621,30 @@ TEST_CASE("[db-query-utils] strip_sql_comments removes line and block "
   REQUIRE(strip_sql_comments("/* unterminated") == "");
 }
 
+TEST_CASE("[db-query-utils] strip_sql_comments keeps lookalike characters",
+          "[db-query-utils]") {
+  // A single dash / slash is not a comment opener: both characters must match.
+  REQUIRE(strip_sql_comments("a-b") == "a-b");
+  REQUIRE(strip_sql_comments("1/2") == "1/2");
+  // A comment that reaches EOF without a newline or a closing "*/" is dropped
+  // as a whole (the inner scans stop at the end of the string).
+  REQUIRE(strip_sql_comments("--").empty());
+  REQUIRE(strip_sql_comments("/*").empty());
+  REQUIRE(strip_sql_comments("/*/").empty());
+  REQUIRE(strip_sql_comments("SELECT 1 -- tail") == "SELECT 1 ");
+}
+
+TEST_CASE("[db-query-utils] next_word_lower skips blanks and stops at EOF",
+          "[db-query-utils]") {
+  size_t pos = 0;
+  REQUIRE(next_word_lower("  SELECT\tx", pos) == "select");
+  REQUIRE(next_word_lower("  SELECT\tx", pos) == "x");
+  // A position at (or past) the end yields an empty word, not an exception.
+  REQUIRE(next_word_lower("  SELECT\tx", pos).empty());
+  pos = 42;
+  REQUIRE(next_word_lower("SELECT", pos).empty());
+}
+
 TEST_CASE("[db-query-utils] is_read_only_sql accepts SELECT/WITH only",
           "[db-query-utils]") {
   REQUIRE(is_read_only_sql("SELECT * FROM t"));
@@ -3635,6 +3659,7 @@ TEST_CASE("[db-query-utils] is_read_only_sql accepts SELECT/WITH only",
   REQUIRE(!is_read_only_sql("DROP TABLE t"));
   REQUIRE(!is_read_only_sql("/* not read */ DELETE FROM t"));
   REQUIRE(!is_read_only_sql(""));
+  REQUIRE(!is_read_only_sql("   "));
 }
 
 TEST_CASE("[db-query-utils] parse_db_query_request validates contract",

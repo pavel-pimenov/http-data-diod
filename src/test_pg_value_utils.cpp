@@ -2,6 +2,7 @@
 
 #include "json_utils.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <optional>
 #include <string>
 
 // Keep the import list explicit: no `using namespace` (google-build). The OID
@@ -44,6 +45,45 @@ TEST_CASE("hex_to_bytes decodes bytea hex output") {
   REQUIRE(hex_to_bytes("\\x").empty());
   REQUIRE(hex_to_bytes("").empty());
   REQUIRE(hex_to_bytes("\\xzz") == std::string("\x00", 1));
+}
+
+TEST_CASE("hex_to_bytes tolerates a lone backslash and non-hex nibbles") {
+  // A single backslash is not the "\\x" prefix (size check fails), so decoding
+  // starts at 0 and yields no complete pair.
+  REQUIRE(hex_to_bytes("\\").empty());
+  // ':' and 'G' are the edges of the nibble ranges: each satisfies the lower
+  // bound of one branch but not the upper one, so both decode to 0.
+  REQUIRE(hex_to_bytes("\\x:0") == std::string("\x00", 1));
+  REQUIRE(hex_to_bytes("\\xG0") == std::string("\x00", 1));
+}
+
+TEST_CASE("pg_text_values converts every scalar parameter type") {
+  const json params = json{{"a_null", nullptr},   {"b_true", true},
+                          {"b_false", false},    {"c_int", -42},
+                          {"d_float", 1.5},      {"e_text", "hello"}};
+  const auto values = pg_value_utils::pg_text_values(params);
+  REQUIRE(values.size() == 6);
+  // nlohmann::json objects are std::map: parameters come out sorted by name,
+  // and that order is exactly the positional $1..$N numbering.
+  REQUIRE_FALSE(values[0].has_value()); // a_null -> SQL NULL
+  REQUIRE(values[1] == std::optional<std::string>("f")); // b_false
+  REQUIRE(values[2] == std::optional<std::string>("t")); // b_true
+  REQUIRE(values[3] == std::optional<std::string>("-42")); // c_int
+  REQUIRE(values[4] == std::optional<std::string>("1.500000")); // d_float
+  REQUIRE(values[5] == std::optional<std::string>("hello")); // e_text
+}
+
+TEST_CASE("pg_text_values keeps order, skips non-scalars and empty params") {
+  // Non-scalars are rejected by the request contract before execution; the
+  // converter must skip them instead of turning them into NULL, which would
+  // shift the positional $1..$N numbering.
+  const json params = json{{"first", 1}, {"nested", json::array({1})},
+                          {"last", "z"}};
+  const auto values = pg_value_utils::pg_text_values(params);
+  REQUIRE(values.size() == 2);
+  REQUIRE(values[0] == std::optional<std::string>("1"));
+  REQUIRE(values[1] == std::optional<std::string>("z"));
+  REQUIRE(pg_value_utils::pg_text_values(json::object()).empty());
 }
 
 TEST_CASE("pg_value converts scalar text values") {

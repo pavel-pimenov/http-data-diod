@@ -216,37 +216,20 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
                                  timeout_error);
   }
 
-  // Bind parameters as positional $1..$N. Params are passed in text format
-  // (the server casts to the inferred placeholder type); NULL is signalled by
-  // a null value pointer.
-  std::vector<std::string> text_values;
+  // Bind parameters as positional $1..$N. The text conversion lives in
+  // pg_value_utils so its per-type branches are unit-tested without libpq.
+  const auto text_values = pg_value_utils::pg_text_values(params);
   std::vector<const char *> param_values;
   std::vector<int> param_lengths;
-  text_values.reserve(params.size());
-  param_values.reserve(params.size());
-  param_lengths.reserve(params.size());
-  for (const auto &[name, value] : params.items()) {
-    (void)name;
-    if (value.is_null()) {
-      text_values.emplace_back();
+  param_values.reserve(text_values.size());
+  param_lengths.reserve(text_values.size());
+  for (const auto &value : text_values) {
+    if (value) {
+      param_values.push_back(value->c_str());
+      param_lengths.push_back(static_cast<int>(value->size()));
+    } else {
       param_values.push_back(nullptr);
       param_lengths.push_back(0);
-    } else if (value.is_boolean()) {
-      text_values.emplace_back(value.get<bool>() ? "t" : "f");
-      param_values.push_back(text_values.back().c_str());
-      param_lengths.push_back(static_cast<int>(text_values.back().size()));
-    } else if (value.is_number_integer()) {
-      text_values.push_back(std::to_string(value.get<int64_t>()));
-      param_values.push_back(text_values.back().c_str());
-      param_lengths.push_back(static_cast<int>(text_values.back().size()));
-    } else if (value.is_number_float()) {
-      text_values.push_back(std::to_string(value.get<double>()));
-      param_values.push_back(text_values.back().c_str());
-      param_lengths.push_back(static_cast<int>(text_values.back().size()));
-    } else if (value.is_string()) {
-      text_values.push_back(value.get<std::string>());
-      param_values.push_back(text_values.back().c_str());
-      param_lengths.push_back(static_cast<int>(text_values.back().size()));
     }
   }
 

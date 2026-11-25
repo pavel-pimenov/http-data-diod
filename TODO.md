@@ -20,12 +20,16 @@ healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены
 
 ## Текущий статус (25 — transaction groups по продуктам)
 
-Покрытие юнит-тестами: **594 test cases**,
-**3 177 assertions** (test_components 474/2294 + test_proxy_core 120/883). Замер через `scripts/run-coverage.sh`
+Покрытие юнит-тестами: **757 test cases**, **4 035 assertions**
+(test_components 631/3083 + test_proxy_core 126/952). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **Lines: 98.0%** (10156/10358), гейт 90% — пройден
-- **Functions: 94.6%** (1276/1349)
-- **Branches: 41.5%** (20508/49374) — слабое место
+- **production-файлы: 91.8% строк** (7132/7767) — пер-файловый гейт
+  `scripts/coverage-regression-check.py` против `docs/coverage-baseline.json`
+- **все файлы (с тестами): 94.6% строк**
+- **ветви: 41.3%** (32721/79323) — в это число входят throw-рёбра и макросы Catch2
+  в тестах; по production-файлам сырьё baseline — 53.2% (7596/14270), после round 212
+  `pg_value_utils.hpp` 122/176, `db_query_utils.hpp` 305/606,
+  `db_query_executor_postgres.cpp` 157/286, `db_query_handler.cpp` 83/146.
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,
@@ -35,8 +39,8 @@ healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены
 Раунд ветвей: parse_url/format_http_error/JsonUtils/HeaderUtils/Gateway
 routing + 12 кейсов валидации config.cpp. Вывод: каждая покрытая ветвь
 в production добавляет 30-80 непокрываемых тест-ветвей макросов Catch2
-(тест-файлы = 35290 из 42355 общего числа), поэтому общий % почти
-недвижим; честная цель — production-only ветви 56.7% (3852/6791).
+(тест-файлы = 65053 из 79323 общего числа), поэтому общий % почти
+недвижим; production-only ветви — 53.2% (7596/14270).
 config.cpp: ветви валидации почти насыщены (общий `if (cond)` в
 `ConfigChecker::check` — точка слияния), остальное — env-var ветки
 `get_env_*` (override/invalid/default).
