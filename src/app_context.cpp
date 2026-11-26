@@ -4,6 +4,7 @@
 #include "json_schema_validator.hpp"
 #include "logger.hpp"
 #include "metrics_manager.hpp"
+#include "readiness.hpp"
 #include "tracing_metrics.hpp"
 // The AppContext destructor is defined out of line: its unique_ptr members
 // (see app_context.hpp) need complete types here, which include-cleaner cannot

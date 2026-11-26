@@ -349,6 +349,12 @@
       "branches": 126,
       "branches_covered": 82
     },
+    "readiness.hpp": {
+      "lines": 14,
+      "covered": 14,
+      "branches": 14,
+      "branches_covered": 11
+    },
     "request_data_preparer.cpp": {
       "lines": 22,
       "covered": 21,
@@ -368,10 +374,10 @@
       "branches_covered": 0
     },
     "request_handler_admin.cpp": {
-      "lines": 65,
-      "covered": 53,
-      "branches": 192,
-      "branches_covered": 81
+      "lines": 60,
+      "covered": 52,
+      "branches": 182,
+      "branches_covered": 74
     },
     "request_handler_db_gateway.cpp": {
       "lines": 178,
@@ -461,7 +467,7 @@
       "lines": 211,
       "covered": 208,
       "branches": 393,
-      "branches_covered": 246
+      "branches_covered": 247
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -473,7 +479,7 @@
       "lines": 70,
       "covered": 70,
       "branches": 140,
-      "branches_covered": 89
+      "branches_covered": 86
     },
     "thread_pool_wrapper.hpp": {
       "lines": 28,

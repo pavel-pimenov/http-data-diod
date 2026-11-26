@@ -16,6 +16,7 @@
 #include "prometheus/client_metric.h"
 #include "prometheus/registry.h"
 #include "random_utils.hpp"
+#include "readiness.hpp"
 #include "test_metrics_support.hpp"
 #include "test_wait_support.hpp"
 #include "url_utils.hpp"
@@ -29,6 +30,7 @@
 #include <stdlib.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include <utility>
@@ -1552,4 +1554,84 @@ TEST_CASE("L2 routing: build_l2_url forwards the canonicalized path",
           "http://l2:8080/api/v1");
   REQUIRE(build_l2_url("http://l2:8080/api", "/api/../api/v1") ==
           "http://l2:8080/api/v1");
+}
+// ============================================================================
+// NATS readiness contract (pure helper behind /health/ready)
+// ============================================================================
+
+TEST_CASE("Readiness: a missing NATS client reports unavailable",
+          "[readiness]") {
+  const auto result = readiness::evaluate_nats({});
+  REQUIRE_FALSE(result.m_ready);
+  REQUIRE(result.m_reason ==
+          std::string_view(kNotReadyNatsUnavailable));
+  REQUIRE(result.m_error == "NATS connection not available");
+}
+
+TEST_CASE("Readiness: a disconnected client is unavailable on both paths",
+          "[readiness]") {
+  readiness::NatsProbe probe;
+  probe.m_has_client = true;
+  probe.m_connected = false;
+  // The ping is never attempted for a lost connection, so its result must not
+  // change the answer on either the default or the allow-connect path.
+  for (const bool allow_connect : {false, true}) {
+    probe.m_allow_connect = allow_connect;
+    probe.m_ping_ok = true;
+    const auto result = readiness::evaluate_nats(probe);
+    REQUIRE_FALSE(result.m_ready);
+    REQUIRE(result.m_reason ==
+            std::string_view(kNotReadyNatsUnavailable));
+    REQUIRE(result.m_error == "NATS connection not available");
+  }
+}
+
+TEST_CASE("Readiness: a connected client is ready without a ping",
+          "[readiness]") {
+  readiness::NatsProbe probe;
+  probe.m_has_client = true;
+  probe.m_connected = true;
+  probe.m_allow_connect = false;
+  const auto result = readiness::evaluate_nats(probe);
+  REQUIRE(result.m_ready);
+  REQUIRE(result);
+  REQUIRE(result.m_reason == nullptr);
+  REQUIRE(result.m_error.empty());
+}
+
+TEST_CASE("Readiness: the allow-connect path reports the ping result",
+          "[readiness]") {
+  readiness::NatsProbe probe;
+  probe.m_has_client = true;
+  probe.m_connected = true;
+  probe.m_allow_connect = true;
+
+  probe.m_ping_ok = true;
+  const auto ok = readiness::evaluate_nats(probe);
+  REQUIRE(ok.m_ready);
+  REQUIRE(ok.m_reason == nullptr);
+
+  probe.m_ping_ok = false;
+  const auto failed = readiness::evaluate_nats(probe);
+  REQUIRE_FALSE(failed.m_ready);
+  REQUIRE(failed.m_reason == std::string_view(kNotReadyPingFailed));
+  REQUIRE(failed.m_error == "NATS ping failed");
+}
+
+TEST_CASE("Readiness: a thrown check maps to health_check_failed",
+          "[readiness]") {
+  const auto result = readiness::nats_check_failed("probe exploded");
+  REQUIRE_FALSE(result.m_ready);
+  REQUIRE(result.m_reason ==
+          std::string_view(kNotReadyHealthCheckFailed));
+  REQUIRE(result.m_error == "NATS health check failed: probe exploded");
+  // Every reason the probe can emit must have a pre-created metric series.
+  for (const char *reason : {kNotReadyNatsUnavailable, kNotReadyPingFailed,
+                             kNotReadyHealthCheckFailed}) {
+    bool found = false;
+    for (const char *registered : g_not_ready_reasons) {
+      found = found || std::string_view(registered) == std::string_view(reason);
+    }
+    REQUIRE(found);
+  }
 }

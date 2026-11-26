@@ -11,7 +11,6 @@
 #include "url_utils.hpp"
 #include <cstddef>
 #include <cstdio>
-#include <format>
 #include <nlohmann/json.hpp>
 #if __has_include(<stacktrace>)
 #include <stacktrace>
@@ -82,55 +81,42 @@ void RequestHandler::handle_stacktrace(httplib::Response &res) {
 }
 
 void RequestHandler::handle_health_ready(httplib::Response &res) {
-  bool nats_healthy = false;
-  std::string error_msg;
-  const char *not_ready_reason = kNotReadyNatsUnavailable;
-
+  readiness::NatsProbe probe;
+  readiness::Result result;
   try {
-    if (m_ctx.m_nats_client) {
-      if (m_ctx.m_config.m_app.m_health_ready_allow_connect) {
+    probe.m_has_client = static_cast<bool>(m_ctx.m_nats_client);
+    if (probe.m_has_client) {
+      probe.m_allow_connect =
+          m_ctx.m_config.m_app.m_health_ready_allow_connect;
+      probe.m_connected = m_ctx.m_nats_client->is_connected();
+      if (probe.m_allow_connect && probe.m_connected) {
         // Opt-in legacy path: ping() may attempt a (potentially blocking)
         // reconnect when the connection was lost between the state read and
         // the ping — enables readiness to recover connectivity on its own.
-        if (m_ctx.m_nats_client->is_connected()) {
-          nats_healthy = (m_ctx.m_nats_client->ping() == "PONG");
-          if (!nats_healthy) {
-            error_msg = "NATS ping failed";
-            not_ready_reason = kNotReadyPingFailed;
-          }
-        }
-      } else {
-        // Default: never initiate a reconnect from the health endpoint.
-        // Only report the current connection state, so /health/ready answers
-        // fast for the load balancer even while NATS is down.
-        nats_healthy = m_ctx.m_nats_client->is_connected();
+        probe.m_ping_ok = (m_ctx.m_nats_client->ping() == "PONG");
       }
     }
-    // A missing or disconnected client reports the same readable message
-    // (the legacy allow-connect path with a lost connection also lands here
-    // because nats_healthy stays false and error_msg is still empty).
-    if (!nats_healthy && error_msg.empty()) {
-      error_msg = "NATS connection not available";
-    }
+    // Default path: never initiate a reconnect from the health endpoint. Only
+    // report the current connection state, so /health/ready answers fast for
+    // the load balancer even while NATS is down.
+    result = readiness::evaluate_nats(probe);
   } catch (const std::exception &e) {
-    error_msg = std::format("NATS health check failed: {}", e.what());
-    nats_healthy = false;
-    not_ready_reason = kNotReadyHealthCheckFailed;
+    result = readiness::nats_check_failed(e.what());
   }
 
   // The reason of a refusal is visible only in the body and the log, so it is
   // counted as well: the metric answers "how often and why is the proxy not
   // ready" without scraping the health endpoint.
-  if (!nats_healthy) {
+  if (!result.m_ready) {
     m_ctx.m_proxy.m_metrics->m_not_ready_total
-        .Add({{"reason", not_ready_reason}})
+        .Add({{"reason", result.m_reason}})
         .Increment();
   }
 
   write_nats_readiness(res, "l2-proxy",
                        m_ctx.m_proxy.m_metrics->m_nats_connected,
-                       m_ctx.m_proxy.m_metrics->m_health_ready, nats_healthy,
-                       error_msg);
+                       m_ctx.m_proxy.m_metrics->m_health_ready, result.m_ready,
+                       result.m_error);
 }
 
 void RequestHandler::handle_duplicates(httplib::Response &res) const {

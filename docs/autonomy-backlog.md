@@ -21,9 +21,13 @@ branch-хвосты (`sentry_client`, `trace_logger`, `tracing_helpers`, `stats_
    покрыты): вход — флаги ping/health/connected, выход — структура
    `{healthy, reason, error}`; обработчик только логирует и пишет ответ.
    Плюс кейсы на все комбинации в `test_proxy_core`/`test_components`.
-3. **215** — общий guard-ответ для «endpoint недоступен» (404 + JSON body)
-   из `request_handler_{admin,limits,pipeline}`: один inline-хелпер рядом с
-   `set_json_error_response` + тесты.
+3. **215** — `port_utils::parse_tcp_port`: строгий разбор порта (только цифры,
+   диапазон `net_limits::kMinTcpPort..kMaxTcpPort`, nullopt на мусор/переполнение).
+   Заменить небезопасный `std::stoi` в `parse_url` (`url_utils.hpp`) и в разборе
+   `SENTRY_DSN` (`crash_handler.hpp`, там исключение из `install()` и
+   `uint16_t`-wrap при порту > 65535). Тесты на границы 0/1/65535/65536,
+   пустую строку, знак, хвостовой мусор; проверить, что `parse_url` с
+   невалидным портом падает на схему по умолчанию.
 4. **216** — `db_gateway_routing`: добить ветви classify_method/parse_path
    (405/404/unknown action) юнит-кейсами; проверить, что новые кейсы ловят
    регрессии.

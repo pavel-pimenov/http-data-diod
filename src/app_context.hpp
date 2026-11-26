@@ -5,6 +5,7 @@
 #include "dynamic_labeled_family.hpp"
 #include "in_flight_tracker.hpp"
 #include "metrics_history.hpp"
+#include "readiness.hpp"
 #include "tracing_metrics.hpp"
 #include <array>
 #include <memory>
@@ -15,15 +16,6 @@
 #include <prometheus/registry.h>
 #include <string>
 #include <vector>
-
-// Reasons a service can report "not ready". The list is the single source of
-// truth: the AppContext pre-creates a series per reason, and the handlers use
-// the same constants so a metric label can never drift from the body text.
-inline constexpr const char *kNotReadyNatsUnavailable = "nats_unavailable";
-inline constexpr const char *kNotReadyPingFailed = "ping_failed";
-inline constexpr const char *kNotReadyHealthCheckFailed = "health_check_failed";
-inline constexpr std::array<const char *, 3> g_not_ready_reasons = {
-    kNotReadyNatsUnavailable, kNotReadyPingFailed, kNotReadyHealthCheckFailed};
 
 struct ProxyMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
