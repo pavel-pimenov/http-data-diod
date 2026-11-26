@@ -17,9 +17,13 @@
 #include <vector>
 
 // Reasons a service can report "not ready". The list is the single source of
-// truth: the AppContext pre-creates a series per reason.
+// truth: the AppContext pre-creates a series per reason, and the handlers use
+// the same constants so a metric label can never drift from the body text.
+inline constexpr const char *kNotReadyNatsUnavailable = "nats_unavailable";
+inline constexpr const char *kNotReadyPingFailed = "ping_failed";
+inline constexpr const char *kNotReadyHealthCheckFailed = "health_check_failed";
 inline constexpr std::array<const char *, 3> g_not_ready_reasons = {
-    "nats_unavailable", "ping_failed", "health_check_failed"};
+    kNotReadyNatsUnavailable, kNotReadyPingFailed, kNotReadyHealthCheckFailed};
 
 struct ProxyMetrics {
   // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -

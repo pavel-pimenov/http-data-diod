@@ -2399,6 +2399,22 @@ TEST_CASE("DuplicateDetector: dropped client counters are reported by reason",
   }
 }
 
+TEST_CASE("DuplicateDetector: eviction reason names match the metric labels",
+          "[duplicate-detector]") {
+  using Reason = DuplicateDetector::EvictionReason;
+  REQUIRE(DuplicateDetector::eviction_reason_name(Reason::BODY_TTL) ==
+          std::string("body_ttl"));
+  REQUIRE(DuplicateDetector::eviction_reason_name(Reason::BODY_CAP) ==
+          std::string("body_cap"));
+  REQUIRE(DuplicateDetector::eviction_reason_name(Reason::CLIENT_TTL) ==
+          std::string("client_ttl"));
+  REQUIRE(DuplicateDetector::eviction_reason_name(Reason::CLIENT_CAP) ==
+          std::string("client_cap"));
+  // Out-of-range enum values must not read past the name table.
+  REQUIRE(DuplicateDetector::eviction_reason_name(static_cast<Reason>(99)) ==
+          std::string("unknown"));
+}
+
 TEST_CASE("DuplicateDetector: per-client duplicate count increments",
           "[duplicate-detector]") {
   DuplicateDetector::Options options;

@@ -336,7 +336,7 @@ void run_worker(AppContext &app_ctx) {
       // The reason of a refusal is visible only in the body and the log, so it is
       // counted as well.
       app_ctx.m_worker.m_metrics->m_not_ready_total
-          .Add({{"reason", "nats_unavailable"}})
+          .Add({{"reason", kNotReadyNatsUnavailable}})
           .Increment();
     }
     write_nats_readiness(res, "l2-worker",

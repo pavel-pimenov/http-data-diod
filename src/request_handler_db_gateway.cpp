@@ -160,8 +160,7 @@ void RequestHandler::handle_db_gateway_list(
     return;
   }
   json names = db_gateway_routing::databases_list_json(m_ctx.m_config.m_db_query.m_databases);
-  res.status = http_status::kOk;
-  send_json_response(res, res.status, json{{"databases", names}});
+  send_json_response(res, http_status::kOk, json{{"databases", names}});
   record_db_request_metrics(m_ctx.m_proxy.m_metrics->m_db_requests_total, "",
                             "list", http_status::kOk);
 }
@@ -316,8 +315,7 @@ void RequestHandler::route_db_request(
   if (envelope->contains(DbQueryContract::kBody)) {
     response_body = (*envelope)[DbQueryContract::kBody];
   }
-  res.status = status;
-  send_json_response(res, res.status, response_body);
+  send_json_response(res, status, response_body);
 
   record_db_nats_duration(nats_end_us);
   record_db_metrics(status);

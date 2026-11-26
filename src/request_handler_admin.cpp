@@ -41,10 +41,9 @@ void RequestHandler::handle_crash_test(const httplib::Request &req,
   // behind ENABLE_CRASH_TEST_ENDPOINT (default off) so a public client can
   // not remotely SIGSEGV the proxy.
   if (!m_ctx.m_config.m_app.m_enable_crash_test_endpoint) {
-    res.status = http_status::kNotFound;
-    res.set_content(
-        R"json({"error": "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)"})json",
-        "application/json");
+    set_json_error_response(
+        res, http_status::kNotFound,
+        "crash test endpoint is disabled (ENABLE_CRASH_TEST_ENDPOINT=false)");
     return;
   }
   Logger::error("CRASH TEST: intentional SIGSEGV via /crash-test endpoint");
@@ -85,7 +84,7 @@ void RequestHandler::handle_stacktrace(httplib::Response &res) {
 void RequestHandler::handle_health_ready(httplib::Response &res) {
   bool nats_healthy = false;
   std::string error_msg;
-  const char *not_ready_reason = "nats_unavailable";
+  const char *not_ready_reason = kNotReadyNatsUnavailable;
 
   try {
     if (m_ctx.m_nats_client) {
@@ -97,7 +96,7 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
           nats_healthy = (m_ctx.m_nats_client->ping() == "PONG");
           if (!nats_healthy) {
             error_msg = "NATS ping failed";
-            not_ready_reason = "ping_failed";
+            not_ready_reason = kNotReadyPingFailed;
           }
         }
       } else {
@@ -116,7 +115,7 @@ void RequestHandler::handle_health_ready(httplib::Response &res) {
   } catch (const std::exception &e) {
     error_msg = std::format("NATS health check failed: {}", e.what());
     nats_healthy = false;
-    not_ready_reason = "health_check_failed";
+    not_ready_reason = kNotReadyHealthCheckFailed;
   }
 
   // The reason of a refusal is visible only in the body and the log, so it is
@@ -139,10 +138,8 @@ void RequestHandler::handle_duplicates(httplib::Response &res) const {
   // detector is absent (non-proxy mode) or disabled this endpoint answers 404
   // so callers can distinguish "not supported here" from "empty report".
   if (!m_ctx.m_proxy.m_duplicate_detector) {
-    res.status = http_status::kNotFound;
-    res.set_content(
-        R"({"error": "duplicate detection not available in this mode"})",
-        "application/json");
+    set_json_error_response(res, http_status::kNotFound,
+                            "duplicate detection not available in this mode");
     return;
   }
   res.status = http_status::kOk;
