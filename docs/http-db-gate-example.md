@@ -26,7 +26,7 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 | `postgres` | БД | `postgres:17-alpine`, демо-схема из `sql/postgres.sql`. Profile `databases` (`DB_POSTGRES_ENABLED=true`); при внешнем узле-БД работает `DB_POSTGRES_HOST` |
 | `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/oracle.sql`. Profile `databases`: `docker compose --profile databases up -d oracle` + `DB_ORACLE_ENABLED=true` |
 | `l2-proxy` | HTTP-вход | регистрирует БД из `DB_POSTGRES_*` / `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
-| `l2-worker` | Исполнитель | сборка по умолчанию `target=runtime` (libpq); для Oracle нужен `target=runtime-db` (OCI из XE-образа), держит пулы сессий, отвечает на `service.db.query` |
+| `l2-worker` | Исполнитель | Oracle OCI-клиент встроен в общий `runtime-base` (единый бинарник, режим через `MODE`), держит пулы сессий, отвечает на `service.db.query` |
 | `nats-server` | Транспорт | subject `service.db.query`, queue group `db_workers` |
 
 ## Переменные окружения (docker-compose.yml)
@@ -50,15 +50,16 @@ DB_ORACLE_ENABLED=true docker compose up -d l2-worker l2-proxy
 ## Oracle OCI client: откуда библиотеки в образе
 
 l2-worker ходит в Oracle через ODPI-C, которому нужны динамические библиотеки Oracle OCI
-(`libclntsh.so` и др.). В исходниках их нет и с сети они **не качаются**: сборка `runtime-db`
-извлекает их прямо из образа `gvenzl/oracle-xe:21.3.0-slim` (того же, что используется для
-сервиса `oracle`) средствами multi-stage `COPY --from`. Это работает в закрытой сети — не нужен
-ни `download.oracle.com`, ни отдельный Instant Client zip.
+(`libclntsh.so` и др.). В исходниках их нет и с сети они **не качаются**: сборка извлекает их
+прямо из образа `gvenzl/oracle-xe:21.3.0-slim` (того же, что используется для
+сервиса `oracle`) средствами multi-stage `COPY --from` и кладёт в общий `runtime-base`
+(единый бинарник — Oracle доступен всем режимам proxy/worker/server). Это работает в
+закрытой сети — не нужен ни `download.oracle.com`, ни отдельный Instant Client zip.
 
-### Что и откуда копируется (Dockerfile, stage `oracle-libs` → `runtime-db`)
+### Что и откуда копируется (Dockerfile, stage `oracle-libs` → `runtime-base`)
 
 Стадия `oracle-libs` = `FROM gvenzl/oracle-xe:21.3.0-slim`, но только как «хранилище файлов»
-(БД при сборке запускается). `runtime-db` копирует из `$ORACLE_HOME` = `/opt/oracle/product/21c/dbhomeXE`:
+(БД при сборке запускается). `runtime-base` копирует из `$ORACLE_HOME` = `/opt/oracle/product/21c/dbhomeXE`:
 
 | Компонент | Путь в XE-образе | Зачем |
 |---|---|---|
@@ -81,8 +82,11 @@ l2-worker ходит в Oracle через ODPI-C, которому нужны д
 
 ### Как встроить клиент в образ l2-worker
 
+Oracle-клиент уже встроен в общий `runtime-base`, отдельный таргет не нужен
+(`runtime-db` сохранён как алиас `runtime`):
+
 ```
-L2_WORKER_DOCKER_TARGET=runtime-db DB_ORACLE_ENABLED=true docker compose up -d --build l2-worker
+DB_ORACLE_ENABLED=true docker compose up -d --build l2-worker
 ```
 
 вместе с profile `databases`. По умолчанию сборка идёт с `target=runtime` и OCI-клиент **не**
@@ -93,10 +97,10 @@ L2_WORKER_DOCKER_TARGET=runtime-db DB_ORACLE_ENABLED=true docker compose up -d -
 ```
 docker compose logs l2-worker | grep -i "DB executor 'oracle'"   # ждать "pool ready"
 docker compose up -d --profile databases                          # если СУБД ещё не подняты
-curl http://localhost:8890/v1/sql/oracle/ping                    # {"status":"ok",...}
+curl http://localhost:29002/v1/sql/oracle/ping                    # {"status":"ok",...}
 ```
 
-## ld.so регистрация подробно (что делает runtime-db)
+## ld.so регистрация подробно (что делает runtime-base)
 
 ### Как ODPI-C вообще находит `libclntsh.so`
 
@@ -124,7 +128,7 @@ curl http://localhost:8890/v1/sql/oracle/ping                    # {"status":"ok
   - пишет бинарный кэш `/etc/ld.so.cache`, по которому `dlopen` находит библиотеку по имени без
     сканирования диска.
   В кэш попадает как минимум запись по **SONAME** (`libclntsh.so.21.1`). Более короткое
-  `libclntsh.so` — это symlink, который runtime-db создаёт в каталоге клиента; ODPI-C перебирает
+  `libclntsh.so` — это symlink, который runtime-base создаёт в каталоге клиента; ODPI-C перебирает
   имена
   по цепочке `libclntsh.so`, `.19.1`, ..., `.21.1`, поэтому даже если bare-имя не попадёт в кэш,
   финальное имя `.21.1` из списка в кэше есть — `dlopen` гарантированно находит клиент.
@@ -156,7 +160,7 @@ libaio.so.1             => /usr/lib/x86_64-linux-gnu/libaio.so.1
 `libclntsh.so.21.1` линкуется против SONAME **`libaio.so.1`**. На Ubuntu 26.04/24.04 (t64-переход)
 пакет `libaio1t64` кладёт **`libaio.so.1t64`**, а привычного `libaio.so.1` нет. Абсолютно необходимый
 мост — symlink `libaio.so.1 → libaio.so.1t64` (без него `dlopen` клиента упадёт с `libaio.so.1:
-cannot open shared object file`). В Dockerfile этот symlink создаёт `runtime-db`:
+cannot open shared object file`). В Dockerfile этот symlink создаёт `runtime-base`:
 `ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1`.
 
 ### Альтернатива без ld.so — `LD_LIBRARY_PATH`
@@ -182,11 +186,11 @@ environment:
 
 `docker compose` (re)create контейнера пересобирает его из образа, и все ручные изменения
 (`ld.so.conf.d`, симлинки, сам каталог `/opt/oracle`) теряются. Поэтому клиент кладётся в образ
-при сборке — stage `oracle-libs` (источник из XE) + `runtime-db` (компоновка) это делают по
+при сборке — stage `oracle-libs` (источник из XE) + `runtime-base` (компоновка) это делают по
 умолчанию. В закрытой сети достаточно, чтобы `gvenzl/oracle-xe:21.3.0-slim` был доступен
 локальному Docker (он используется и сервисом `oracle`); отдельного файлового контура OCI нет —
 весь контур собирается «из коробки». Если offline-хост вообще не умеет собирать образы, соберите
-`runtime-db` один раз на машине с Docker и разворачивайте через `docker save`/`docker load`.
+`runtime` один раз на машине с Docker и разворачивайте через `docker save`/`docker load`.
 
 ## Демо-данные
 
@@ -202,7 +206,7 @@ environment:
 ### 1. Список баз данных
 
 ```bash
-curl http://localhost:8890/v1/sql
+curl http://localhost:29002/v1/sql
 ```
 
 ```json
@@ -216,7 +220,7 @@ curl http://localhost:8890/v1/sql
 ### 2. Ping базы
 
 ```bash
-curl http://localhost:8890/v1/sql/oracle/ping
+curl http://localhost:29002/v1/sql/oracle/ping
 ```
 
 ```json
@@ -226,7 +230,7 @@ curl http://localhost:8890/v1/sql/oracle/ping
 ### 3. Простой SELECT
 
 ```bash
-curl -X POST http://localhost:8890/v1/sql/oracle/query \
+curl -X POST http://localhost:29002/v1/sql/oracle/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT id, message, created_at FROM app_user.demo_messages ORDER BY id"}'
 ```
@@ -253,7 +257,7 @@ curl -X POST http://localhost:8890/v1/sql/oracle/query \
 ### 4. Запрос с bind-переменной
 
 ```bash
-curl -X POST http://localhost:8890/v1/sql/oracle/query \
+curl -X POST http://localhost:29002/v1/sql/oracle/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT message FROM app_user.demo_messages WHERE id = :id", "params": {"id": 2}}'
 ```
@@ -273,7 +277,7 @@ curl -X POST http://localhost:8890/v1/sql/oracle/query \
 ### 4b. То же самое для PostgreSQL (включён по умолчанию)
 
 ```bash
-curl -X POST http://localhost:8890/v1/sql/postgres/query \
+curl -X POST http://localhost:29002/v1/sql/postgres/query \
   -H 'Content-Type: application/json' \
   -d '{"sql":"SELECT id, message FROM demo_messages ORDER BY id"}'
 ```

@@ -17,6 +17,9 @@ public:
   bool init() override;
   json execute_query(const std::string &sql, const json &params, int timeout_ms,
                      int max_rows, int &status_code) override;
+  int stream_query(const std::string &sql, const json &params, int timeout_ms,
+                   int max_rows, int &status_code, json &columns_out,
+                   RowCallback row_cb) override;
   bool ping(int timeout_ms) override;
 
 protected:

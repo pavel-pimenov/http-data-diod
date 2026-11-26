@@ -10,24 +10,19 @@
 #include <cstring>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <span>
 #include <string>
 #include <string_view>
-#if __has_include(<flat_set>)
-#include <flat_set>
-#endif
+#include <unordered_set>
 
 namespace header_utils {
-#if __has_include(<flat_set>) && defined(__cpp_lib_flat_set)
-using HeaderSet = std::flat_set<std::string>;
-#else
-using HeaderSet = std::set<std::string>;
-#endif
+// Header lookup sets are small and accessed on every request path; an
+// unordered_set (bucket-based) keeps the header include tree light vs the
+// standard library flat_* containers that pull in extra headers.
+using HeaderSet = std::unordered_set<std::string>;
 // Inline namespace-scope singletons: guaranteed to be a single object across
 // all translation units (C++17 inline variables), unlike function-local statics
 // inside implicitly-inline member functions.
-// flat_set for 4-10 elements: sorted vector, 0 allocations for find, cache-friendly
 inline const HeaderSet g_default_skip_headers = {
     "host", "content-length", "connection", "transfer-encoding"};
 inline const HeaderSet g_response_skip_headers = {

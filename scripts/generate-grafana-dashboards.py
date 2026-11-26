@@ -170,6 +170,9 @@ PROMETHEUS_UID = 'prometheus'
 # VictoriaMetrics доступно по имени контейнера (см. rebuild-and-run.sh).
 PROMETHEUS_URL = 'http://victoria-metrics:8428'
 
+# Grafana folder that holds all generated dashboards (not the root).
+GRAFANA_FOLDER_NAME = 'l2-http-diod'
+
 # Dashboard refresh intervals
 DEFAULT_REFRESH = '10s'
 
@@ -869,9 +872,9 @@ def create_dashboard_base(title: str, uid: str, tags: List[str]) -> Dict:
                             "type": "prometheus",
                             "uid": PROMETHEUS_UID
                         },
-                        "definition": "label_values(up, vm)",
+                        "definition": "up",
                         "refresh": 2,
-                        "regex": "",
+                        "regex": ".*vm=\"([^\"]+)\".*",
                         "sort": 1,
                         "multi": False,
                         "includeAll": False,
@@ -879,7 +882,7 @@ def create_dashboard_base(title: str, uid: str, tags: List[str]) -> Dict:
                         "hide": 0,
                         "options": [],
                         "query": {
-                            "query": "label_values(up, vm)",
+                            "query": "up",
                             "refId": "PrometheusVariableQueryEditor-VariableQuery"
                         }
                     }
@@ -1446,9 +1449,33 @@ class GrafanaAPI:
             logger.error(f"Failed to get dashboard {uid}: {e}")
             return None
 
+    def ensure_folder(self) -> int:
+        """Find or create the Grafana folder that holds all generated dashboards.
+
+        Returns the folder ID (0 = General/root if creation fails is NOT used —
+        a failure to resolve the folder aborts dashboard saving so dashboards
+        never silently land in the root).
+        """
+        try:
+            folders = self._request("get", f'{self.base_url}/api/folders').json()
+            for folder in folders:
+                if folder.get('title') == GRAFANA_FOLDER_NAME:
+                    logger.info(f"Folder '{GRAFANA_FOLDER_NAME}' already exists (id={folder.get('id')})")  # noqa: E501
+                    return int(folder.get('id'))
+            payload = {"title": GRAFANA_FOLDER_NAME}
+            resp = self._request("post", f'{self.base_url}/api/folders', json=payload)
+            folder = resp.json()
+            logger.info(f"Folder '{GRAFANA_FOLDER_NAME}' created (id={folder.get('id')})")
+            return int(folder.get('id'))
+        except Exception as e:
+            logger.error(f"Failed to ensure Grafana folder '{GRAFANA_FOLDER_NAME}': {e}")
+            raise
+
     def save_dashboard(self, dashboard: Dict) -> bool:
         try:
+            folder_id = self.ensure_folder()
             dashboard['overwrite'] = True
+            dashboard['folderId'] = folder_id
             resp = self._request("post", f'{self.base_url}/api/dashboards/db', json=dashboard)
             result = resp.json()
             logger.info(f"Dashboard saved: {result.get('uid')} - {result.get('url', '')}")
@@ -1711,8 +1738,14 @@ def correct_dashboard_panels(api: GrafanaAPI, dashboard_func, dashboard_uid: str
 
         print(f"{'='*60}\n")
 
-        # Determine if update is needed
-        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics) or (existing_exprs != new_exprs)  # noqa: E501
+        # Determine if update is needed (panels/metrics/exprs changed OR the
+        # dashboard sits in the wrong folder — e.g. root instead of
+        # GRAFANA_FOLDER_NAME).
+        existing_folder = existing.get('meta', {}).get('folderId')
+        target_folder = api.ensure_folder()
+        wrong_folder = existing_folder != target_folder
+
+        needs_update = (len(existing_panels) != len(new_panels)) or (existing_metrics != new_metrics) or (existing_exprs != new_exprs) or wrong_folder  # noqa: E501
 
         if needs_update:
             if api.save_dashboard(new_dashboard):
@@ -3264,6 +3297,92 @@ def create_server_dashboard() -> Dict:
     return dashboard
 
 
+def create_spider_dashboard() -> Dict:
+    """Create l2-db-spider dashboard covering spider-mode metrics"""
+    dashboard = create_dashboard_base(
+        title="L2 DB Spider",
+        uid="l2-db-spider",
+        tags=["l2-db-spider", "database", "poll"]
+    )
+
+    panels = dashboard["dashboard"]["panels"]
+    y = 0
+
+    # Row 1: Здоровье и опрос
+    panels.append(create_row_panel("Здоровье и опрос", 1, y))
+    y += 1
+
+    # Panel 2: Здоровье spider
+    panels.append(create_stat_panel(
+        title="Здоровье (poll)",
+        id=2,
+        x=0, y=y, w=6, h=8,
+        unit="short",
+        thresholds={
+            "mode": "absolute",
+            "steps": [
+                {"color": "red", "value": None},
+                {"color": "green", "value": 1}
+            ]
+        },
+        targets=[
+            {"expr": "l2_spider_healthy{vm=~\"${vm:regex}\"}", "legendFormat": "healthy", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 3: Циклы опроса
+    panels.append(create_timeseries_panel(
+        title="Циклы опроса",
+        id=3,
+        x=6, y=y, w=12, h=8,
+        unit="ops",
+        targets=[
+            {"expr": "sum by (outcome) (rate(l2_spider_polls_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 4: Последний успешный JSON
+    panels.append(create_stat_panel(
+        title="Последний успешный JSON",
+        id=4,
+        x=18, y=y, w=6, h=8,
+        unit="s",
+        targets=[
+            {"expr": "time() - l2_spider_last_success_timestamp{vm=~\"${vm:regex}\"}", "legendFormat": "возраст, с", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
+    # Row 2: Запросы и длительность
+    panels.append(create_row_panel("Запросы и длительность", 10, y))
+    y += 1
+
+    # Panel 12: Запросы по статусу (id 10 занята row-панелью "Запросы и длительность")
+    panels.append(create_timeseries_panel(
+        title="Запросы по статусу",
+        id=12,
+        x=0, y=y, w=12, h=8,
+        unit="ops",
+        targets=[
+            {"expr": "sum by (status) (rate(l2_spider_queries_total{vm=~\"${vm:regex}\"}[5m]))", "legendFormat": "{{status}}", "refId": "A"}  # noqa: E501
+        ]
+    ))
+
+    # Panel 11: Длительность последнего опроса
+    panels.append(create_timeseries_panel(
+        title="Длительность последнего опроса",
+        id=11,
+        x=12, y=y, w=12, h=8,
+        unit="s",
+        targets=[
+            {"expr": "l2_spider_last_poll_duration_seconds{vm=~\"${vm:regex}\"}", "legendFormat": "длительность", "refId": "A"}  # noqa: E501
+        ]
+    ))
+    y += 8
+
+    return dashboard
+
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -3320,6 +3439,43 @@ def _collect_dashboard_metrics(dashboard: Dict) -> Set[str]:
                 out.add(_normalize_metric(m))
     return out
 
+def _print_yaml_help():
+    """Вывести справку: как настроить grafana-dashboards-sync в docker-compose,
+    когда контейнер не нашёл Grafana. YAML подсвечивается ANSI-цветами:
+    ключи — голубой, значения — зелёный, комментарии — жёлтый."""
+    CYAN = "\033[36m"; GREEN = "\033[32m"; YELLOW = "\033[33m"
+    BOLD = "\033[1m"; RED = "\033[31m"; RESET = "\033[0m"
+
+    def key(s):
+        return f"{CYAN}{s}{RESET}"
+    def val(s):
+        return f"{GREEN}{s}{RESET}"
+    def com(s):
+        return f"{YELLOW}{s}{RESET}"
+
+    url_q = '"http://grafana-host:3000"'
+    user_q = '"admin"'
+    pass_q = '"admin"'
+    curl_cmd = '  curl http://grafana-host:3000/api/health'
+
+    print()
+    print(f"{BOLD}{RED}=== Grafana не найден — настройте sidecar в docker-compose ==={RESET}")
+    print(f"{com('# Контейнер grafana-dashboards-sync не смог подключиться к Grafana по GRAFANA_URL.')}")  # noqa: E501
+    print(f"{com('# Укажите доступную Grafana (может быть на другом хосте). Пример:')}")
+    print(f"{key('  grafana-dashboards-sync:')}")
+    print(f"{key('    image:')} {val('docker-registry.dp.nlmk.com/l2-dashboards-sync:latest')}")
+    print(f"{key('    restart:')} {val('on-failure')}")
+    print(f"{key('    environment:')}")
+    print(f"{key('      GRAFANA_URL:')} {val(url_q)}")
+    print(f"{key('      GRAFANA_USER:')} {val(user_q)}")
+    print(f"{key('      GRAFANA_PASSWORD:')} {val(pass_q)}")
+    print(f"{key('    networks:')}")
+    print(f"{key('      - l2_network')}")
+    print()
+    print(f"{com('# Проверка доступности Grafana:')}")
+    print(f"{val(curl_cmd)}")
+
+
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
@@ -3358,6 +3514,7 @@ Examples:
         (create_proxy_dashboard, 'l2-proxy'),
         (create_worker_dashboard, 'l2-worker'),
         (create_server_dashboard, 'l2-server'),
+        (create_spider_dashboard, 'l2-db-spider'),
         (create_slo_dashboard, 'l2-slo-tracking'),
         (create_nats_dashboard, 'nats-dashboard'),
         (create_nginx_dashboard, 'nginx-metrics')
@@ -3449,13 +3606,19 @@ Examples:
         api = GrafanaAPI(config['url'], user=config['user'], password=config['password'], **api_kwargs)  # noqa: E501
 
     if not api.test_connection():
-        logger.error("Cannot connect to Grafana. Exiting.")
+        logger.error("Cannot connect to Grafana at %s. Exiting.", config['url'])
+        _print_yaml_help()
         return 1
 
     # Datasource (VictoriaMetrics) provisioning через API — заменяет
     # grafana/provisioning/datasources. Дашборды ссылаются на UID 'prometheus'.
     # Приоритет URL: --datasource-url (CLI) > конфиг-файл > константа по умолчанию.
     api.create_datasource(args.datasource_url or config.get('prometheus_url') or PROMETHEUS_URL)
+
+    # Ensure the target folder exists (all dashboards live in GRAFANA_FOLDER_NAME,
+    # never the root). Creation runs before any dashboard work so it happens even
+    # when --correct-dashboards finds nothing to update.
+    api.ensure_folder()
 
     if args.discover_metrics:
         prometheus_url = (args.prometheus_url or config.get('prometheus_url')

@@ -64,7 +64,7 @@ git safe-commit "your commit message"
    - l2-proxy (port 8888, /health)
    - l2-worker (port 19091, /metrics)
    - l2-server (port 8088, /health)
-   - nginx (port 7777)
+   - nginx (port 29003)
    - jaeger (port 16686)
 
 3. **Message Consistency** - Sends a test message through the proxy and verifies it's received correctly

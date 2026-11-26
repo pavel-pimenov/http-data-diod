@@ -59,6 +59,7 @@ DASHBOARDS: List[Tuple[Any, str]] = [
     (gg.create_proxy_dashboard, 'l2-proxy'),
     (gg.create_worker_dashboard, 'l2-worker'),
     (gg.create_server_dashboard, 'l2-server'),
+    (gg.create_spider_dashboard, 'l2-db-spider'),
     (gg.create_slo_dashboard, 'l2-slo-tracking'),
     (gg.create_nats_dashboard, 'nats-dashboard'),
     (gg.create_nginx_dashboard, 'nginx-metrics'),

@@ -14,26 +14,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# shellcheck source=lib-common.sh
+. "$SCRIPT_DIR/lib-common.sh"
 
 # Check if containers are running
 check_containers() {
@@ -94,6 +76,19 @@ run_metrics_check() {
         return 1
     fi
     log_info "✓ Metric consistency check passed"
+    return 0
+}
+
+# Syntax-check the registry-report UI inline <script> with node (in the
+# registry-report-server container). A JS syntax error silently kills the whole
+# page (empty combo-box, disabled button), so it must be caught before commit.
+run_js_check() {
+    log_info "Running registry-report UI JavaScript syntax check..."
+    if ! ./scripts/check-registry-report-js.sh; then
+        log_error "registry-report UI JavaScript has a syntax error!"
+        return 1
+    fi
+    log_info "✓ registry-report UI JavaScript syntax passed"
     return 0
 }
 
@@ -197,6 +192,12 @@ main() {
     # DB gateway e2e, golden metrics and /metrics consistency)
     if ! run_metrics_check; then
         log_error "Pre-commit metric consistency check failed!"
+        exit 1
+    fi
+
+    # Run registry-report UI JavaScript syntax check (in the container)
+    if ! run_js_check; then
+        log_error "Pre-commit JS syntax check failed!"
         exit 1
     fi
 

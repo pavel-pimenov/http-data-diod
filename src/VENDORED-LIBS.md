@@ -8,13 +8,17 @@
 исходников: тесты, бенчмарки, examples, `CMakeLists.txt` и `BUILD.bazel`
 апстрима вендорению не подлежат.
 
-Сборка слинкована с системным пакетом `libfmt10` (spdlog-header-only + внешний fmt),
-остальные зависимости вендорятся либо берутся из apt (см. `Dockerfile`).
+fmt и spdlog вендорятся header-only (fmt 12.2.1 + spdlog 1.17.0); системные
+пакеты `libfmt10`/`libspdlog-dev` из apt больше не используются (там более
+старые версии). Остальные зависимости вендорятся либо берутся из apt
+(см. `Dockerfile`).
 
 | Библиотека | Версия | Источник | Комментарий |
 |---|---|---|---|
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | single-header `json/nlohmann/json.hpp` | пин `v3.12.0` (@ 55f9368); локальная правка `json.hpp`/`json_fwd.hpp`: NOLINT-комментарии + GCC C++20 modules workaround; пакет `nlohmann-json3-dev` убран из apt |
 | [prometheus-cpp](https://github.com/jupp0r/prometheus-cpp) | master @ 66b6159 | source tree `prometheus-cpp/` (core/push/util) | пин — коммит 66b6159 (ветка master, после v1.3.0: в `CMakeLists` уже `VERSION 1.3.0`); вендорено — apt-пакет 1.0.x без `Family::Remove/Has`; `core_export.h` генерируется апстримным CMake, в git-дереве его нет. Модуль `pull` (civetweb) не используется — заменён на собственный экспозер `/metrics` на cpp-httplib (round 181). |
+| [fmt](https://github.com/fmtlib/fmt) | 12.2.1 | headers `fmt/` + `LICENSE` | пин `12.2.1` (tar-архив); header-only (`FMT_HEADER_ONLY`), `src/format.cc`/`os.cc` не вендорятся и не компилируются — runtime-пакет `libfmt10` убран |
+| [spdlog](https://github.com/gabime/spdlog) | 1.17.0 | headers `spdlog/` + `LICENSE` | пин `1.17.0` (tar-архив); header-only (`spdlog::spdlog_header_only`) против вендорного fmt через `SPDLOG_FMT_EXTERNAL`, bundled fmt не используется; apt-пакет `libspdlog-dev` убран |
 | [nats.c (cnats)](https://github.com/nats-io/nats.c) | 3.15.0 | source tree `nats/` (src/) | пин `v3.15.0` (@ 23f51ca6); проект использует только классическое publish/subscribe без JetStream; локальная правка `CMakeLists.txt`: examples/test отключены опциями `NATS_BUILD_EXAMPLES`/`BUILD_TESTING` |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | 0.67.0 | `httplib/httplib.h` + `httplib.cc` | пин `v0.67.0` (@ 7800c3dc); пара заголовок+реализация собирается из single-header штатным `split.py` этого же тега; реализация не правится (сторонняя либа) |
 | [base64](https://github.com/tobiaslocker/base64) | master @ 8d96a2a | single-header `base64/base64.hpp` | репозиторий без тегов; пин — коммит ветки master (версии в коде нет) |
@@ -36,6 +40,11 @@ python3 scripts/update-vendored-libs.py --prune                  # в апгре
 ref явно переопределён через `--ref`; локальные правки (см. `PATCHED` в скрипте)
 при этом не перезаписываются без `--force`. Для cpp-httplib скрипт сам запускает
 `split.py` зафиксированного тега.
+
+`fmt` и `spdlog` в скрипт не включены (они переносятся из tar-архивов, а не из
+git-клона): апгрейд — вручную, распаковать архив нужной версии и скопировать
+только `include/` + `LICENSE` в `src/fmt/` и `src/spdlog/`. Header-only сборка
+не требует переноса `src/*.cc` (fmt) или компилируемых `src/*.cpp` (spdlog).
 
 ## Правила обновления
 

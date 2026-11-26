@@ -32,7 +32,6 @@ A stack that is not running at all is reported as a single actionable error
 """
 
 import argparse
-import importlib.util
 import pathlib
 import re
 import sys
@@ -40,103 +39,40 @@ import urllib.error
 import urllib.request
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC_DIR = REPO_ROOT / "src"
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import metrics_common
 GENERATOR_PATH = REPO_ROOT / "scripts" / "generate-grafana-dashboards.py"
 PERSES_PATH = REPO_ROOT / "scripts" / "generate-perses-dashboards.py"
 GOLDEN_PATH = REPO_ROOT / "scripts" / "metrics-golden-check.py"
 README_PATH = REPO_ROOT / "README.md"
 
-METRIC_LITERAL = r"(l2_[a-z0-9_]+)"
-# The registration calls come in two shapes: the direct
-# MetricsManager::create_* form and the MetricRegistrar short-hand
-# (reg_<registry>.<kind>("name", ...)) introduced for the metric structs.
-CREATE_CALL = re.compile(
-    r"(?:MetricsManager::create_\w+\(\s*[^,]+,\s*|reg_\w+\.\w+\(\s*)\""
-    + METRIC_LITERAL + r"\"", re.S)
-DYNAMIC_SERIES_MARK = re.compile(r"DynamicLabeledFamily<[^>]*>::Series>")
-HISTOGRAM_SUFFIXES = ("_bucket", "_count", "_sum")
+# Re-exported from metrics_common so scripts that load this module via
+# load_module (e.g. alerts-consistency-check.py) keep working unchanged.
+METRIC_LITERAL = metrics_common.METRIC_LITERAL
+CREATE_CALL = metrics_common.CREATE_CALL
+DYNAMIC_SERIES_MARK = metrics_common.DYNAMIC_SERIES_MARK
+HISTOGRAM_SUFFIXES = metrics_common.HISTOGRAM_SUFFIXES
+LAZY_PREFIXES = metrics_common.LAZY_PREFIXES
+SERVICE_ENDPOINTS = metrics_common.SERVICE_ENDPOINTS
+SHARED_PREFIXES = metrics_common.SHARED_PREFIXES
+SRC_DIR = metrics_common.SRC_DIR
 
-# Families that are registered but only appear in /metrics once the labels are
-# actually populated (per-client-id duplicate detectors, per-IP limiter counters
-# behind a disabled-by-default flag, DB Gateway request families). Kept in sync
-# with metrics-golden-check.py CONDITIONAL by the cross-source check itself.
-LAZY_PREFIXES = (
-    "l2_proxy_per_client_id_",
-    "l2_proxy_per_ip_",
-    "l2_proxy_db_",
-    "l2_worker_db_",
-)
-
-# /metrics endpoints published by docker-compose.yml for each role: the proxy
-# exposes 19090, the worker 19091, l2-server 19092. 19093 is the worker's
-# /health/ready port, not a metrics endpoint.
-SERVICE_ENDPOINTS = {
-    "proxy": ("http://localhost:19090/metrics", ("l2_proxy_", "l2_http_pool_",
-                                                 "l2_rate_limiter_",
-                                                 "l2_per_ip_rate_limiter_")),
-    "worker": ("http://localhost:19091/metrics", ("l2_worker_",)),
-    "server": ("http://localhost:19092/metrics", ("l2_server_",)),
-}
-
-# The l2_common registry (tracing + sentry queues) is merged into every service's
-# exposer, so these names legitimately appear on endpoints other than their
-# "own" service.
-SHARED_PREFIXES = ("l2_tracing_", "l2_worker_sentry_", "l2_common_")
+normalize = metrics_common.normalize
+collect_series_block = metrics_common.collect_series_block
+cpp_registered_metrics = metrics_common.cpp_registered_metrics
+parse_exposition = metrics_common.parse_exposition
+scrape_metrics = metrics_common.scrape_metrics
+compare = metrics_common.compare
+split_lazy = metrics_common.split_lazy
 
 
 class CheckFailure(Exception):
     pass
 
 
-def normalize(name: str) -> str:
-    for suffix in HISTOGRAM_SUFFIXES:
-        if name.endswith(suffix):
-            return name[: -len(suffix)]
-    return name
-
-
 def load_module(path: pathlib.Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise CheckFailure(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def collect_series_block(text: str, start: int, window: int = 4000) -> str:
-    """Return the brace-balanced block that starts at/after `start`."""
-    begin = text.find("{", start)
-    if begin < 0:
-        return ""
-    depth = 0
-    for idx in range(begin, min(len(text), begin + window)):
-        char = text[idx]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[begin:idx + 1]
-    return ""
-
-
-def cpp_registered_metrics(src_dir: pathlib.Path = None) -> tuple:
-    """Metric names registered in C++ plus every l2_ literal found (the latter
-    exposes non-registration literals such as Sentry fingerprints)."""
-    src = src_dir if src_dir is not None else SRC_DIR
-    registered = set()
-    literals = set()
-    for path in sorted(src.glob("*.cpp")) + sorted(src.glob("*.hpp")):
-        if path.name.startswith("test_"):
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        literals |= set(re.findall(r"\"" + METRIC_LITERAL + r"\"", text))
-        registered |= set(CREATE_CALL.findall(text))
-        for match in DYNAMIC_SERIES_MARK.finditer(text):
-            block = collect_series_block(text, match.end())
-            registered |= set(re.findall(r"\"" + METRIC_LITERAL + r"\"", block))
-    return registered, literals
+    return metrics_common.load_module(path, name, failure_cls=CheckFailure)
 
 
 def dashboard_metrics(generator) -> set:

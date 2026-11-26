@@ -8,7 +8,7 @@
 set -eu
 
 if [ "$(id -u)" = "0" ]; then
-  chown -R app:app /root /memory-logs /profiles /crash-dumps 2>/dev/null || true
+  chown -R app:app /root /memory-logs /profiles /crash-dumps /spider 2>/dev/null || true
   exec setpriv --reuid 10001 --regid 10001 --clear-groups "$@"
 fi
 

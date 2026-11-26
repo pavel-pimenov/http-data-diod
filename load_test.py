@@ -7,7 +7,7 @@ and measures latency, throughput, and error rates.
 
 Usage:
   python3 load_test.py --requests 1000 --concurrent 100
-  python3 load_test.py --requests 5000 --concurrent 200 --url http://localhost:7777
+  python3 load_test.py --requests 5000 --concurrent 200 --url http://localhost:29003
 """
 
 import asyncio
@@ -265,8 +265,8 @@ async def main():
     parser.add_argument(
         "--url",
         type=str,
-        default="http://localhost:7777",
-        help="Target URL (default: http://localhost:7777 via nginx)",
+        default="http://localhost:29003",
+        help="Target URL (default: http://localhost:29003 via nginx)",
     )
     parser.add_argument(
         "--warmup", type=int, default=50, help="Warmup requests (default: 50)"

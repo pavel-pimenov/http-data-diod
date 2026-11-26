@@ -553,6 +553,234 @@ json OracleQueryExecutor::execute_query(const std::string &sql,
   return build_query_response(columns_json, rows, start_ms);
 }
 
+int OracleQueryExecutor::stream_query(const std::string &sql,
+                                      const json &params, int timeout_ms,
+                                      int max_rows, int &status_code,
+                                      json &columns_out, RowCallback row_cb) {
+  status_code = 200;
+  int row_count = 0;
+  if (!m_init.m_ready.load(std::memory_order_acquire)) {
+    Logger::warn("DB executor '{}': pool not ready yet, rejecting query",
+                 m_impl->m_db.m_name);
+    status_code = 503;
+    return 0;
+  }
+  auto maybe_conn = m_impl->acquire_conn(timeout_ms);
+  if (!maybe_conn) {
+    status_code = 503;
+    return 0;
+  }
+  dpiConn *conn = *maybe_conn;
+  const ConnGuard conn_guard{this, conn};
+
+  dpiStmt *stmt_raw = nullptr;
+  if (dpiConn_prepareStmt(conn, 0, sql.data(),
+                          static_cast<uint32_t>(sql.size()), nullptr, 0,
+                          &stmt_raw) < 0) {
+    status_code = 422;
+    return 0;
+  }
+  const StmtGuard stmt_guard{stmt_raw};
+
+  for (const auto &[name, value] : params.items()) {
+    dpiData data{};
+    std::string str_value;
+    dpiNativeTypeNum native = DPI_NATIVE_TYPE_INT64;
+    if (value.is_null()) {
+      data.isNull = 1;
+      native = DPI_NATIVE_TYPE_NULL;
+    } else if (value.is_boolean()) {
+      data.value.asInt64 = value.get<bool>() ? 1 : 0;
+    } else if (value.is_number_integer()) {
+      data.value.asInt64 = value.get<int64_t>();
+    } else if (value.is_number_float()) {
+      data.value.asDouble = value.get<double>();
+      native = DPI_NATIVE_TYPE_DOUBLE;
+    } else if (value.is_string()) {
+      str_value = value.get<std::string>();
+      data.value.asBytes.ptr = str_value.data();
+      data.value.asBytes.length = static_cast<uint32_t>(str_value.size());
+      native = DPI_NATIVE_TYPE_BYTES;
+    }
+    std::string bind_name = name;
+    if (!bind_name.empty() && bind_name.front() == ':') {
+      bind_name.erase(0, 1);
+    }
+    if (dpiStmt_bindValueByName(stmt_raw, bind_name.data(),
+                                static_cast<uint32_t>(bind_name.size()),
+                                native, &data) < 0) {
+      status_code = 422;
+      return 0;
+    }
+  }
+
+  uint32_t num_query_columns = 0;
+  if (dpiStmt_execute(stmt_raw, DPI_MODE_EXEC_DEFAULT, &num_query_columns) <
+      0) {
+    status_code = 422;
+    return 0;
+  }
+  if (num_query_columns == 0) {
+    status_code = 422;
+    return 0;
+  }
+
+  std::vector<ColumnPlan> columns;
+  columns.reserve(num_query_columns);
+  std::vector<std::pair<std::string, std::string>> name_type;
+  name_type.reserve(num_query_columns);
+  for (uint32_t pos = 1; pos <= num_query_columns; ++pos) {
+    dpiQueryInfo info{};
+    if (dpiStmt_getQueryInfo(stmt_raw, pos, &info) < 0) {
+      status_code = 422;
+      return 0;
+    }
+    ColumnPlan column;
+    column.m_name.assign(info.name, info.nameLength);
+    column.m_oracle_type = info.typeInfo.oracleTypeNum;
+    column.m_is_blob = info.typeInfo.oracleTypeNum == DPI_ORACLE_TYPE_BLOB ||
+                       info.typeInfo.oracleTypeNum == DPI_ORACLE_TYPE_BFILE;
+    switch (info.typeInfo.oracleTypeNum) {
+    case DPI_ORACLE_TYPE_NATIVE_FLOAT:
+    case DPI_ORACLE_TYPE_NATIVE_DOUBLE:
+      column.m_native_type = DPI_NATIVE_TYPE_DOUBLE;
+      break;
+    case DPI_ORACLE_TYPE_NATIVE_INT:
+    case DPI_ORACLE_TYPE_BOOLEAN:
+      column.m_native_type = DPI_NATIVE_TYPE_INT64;
+      break;
+    case DPI_ORACLE_TYPE_NATIVE_UINT:
+      column.m_native_type = DPI_NATIVE_TYPE_UINT64;
+      break;
+    case DPI_ORACLE_TYPE_DATE:
+    case DPI_ORACLE_TYPE_TIMESTAMP:
+    case DPI_ORACLE_TYPE_TIMESTAMP_TZ:
+    case DPI_ORACLE_TYPE_TIMESTAMP_LTZ:
+      column.m_native_type = DPI_NATIVE_TYPE_TIMESTAMP;
+      break;
+    case DPI_ORACLE_TYPE_INTERVAL_DS:
+      column.m_native_type = DPI_NATIVE_TYPE_INTERVAL_DS;
+      break;
+    case DPI_ORACLE_TYPE_INTERVAL_YM:
+      column.m_native_type = DPI_NATIVE_TYPE_INTERVAL_YM;
+      break;
+    case DPI_ORACLE_TYPE_CLOB:
+    case DPI_ORACLE_TYPE_NCLOB:
+    case DPI_ORACLE_TYPE_BLOB:
+    case DPI_ORACLE_TYPE_BFILE:
+      column.m_native_type = DPI_NATIVE_TYPE_LOB;
+      break;
+    default:
+      column.m_native_type = DPI_NATIVE_TYPE_BYTES;
+      break;
+    }
+    if (column.m_native_type == DPI_NATIVE_TYPE_BYTES) {
+      column.m_buffer_size = info.typeInfo.clientSizeInBytes;
+      if (column.m_buffer_size == 0) {
+        column.m_buffer_size = 1024;
+      }
+      column.m_buffer_size =
+          std::min(column.m_buffer_size, g_max_inline_bytes);
+    }
+    if (dpiStmt_defineValue(stmt_raw, pos, column.m_oracle_type,
+                            column.m_native_type, column.m_buffer_size, 1,
+                            nullptr) < 0) {
+      status_code = 422;
+      return 0;
+    }
+    columns.push_back(std::move(column));
+    name_type.emplace_back(columns.back().m_name,
+                           oracle_type_name(columns.back().m_oracle_type));
+  }
+  columns_out = make_db_columns_json(name_type);
+
+  int found = 0;
+  uint32_t buffer_row_index = 0;
+  while (true) {
+    if (dpiStmt_fetch(stmt_raw, &found, &buffer_row_index) < 0) {
+      status_code = 422;
+      return 0;
+    }
+    if (!found) {
+      break;
+    }
+    json row = json::array();
+    for (uint32_t pos = 1; pos <= num_query_columns; ++pos) {
+      dpiNativeTypeNum native_type = DPI_NATIVE_TYPE_NULL;
+      dpiData *data = nullptr;
+      if (dpiStmt_getQueryValue(stmt_raw, pos, &native_type, &data) < 0 ||
+          !data) {
+        status_code = 422;
+        return 0;
+      }
+      const auto &column = columns[pos - 1];
+      json value = nullptr;
+      if (!data->isNull) {
+        switch (column.m_native_type) {
+        case DPI_NATIVE_TYPE_BYTES:
+          value = std::string(data->value.asBytes.ptr,
+                              data->value.asBytes.length);
+          break;
+        case DPI_NATIVE_TYPE_INT64:
+          value = data->value.asInt64;
+          break;
+        case DPI_NATIVE_TYPE_UINT64:
+          value = data->value.asUint64;
+          break;
+        case DPI_NATIVE_TYPE_DOUBLE:
+          value = data->value.asDouble;
+          break;
+        case DPI_NATIVE_TYPE_TIMESTAMP:
+          value = format_timestamp(data->value.asTimestamp);
+          break;
+        case DPI_NATIVE_TYPE_INTERVAL_DS:
+          value = format_interval_ds(data->value.asIntervalDS);
+          break;
+        case DPI_NATIVE_TYPE_INTERVAL_YM:
+          value = format_interval_ym(data->value.asIntervalYM);
+          break;
+        case DPI_NATIVE_TYPE_LOB: {
+          dpiLob *lob = data->value.asLOB;
+          std::string buffer;
+          if (lob) {
+            uint64_t lob_size = 0;
+            if (dpiLob_getSize(lob, &lob_size) == 0 && lob_size > 0) {
+              const uint64_t amount =
+                  std::min<uint64_t>(lob_size, g_max_lob_bytes);
+              buffer.resize(static_cast<size_t>(amount));
+              uint64_t read_len = 0;
+              if (dpiLob_readBytes(lob, 1, amount, buffer.data(), &read_len) <
+                  0) {
+                Logger::warn("DB executor '{}': LOB read failed: {}",
+                             m_impl->m_db.m_name, m_impl->describe_error());
+                buffer.clear();
+              } else {
+                buffer.resize(read_len);
+              }
+            }
+          }
+          value = column.m_is_blob ? base64::to_base64(buffer) : buffer;
+          break;
+        }
+        default:
+          value = nullptr;
+          break;
+        }
+      }
+      row.push_back(std::move(value));
+    }
+    // max_rows <= 0 means unlimited.
+    if (max_rows > 0 && row_count >= max_rows) {
+      break;
+    }
+    if (!row_cb(std::move(row))) {
+      break;
+    }
+    ++row_count;
+  }
+  return row_count;
+}
+
 bool OracleQueryExecutor::ping(int timeout_ms) {
   if (!m_init.m_ready.load(std::memory_order_acquire)) {
     Logger::warn("DB executor '{}': pool not ready yet, ping failed",

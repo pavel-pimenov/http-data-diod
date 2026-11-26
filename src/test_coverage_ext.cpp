@@ -88,6 +88,10 @@ public:
                      int &) override {
     return json::object();
   }
+  int stream_query(const std::string &, const json &, int, int, int &,
+                   json &, RowCallback) override {
+    return 0;
+  }
   bool ping(int) override { return true; }
   void set_error_metrics(prometheus::Family<prometheus::Counter> *) override {}
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *) override {}
@@ -1195,6 +1199,10 @@ public:
   json execute_query(const std::string &, const json &, int, int,
                      int &) override {
     return json::object();
+  }
+  int stream_query(const std::string &, const json &, int, int, int &,
+                   json &, RowCallback) override {
+    return 0;
   }
   bool ping(int) override { return true; }
   void set_error_metrics(prometheus::Family<prometheus::Counter> *errors) override {

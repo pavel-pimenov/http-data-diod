@@ -3592,7 +3592,7 @@ TEST_CASE("Request data: non-JSON body is base64-encoded and flagged binary",
           "[request-data]") {
   httplib::Request req;
   req.remote_addr = "9.9.9.9";
-  // zlib stream with bytes that are not valid UTF-8 (real FlylinkDC++ body).
+  // zlib stream with bytes that are not valid UTF-8 (real binary upstream body).
   const std::string raw_body("\x78\xDA\x00\x01\xff\xfe", 6);
 
   const auto data =
@@ -3691,6 +3691,17 @@ TEST_CASE("[db-query-utils] is_read_only_sql accepts SELECT/WITH only",
   REQUIRE(!is_read_only_sql("/* not read */ DELETE FROM t"));
   REQUIRE(!is_read_only_sql(""));
   REQUIRE(!is_read_only_sql("   "));
+  // Multi-statement smuggling: a SELECT with a trailing ';' then DDL/DML.
+  REQUIRE(!is_read_only_sql("SELECT * FROM t; DROP TABLE t"));
+  REQUIRE(!is_read_only_sql("SELECT 1; INSERT INTO t VALUES (1)"));
+  REQUIRE(!is_read_only_sql("WITH x AS (SELECT 1) SELECT * FROM x; UPDATE t SET a=1"));
+  REQUIRE(!is_read_only_sql("SELECT 1; SELECT 2"));
+  // A single trailing terminator is still a read-only statement.
+  REQUIRE(is_read_only_sql("SELECT * FROM t;"));
+  REQUIRE(is_read_only_sql("SELECT 1;  "));
+  // ';' inside a string literal is data, not a terminator.
+  REQUIRE(is_read_only_sql("SELECT 'a;b' FROM t"));
+  REQUIRE(is_read_only_sql("SELECT \";\" FROM t"));
 }
 
 TEST_CASE("[db-query-utils] parse_db_query_request validates contract",

@@ -452,3 +452,18 @@ groups:
           summary: "Сэмплер истории метрик падает"
           description: "Раундов сбора истории с исключением — {{ $value }}/с. Спарклайны на /stats устаревают, хотя процесс жив (с round 190 падение сэмплера не фатально, поэтому его видно только по метрике)."
           runbook: "README.md → «Алерты (оповещения)»: ищите в логе сервиса 'Metrics history sampling failed' — там текст исключения из registry->Collect()."
+
+      # l2-db-spider: последний цикл опроса баз закончился ошибкой (запросы не
+      # выполнились или JSON не записался). Метрика экспортируется только когда
+      # сервис запущен (DB_SPIDER_ENABLED=true), поэтому на стеке без spider
+      # алерт молчит.
+      - alert: L2DbSpiderUnhealthy
+        expr: min(l2_spider_healthy) < 1
+        for: 15m
+        labels:
+          severity: warning
+          service: spider
+        annotations:
+          summary: "l2-db-spider не может опросить базы"
+          description: "Последний цикл опроса баз закончился ошибкой ({{ $value }}). Запросы не выполнились или JSON не записался — словарь/динамика роста устаревают."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_spider_queries_total{status=\"error\"} по db/query — это SQL-ошибка или недоступность БД; проверьте логи l2-db-spider."

@@ -125,6 +125,48 @@ public:
     int m_default_max_rows{1000};
   };
 
+  // l2-db-spider: опрос баз данных словарными SELECT-запросами и выгрузка
+  // результата в JSON-файл на диске. Поддерживает произвольное число баз
+  // (Oracle/PostgreSQL), каждая со своим списком запросов. Конфигурация
+  // задаётся JSON-массивом в DB_SPIDER_DATABASES.
+  struct Spider {
+    // Одна база, опрашиваемая l2-db-spider. m_queries — список произвольных
+    // SELECT-запросов (например, размер shared pool, размер таблиц на диске);
+    // результат каждого запроса пишется в JSON-файл.
+    struct DbQuery {
+      std::string m_name;      // имя запроса (ключ в JSON-выгрузке)
+      std::string m_sql;       // SELECT-запрос
+      int m_timeout_ms{5000};  // таймаут выполнения
+      int m_max_rows{100000};  // лимит строк
+    };
+
+    // База данных: коннект + список запросов.
+    struct Db {
+      std::string m_name;    // имя базы
+      std::string m_driver;  // "oracle" | "postgres"
+      std::string m_host;
+      int m_port = 0;
+      std::string m_service;    // Oracle service
+      std::string m_database;   // PostgreSQL dbname
+      std::string m_user;
+      std::string m_password;
+      int m_pool_min = 1;
+      int m_pool_max = 2;
+      std::vector<DbQuery> m_queries;
+    };
+
+    // Базы для опроса.
+    std::vector<Db> m_databases;
+    // Период опроса (секунды). 0 = опрос выключен (только разовый проход).
+    int m_interval_seconds = 300;
+    // Каталог для JSON-выгрузок.
+    std::string m_output_dir{"/spider"};
+    // Включён ли режим (DB_SPIDER_ENABLED).
+    bool m_enabled = false;
+    // Путь к INI-файлу конфигурации (DB_SPIDER_CONFIG_FILE).
+    std::string m_config_file{"/spider/spider-config.ini"};
+  };
+
   // Request rate limiting: per-IP token buckets (one RateLimiter per client
   // IP, LRU-bounded) plus a global token bucket shared across all clients.
   struct RateLimit {
@@ -232,6 +274,7 @@ public:
   Tracing m_tracing;
   Sentry m_sentry;
   DbQuery m_db_query;
+  Spider m_spider;
   RateLimit m_rate_limit;
   Dedup m_dedup;
   Duplicate m_duplicate;
@@ -267,6 +310,7 @@ private:
   void load_feature_config();
   void load_nats_config();
   void load_db_query_config();
+  void load_spider_config();
 
   // True only for modes that talk to NATS (proxy/worker); l2-server does not.
   [[nodiscard]] bool uses_nats() const {

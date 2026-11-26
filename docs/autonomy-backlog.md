@@ -12,6 +12,11 @@ branch-хвосты (`sentry_client`, `trace_logger`, `tracing_helpers`, `stats_
 
 ## Открытые
 
+0. **266 — закрыт.** Слияние архива другой ветки (round 265) с текущей
+   (round 217) через 3-way merge от общего предка `3b9bdba`; обе линии
+   сохранены, 7 конфликтов разрешены, инфраструктурные адаптации
+   (`PIP_INDEX_URL`, `nats-notls.conf`, exec-биты, lazy-метрика spider,
+   gcovr-фильтры fmt/spdlog) описаны в `docs/history/round-266-*.md`.
 1. **213 — закрыт.** Унификация JSON-ошибок (`set_json_error_response`),
    убрана двойная установка `status` в DB-gateway, константы `kNotReady*`
    для причин not-ready, тест `DuplicateDetector::eviction_reason_name`.

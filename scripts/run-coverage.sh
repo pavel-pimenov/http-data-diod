@@ -19,7 +19,7 @@ IMAGE_TAG="http-data-diod:coverage"
 
 echo "=== Building the coverage image (gcovr) ==="
 docker build --target coverage -t "$IMAGE_TAG" \
-    -f src/Dockerfile src
+    -f src/Dockerfile.test src
 
 CID="$(docker create "$IMAGE_TAG")"
 trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
@@ -39,4 +39,4 @@ echo ""
 echo "=== Coverage report: $OUT_DIR/coverage.html ==="
 echo "Open in a browser (line/branch coverage per source file)."
 echo "Note: the coverage image build FAILS (non-zero exit) if total line"
-echo "coverage drops below the gate in src/Dockerfile (--fail-under-line)."
+echo "coverage drops below the gate in src/Dockerfile.test (--fail-under-line)."

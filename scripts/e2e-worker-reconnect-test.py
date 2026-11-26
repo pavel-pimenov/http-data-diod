@@ -22,17 +22,19 @@ Exit code 0 = all phases passed, 1 = any failure.
 import argparse
 import asyncio
 import json
-import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 import aiohttp
 
-PROXY_URL = "http://localhost:8890"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import e2e_utils
+
+PROXY_URL = "http://localhost:29002"
 WORKER_HEALTH = "http://localhost:19093/health/ready"
-NATS_HOST = "localhost"
 NATS_PORT = 4222
 NATS_SUBJECT = "service.proxy"  # must match NATS_SUBJECT in docker-compose
 
@@ -41,34 +43,10 @@ WORKER_CONTAINER = "l2-worker"
 
 PHASES = ["outage", "recovery", "dedup"]
 
-
-def nats_url() -> str:
-    """Authorized NATS URL; honors native nats:// scheme override."""
-    env_url = os.environ.get("E2E_NATS_URL")
-    if env_url:
-        return env_url
-    token = os.environ.get("E2E_NATS_TOKEN")
-    if not token:
-        env_path = Path(__file__).parent.parent / ".env"
-        if env_path.exists():
-            for line in env_path.read_text().splitlines():
-                if line.startswith("NATS_TOKEN="):
-                    token = line.split("=", 1)[1].strip()
-                    break
-    if not token or token in ("", "-"):
-        # No auth configured (fresh clone / CI): plain URL.
-        return f"nats://localhost:{NATS_PORT}"
-    return f"nats://{token}@localhost:{NATS_PORT}"
-
-
-def log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
-
-
-def docker(args: list[str], timeout: float = 40.0) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["docker", *args], capture_output=True, text=True, timeout=timeout
-    )
+log = e2e_utils.log
+docker = e2e_utils.docker
+wait_for = e2e_utils.wait_for
+nats_url = lambda: e2e_utils.nats_url(NATS_PORT)
 
 
 def make_echo_payload(client_id: str, value: int) -> dict:
@@ -98,17 +76,6 @@ async def proxy_post(payload: dict, session: aiohttp.ClientSession, timeout: flo
         # Offline backend / hang: report as a -1 (client-side timeout) so callers
         # can treat "no successful response" uniformly.
         return -1, ""
-
-
-async def wait_for(predicate, timeout_s: float, step_s: float = 0.5, desc: str = ""):
-    deadline = time.monotonic() + timeout_s
-    last = None
-    while time.monotonic() < deadline:
-        last = await predicate()
-        if last:
-            return last
-        await asyncio.sleep(step_s)
-    raise TimeoutError(f"timed out waiting for {desc} (last result: {last!r})")
 
 
 async def worker_health_ok(session: aiohttp.ClientSession) -> int:

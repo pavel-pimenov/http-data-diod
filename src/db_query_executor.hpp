@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "nlohmann/json.hpp"
+#include <functional>
 #include <memory>
 #include <prometheus/counter.h>
 #include <prometheus/family.h>
@@ -42,6 +43,20 @@ public:
   // ErrorResponse object.
   virtual json execute_query(const std::string &sql, const json &params,
                              int timeout_ms, int max_rows, int &status_code) = 0;
+
+  // Row callback invoked by stream_query() once per fetched row (a json array
+  // of column values). Returns false to stop fetching early.
+  using RowCallback = std::function<bool(json &&)>;
+
+  // Streams the result of a read-only query row-by-row, invoking `row_cb` for
+  // every row without materialising the whole result set in memory. Used by
+  // l2-db-spider to write JSON files incrementally (avoids holding hundreds of
+  // MB of rows at once). On success status_code = 200 and `columns_out` is
+  // filled with the column descriptors; on failure status_code carries the
+  // mapped HTTP status. Returns the row count fetched.
+  virtual int stream_query(const std::string &sql, const json &params,
+                           int timeout_ms, int max_rows, int &status_code,
+                           json &columns_out, RowCallback row_cb) = 0;
 
   // Lightweight connectivity check ("SELECT 1"). Returns true when a
   // connection could be acquired and the probe succeeded.

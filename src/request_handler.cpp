@@ -78,7 +78,7 @@ void RequestHandler::handle_post(const httplib::Request &req,
     return;
   }
 
-  // Real FlylinkDC++ test-port traffic carries zlib-compressed bodies; with
+  // Real binary upstream traffic carries zlib-compressed bodies; with
   // raw pass-through enabled they are forwarded verbatim (base64 over NATS)
   // instead of being rejected as invalid JSON.
   if (!body.empty() && !nlohmann::json::accept(body) &&

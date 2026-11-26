@@ -4,11 +4,13 @@
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <format>
+#include <fstream>
 #include <nats/status.h>
 #include <memory>
 #include <mutex>
@@ -35,6 +37,54 @@ constexpr std::size_t kNatsUrlMaxLength = 256;
 std::string nats_status_text(natsStatus status) {
   const char *text = natsStatus_GetText(status);
   return text ? text : "unknown NATS error";
+}
+
+// Builds a configuration hint when a NATS connect fails, so the operator sees
+// which likely-missing setting to fix. NATS servers that advertise
+// tls_required/auth_required in their INFO (e.g. a production broker) silently
+// stall a client that never negotiates TLS or sends credentials, surfacing as
+// a connect Timeout rather than a clear error. If TLS is disabled on the
+// client, or no auth is configured, append an actionable hint to the error.
+std::string connect_config_hint(const NatsConfig &config) {
+  std::string hint;
+  if (!config.m_enable_tls) {
+    hint += " the server may require TLS (set NATS_ENABLE_TLS=true and point "
+            "NATS_TLS_CA_CERT_FILE at the CA)";
+  }
+  if (config.m_token.empty() && config.m_username.empty() &&
+      config.m_password.empty() && config.m_credentials_file.empty()) {
+    if (!hint.empty()) {
+      hint += ";";
+    }
+    hint += " the server may require auth (set NATS_TOKEN or "
+            "NATS_USERNAME/NATS_PASSWORD)";
+  }
+  return hint;
+}
+
+// Probes a CA/certificate file and returns a human-readable reason when it
+// cannot be opened. Distinguishes the two most common failure modes so the
+// operator sees whether the path is wrong or the file is unreadable by the
+// runtime user (the container runs as an unprivileged 'app' uid): a missing
+// file points to a wrong mount/path, EACCES points to permissions (e.g. a
+// 0600 root-owned secret). Returns an empty string when the file opens.
+std::string check_file_readable(const std::string &path) {
+  if (path.empty()) {
+    return "empty path";
+  }
+  std::ifstream file(path, std::ios::binary);
+  if (file.is_open()) {
+    return {};
+  }
+  const int err = errno;
+  if (err == ENOENT) {
+    return "file not found (missing mount or wrong path)";
+  }
+  if (err == EACCES) {
+    return "permission denied (check file mode/owner; the runtime user is the "
+           "unprivileged 'app' uid 10001)";
+  }
+  return "cannot open: " + std::string(std::strerror(err));
 }
 
 // Delivery callback shared by Subscribe/QueueSubscribe: forwards the message
@@ -66,22 +116,27 @@ void nats_message_callback(natsConnection *nc, natsSubscription *sub,
 NatsClient::NatsClient(const NatsConfig &cfg)
     : m_config(cfg) {
   std::string auth_info;
-  if (!m_config.m_username.empty()) {
-    auth_info += " username=" + m_config.m_username;
-  }
+  std::string auth_type = "none";
   if (!m_config.m_token.empty()) {
+    auth_type = "token";
     auth_info += " token=***";
-  }
-  if (!m_config.m_credentials_file.empty()) {
+  } else if (!m_config.m_username.empty() || !m_config.m_password.empty()) {
+    auth_type = "username/password";
+    auth_info += " username=" + m_config.m_username +
+                 (m_config.m_password.empty() ? " (password not set)"
+                                              : " (password=***)");
+  } else if (!m_config.m_credentials_file.empty()) {
+    auth_type = "credentials_file";
     auth_info += " creds_file=" + m_config.m_credentials_file;
   }
   if (m_config.m_enable_tls) {
     auth_info += " tls=enabled";
   }
 
-  Logger::info("NATS client created: {}:{} subject={} queue_group={}{}",
+  Logger::info("NATS client created: {}:{} subject={} queue_group={} "
+               "auth_type={}{}",
                m_config.m_host, m_config.m_port, m_config.m_subject,
-               m_config.m_queue_group, auth_info);
+               m_config.m_queue_group, auth_type, auth_info);
 }
 
 NatsClient::~NatsClient() {
@@ -168,13 +223,39 @@ bool NatsClient::connect(int max_attempts) {
         m_state.m_connected_instances.fetch_add(1, std::memory_order_acq_rel);
         m_state.m_connected = true;
         set_last_error("");
-        Logger::info("Connected to NATS server: {}", url);
+        // Log the URL actually dialed by the NATS client (from opts), which may
+        // differ from the configured host if DNS/round-robin picked another
+        // address during the connect.
+        char connected_url[256] = {};
+        const natsStatus curl_status = natsConnection_GetConnectedUrl(
+            m_connection.m_conn, connected_url, sizeof(connected_url));
+        if (curl_status == NATS_OK && connected_url[0] != '\0') {
+          Logger::info("Connected to NATS server: {} (dialed: {})", url,
+                       connected_url);
+        } else {
+          Logger::info("Connected to NATS server: {}", url);
+        }
         return true;
       }
 
       m_state.m_connected = false;
+      const std::string status_text = nats_status_text(s);
+      const std::string hint = connect_config_hint(m_config);
+      // The NATS connection object may carry the underlying (TLS/IO) reason
+      // that natsConnection_Connect() swallowed into a generic status; read it
+      // so the operator sees *why* the handshake/connect stalled.
+      std::string conn_detail;
+      if (m_connection.m_conn != nullptr) {
+        std::array<char, 512> err_buf{};
+        if (natsConnection_ReadLastError(m_connection.m_conn, err_buf.data(),
+                                         err_buf.size()) == NATS_OK &&
+            err_buf[0] != '\0') {
+          conn_detail = std::string("; last error: ") + err_buf.data();
+        }
+      }
       set_last_error("Failed to connect to NATS server: " + url + ": " +
-                     nats_status_text(s));
+                     status_text + conn_detail +
+                     (hint.empty() ? "" : " (" + hint + ")"));
       cleanup();
     } catch (const std::exception &e) {
       m_state.m_connected = false;
@@ -247,19 +328,21 @@ bool NatsClient::setup_options(const std::string &url) {
   CHECK_NATS_OK(natsOptions_SetClosedCB(m_connection.m_opts, &NatsClient::closed_cb, this),
                 "Failed to set NATS closed callback");
   CHECK_NATS_OK(natsOptions_SetTimeout(
-                    m_connection.m_opts, ms_to_seconds(m_config.m_connect_timeout_ms)),
+                    m_connection.m_opts, m_config.m_connect_timeout_ms),
                 "Failed to set NATS timeout");
 
   if (!m_config.m_token.empty()) {
     CHECK_NATS_OK(natsOptions_SetToken(m_connection.m_opts, m_config.m_token.c_str()),
                   "Failed to set NATS token");
-    Logger::debug("NATS token authentication configured");
+    Logger::info("NATS authentication type: token");
   } else if (!m_config.m_username.empty() ||
              !m_config.m_password.empty()) {
     CHECK_NATS_OK(natsOptions_SetUserInfo(m_connection.m_opts, m_config.m_username.c_str(),
                                           m_config.m_password.c_str()),
                   "Failed to set NATS username/password");
-    Logger::debug("NATS username/password authentication configured");
+    Logger::info("NATS authentication type: username/password (user={}{})",
+                 m_config.m_username,
+                 m_config.m_password.empty() ? ", password not set" : "");
   }
 
   if (!m_config.m_credentials_file.empty()) {
@@ -267,8 +350,8 @@ bool NatsClient::setup_options(const std::string &url) {
         natsOptions_SetUserCredentialsFromFiles(
             m_connection.m_opts, m_config.m_credentials_file.c_str(), nullptr),
         "Failed to set NATS credentials file: " + m_config.m_credentials_file);
-    Logger::debug("NATS credentials file configured: {}",
-                  m_config.m_credentials_file);
+    Logger::info("NATS authentication type: credentials_file ({})",
+                 m_config.m_credentials_file);
   }
 
   // Set TLS configuration
@@ -277,18 +360,78 @@ bool NatsClient::setup_options(const std::string &url) {
                   "Failed to enable NATS TLS");
 
     if (!m_config.m_tls_ca_cert_file.empty()) {
+      const std::string ca_reason =
+          check_file_readable(m_config.m_tls_ca_cert_file);
+      if (!ca_reason.empty()) {
+        set_error("Failed to load NATS CA certificate: " +
+                  m_config.m_tls_ca_cert_file + " (" + ca_reason + ")");
+        Logger::error("NATS CA certificate {} is not readable: {}",
+                      m_config.m_tls_ca_cert_file, ca_reason);
+        return false;
+      }
       CHECK_NATS_OK(natsOptions_LoadCATrustedCertificates(
                         m_connection.m_opts, m_config.m_tls_ca_cert_file.c_str()),
                     "Failed to load NATS CA certificate: " +
                         m_config.m_tls_ca_cert_file);
+      Logger::info("NATS CA certificate loaded: {}",
+                   m_config.m_tls_ca_cert_file);
+    } else {
+      // NATS TLS is enabled but the CA path is not set: the client would start
+      // TLS without a trust anchor and stall on the handshake. Fail loudly with
+      // a clear hint instead of silently skipping the CA.
+      const std::string msg =
+          "NATS TLS is enabled (NATS_ENABLE_TLS=true) but NATS_TLS_CA_CERT_FILE "
+          "is not set: the client cannot verify the NATS server. Set "
+          "NATS_TLS_CA_CERT_FILE to the CA bundle (e.g. /etc/nats/certs_nats/"
+          "ca.crt) and mount it into the container; without it the TLS "
+          "handshake will never complete.";
+      set_error(msg);
+      Logger::error("{}", msg);
+      return false;
     }
 
     if (!m_config.m_tls_cert_file.empty() &&
         !m_config.m_tls_key_file.empty()) {
+      const std::string cert_reason =
+          check_file_readable(m_config.m_tls_cert_file);
+      const std::string key_reason =
+          check_file_readable(m_config.m_tls_key_file);
+      if (!cert_reason.empty() || !key_reason.empty()) {
+        set_error("Failed to load NATS client certificates: cert=" +
+                  m_config.m_tls_cert_file + " (" +
+                  (cert_reason.empty() ? "ok" : cert_reason) + "), key=" +
+                  m_config.m_tls_key_file + " (" +
+                  (key_reason.empty() ? "ok" : key_reason) + ")");
+        Logger::error("NATS client cert/key not readable: cert={} ({}), key={} ({})",
+                      m_config.m_tls_cert_file,
+                      cert_reason.empty() ? "ok" : cert_reason,
+                      m_config.m_tls_key_file,
+                      key_reason.empty() ? "ok" : key_reason);
+        return false;
+      }
       CHECK_NATS_OK(natsOptions_LoadCertificatesChain(
                         m_connection.m_opts, m_config.m_tls_cert_file.c_str(),
                         m_config.m_tls_key_file.c_str()),
                     "Failed to load NATS client certificates");
+      Logger::info("NATS client certificate chain loaded: cert={}, key={}",
+                   m_config.m_tls_cert_file, m_config.m_tls_key_file);
+    } else if (!m_config.m_tls_cert_file.empty() ||
+               !m_config.m_tls_key_file.empty()) {
+      // Only one half of the client cert/key pair is set: the chain cannot be
+      // loaded. Fail loudly so the operator sees which env var is missing.
+      const std::string missing =
+          m_config.m_tls_cert_file.empty() ? "NATS_TLS_CERT_FILE"
+                                           : "NATS_TLS_KEY_FILE";
+      const std::string set = m_config.m_tls_cert_file.empty()
+                                  ? "NATS_TLS_KEY_FILE"
+                                  : "NATS_TLS_CERT_FILE";
+      const std::string msg =
+          "NATS client certificate pair is incomplete: " + missing +
+          " is not set but " + set + " is. Both NATS_TLS_CERT_FILE and "
+          "NATS_TLS_KEY_FILE must be set together (or both empty) for NATS TLS.";
+      set_error(msg);
+      Logger::error("{}", msg);
+      return false;
     }
 
     Logger::debug("NATS TLS configuration enabled");
@@ -331,12 +474,22 @@ void NatsClient::on_reconnected(natsConnection *nc) {
   }
 }
 
-void NatsClient::on_async_nats_error(natsStatus err) {
+void NatsClient::on_async_nats_error(natsStatus err, natsConnection *nc) {
   const std::string error_text = nats_status_text(err);
+  std::string conn_detail;
+  if (nc != nullptr) {
+    std::array<char, 512> err_buf{};
+    if (natsConnection_ReadLastError(nc, err_buf.data(), err_buf.size()) ==
+            NATS_OK &&
+        err_buf[0] != '\0') {
+      conn_detail = std::string("; last error: ") + err_buf.data();
+    }
+  }
+  const std::string full = "asynchronous NATS error: " + error_text + conn_detail;
   if (!m_state.m_shutdown.load(std::memory_order_acquire)) {
-    set_error("asynchronous NATS error: " + error_text);
+    set_error(full);
   } else {
-    Logger::error("NATS asynchronous error: {}", error_text);
+    Logger::error("{}", full);
   }
 }
 
@@ -365,11 +518,10 @@ void NatsClient::reconnected_cb(natsConnection *nc, void *closure) {
 
 void NatsClient::error_cb(natsConnection *nc, natsSubscription *sub,
                           natsStatus err, void *closure) {
-  (void)nc;
   (void)sub;
   auto *client = static_cast<NatsClient *>(closure);
   if (client != nullptr) {
-    client->on_async_nats_error(err);
+    client->on_async_nats_error(err, nc);
   } else {
     Logger::error("NATS asynchronous error: {}", nats_status_text(err));
   }
@@ -668,7 +820,7 @@ bool NatsClient::drain(int timeout_ms) {
   // acknowledgements
   if (m_connection.m_conn) {
     const natsStatus s =
-        natsConnection_DrainTimeout(m_connection.m_conn, ms_to_seconds(timeout_ms));
+        natsConnection_DrainTimeout(m_connection.m_conn, timeout_ms);
     if (s != NATS_OK) {
       Logger::warn("NATS connection drain failed: {}", nats_status_text(s));
     } else {

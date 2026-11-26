@@ -20,6 +20,7 @@ CMakeFiles
 *.txt
 !CMakeLists.txt
 !package.json
+!config/registries.json
 docker-memory-analysis/
 test/
 scripts/
@@ -39,3 +40,14 @@ build-pvs/
 pvs-studio.log
 *.pvs.raw
 .pvsconfig
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+certs/
+certs_nats/
+spider-config.ini
+spider-sql/

@@ -282,6 +282,116 @@ json PostgresQueryExecutor::execute_query(const std::string &sql,
   return build_query_response(columns_json, rows, start_ms);
 }
 
+int PostgresQueryExecutor::stream_query(const std::string &sql,
+                                        const json &params, int timeout_ms,
+                                        int max_rows, int &status_code,
+                                        json &columns_out, RowCallback row_cb) {
+  status_code = http_status::kOk;
+  int row_count = 0;
+
+  auto maybe_conn = m_impl->acquire_conn();
+  if (!maybe_conn) {
+    status_code = http_status::kServiceUnavailable;
+    return 0;
+  }
+  PGconn *conn = *maybe_conn;
+
+  const int effective_timeout =
+      resolve_positive_or(timeout_ms, m_impl->m_db.m_query_timeout_ms);
+  const std::string timeout_error =
+      Impl::set_statement_timeout(conn, effective_timeout);
+  if (!timeout_error.empty()) {
+    m_impl->release_conn(conn);
+    status_code = http_status::kUnprocessableEntity;
+    return 0;
+  }
+
+  std::vector<std::string> text_values;
+  std::vector<const char *> param_values;
+  std::vector<int> param_lengths;
+  text_values.reserve(params.size());
+  param_values.reserve(params.size());
+  param_lengths.reserve(params.size());
+  for (const auto &[name, value] : params.items()) {
+    (void)name;
+    if (value.is_null()) {
+      text_values.emplace_back();
+      param_values.push_back(nullptr);
+      param_lengths.push_back(0);
+    } else if (value.is_boolean()) {
+      text_values.emplace_back(value.get<bool>() ? "t" : "f");
+      param_values.push_back(text_values.back().c_str());
+      param_lengths.push_back(static_cast<int>(text_values.back().size()));
+    } else if (value.is_number_integer()) {
+      text_values.push_back(std::to_string(value.get<int64_t>()));
+      param_values.push_back(text_values.back().c_str());
+      param_lengths.push_back(static_cast<int>(text_values.back().size()));
+    } else if (value.is_number_float()) {
+      text_values.push_back(std::to_string(value.get<double>()));
+      param_values.push_back(text_values.back().c_str());
+      param_lengths.push_back(static_cast<int>(text_values.back().size()));
+    } else if (value.is_string()) {
+      text_values.push_back(value.get<std::string>());
+      param_values.push_back(text_values.back().c_str());
+      param_lengths.push_back(static_cast<int>(text_values.back().size()));
+    }
+  }
+
+  PGresult *res = PQexecParams(
+      conn, sql.c_str(), static_cast<int>(param_values.size()), nullptr,
+      param_values.data(), param_lengths.data(), nullptr, 0);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    const auto message = Impl::trim_copy(PQresultErrorMessage(res));
+    count_query_error(Impl::sqlstate_class(res));
+    PQclear(res);
+    m_impl->release_conn(conn);
+    status_code = http_status::kUnprocessableEntity;
+    return 0;
+  }
+
+  const int num_fields = PQnfields(res);
+  const int num_tuples = PQntuples(res);
+  if (num_fields == 0) {
+    PQclear(res);
+    m_impl->release_conn(conn);
+    status_code = http_status::kUnprocessableEntity;
+    return 0;
+  }
+
+  std::vector<std::pair<std::string, std::string>> name_type;
+  name_type.reserve(num_fields);
+  for (int c = 0; c < num_fields; ++c) {
+    name_type.emplace_back(
+        PQfname(res, c),
+        pg_value_utils::pg_type_name(static_cast<uint32_t>(PQftype(res, c))));
+  }
+  columns_out = make_db_columns_json(name_type);
+
+  for (int r = 0; r < num_tuples; ++r) {
+    if (max_rows > 0 && row_count >= max_rows) {
+      break;
+    }
+    json row = json::array();
+    for (int c = 0; c < num_fields; ++c) {
+      if (PQgetisnull(res, r, c)) {
+        row.push_back(nullptr);
+        continue;
+      }
+      const auto oid = static_cast<uint32_t>(PQftype(res, c));
+      row.push_back(pg_value_utils::pg_value(
+          oid, PQgetvalue(res, r, c), PQgetlength(res, r, c)));
+    }
+    if (!row_cb(std::move(row))) {
+      break;
+    }
+    ++row_count;
+  }
+
+  PQclear(res);
+  m_impl->release_conn(conn);
+  return row_count;
+}
+
 bool PostgresQueryExecutor::ping(int timeout_ms) {
   auto maybe_conn = m_impl->acquire_conn();
   if (!maybe_conn) {

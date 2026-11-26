@@ -15,7 +15,7 @@ import os
 
 CONTAINER = "l2-proxy"
 CRASH_DUMPS_DIR = "./crash-dumps"
-PROXY_URL = "http://localhost:7777"
+PROXY_URL = "http://localhost:29003"
 TIMEOUT = 30
 
 

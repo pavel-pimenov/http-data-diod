@@ -32,6 +32,7 @@
 
 #include "app_context.hpp"
 #include "constants.hpp"
+#include "db_spider.hpp"
 #include "l2_worker.hpp"
 #include "proxy_init.hpp"
 #include "request_handler.hpp"
@@ -380,6 +381,66 @@ void run_worker(AppContext &app_ctx) {
   }
 }
 
+void run_db_spider(AppContext &app_ctx) {
+  auto stats_logger = start_stats_logging(app_ctx);
+
+  auto exposer =
+      create_metrics_exposer(service_port::kSpiderMetrics,
+                             app_ctx.m_spider_registry,
+                             app_ctx.m_common_registry,
+                             app_ctx.m_metrics_render_duration,
+                             [&app_ctx] { refresh_crash_dumps(app_ctx); });
+
+  DbSpider spider(app_ctx);
+
+  // Health server: reports liveness and readiness on a separate port.
+  httplib::Server health_server;
+  health_server.Get("/health/live", [](const httplib::Request & /*req*/,
+                                       httplib::Response &res) {
+    set_health_alive(res, "l2-db-spider");
+  });
+  health_server.Get("/health/ready", [](const httplib::Request & /*req*/,
+                                        httplib::Response &res) {
+    set_health_ready(res, "l2-db-spider");
+  });
+  std::thread health_thread([&health_server]() {
+    Logger::info("DB spider health server started on port {}",
+                 service_port::kSpiderHealth);
+    health_server.listen("0.0.0.0", service_port::kSpiderHealth);
+  });
+
+  Logger::info("C++ DB spider Prometheus metrics available at "
+               "http://0.0.0.0:{}/metrics",
+               service_port::kSpiderMetrics);
+  Logger::info("C++ DB spider health check available at "
+               "http://0.0.0.0:{}/health/ready",
+               service_port::kSpiderHealth);
+
+  std::jthread spider_thread([&spider](const std::stop_token &st) {
+    spider.run(st);
+  });
+
+  // Wait for shutdown signal.
+  {
+    std::unique_lock lock(g_shutdown_mutex);
+    while (!g_shutdown_flag.load()) {
+      g_shutdown_cv.wait_for(
+          lock,
+          std::chrono::milliseconds(http_timeouts::kShutdownPollIntervalMs),
+          []() { return g_shutdown_flag.load(); });
+    }
+  }
+
+  spider_thread.request_stop();
+  if (spider_thread.joinable()) {
+    spider_thread.join();
+  }
+  health_server.stop();
+  if (health_thread.joinable()) {
+    health_thread.join();
+  }
+}
+
 void run_l2_server(AppContext &app_ctx) {
   auto stats_logger = start_stats_logging(app_ctx);
 
@@ -532,6 +593,9 @@ int main() { // NOLINT(bugprone-exception-escape)
     } else if (app_ctx.m_config.m_app.m_mode == "l2-server") {
       Logger::info("Starting in l2-server mode");
       run_l2_server(app_ctx);
+    } else if (app_ctx.m_config.m_app.m_mode == "l2-db-spider") {
+      Logger::info("Starting in l2-db-spider mode");
+      run_db_spider(app_ctx);
     } else {
       handle_error(
           std::format("Invalid mode: {}. Use proxy, worker, or l2-server",

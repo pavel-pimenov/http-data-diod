@@ -34,6 +34,14 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
 
+  - job_name: 'l2-db-spider'
+    static_configs:
+      - targets: ['l2-db-spider:19094']
+        labels:
+          vm: '%{VM_NAME}'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
   - job_name: 'nats'
     static_configs:
       - targets: ['nats-exporter:7777']

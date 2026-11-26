@@ -308,12 +308,36 @@ struct ProxyContext {
   std::unique_ptr<InternalMemoryMetrics> m_internal_memory_metrics;
 };
 
+// l2-db-spider observability: counters of the periodic database polls and
+// query executions, plus gauges of the latest poll/query outcome.
+struct SpiderMetrics {
+  // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members) -
+  // Intentional design for Prometheus metrics
+  // Total polls attempted, split by outcome (ok/error).
+  prometheus::Family<prometheus::Counter> &m_polls_total;
+  // Total query executions by database and query name, split by status.
+  prometheus::Family<prometheus::Counter> &m_queries_total;
+  // Duration of the last poll cycle (all databases) in seconds.
+  prometheus::Gauge &m_last_poll_duration_seconds;
+  // Timestamp (epoch seconds) of the last successful JSON write.
+  prometheus::Gauge &m_last_success_timestamp;
+  // 1 when the last poll cycle succeeded, 0 on failure.
+  prometheus::Gauge &m_healthy;
+  // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+};
+
 struct WorkerContext {
   std::unique_ptr<WorkerMetrics> m_metrics;
 };
 
 struct ServerContext {
   std::unique_ptr<ServerMetrics> m_metrics;
+};
+// NOLINTEND(misc-non-private-member-variables-in-classes)
+
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+struct SpiderContext {
+  std::unique_ptr<SpiderMetrics> m_metrics;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 
@@ -326,6 +350,7 @@ public:
   std::shared_ptr<prometheus::Registry> m_proxy_registry;
   std::shared_ptr<prometheus::Registry> m_worker_registry;
   std::shared_ptr<prometheus::Registry> m_server_registry;
+  std::shared_ptr<prometheus::Registry> m_spider_registry;
   // Cross-cutting observability metrics (distributed tracing + Sentry
   // delivery). Registered once here and exposed alongside each mode's own
   // registry on every metrics port (19090/19091/19092) so the counters stay
@@ -353,6 +378,7 @@ public:
   ProxyContext m_proxy;
   WorkerContext m_worker;
   ServerContext m_server;
+  SpiderContext m_spider;
 
   // In-process ring buffers feeding the /stats sparklines. One sampler thread
   // per registry; cheap and independent of /stats request rate. Held by
@@ -360,6 +386,7 @@ public:
   std::unique_ptr<MetricsHistory> m_proxy_stats_history;
   std::unique_ptr<MetricsHistory> m_worker_stats_history;
   std::unique_ptr<MetricsHistory> m_server_stats_history;
+  std::unique_ptr<MetricsHistory> m_spider_stats_history;
   std::unique_ptr<MetricsHistory> m_common_stats_history;
 
   AppContext();
@@ -372,6 +399,7 @@ private:
   void init_proxy_metrics();
   void init_worker_metrics();
   void init_server_metrics();
+  void init_spider_metrics();
   // Stops the in-process stats-history sampler threads (created as a set in
   // init_common); safe to call on a partially-initialized context.
   void stop_stats_history() const;

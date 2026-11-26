@@ -29,16 +29,17 @@ HttpClientPool::HttpClientPool(size_t max_pool_size, int timeout_seconds,
 }
 
 void HttpClientPool::set_metrics(const PoolMetrics &metrics) {
-  m_metrics = metrics;
+  m_metrics = std::make_shared<PoolMetrics>(metrics);
 }
 
 void HttpClientPool::update_metrics() {
-  if (m_metrics.m_active_clients) {
-    m_metrics.m_active_clients->get().Set(
+  const auto metrics = m_metrics;
+  if (metrics && metrics->m_active_clients) {
+    metrics->m_active_clients->get().Set(
         static_cast<double>(m_counters->m_active_clients.load()));
   }
-  if (m_metrics.m_available_clients) {
-    m_metrics.m_available_clients->get().Set(
+  if (metrics && metrics->m_available_clients) {
+    metrics->m_available_clients->get().Set(
         static_cast<double>(m_state.m_available_connections.size()));
   }
 }
@@ -70,8 +71,8 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
           "HttpClientPool: acquire timeout after {}s (max_size={}, total={})",
           m_config.m_acquire_timeout_seconds, m_config.m_max_pool_size, m_counters->m_total_clients.load());
 
-      if (m_metrics.m_acquisition_timeouts) {
-        m_metrics.m_acquisition_timeouts->get().Increment();
+      if (m_metrics && m_metrics->m_acquisition_timeouts) {
+        m_metrics->m_acquisition_timeouts->get().Increment();
       }
 
       throw std::runtime_error(
@@ -103,15 +104,18 @@ std::unique_ptr<HttpClient> HttpClientPool::acquire_connection() {
   // call threw): the hook then frees the slot, otherwise a burst of failures
   // would exhaust the pool for good.
   auto counters = m_counters;
-  const PoolMetrics metrics = m_metrics;
+  // The hook holds a shared_ptr to the metrics (not a reference_wrapper copy):
+  // a client dropped by a throwing consumer may outlive the pool, and the hook
+  // must not dereference a destroyed reference_wrapper.
+  const auto metrics = m_metrics;
   client->set_pool_release_hook([counters, metrics](bool leased) {
     if (!leased) {
       return; // idle connections are accounted for by the pool itself
     }
     counters->m_total_clients--;
     counters->m_active_clients--;
-    if (metrics.m_active_clients) {
-      metrics.m_active_clients->get().Set(
+    if (metrics && metrics->m_active_clients) {
+      metrics->m_active_clients->get().Set(
           static_cast<double>(counters->m_active_clients.load()));
     }
     Logger::debug("HttpClientPool: connection dropped without release, slot "
@@ -138,8 +142,8 @@ std::unique_ptr<HttpClient> HttpClientPool::try_acquire_from_queue(
                       m_config.m_max_idle_time) {
       m_counters->m_total_clients--;
       m_counters->m_stale_evictions++;
-      if (m_metrics.m_stale_evictions) {
-        m_metrics.m_stale_evictions->get().Increment();
+      if (m_metrics && m_metrics->m_stale_evictions) {
+        m_metrics->m_stale_evictions->get().Increment();
       }
       Logger::warn("HttpClientPool: evicting stale connection (idle > {}s), "
                    "stale_evictions={}",
@@ -210,8 +214,8 @@ void HttpClientPool::release_connection(std::unique_ptr<HttpClient> client) {
 
   update_metrics();
 
-  if (m_metrics.m_releases) {
-    m_metrics.m_releases->get().Increment();
+  if (m_metrics && m_metrics->m_releases) {
+    m_metrics->m_releases->get().Increment();
   }
 }
 
@@ -222,14 +226,14 @@ size_t HttpClientPool::available_count() const {
 
 void HttpClientPool::record_acquisition(
     std::chrono::steady_clock::time_point start_time) {
-  if (m_metrics.m_acquisitions) {
-    m_metrics.m_acquisitions->get().Increment();
+  if (m_metrics && m_metrics->m_acquisitions) {
+    m_metrics->m_acquisitions->get().Increment();
   }
 
-  if (m_metrics.m_acquisition_duration) {
+  if (m_metrics && m_metrics->m_acquisition_duration) {
     const auto duration = std::chrono::duration<double>(
                               std::chrono::steady_clock::now() - start_time)
                               .count();
-    m_metrics.m_acquisition_duration->get().Observe(duration);
+    m_metrics->m_acquisition_duration->get().Observe(duration);
   }
 }

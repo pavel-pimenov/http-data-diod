@@ -32,6 +32,8 @@ namespace service_port {
 inline constexpr int kProxyMetrics = 19090;
 inline constexpr int kWorkerMetrics = 19091;inline constexpr int kServerMetrics = 19092;
  inline constexpr int kWorkerHealth = 19093;
+ inline constexpr int kSpiderMetrics = 19094;
+ inline constexpr int kSpiderHealth = 19095;
  } // namespace service_port
 
 namespace url_constants {

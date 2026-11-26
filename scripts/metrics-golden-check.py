@@ -166,6 +166,14 @@ CONDITIONAL = [
     "l2_worker_db_query_errors_total",
     "l2_worker_db_requests_total",
     "l2_worker_db_query_duration_seconds",
+    # l2-db-spider families: emitted only when the spider service is up
+    # (DB_SPIDER_ENABLED=true). In the base stack it is disabled, so they are
+    # required exclusively under --all.
+    "l2_spider_polls_total",
+    "l2_spider_queries_total",
+    "l2_spider_last_poll_duration_seconds",
+    "l2_spider_last_success_timestamp",
+    "l2_spider_healthy",
 ]
 
 # Core happy-path counters asserted to be non-zero over the traffic window.
@@ -286,8 +294,8 @@ def poll_catalogue_families(vm_url: str, required: list) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8430"),
-        help="VictoriaMetrics URL (default http://localhost:8430)")
+        "--url", default=os.environ.get("VICTORIA_METRICS_URL", "http://localhost:8428"),
+        help="VictoriaMetrics URL (default http://localhost:8428)")
     parser.add_argument("--traffic", action="store_true",
                         help="also require the core happy-path counters to be non-zero")
     parser.add_argument(

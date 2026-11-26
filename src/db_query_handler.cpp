@@ -137,12 +137,54 @@ void DbQueryHandler::handle_request(const json &request, int &status_code,
 
   const int timeout_ms =
       resolve_positive_or(req.m_timeout_ms, executor->default_timeout_ms());
+  // max_rows == -1 means "unlimited": pass it through verbatim (executors and
+  // DbRowCollector treat <= 0 as no row cap). Otherwise use the request value
+  // or the executor default.
   const int max_rows =
-      resolve_positive_or(req.m_max_rows, executor->default_max_rows());
+      req.m_max_rows == -1 ? -1 : resolve_positive_or(req.m_max_rows,
+                                                      executor->default_max_rows());
   int exec_status = http_status::kOk;
   const json exec_body =
       executor->execute_query(req.m_sql, req.m_params, timeout_ms, max_rows,
                               exec_status);
   status_code = exec_status;
   body = exec_body;
+}
+
+int DbQueryHandler::stream_request(const json &request, int &status_code,
+                                   json &columns_out,
+                                   DbQueryExecutor::RowCallback row_cb) {
+  auto parsed = parse_db_query_request(request);
+  if (!parsed) {
+    status_code = http_status::kBadRequest;
+    return 0;
+  }
+  const auto &req = *parsed;
+
+  DbQueryExecutor *executor = nullptr;
+  {
+    const std::scoped_lock lock(m_state.m_mutex);
+    if (req.m_db.empty() && m_state.m_executors.size() == 1) {
+      executor = m_state.m_executors.begin()->second.get();
+    } else if (const auto it = m_state.m_executors.find(req.m_db);
+               it != m_state.m_executors.end()) {
+      executor = it->second.get();
+    }
+  }
+  if (!executor) {
+    status_code = http_status::kNotFound;
+    return 0;
+  }
+
+  const int timeout_ms =
+      resolve_positive_or(req.m_timeout_ms, executor->default_timeout_ms());
+  const int max_rows =
+      req.m_max_rows == -1 ? -1 : resolve_positive_or(req.m_max_rows,
+                                                      executor->default_max_rows());
+  int exec_status = http_status::kOk;
+  const int row_count =
+      executor->stream_query(req.m_sql, req.m_params, timeout_ms, max_rows,
+                             exec_status, columns_out, std::move(row_cb));
+  status_code = exec_status;
+  return row_count;
 }

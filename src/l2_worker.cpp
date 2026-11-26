@@ -631,7 +631,7 @@ L2Worker::prepare_response_data(const L2Response &l2_response,
                             ? utf8_utils::sanitize_invalid(content_type_it->second)
                             : "";
   // Content-Type alone is not enough: legacy upstreams answer unknown paths
-  // with text/html bodies that are not valid UTF-8 (e.g. PTOKAX 404 pages).
+  // with text/html bodies that are not valid UTF-8 (e.g. 404 error pages).
   // Such a body cannot go into the JSON envelope as is, so it is base64-encoded
   // and forwarded byte-for-byte instead of failing with type_error.316.
   data.m_is_binary = HeaderUtils::is_binary_content_type(data.m_content_type) ||

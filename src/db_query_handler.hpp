@@ -13,10 +13,6 @@
 #include <string>
 #include <vector>
 
-#if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
-#include <flat_map>
-#endif
-
 using json = nlohmann::json;
 
 // Owns one DbQueryExecutor per configured database and routes parsed
@@ -47,6 +43,23 @@ public:
            m_state.m_executors.size() >= m_state.m_expected_count;
   }
 
+  // True when every configured executor reports itself fully ready (e.g. the
+  // Oracle ODPI pool has finished its background init). Used by the spider to
+  // avoid polling databases whose pools are still warming up.
+  [[nodiscard]] bool all_ready() const {
+    const std::scoped_lock lock(m_state.m_mutex);
+    if (m_state.m_executors.empty()) {
+      return false;
+    }
+    for (const auto &[name, executor] : m_state.m_executors) {
+      (void)name;
+      if (!executor->is_ready()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Names of every configured database. Used for the per-database gateway
   // readiness gauge so a slow-starting database is visible before init().
   [[nodiscard]] std::vector<std::string> configured_databases() const;
@@ -58,6 +71,14 @@ public:
   // status of the DB gateway response and body with its JSON body
   // (success body or ErrorResponse object).
   void handle_request(const json &request, int &status_code, json &body);
+
+  // Executes a query row-by-row via the executor's stream_query, invoking
+  // `row_cb` for every row. On success status_code = 200 and columns_out is
+  // the column descriptors; on failure status_code carries the mapped HTTP
+  // status. Returns the row count fetched. Used by l2-db-spider to write JSON
+  // files incrementally without materialising the full result set.
+  int stream_request(const json &request, int &status_code, json &columns_out,
+                     DbQueryExecutor::RowCallback row_cb);
 
   // Wires the pool gauge family into every (future) executor created by
   // init(). Safe to call before init(); executors already created keep their
@@ -75,21 +96,10 @@ public:
       prometheus::Family<prometheus::Histogram> *pool_acquire_duration);
 
 private:
-#if __has_include(<flat_map>) && defined(__cpp_lib_flat_map)
   struct State {
-    // 2 базы (postgres/oracle) — flat_map(sorted vector) кэш-дружелюбнее map(rb-tree)
-    std::flat_map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
-    // Serializes init() (runs on the worker main loop) against request dispatch
-    // (runs on pool threads) so a slow/blocked executor creation can never race
-    // with reads of m_executors.
-    mutable std::mutex m_mutex;
-    size_t m_expected_count = 0;
-    // Insertion-ordered configured database names (mirrors m_expected_count);
-    // kept so readiness can be reported for databases that have no executor yet.
-    std::vector<std::string> m_configured_names;
-  } m_state;
-#else
-  struct State {
+    // Базы (postgres/oracle) — map (rb-tree). Убрали стандартный flat_map: он
+    // тянет за собой дополнительные заголовки и раздувает размер исходников;
+    // map достаточно для 1-2 баз.
     std::map<std::string, std::unique_ptr<DbQueryExecutor>> m_executors;
     // Serializes init() (runs on the worker main loop) against request dispatch
     // (runs on pool threads) so a slow/blocked executor creation can never race
@@ -100,7 +110,6 @@ private:
     // kept so readiness can be reported for databases that have no executor yet.
     std::vector<std::string> m_configured_names;
   } m_state;
-#endif
   prometheus::Family<prometheus::Gauge> *m_pool_metrics = nullptr;
   prometheus::Family<prometheus::Counter> *m_errors_by_class = nullptr;
   prometheus::Family<prometheus::Gauge> *m_pool_capacity = nullptr;

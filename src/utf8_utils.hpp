@@ -73,8 +73,8 @@ inline bool is_valid_utf8(std::string_view input) {
 }
 
 // Replaces every invalid byte with U+FFFD so the result can be serialized by
-// nlohmann::json. Legacy upstreams put localized text into HTTP headers (PTOKAX
-// sends a Windows-1251 Date), and a single such byte used to abort the whole
+// nlohmann::json. Legacy upstreams put localized text into HTTP headers
+// (e.g. a Windows-1251 Date), and a single such byte used to abort the whole
 // NATS response with json type_error.316.
 inline std::string sanitize_invalid(std::string_view input) {
   constexpr std::string_view replacement = "\xEF\xBF\xBD";

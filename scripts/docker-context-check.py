@@ -140,7 +140,7 @@ def main() -> int:
     tracked = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "src"],
         capture_output=True, text=True, check=True).stdout.splitlines()
-    relpaths = sorted(p.removeprefix("src/") for p in tracked
+    relpaths = sorted(p[len("src/"):] if p.startswith("src/") else p for p in tracked
                       if "/src/" in "/" + p or p.startswith("src/"))
     relpaths = [p for p in relpaths if p]
     context = apply_ignore(ignore_lines, relpaths)
@@ -150,6 +150,15 @@ def main() -> int:
     for p in context:
         context_prefixes.add(p.rsplit("/", 1)[0] if "/" in p else ".")
         context_prefixes.add(".")
+    # Корневой контекст (контекст сборки `.` для spider-ai): scripts/ живут в
+    # корне репо и НЕ исключаются корневым .dockerignore (его нет). Собираем
+    # git-ls-files всего репо для проверки refs вида scripts/...
+    root_tracked = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files"],
+        capture_output=True, text=True, check=True).stdout.splitlines()
+    root_tracked += subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True, check=True).stdout.splitlines()
     for ref in referenced_src_paths(dockerfile_text):
         ref = ref.lstrip("./")
         if not ref:
@@ -157,8 +166,15 @@ def main() -> int:
         ref = ref.rstrip("/")
         if ref in {".", ""}:
             continue
-        present = (ref in context or any(p.startswith(ref + "/")
-                                          for p in context))
+        # refs под scripts/ и config/ обслуживаются корневым контекстом
+        # (spider-ai, registry-report-server — build context `.`):
+        if (ref.startswith("scripts/") or ref == "scripts"
+                or ref.startswith("config/") or ref == "config"):
+            present = (ref in root_tracked or any(p.startswith(ref + "/")
+                                                  for p in root_tracked))
+        else:
+            present = (ref in context or any(p.startswith(ref + "/")
+                                              for p in context))
         if not present:
             missing.append(ref)
 

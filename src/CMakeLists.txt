@@ -186,9 +186,29 @@ target_compile_definitions(proj_prometheus_core
 # Compatibility alias so existing references keep working without renaming.
 add_library(prometheus-cpp::core ALIAS proj_prometheus_core)
 
-# Find spdlog (fast C++ logging library)
-find_package(spdlog CONFIG REQUIRED)
-message(STATUS "Found spdlog: ${spdlog_VERSION}")
+# ------------------- Vendored fmt + spdlog (header-only) -------------------
+# fmt 12.2.1 and spdlog 1.17.0 are vendored under fmt/ and spdlog/ (headers +
+# LICENSE only, no upstream CMake/tests/benchmarks). Both are header-only:
+#  - fmt is compiled in header-only mode (FMT_HEADER_ONLY), so no fmt.cc is
+#    built/linked and libfmt10 is dropped from the runtime.
+#  - spdlog is used header-only (spdlog::spdlog_header_only) against the
+#    vendored fmt via SPDLOG_FMT_EXTERNAL, replacing the apt libspdlog-dev
+#    (which shipped an older fmt) and keeping the bundled fmt unused.
+set(FMT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/fmt)
+add_library(fmt_header_only INTERFACE)
+target_include_directories(fmt_header_only INTERFACE ${FMT_ROOT})
+target_compile_definitions(fmt_header_only INTERFACE FMT_HEADER_ONLY)
+add_library(fmt::fmt ALIAS fmt_header_only)
+
+set(SPDLOG_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/spdlog)
+add_library(spdlog_header_only INTERFACE)
+target_include_directories(spdlog_header_only INTERFACE ${SPDLOG_ROOT})
+# spdlog 1.17 defaults to its bundled fmt; force the vendored external one.
+target_compile_definitions(spdlog_header_only INTERFACE SPDLOG_FMT_EXTERNAL)
+# spdlog's fmt/fmt.h also defines FMT_HEADER_ONLY for the external case; keep
+# it consistent with fmt_header_only.
+target_link_libraries(spdlog_header_only INTERFACE fmt_header_only)
+add_library(spdlog::spdlog_header_only ALIAS spdlog_header_only)
 
 # Find Catch2 (unit testing framework) - optional
 if(BUILD_TESTS)
@@ -254,6 +274,7 @@ stats_logger.cpp
    db_query_executor_oracle.cpp
    db_query_executor_postgres.cpp
    db_query_executor_factory.cpp
+   db_spider.cpp
    sentry_client.cpp
    httplib/httplib.cc
    odpi/embed/dpi.c
@@ -295,7 +316,7 @@ set_source_files_properties(
     http_client.cpp http_client_pool.cpp stats_logger.cpp
     db_query_handler.cpp db_query_executor_base.cpp
     db_query_executor_oracle.cpp db_query_executor_postgres.cpp
-    db_query_executor_factory.cpp sentry_client.cpp
+    db_query_executor_factory.cpp db_spider.cpp sentry_client.cpp
     PROPERTIES UNITY_GROUP "proxy-nats")
 
 # Include directories
@@ -416,6 +437,7 @@ if(BUILD_TESTS)
         test_l2_worker.cpp
         test_nats_live.cpp
         test_db_live.cpp
+        test_db_spider.cpp
         version.cpp
         shutdown_flag.cpp
         app_context.cpp
@@ -455,6 +477,7 @@ if(BUILD_TESTS)
         db_query_executor_oracle.cpp
         db_query_executor_postgres.cpp
         db_query_executor_factory.cpp
+        db_spider.cpp
         odpi/embed/dpi.c
     )
     target_include_directories(test_components PRIVATE

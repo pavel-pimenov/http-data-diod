@@ -11,66 +11,13 @@
 
 ---
 
-## Визуальная схема взаимодействий
-
-```mermaid
-flowchart TD
-    user[Пользователь/Тест]
-    nginx[nginx]
-    proxy[l2-proxy]
-    worker[l2-worker]
-    nats[nats-server]
-    nginxExporter[nginx-exporter]
-    natsExporter[nats-exporter]
-    prometheus[prometheus]
-    jaeger[jaeger]
-    datahub-gantpool[DataHub-GantPool]
-    server[l2-server]
-    postgres[postgres 17]
-    oracle[oracle-xe 21c]
-
-    user -- "HTTPS 443" --> nginx
-    nginx -- "HTTP" --> proxy
-    proxy -- "HTTP" --> server
-    worker -- "HTTP" --> server
-    worker -- "HTTPS 8181" --> datahub-gantpool
-
-    proxy -- "NATS TCP 4222" --> nats
-    worker -- "NATS TCP 4222" --> nats
-
-    subgraph DBGATE ["HTTP DB Gateway (NATS subject service.db.query, queue group db_workers)"]
-        worker -- "libpq 5432" --> postgres
-        worker -- "ODPI-C 1521 (profile databases)" --> oracle
-    end
-
-    nginxExporter -- "metrics" --> nginx
-    natsExporter -- "HTTP 8222 / metrics" --> nats
-
-    vmagent -- "scrape 19090" --> proxy
-    vmagent -- "scrape 19092" --> server
-    vmagent -- "scrape 19091" --> worker
-    vmagent -- "scrape 9113" --> nginxExporter
-    vmagent -- "scrape 7778" --> natsExporter
-    vmagent -- "remoteWrite" --> victoria-metrics
-
-    proxy -- "tracing" --> jaeger
-    worker -- "tracing" --> jaeger
-    server -- "tracing" --> jaeger
-```
-
-**Обозначения:**  
-- Направление стрелки: всегда КЛИЕНТ 👉 СЕРВЕР.
-- Надписи на стрелках = используемый протокол и порт.
-
----
-
 ## Сетевая схема с разделением сегментов
 
 ```mermaid
 flowchart LR
     %% Корпоративная сеть
     subgraph CORP ["Корпоративная сеть"]
-        user[Пользователь/Тест]
+        user[Пользователь/Сервис]
     end
 
     %% DMZ зона
@@ -83,6 +30,10 @@ flowchart LR
     %% Технологический сегмент l2
     subgraph L2_NET ["Технологический сегмент (l2)"]
         worker[l2-worker]
+    end
+
+    %% Сегмент ODS (DataHub/GantPool)
+    subgraph ODS_NET ["ОДС КЦ-1/2"]
         datahub-gantpool[DataHub-GantPool]
     end
 
@@ -104,6 +55,82 @@ flowchart LR
     %% HTTP DB Gateway: воркер держит пулы соединений с СУБД
     worker -- "libpq 5432" --> postgres
     worker -- "ODPI-C 1521" --> oracle
+```
+
+**Обозначения:**  
+- Направление стрелки: всегда КЛИЕНТ 👉 СЕРВЕР.
+- Надписи на стрелках = используемый протокол и порт.
+
+---
+
+## Визуальная схема взаимодействий
+
+```mermaid
+flowchart TD
+    user[Пользователь/Сервис]
+    nginx[nginx]
+    proxy[l2-proxy]
+    worker[l2-worker]
+    nats[nats-server]
+    nginxExporter[nginx-exporter]
+    natsExporter[nats-exporter]
+    vmagent[vmagent]
+    victoriaMetrics[victoria-metrics]
+    vmalert[vmalert]
+    jaeger[jaeger]
+    datahub-gantpool[DataHub-GantPool]
+    server[l2-server]
+    postgres[postgres 17]
+    oracle[oracle-xe 21c]
+    glitchtip[glitchtip]
+    glitchtipDb[glitchtip-db]
+    grafana[grafana]
+    perses[perses]
+    swaggerUi[swagger-ui]
+    natsGui[nats-gui]
+
+    user -- "HTTPS 443" --> nginx
+    nginx -- "HTTP" --> proxy
+    proxy -- "HTTP" --> server
+    worker -- "HTTP" --> server
+
+    proxy -- "NATS TCP 4222" --> nats
+    worker -- "NATS TCP 4222" --> nats
+
+    subgraph DBGATE ["HTTP DB Gateway (NATS subject service.db.query, queue group db_workers)"]
+        worker -- "libpq 5432" --> postgres
+        worker -- "ODPI-C 1521 (profile databases)" --> oracle
+    end
+
+    subgraph ODS_SEG ["ОДС КЦ-1/2"]
+        worker -- "HTTPS 8181" --> datahub-gantpool
+    end
+
+    nginxExporter -- "metrics" --> nginx
+    natsExporter -- "HTTP 8222 / metrics" --> nats
+
+    vmagent -- "scrape 19090" --> proxy
+    vmagent -- "scrape 19092" --> server
+    vmagent -- "scrape 19091" --> worker
+    vmagent -- "scrape 9113" --> nginxExporter
+    vmagent -- "scrape 7778" --> natsExporter
+    vmagent -- "remoteWrite" --> victoriaMetrics
+
+    victoriaMetrics -- "read/query" --> grafana
+    victoriaMetrics -- "read/query" --> perses
+    victoriaMetrics -- "remoteRead" --> vmalert
+    vmalert -- "alerts" --> victoriaMetrics
+
+    glitchtip -- "Sentry-compatible DSN" --> proxy
+    glitchtip -- "Sentry-compatible DSN" --> worker
+    glitchtip -- "SQL 5432" --> glitchtipDb
+
+    natsGui -- "HTTP 8222" --> nats
+    swaggerUi -- "HTTP DB Gateway spec" --> nginx
+
+    proxy -- "tracing" --> jaeger
+    worker -- "tracing" --> jaeger
+    server -- "tracing" --> jaeger
 ```
 
 ---
@@ -128,85 +155,7 @@ client <- nginx <- l2-proxy <- NATS (service.db.query) <- l2-worker <- PostgreSQ
 
 ---
 
-## Живая цепочка FlylinkDC++ (nginx 37015 → ptokax 37014)
-
-На боевом узле публичный вход PTOKAX test-port обслуживает nginx
-(`ptokax-testport-proxy`, хост-порт **37015**), который раньше проксировал
-напрямую в контейнер хаба (`ptokax:37014`). Диод встраивается между ними:
-
-```text
-client -> testport-proxy:37015 -> l2-proxy:8888 -> NATS -> l2-worker -> ptokax:37014
-client <- testport-proxy:37015 <- l2-proxy:8888 <- NATS <- l2-worker <- ptokax:37014
-```
-
-Запуск в этом режиме:
-
-```bash
-COMPOSE_FILE=docker-compose.yml:docker-compose.live.yml ./rebuild-and-run.sh
-```
-
-Что делает `docker-compose.live.yml`:
-
-- `l2-proxy` и `l2-worker` дополнительно подключаются к внешней сети
-  `flylinkdc-hub_default` (её владелец — стек хаба, поэтому `down` диода не
-  ломает сетевые привязки nginx);
-- `l2-worker` ходит в реальный бэкенд `http://ptokax:37014`
-  (`L2_SERVER_*`);
-- `PROXY_RAW_BODY_PASSTHROUGH=true` — реальные клиенты FlylinkDC++ присылают
-  на `/fly-stat`, `/fly-zget`, `/fly-download`, `/fly-error-sql`
-  **zlib-сжатые** тела (`0x78 0xDA ...`), а не JSON. Такие тела
-  base64-кодируются в NATS-конверте (`body_is_binary=true`), воркер
-  декодирует их байт-в-байт и отправляет в хаб. JSON-тела
-  (`/fly-test-port`, `/fly-login`) идут как есть. В базовом
-  `docker-compose.yml` флаг по умолчанию **выключен** (стенд с `l2-server`
-  работает с JSON) — включает его только live-override;
-- `DB_QUERY_ENABLED=false` (прокси и воркер) и `DB_POSTGRES_ENABLED=false`
-  (воркер): в живой цепочке нет узла БД, а включённый шлюз заставляет воркер
-  бесконечно переподключаться к `postgres:5432` и писать две строки ошибки
-  каждые ~0.5 с (≈178 тыс. строк в сутки при простое);
-- `MAX_RETRIES=2` — PTOKAX закрывает соединение после каждого ответа, не
-  присылая `Connection: close`, поэтому первый вызов на переиспользованном
-  keep-alive сокете может упасть с `Error::Connection`; вторая попытка идёт
-  на свежем сокете.
-
-`nginx` хаба при этом резолвит `l2-proxy` через Docker DNS с коротким TTL
-(`resolver 127.0.0.11 valid=10s`), поэтому пересоздание контейнера диода не
-требует ручного рестарта nginx. Откат — вернуть в `flylinkdc-hub/nginx.conf`
-`proxy_pass http://ptokax:37014;`.
-
-NATS поднимается с `max_payload: 16777216` в `nats/nats.conf` (у nats-server
-нет CLI-флага для этого лимита), чтобы 8 MiB тело test-port (лимит
-nginx/хаба) умещалось в base64-конверт.
-
-### Проверка прозрачности цепочки
-
-`scripts/live-chain-check.py` отправляет один и тот же запрос двумя путями —
-напрямую в `ptokax:37014` (из контейнера в сети хаба) и через
-`nginx:37015 → диод` — и сравнивает статус, тело побайтово и `Content-Type`
-апстрима. Сценарии: JSON, plain text, zlib-сжатое тело, бинарь с невалидным
-UTF-8, ответ-ошибка `404 /favicon.ico` (у него хаб отдаёт `Date` в Windows-1251)
-и тело 1 MiB. Сценарий с `GET` идёт через собственный nginx диода
-(`--diode-url`, по умолчанию `http://localhost:7777`), потому что nginx хаба
-перед test-port отвечает на `GET` `405 Only POST is allowed`. `/fly-test-port` эхом возвращает IP вызывающего, поэтому
-для прямого запроса подставляется тот же `X-Real-IP`, который видит цепочка
-(значение определяется пробой, а не хардкодом адреса Docker-сети).
-
-```bash
-./scripts/live-chain-check.py                  # 6 сценариев
-./scripts/live-chain-check.py --skip-large     # без 1 MiB
-```
-
-Скрипт рассчитан на живой режим (`docker-compose.live.yml`) и в CI не входит:
-ему нужен контейнер в сети `flylinkdc-hub_default` и реальный PTOKAX.
-
-Заголовки ответа, которые нельзя положить в JSON-конверт NATS, санитизируются:
-невалидные UTF-8 байты заменяются на `U+FFFD` (`src/utf8_utils.hpp`), иначе
-`dump()` конверта бросает `type_error.316`. Так приходит локализованный
-`Date` в Windows-1251, которым PTOKAX сопровождает ответы-ошибки, — раньше
-такой 404 превращался в 500. Тела ответов при этом остаются побайтовыми
-(base64 + `is_binary`).
-
-### Здоровье стека и диска
+## Здоровье стека и диска
 
 `./health-check.sh all` проверяет не только прикладные сервисы, но и
 наблюдаемость: `victoria-metrics`, `vmagent`, `vmalert`, `nats-server`,
@@ -226,7 +175,7 @@ UTF-8, ответ-ошибка `404 /favicon.ico` (у него хаб отдаё
 2026-10-27: VictoriaMetrics упал с `no space left on device` и оставался
 мёртвым ~43 часа, пока `docker ps` показывал `Up (healthy)`.
 
-### Внешний сторож: cron + лимиты логов
+## Внешний сторож: cron + лимиты логов
 
 `health-check.sh` — это проверка, а не сторож: без регулярного запуска она не
 работает, а `vmalert` не может сообщить о падении VictoriaMetrics, потому что
@@ -271,7 +220,7 @@ crontab** (sudo на хосте нет):
 | Драйвер | Образ / протокол | Статус по умолчанию | Включение |
 |---|---|---|---|
 | PostgreSQL | `postgres:17-alpine`, libpq, порт 5432 | **включён** драйвер (`DB_POSTGRES_ENABLED=true`), сервис не стартует | profile `databases` или внешний `DB_POSTGRES_HOST` |
-| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `databases` + `DB_ORACLE_ENABLED=true` + worker `runtime-db` |
+| Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа, встроен в общий `runtime-base`), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `databases` + `DB_ORACLE_ENABLED=true` |
 
 Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
 
@@ -281,11 +230,67 @@ crontab** (sudo на хосте нет):
 прикладном узле ходит к ним по адресам из `DB_POSTGRES_HOST` / `DB_ORACLE_HOST`
 (см. `.env.example`). Если СУБД нужны на том же хосте, достаточно добавить
 профиль при старте: `docker compose --profile databases up -d`.
-Обратите внимание: для Oracle worker должен собираться в `runtime-db`
-(`L2_WORKER_DOCKER_TARGET=runtime-db`), по умолчанию собирается `runtime`
-(Oracle OCI-клиент не кладётся в образ).
+Oracle OCI-клиент встроен в общий `runtime-base`, поэтому Oracle доступен
+всем режимам единого бинарника (proxy/worker/server) без отдельного таргета;
+`runtime-db` сохранён как алиас `runtime` для обратной совместимости.
 
 Ключевые переменные окружения см. в `docker-compose.yml` (`DB_QUERY_*`, `DB_POSTGRES_*`, `DB_ORACLE_*`); метрики воркера по шлюзу эмитируются через `l2_worker_*` (см. дашборд `L2 Воркер`).
+
+### l2-db-spider — опрос баз по расписанию
+
+Отдельный сервис `l2-db-spider` (режим `MODE=l2-db-spider`, тот же бинарник) опрашивает базы данных произвольными read-only `SELECT`-запросами и пишет результат в JSON-файлы на диске — **по одному файлу `<db>_<query>.json` на каждый запрос**. В отличие от HTTP DB Gateway, spider **не принимает клиентских запросов** — он работает по собственному расписанию (`DB_SPIDER_INTERVAL_SECONDS`, по умолчанию 24 часа) и выполняет полный опрос сразу при старте. Ручной запуск — перезапуск контейнера (`docker restart l2-db-spider`), что исключает риск DoS-атаки с частыми запросами к СУБД. Клиенты читают готовые JSON-файлы.
+
+- Конфиг — **INI-файл** `spider-config.ini` (путь через `DB_SPIDER_CONFIG_FILE`, монтируется в контейнер read-only). Структура:
+  - `[spider]` — глобальные настройки (`interval_seconds`, `output_dir`);
+  - `[db:<имя>]` — коннект к базе (`driver`, `host`, `port`, `service`/`database`, `user`, `password`, `pool_min`, `pool_max`);
+  - `[query:<имя>]` — запрос (`db=<имя базы>`, `sql`, `timeout_ms`, `max_rows`); привязывается к базе через `db=`.
+- Пример (`spider-config.ini`) — 3 базы (ccm2/ccm4/ccm5), общий пользователь
+  `l2common`, выгрузка shared pool, таблспейсов и размеров таблиц. Пароль не
+  хранится в файле — подставляется из env `DB_SPIDER_PASSWORD` через
+  placeholder `%DB_SPIDER_PASSWORD%`:
+  ```ini
+  [db:ccm2]
+  driver = oracle
+  host = ccm2.nlmk
+  port = 1521
+  service = ccm2.nlmk
+  user = l2common
+  password = %DB_SPIDER_PASSWORD%
+  pool_min = 1
+  pool_max = 2
+
+  [query:ccm2_shared_pool]
+  name = shared_pool
+  db = ccm2
+  sql = SELECT name, SUM(bytes) AS bytes FROM v$sgastat GROUP BY name ORDER BY bytes DESC
+  timeout_ms = 5000
+  max_rows = 500
+
+  [query:ccm2_tablespaces]
+  name = tablespaces
+  db = ccm2
+  sql = SELECT ts.name AS tablespace_name, COALESCE(SUM(df.bytes),0) AS bytes FROM v$tablespace ts LEFT JOIN v$datafile df ON df.ts# = ts.ts# GROUP BY ts.name ORDER BY bytes DESC
+  timeout_ms = 10000
+  max_rows = 1000
+
+  [query:ccm2_table_sizes]
+  name = table_sizes
+  db = ccm2
+  sql = SELECT segment_name, segment_type, SUM(bytes) AS bytes FROM user_segments GROUP BY segment_name, segment_type ORDER BY bytes DESC
+  timeout_ms = 15000
+  max_rows = 5000
+  ```
+  Имена секций запросов должны быть уникальны (префикс `<база>_<имя>`), а реальное
+  имя запроса (для файла `<db>_<query>.json`) задаётся через `name=`.
+- Каждый запрос пишется в файл `<output_dir>/<db>_<query>.json` с метаданными:
+  ```json
+  {"generated_at": 1750000000000000, "db": "ccm3t", "query": "shared_pool",
+   "status": "ok", "result": {"columns": [...], "rows": [...]}}
+  ```
+  `result` содержит только данные запроса (`columns` + `rows`), без служебных полей ответа БД-шлюза.
+- Переиспользует те же пулы соединений и executor'ы, что и HTTP DB Gateway (ODPI-C для Oracle, libpq для PostgreSQL); Oracle-клиент встроен в общий `runtime-base`.
+- Результат пишется в `DB_SPIDER_OUTPUT_DIR` (по умолчанию `/spider`, монтируется в `./spider-output` на хосте).
+- Метрики: `l2_spider_*` (см. каталог метрик и дашборд `L2 DB Spider`), health-эндпоинт на `:19095`, метрики на `:19094`.
 
 ### Переменные окружения гейтвея (defaults из docker-compose)
 
@@ -300,9 +305,26 @@ crontab** (sudo на хосте нет):
 | `DB_POSTGRES_ENABLED` | `true` | proxy, worker | Регистрация драйвера postgres |
 | `DB_POSTGRES_HOST`/`PORT`/`DB`/`USER`/`PASSWORD` | `postgres`/`5432`/`app_db`/`app_user`/`app_password` | worker | Подключение к postgres (libpq); `postgres` — имя compose-сервиса, для внешнего узла-БД задайте его адрес |
 | `DB_POSTGRES_POOL_MIN` / `DB_POSTGRES_POOL_MAX` | `1` / `5` | worker | Размер пула сессий postgres |
-| `DB_ORACLE_ENABLED` | `false` | proxy, worker | Регистрация драйвера oracle (profile `databases`; worker `runtime-db`) |
+| `DB_ORACLE_ENABLED` | `false` | proxy, worker | Регистрация драйвера oracle (profile `databases`; Oracle-клиент встроен в общий `runtime-base`) |
 | `DB_ORACLE_HOST`/`PORT`/`SERVICE`/`USER`/`PASSWORD` | `oracle`/`1521`/`XEPDB1`/`app_user`/`app_password` | worker | Подключение к Oracle (ODPI-C) |
 | `DB_ORACLE_POOL_MIN` / `DB_ORACLE_POOL_MAX` | `1` / `5` | worker | Размер пула сессий Oracle |
+
+### Переменные окружения NATS (defaults из docker-compose)
+
+| Переменная | Default | Сервис | Описание |
+|---|---|---|---|
+| `NATS_HOST` | `nats-server` | proxy, worker | Хост NATS; для внешнего узла-сервера задайте его адрес (например `k2-datahub-dev.k2.ia.nlmk`) |
+| `NATS_PORT` | `4222` | proxy, worker | Порт NATS |
+| `NATS_SUBJECT` | `service.proxy` | proxy, worker | Subject запросов прокси/воркера |
+| `NATS_QUEUE_GROUP` | `proxy_workers` | proxy, worker | Queue group |
+| `NATS_TIMEOUT_MS` | `30000` | proxy, worker | Общий таймаут операций NATS (мс) |
+| `NATS_CONNECT_TIMEOUT_MS` | `5000` | proxy, worker | **Connect-timeout (мс)**. Передаётся в `natsOptions_SetTimeout()` **как миллисекунды** — nats.c ожидает мс (дефолт `2*1000`=2000 мс). Не конвертируйте в секунды: баг `ms_to_seconds` делал connect-timeout ~0 мс, из-за чего кросс-хостовый connect мгновенно уходил в Timeout (round 261) |
+| `NATS_USERNAME` / `NATS_PASSWORD` | — | proxy, worker | Авторизация user/password (опционально) |
+| `NATS_TOKEN` | — | proxy, worker | Токен-авторизация (опционально) |
+| `NATS_CREDENTIALS_FILE` | — | proxy, worker | Файл кредов NKeys (опционально) |
+| `NATS_ENABLE_TLS` | `false` | proxy, worker | Включает TLS |
+| `NATS_TLS_CA_CERT_FILE` | — | proxy, worker | Путь к CA для проверки серверного серта (самоподписанный CA) |
+| `NATS_TLS_CERT_FILE` / `NATS_TLS_KEY_FILE` | — | proxy, worker | Клиентский серт/ключ (опционально, НЕ требуется если сервер не настроен на mTLS) |
 
 Пул ограничивает суммарное число соединений сверху (`POOL_MAX`):
 соединения создаются по требованию и возвращаются в пул idle; при всплеске
@@ -412,19 +434,19 @@ Rate limiting применяется **только к `l2-proxy`** (в режи
 
 ### Тест
 
-`python3 rate_limit_test.py` — интеграционный тест лимитера. Ожидание (`429` под нагрузкой или его отсутствие) выводится из `ENABLE_GLOBAL_RATE_LIMITING` (или флагов `--expect-429`/`--expect-zero`).
+`python3 rate-limit-test.py` — интеграционный тест лимитера. Ожидание (`429` под нагрузкой или его отсутствие) выводится из `ENABLE_GLOBAL_RATE_LIMITING` (или флагов `--expect-429`/`--expect-zero`).
 
 Проверка отключённого лимитера (при `ENABLE_GLOBAL_RATE_LIMITING=false`):
 
 ```bash
-python3 rate_limit_test.py --expect-zero
+python3 rate-limit-test.py --expect-zero
 ```
 
 ---
 
 ## Отказоустойчивость (fault tolerance)
 
-`python3 fault_tolerance_test.py` — интеграционный набор, который по очереди «роняет» одну зависимость стека через `docker compose stop`, проверяет ожидаемое поведение и восстанавливает сервис (`docker compose start`). Все сценарии в конце возвращают стек в healthy-состояние.
+`python3 fault-tolerance-test.py` — интеграционный набор, который по очереди «роняет» одну зависимость стека через `docker compose stop`, проверяет ожидаемое поведение и восстанавливает сервис (`docker compose start`). Все сценарии в конце возвращают стек в healthy-состояние.
 
 | Сценарий | Что делается | Что проверяется |
 |---|---|---|
@@ -438,7 +460,7 @@ python3 rate_limit_test.py --expect-zero
 | `drain` | `docker compose stop` (`SIGTERM`) под нагрузкой | Graceful drain: in-flight запросы завершаются в пределах `stop_grace_period` (нет клиентских зависаний), после старта воркер снова ready |
 | `reply-loss` | Рабочий получает запросы и начинает обработку, затем `docker compose stop l2-worker` (ответы теряются) | Прокси повторяет poll-запросы (росчёт `l2_proxy_duplicate_requests_total`), возвращает 504 к дедлайну poll (никогда не виснет), `message_counter.py` проходит после восстановления |
 
-Пропуск сценария: `python3 fault_tolerance_test.py --skip nats --skip server --skip dedup --skip reply-loss`.
+Пропуск сценария: `python3 fault-tolerance-test.py --skip nats --skip server --skip dedup --skip reply-loss`.
 
 ### Проверка «золотого набора» метрик
 
@@ -467,10 +489,10 @@ python3 rate_limit_test.py --expect-zero
   Перед этим надо сгенерировать DB-трафик: `python3 scripts/db-gateway-e2e-test.py`
   (СУБД поднимаются через profile: `docker compose --profile databases up -d`).
 
-В CI после smoke-теста дополнительно гоняется
-`scripts/db-gateway-e2e-test.py`, затем `--traffic --db`; presence-проверка
-без флагов выполняется в конце `./rebuild-and-run.sh`. Локально pre-commit
-прогоняет DB e2e + `--traffic --db` при живом postgres.
+После smoke-теста локально гоняется `scripts/db-gateway-e2e-test.py`, затем
+`--traffic --db`; presence-проверка без флагов выполняется в конце
+`./rebuild-and-run.sh`. pre-commit прогоняет DB e2e + `--traffic --db` при
+живом postgres.
 
 ### Сверка имён метрик между источниками
 
@@ -608,18 +630,23 @@ l2-worker (`19091`) и l2-server (`19092`). В каждом режиме рее�
 > один и тот же дамп виден в `/metrics` каждого из них — в панелях и алертах
 > берите `max()` (или `max by (...)`), иначе один крах посчитается трижды.
 
-### Отслеживание ошибок (Sentry)
+### Отслеживание ошибок (Sentry/GlitchTip)
 
-Лёгкий клиент без внешнего SDK: события собираются в асинхронную очередь и
-отправляются через встроенный HTTP-клиент (cpp-httplib) на ingest-эндпоинт
-Sentry (`POST /api/{project}/envelope/`, content-type
-`application/x-sentry-envelope`). Hot-path не блокируется: `capture()` только
-ставит событие в очередь (лимит `SENTRY_MAX_QUEUE_SIZE`, при переполнении
-сбрасывается самое старое). Отправка идёт в фоновом потоке; ошибки сети
-подсчитываются метриками и не пробрасываются в обработку запросов.
+В стеке живёт **GlitchTip** (`http://localhost:8000`) — self-hosted
+Sentry-совместимый сервер (аналог Sentry, порт 8000, сервис `glitchtip` +
+выделенный PostgreSQL `glitchtip-db`). C++-клиент без внешнего SDK: события
+собираются в асинхронную очередь и отправляются через встроенный HTTP-клиент
+(cpp-httplib) на ingest-эндпоинт Sentry/GlitchTip (`POST /api/{project}/envelope/`,
+content-type `application/x-sentry-envelope`). Hot-path не блокируется:
+`capture()` только ставит событие в очередь (лимит `SENTRY_MAX_QUEUE_SIZE`, при
+переполнении сбрасывается самое старое). Отправка идёт в фоновом потоке;
+ошибки сети подсчитываются метриками и не пробрасываются в обработку запросов.
 
 Включение — переменная окружения `SENTRY_DSN` формата
 `https://PUBLIC[:SECRET]@HOST[:PORT][/PATH]/PROJECT` (пустой DSN = выключено).
+После первого запуска GlitchTip зарегистрируй юзера в `http://localhost:8000`,
+создай организацию + проект и подставь DSN проекта в `.env`:
+`SENTRY_DSN=http://<public-key>@glitchtip:8000/<project-id>`.
 Дополнительно: `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TIMEOUT_MS`
 (по умолчанию 3000), `SENTRY_MAX_QUEUE_SIZE` (по умолчанию 256).
 Клиент создаётся во всех режимах (l2-proxy, l2-server, l2-worker), тег
@@ -659,18 +686,9 @@ envelope-эндпоинт, по одной `transaction`-записи на сп�
 > Клиент Sentry создаётся во всех режимах, поэтому в каждом процессе счётчики
 > доставки отражают активность именно этого процесса (tag `service` = режим).
 
-Self-hosted Sentry-совместимый сервер также доступен как профиль docker-compose
-для постоянной (не E2E-разовой) интеграции стека с реальным Sentry-каналом:
-
-```bash
-docker compose --profile glitchtip up -d                  # поднять glitchtip на :8000
-```
-
-Либо автоматически при сборке dev-стека:
-
-```bash
-ENABLE_GLITCHTIP=true ./rebuild-and-run.sh
-```
+Self-hosted Sentry-совместимый сервер GlitchTip всегда часть compose-стека
+(сервисы `glitchtip` + `glitchtip-db`, UI `http://localhost:8000`), поднимается
+автоматически при `./rebuild-and-run.sh` и `docker compose up -d`.
 
 Регистрация первого пользователя, создание организации и проекта — в UI
 `http://localhost:8000`. DSN проекта имеет вид
@@ -862,6 +880,20 @@ Rate limiter (прокси, режим `MODE=proxy`):
 | `l2_server_responses_total` | counter | `status` | Ответы сервера по статусу |
 | `l2_server_health_ready` | gauge | — | Готовность `/health/ready` (1/0) |
 
+### l2-db-spider
+
+| Метрика | Тип | Метки | Описание |
+|---|---|---|---|
+| `l2_spider_polls_total` | counter | `outcome` | Циклы опроса баз (ok/error) |
+| `l2_spider_queries_total` | counter | `db`, `query`, `status` | Выполненные запросы по базе, имени и статусу |
+| `l2_spider_last_poll_duration_seconds` | gauge | — | Длительность последнего цикла опроса (все базы) |
+| `l2_spider_last_success_timestamp` | gauge | — | Unix-время последней успешной записи JSON |
+| `l2_spider_healthy` | gauge | — | Здоровье spider (1 = последний цикл успешен, 0 = ошибка) |
+
+> Метрики l2-db-spider экспонируются на порту `19094` (метрики) и `19095`
+> (health). Режим опционален (`DB_SPIDER_ENABLED`), поэтому в golden-check
+> они в `CONDITIONAL` (обязательны только при запущенном spider).
+
 > Метрики наблюдаемости уровня «насыщенность и доступность» (per-status
 > ответы, in-flight, очередь, NATS-связь, health-готовность) и метрики
 > rate limiter подробно разобраны в разделах выше — они являются базой для
@@ -877,7 +909,7 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 | Сервис | URL | Порт |
 |---|---|---|
-| `l2-proxy` | `http://localhost:8890/stats` (или через nginx `:7777/stats`) | 8890 (внутри сети — 8888) |
+| `l2-proxy` | `http://localhost:29002/stats` (или через nginx `:29003/stats`) | 29002 (внутри сети — 8888) |
 | `l2-worker` | `http://localhost:19093/stats` | 19093 |
 
 Особенности:
@@ -910,18 +942,38 @@ Rate limiter (прокси, режим `MODE=proxy`):
 
 ---
 
-## Дашборды (Perses, генерация скриптом)
+## Дашборды (Grafana + Perses, генерация скриптом)
 
-Grafana из стека удалена (round 204): 847-МБ образ дублировал Perses и требовал
-второго синка дашбордов. Единственный UI — **Perses** на `http://localhost:8089`.
-Определения панелей по-прежнему живут в `scripts/generate-grafana-dashboards.py`
-(историческое имя): этот модуль — источник структуры панелей и PromQL, из него
-`scripts/generate-perses-dashboards.py` строит нативные Perses-дашборды. Вручную
-панели не правятся — правится генератор.
+Оба UI читают **одни и те же** определения панелей из
+`scripts/generate-grafana-dashboards.py` — это источник структуры панелей и
+PromQL. Вручную панели не правятся — правится генератор:
+- **Grafana** на `http://localhost:3000` (порт 3000, логин `admin/admin`) — дашборды
+  заливаются через `scripts/generate-grafana-dashboards.py --correct-dashboards`;
+- **Perses** на `http://localhost:8089` — нативный конвертер
+  `scripts/generate-perses-dashboards.py` строит Perses-дашборды из тех же определений.
+
+### Отчёты по Docker-реестрам (`http://localhost:8083`)
+
+Сервис `registry-report-server` (`docker-compose.yml`, образ на базе Ubuntu 26.04,
+порт 8083) — веб-UI для сбора и просмотра отчётов о **Artifactory Docker-реестрах**
+(размеры, теги). Генерирует отчёт по выбранному repo-ключу (или его подмножеству),
+сохраняет его на волюм `registry-reports` и показывает список проверенных с датой
+плюс диаграммы распределения по размерам и числу тегов.
+
+- Список проверяемых Artifactory repo-ключей — в `config/registries.json` (в git).
+- Креды — из `.env` по `user_env`/`password_env` из конфига (одна read-only учётка
+  `datp-replication-ro`, полный доступ к реестрам).
+- Доступ к реестрам: `https://repos.dp.nlmk.com/artifactory/api/docker/<key>/v2/`.
+- Имя файла отчёта = имя repo-ключа + дата (`<key>-<timestamp>.html`).
+- Отчёты сохраняются в `REPORT_DIR` (default `/data`, волюм `registry-reports`).
+- Диаграмма «Распределение по размерам» строится по всем repo-ключам из конфига
+  (`/api/summary`), галочка «Показать все» добавляет репозитории вне конфига.
+- Скрипт: `scripts/registry-report-server.py` (Dockerfile-стадия `registry-report-server`),
+  CLI: `scripts/registry-report.py`.
 
 > **Датасорс** (VictoriaMetrics, URL `http://victoria-metrics:8428`) создаётся
-> скриптом Perses-синка как глобальный `prometheus`; провижининг-каталог Grafana
-> удалён ещё в round 66.
+> обоими синк-скриптами: Grafana через API (`VictoriaMetrics`), Perses как
+> глобальный `prometheus` (HTTP-прокси).
 
 Дашборды и их UID:
 
@@ -937,7 +989,7 @@ Grafana из стека удалена (round 204): 847-МБ образ дубл
 | NATS-сервер | `nats-dashboard` | `gnatsd_*` (генерируется скриптом) |
 | NGINX Метрики | `nginx-metrics` | nginx `stub_status` (из `grafana-nginx.json`) |
 
-Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка структуры без сети: `python3 scripts/generate-perses-dashboards.py --check`.
+Скрипт генерирует панели для **всех** метрик, эмитируемых C++ (`l2_*`), и не ссылается на несуществующие метрики. Заголовки дашбордов и панелей — на русском. Проверка структуры без сети: `python3 scripts/generate-grafana-dashboards.py --check`.
 
 ### Perses-дашборды (`http://localhost:8089`)
 
@@ -954,20 +1006,37 @@ python3 scripts/generate-perses-dashboards.py --check      # offline-прове�
 python3 scripts/generate-perses-dashboards.py --output-dir ./monitoring/perses/generated  # GitOps-экспорт
 ```
 
-`rebuild-and-run.sh` после поднятия стека синкает дашборды в Perses; живое
-сравнение с Grafana больше не запускается (её контейнера нет), но
-`scripts/compare-grafana-perses.py` и `scripts/test-grafana-generator.sh`
-оставлены в репозитории на случай возврата второго UI. В CI дашборды создаются с
-нуля при каждом прогоне, поэтому `Perses=0` означает сломанный синк, а не
-пустой кэш.
+### Grafana-дашборды (sidecar, `GRAFANA_URL` может указывать на другой хост)
 
-Сервис `perses` в `docker-compose.yml` слушает `8089:8080` и использует named volume
-`perses-data`; после `./rebuild-and-run.sh` дашборды пересоздаются сами (PUT-идемпотентно).
-Режим `--mode migrate` (через `POST /api/migrate`) оставлен как fallback.
+Grafana (порт 3000, образ `grafana/grafana:12.4`, логин `admin/admin`, named
+volume `grafana-storage`) — один из UI. Дашборды и Prometheus-датасорс
+(proxy на VictoriaMetrics) накатывает **sidecar-контейнер**
+`grafana-dashboards-sync` (сервис в `docker-compose.yml`, стадия `grafana-sync`
+в `src/Dockerfile`): при старте ждёт готовность Grafana по `GRAFANA_URL`,
+запускает `generate-grafana-dashboards.py --correct-dashboards` и завершается
+(`restart: on-failure`). Grafana может находиться **на другом хосте** — просто
+укажите `GRAFANA_URL` (например `http://grafana-host:3000`).
 
-Генератор `generate-grafana-dashboards.py` сохраняет и старый режим отправки в
-Grafana по API (`GRAFANA_URL`/`--correct-dashboards`): это только опциональный
-экспорт во внешний инстанс, в compose Grafana больше не входит.
+Ручной синк с хоста — так же, как делает sidecar:
+
+```bash
+GRAFANA_URL="http://localhost:3000" GRAFANA_USER=admin GRAFANA_PASSWORD=admin \
+  python3 scripts/generate-grafana-dashboards.py --correct-dashboards
+python3 scripts/generate-grafana-dashboards.py --check      # offline-проверка (без сети)
+python3 scripts/generate-grafana-dashboards.py --output-dir ./grafana/generated  # GitOps-экспорт
+```
+
+`rebuild-and-run.sh` после поднятия стека синкает Perses (нативно) и
+запускает sidecar для Grafana. Живое сравнение `scripts/compare-grafana-perses.py`
+и `scripts/test-grafana-generator.sh` оставлены в репозитории для проверки
+паритета панелей между двумя UI.
+
+Сервис `perses` в `docker-compose.yml` слушает `8089:8080` (volume `perses-data`);
+сервис `grafana` слушает `3000:3000` (volume `grafana-storage`); сервис
+`grafana-dashboards-sync` — одноразовый sidecar. После `./rebuild-and-run.sh`
+дашборды пересоздаются сами (PUT-идемпотентно для Perses, `--correct-dashboards`
+для Grafana). Режим `--mode migrate` (через `POST /api/migrate`) оставлен как
+fallback.
 
 **Замечание про «пустые» панели.** Панели используют фиксированные окна `rate[1m]`/`rate[5m]`
 (как и раньше): если счётчик события не рос в окне (например, нет 4xx/5xx при здоровой
@@ -1030,7 +1099,7 @@ python3 scripts/alerts-consistency-check.py --runtime   # + VictoriaMetrics и v
 - **у правила есть `for`, `labels.severity`, `labels.service`, `annotations.summary/description/runbook`** — алерт без инструкции «что делать» бесполезен;
 - **PromQL валидна** (в runtime-режиме — запросом в VictoriaMetrics), а `vmalert` загрузил правила и не накопил ошибок вычисления.
 
-Гейт висит в `scripts/ci-gate.sh` (offline + runtime), то есть в CI и в pre-commit.
+Гейт висит в `scripts/ci-gate.sh` (offline + runtime) и гоняется через pre-commit.
 
 ### Выбор виртуальных машин
 
@@ -1049,7 +1118,7 @@ VM_NAME=my-node ./rebuild-and-run.sh        # переопределение н�
 
 ## Нагрузочное тестирование (baseline)
 
-Baseline зафиксирован 2026-08-06 на этом стеке через `python3 scripts/comprehensive-performance-test.py` (URL — через nginx, `http://localhost:7777`, запросы с payload метрик), переопределён 2026-09-08 после добавления tracing/Sentry-интеграции:
+Baseline зафиксирован 2026-08-06 на этом стеке через `python3 scripts/comprehensive-performance-test.py` (URL — через nginx, `http://localhost:29003`, запросы с payload метрик), переопределён 2026-09-08 после добавления tracing/Sentry-интеграции:
 
 | Сценарий | Итерации × concurrency | RPS | p50 | p95 | p99 | Avg latency |
 |---|---|---|---|---|---|---|
@@ -1122,7 +1191,8 @@ python3 scripts/sentry-e2e-test.py       # PASS/FAIL
 Находки в вендорных заголовках (`httplib`, `base64`, `nats`, `odpi`, `json`,
 `prometheus-cpp`) подавляются списком `src/cppcheck-suppressions.txt`. Оба
 инструмента автоматически запускаются в pre-commit (пропуск:
-`SKIP_CLANG_TIDY=1` / `SKIP_CPPCHECK=1`) и в CI (джобы `clang-tidy` и `cppcheck`).
+`SKIP_CLANG_TIDY=1` / `SKIP_CPPCHECK=1`) и вручную через `--all`; в CI не
+гоняются (нужен Docker daemon).
 
 ---
 
@@ -1178,8 +1248,9 @@ python3 scripts/coverage-regression-check.py            # только пров�
 python3 scripts/coverage-regression-check.py --max-drop 0.5   # порог отчёта о сдвиге
 ```
 
-**Архитектура CI-джобы покрытия.** Джоб `coverage` в `.github/workflows/ci.yml`
-намеренно крутится на `ubuntu-24.04-arm` — той же архитектуре, на которой снят
+**Архитектура замера покрытия.** Замер `coverage` (запускается вручную
+`scripts/run-coverage.sh`, в CI не гоняется — нужен Docker daemon и arm64)
+намеренно крутится на arm64 — той же архитектуре, на которой снят
 `docs/coverage-baseline.json` (машина разработчика, linux/arm64, 4 vCPU). gcov
 приписывает часть исполняемых строк по-разному на разных таргетах: при том же
 исходнике и той же версии gcc на amd64 `http_client.cpp` давал 101 исполняемую
@@ -1188,9 +1259,8 @@ python3 scripts/coverage-regression-check.py --max-drop 0.5   # порог от�
 регрессии: пять файлов теряли ровно по одной покрытой строке
 (`common_utils.cpp`, `db_query_executor_oracle.cpp`, `header_utils.hpp`,
 `http_client_pool.cpp`, `in_flight_tracker.hpp`), а `config.cpp`/`http_client.cpp`
-ещё и меняли общее число строк (до −1.9 п.п.). Остальные джобы остаются на
-amd64 — покрытие это замер, а не проверка поведения, и строгий пер-файловый гейт
-возможен только на архитектуре baseline.
+ещё и меняли общее число строк (до −1.9 п.п.). Покрытие это замер, а не проверка
+поведения, и строгий пер-файловый гейт возможен только на архитектуре baseline.
 
 **Ветвевое покрытие (branch):**
 

@@ -32,20 +32,21 @@ MAX_RETRIES="${2:-2}"
 RETRY_DELAY=5
 
 # Service ports
-PROXY_PORT="${PROXY_PORT:-8890}"
+PROXY_PORT="${PROXY_PORT:-29002}"
 WORKER_METRICS_PORT="${WORKER_METRICS_PORT:-19091}"
 WORKER_HEALTH_PORT="${WORKER_HEALTH_PORT:-19093}"
 SERVER_PORT="${SERVER_PORT:-8088}"
 PROXY_METRICS_PORT="${PROXY_METRICS_PORT:-19090}"
 
-# Observability stack (base compose; host ports differ from container ports
-# because the FlylinkDC++ hub stack owns 8428/8080 on this host).
-VM_PORT="${VM_PORT:-8430}"
+# Observability stack (base compose; host ports match the container ports).
+VM_PORT="${VM_PORT:-8428}"
 VMAGENT_PORT="${VMAGENT_PORT:-8429}"
 VMALERT_PORT="${VMALERT_PORT:-8880}"
 NATS_HTTP_PORT="${NATS_HTTP_PORT:-8222}"
 NATS_EXPORTER_PORT="${NATS_EXPORTER_PORT:-7778}"
 PERSES_PORT="${PERSES_PORT:-8089}"
+GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+GLITCHTIP_PORT="${GLITCHTIP_PORT:-8000}"
 
 # Disk guard: the 2026-10-27 VictoriaMetrics crash was `no space left on
 # device` at ~0.9 GB free, so the critical line is above that.
@@ -53,23 +54,8 @@ DISK_WARN_MB="${DISK_WARN_MB:-2048}"
 DISK_CRIT_MB="${DISK_CRIT_MB:-1024}"
 DISK_CHECK_PATH="${DISK_CHECK_PATH:-/}"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# shellcheck source=scripts/lib-common.sh
+. "$SCRIPT_DIR/scripts/lib-common.sh"
 
 # Unified HTTP check — DRY для health/metrics, с ретраями
 check_http() {
@@ -188,6 +174,12 @@ check_metrics_stack() {
     if ! check_and_restart_health "perses" "$PERSES_PORT" "/api/v1/projects" "l2-perses"; then
         log_warn "perses is down (dashboard UI only, not fatal)"
     fi
+    if ! check_and_restart_health "grafana" "$GRAFANA_PORT" "/api/health" "grafana"; then
+        log_warn "grafana is down (dashboard UI only, not fatal)"
+    fi
+    if ! check_and_restart_health "glitchtip" "$GLITCHTIP_PORT" "/" "glitchtip"; then
+        log_warn "glitchtip is down (error tracking UI, not fatal)"
+    fi
 
     return $failed
 }
@@ -246,7 +238,7 @@ run_health_checks() {
 
 
     # Check Nginx
-    if ! check_health "nginx" "7777" "/nginx-health"; then
+    if ! check_health "nginx" "29003" "/nginx-health"; then
         unhealthy_services+=("nginx")
         exit_code=1
     fi

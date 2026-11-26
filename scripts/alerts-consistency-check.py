@@ -26,7 +26,6 @@ Usage: scripts/alerts-consistency-check.py [--offline|--runtime]
 """
 
 import argparse
-import importlib.util
 import json
 import pathlib
 import re
@@ -38,26 +37,23 @@ import urllib.request
 import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import metrics_common
+
 ALERTS_DIR = REPO_ROOT / "alerts"
 METRICS_CHECK_PATH = REPO_ROOT / "scripts" / "metrics-consistency-check.py"
 
-METRIC_LITERAL = r"(l2_[a-z0-9_]+)"
+METRIC_LITERAL = metrics_common.METRIC_LITERAL
 # Prometheus duration: a sequence of <number><unit> pairs ("30s", "5m", "1h30m").
 DURATION = re.compile(r"^(?:\d+(?:ms|s|m|h|d|w|y))+$")
 ALERT_NAME = re.compile(r"^L2[A-Z][A-Za-z0-9]*$")
 SEVERITIES = ("warning", "critical")
 REQUIRED_ANNOTATIONS = ("summary", "description", "runbook")
-VM_URL = "http://localhost:8430"
+VM_URL = "http://localhost:8428"
 VMALERT_URL = "http://localhost:8880"
 
-
-def load_module(path: pathlib.Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+load_module = metrics_common.load_module
 
 
 def load_metrics_module():
