@@ -484,7 +484,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
         ENABLE_ASAN: "${ENABLE_ASAN:-false}"
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
         CACHE_BUST: "${CACHE_BUST:-1}"
@@ -681,7 +681,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
         ENABLE_ASAN: "${ENABLE_ASAN:-false}"
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
         CACHE_BUST: "${CACHE_BUST:-1}"
@@ -839,7 +839,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
         ENABLE_ASAN: "${ENABLE_ASAN:-false}"
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
         CACHE_BUST: "${CACHE_BUST:-1}"
@@ -921,7 +921,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
     restart: unless-stopped
     ports:
       - "19096:19096"
@@ -983,7 +983,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
     restart: "no"
     volumes:
       - ./heat-output:/work/heat-output
@@ -1013,7 +1013,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
     restart: unless-stopped
     ports:
       - "19097:19097"
@@ -1113,7 +1113,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
     restart: on-failure
     environment:
       - GRAFANA_URL=${GRAFANA_URL:-http://grafana:3000}
@@ -1136,7 +1136,7 @@ services:
         BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
         REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
     restart: unless-stopped
     ports:
       - "8083:8083"

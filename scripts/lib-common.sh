@@ -46,9 +46,8 @@ ensure_builder_image() {
     local src_dir="${1:-$PROJECT_ROOT/src}"
     if ! docker image inspect "$LINT_IMAGE" >/dev/null 2>&1; then
         log_info "Builder image not found, building ${LINT_IMAGE}..."
-        local build_args=()
-        contour_build_args build_args
-        docker build --target builder -t "$LINT_IMAGE" "${build_args[@]}" "$src_dir"
+        contour_build_args
+        docker build --target builder -t "$LINT_IMAGE" "${CONTOUR_BUILD_ARGS[@]}" "$src_dir"
     fi
 }
 

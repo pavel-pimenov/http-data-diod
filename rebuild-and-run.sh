@@ -66,18 +66,27 @@ BUILD_START_TIME=$(date +%s)
 export VM_NAME="${VM_NAME:-$(hostname)}"
 
 # ---------------------------------------------------------------------------
-# Contour proxy configuration (per-contour, overridable in .env):
-#   REGISTRY   container-registry proxy prefix for all external images
-#              (docker-compose `image:` + Dockerfile FROM/COPY --from).
-#              Empty string = pull straight from Docker Hub (internet build).
-#   APT_MIRROR apt repository mirror for Ubuntu 26.04 package installs inside
-#              the images. Empty string = use the distro's default sources.
-# Values come from .env (loaded above) per closed contour; e.g. this node uses
-# docker-registry.dp.nlmk.com/ + repos.dp.nlmk.com/..., another contour may use
-# repo.ia.nlmk/k8s-oci/dockerhub/ + repo.ia.nlmk/artifactory/ubuntu_repo/.
-# Empty fallback = Docker Hub / distro defaults.
-export REGISTRY="${REGISTRY:-}"
-export APT_MIRROR="${APT_MIRROR:-}"
+# Image build profile (see scripts/build-profile.sh):
+#   BUILD_PROFILE=public  (default) — Docker Hub, Ubuntu defaults, pypi.org;
+#                          no .env needed, works on a machine with internet.
+#   BUILD_PROFILE=contour — closed contour with mirrors from .env:
+#     REGISTRY       prefix for all external container images
+#                    (docker-compose `image:` + Dockerfile FROM/COPY --from).
+#     APT_MIRROR     Ubuntu 26.04 apt repository mirror inside the images.
+#     PIP_INDEX_URL  pip index for the Python helper images (PDF/dashboards/
+#                    registry report).
+#     BASE_IMAGE     optional fully resolved Ubuntu base image override.
+# dp.nlmk addresses below are only the documented contour defaults; another
+# contour overrides them in .env (e.g. repo.ia.nlmk/...).
+# shellcheck source=scripts/build-profile.sh
+. "$PWD/scripts/build-profile.sh"
+resolve_build_profile
+
+echo "Build profile: ${BUILD_PROFILE}"
+echo "  registry:      ${REGISTRY:-<Docker Hub>}"
+echo "  apt mirror:    ${APT_MIRROR:-<distro defaults>}"
+echo "  pip index:     ${PIP_INDEX_URL}"
+echo "  base image:    ${L2_BASE_IMAGE}"
 
 ENABLE_ASAN=false
 COMPOSE_ARGS=()

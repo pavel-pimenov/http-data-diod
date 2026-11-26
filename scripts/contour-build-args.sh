@@ -1,31 +1,40 @@
 #!/bin/bash
 
-# Shared helper for lint scripts (run-shellcheck.sh, run-clang-tidy.sh,
-# run-cppcheck.sh): returns the docker build --build-arg list needed to build
-# the builder image inside a closed contour.
+# Shared helper for lint/coverage scripts (run-shellcheck.sh, run-clang-tidy.sh,
+# run-cppcheck.sh, ...): fills CONTOUR_BUILD_ARGS with the docker build args for
+# the active profile (public by default, closed contour via BUILD_PROFILE=contour).
+# Source it (`. "$SCRIPT_DIR/contour-build-args.sh"`) after setting
+# PROJECT_ROOT, then:
 #
-# The contour mirrors (REGISTRY/APT_MIRROR) used to be hardcoded in each script
-# separately; this function centralizes loading them from .env and emitting the
-# three build args. Source it (`. "$SCRIPT_DIR/contour-build-args.sh"`) after
-# setting PROJECT_ROOT, then:
+#   contour_build_args
+#   docker build --target builder -t "$LINT_IMAGE" "${CONTOUR_BUILD_ARGS[@]}" "$SRC_DIR"
 #
-#   local build_args=()
-#   contour_build_args build_args
-#   docker build --target builder -t "$LINT_IMAGE" "${build_args[@]}" "$SRC_DIR"
-#
-# Usage:
-#   contour_build_args <array_name>   # fills <array_name> with --build-arg pairs
+# No namerefs: macOS ships bash 3.2, where `local -n` is a syntax error.
 
 contour_build_args() {
-    # nameref gives direct (safe) access to the caller's array, avoiding eval
-    # with interpolated .env values (command injection via a malicious .env).
-    local -n out="$1"
-    out=()
+    CONTOUR_BUILD_ARGS=()
     if [ -f "${PROJECT_ROOT}/.env" ]; then
-        # shellcheck disable=SC1091
-        set -a; source "${PROJECT_ROOT}/.env"; set +a
-        out+=(--build-arg "REGISTRY_MIRROR=${REGISTRY_MIRROR:-${REGISTRY:-}}")
-        out+=(--build-arg "APT_MIRROR=${APT_MIRROR:-}")
-        out+=(--build-arg "BASE_IMAGE=${BASE_IMAGE:-${REGISTRY_MIRROR:-${REGISTRY:-}}ubuntu:26.04}")
+        # Only simple VAR=value lines are needed here. Sourcing .env is unsafe:
+        # it can contain JSON arrays (L2_SERVER_URLS=[...]) and arbitrary shell.
+        while IFS='=' read -r _key _value; do
+            case "$_key" in
+                '' | \#* | *[[:space:]]*) continue ;;
+            esac
+            case "$_value" in
+                *'['* | *[[:space:]]*) continue ;;
+            esac
+            export "$_key=$_value"
+        done < "${PROJECT_ROOT}/.env"
     fi
+
+    # shellcheck source=build-profile.sh
+    . "${PROJECT_ROOT}/scripts/build-profile.sh"
+    resolve_build_profile
+
+    CONTOUR_BUILD_ARGS=(
+        --build-arg "REGISTRY_MIRROR=${REGISTRY_MIRROR}"
+        --build-arg "APT_MIRROR=${APT_MIRROR}"
+        --build-arg "BASE_IMAGE=${L2_BASE_IMAGE}"
+        --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL}"
+    )
 }

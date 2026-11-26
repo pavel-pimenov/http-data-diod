@@ -1,15 +1,13 @@
 # syntax=docker/dockerfile:1
 
-# Build location is configurable for an isolated (offline) contour:
-#   - BASE_IMAGE:   the Ubuntu base image, fully resolved (optionally prefixed
-#                   with the registry proxy), e.g. docker-registry.dp.nlmk.com/ubuntu:26.04
-#   - REGISTRY_MIRROR: prefix prepended to the other external image references
-#                   (FROM nats:2.15.2-alpine, oracle-libs, ...) so they are pulled
-#                   through a registry proxy instead of Docker Hub.
-#   - APT_MIRROR:   apt repository mirror for Ubuntu package installs (defaults
-#                   to the proxy repo; set empty to use the distro defaults).
-# All three default to the isolated-contour proxy endpoints and can be
-# overridden per build to point at another registry/apt proxy.
+# Two build profiles (see scripts/build-profile.sh):
+#   - public (default): Docker Hub, distro apt sources, no build args needed.
+#   - contour: closed contour; scripts/contour-build-args.sh passes the
+#     mirrors from .env (BUILD_PROFILE=contour):
+#       BASE_IMAGE       fully resolved Ubuntu image (may include proxy prefix)
+#       REGISTRY_MIRROR  prefix for the external FROM/COPY --from images
+#       APT_MIRROR       Ubuntu apt repository mirror
+# All ARG defaults below are public; the contour overrides them via build args.
 ARG BASE_IMAGE=ubuntu:26.04
 ARG REGISTRY_MIRROR=
 ARG APT_MIRROR=

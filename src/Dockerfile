@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1
 
-# Build location is configurable for an isolated (offline) contour:
-#   - BASE_IMAGE:   the Ubuntu base image, fully resolved (optionally prefixed
-#                   with the registry proxy), e.g. docker-registry.dp.nlmk.com/ubuntu:26.04
-#   - REGISTRY_MIRROR: prefix prepended to the other external image references
-#                   (FROM nats:2.15.2-alpine, oracle-libs, ...) so they are pulled
-#                   through a registry proxy instead of Docker Hub.
-#   - APT_MIRROR:   apt repository mirror for Ubuntu package installs (defaults
-#                   to the proxy repo; set empty to use the distro defaults).
-# All three default to the isolated-contour proxy endpoints and can be
-# overridden per build to point at another registry/apt proxy.
+# Two build profiles (see scripts/build-profile.sh):
+#   - public (default): Docker Hub, distro apt sources and pypi.org; no build
+#     args needed (the root build script works on a machine with internet).
+#   - contour: closed contour; rebuild-and-run.sh passes the mirrors from .env
+#     (BUILD_PROFILE=contour):
+#       BASE_IMAGE       fully resolved Ubuntu image (may include proxy prefix)
+#       REGISTRY_MIRROR  prefix for the external FROM/COPY --from images
+#       APT_MIRROR       Ubuntu apt repository mirror
+#       PIP_INDEX_URL    pip index for the Python helper stages
+# All ARG defaults below are public; the contour overrides them via build args.
 ARG BASE_IMAGE=ubuntu:26.04
 ARG REGISTRY_MIRROR=
 ARG APT_MIRROR=
@@ -207,13 +207,16 @@ RUN \
 # reportlab is the only dependency (pure-Python PDF generation; DejaVuSans
 # provides the Cyrillic glyphs). No native build deps (PIL) are needed for
 # text/table-only reports. pip installs through the corporate PyPI proxy
-# (same artifactory as the host pip.conf): pypi.org is unreachable in a
-# closed contour.
-ARG PIP_INDEX_URL=https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    --index-url ${PIP_INDEX_URL} \
-    --trusted-host repos.dp.nlmk.com \
-    reportlab==4.4.3
+# The pip index is a build arg: pypi.org by default, an artifactory mirror in
+# the closed contour; the trusted host is derived from the index URL so no
+# contour address is hardcoded in the image.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN set -eu; \
+    pip_host="${PIP_INDEX_URL#*://}"; pip_host="${pip_host%%/*}"; pip_host="${pip_host%%:*}"; \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        --index-url "${PIP_INDEX_URL}" \
+        --trusted-host "${pip_host}" \
+        reportlab==4.4.3
 
 WORKDIR /work
 COPY scripts/spider_report_pdf.py /usr/local/bin/spider_report_pdf.py
@@ -284,11 +287,13 @@ RUN \
     curl \
     && apt-get clean
 
-ARG PIP_INDEX_URL=https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    --index-url ${PIP_INDEX_URL} \
-    --trusted-host repos.dp.nlmk.com \
-    requests
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN set -eu; \
+    pip_host="${PIP_INDEX_URL#*://}"; pip_host="${pip_host%%/*}"; pip_host="${pip_host%%:*}"; \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        --index-url "${PIP_INDEX_URL}" \
+        --trusted-host "${pip_host}" \
+        requests
 
 WORKDIR /opt/dashboards
 COPY scripts/generate-grafana-dashboards.py /opt/dashboards/generate-grafana-dashboards.py
@@ -321,11 +326,13 @@ RUN \
     nodejs \
     && apt-get clean
 
-ARG PIP_INDEX_URL=https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-    --index-url ${PIP_INDEX_URL} \
-    --trusted-host repos.dp.nlmk.com \
-    flask
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN set -eu; \
+    pip_host="${PIP_INDEX_URL#*://}"; pip_host="${pip_host%%/*}"; pip_host="${pip_host%%:*}"; \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        --index-url "${PIP_INDEX_URL}" \
+        --trusted-host "${pip_host}" \
+        flask
 
 WORKDIR /opt/registry-report
 COPY scripts/registry-report-server.py /opt/registry-report/registry-report-server.py

@@ -13,12 +13,17 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+PROJECT_ROOT="$REPO_ROOT"
+
+# shellcheck source=contour-build-args.sh
+. "$REPO_ROOT/scripts/contour-build-args.sh"
 
 OUT_DIR="${1:-$REPO_ROOT/coverage-report}"
 IMAGE_TAG="http-data-diod:coverage"
 
 echo "=== Building the coverage image (gcovr) ==="
-docker build --target coverage -t "$IMAGE_TAG" \
+contour_build_args
+docker build --target coverage -t "$IMAGE_TAG" "${CONTOUR_BUILD_ARGS[@]}" \
     -f src/Dockerfile.test src
 
 CID="$(docker create "$IMAGE_TAG")"

@@ -1333,6 +1333,31 @@ docker run --rm -v $PWD/coverage-report:/out --entrypoint gcovr http-data-diod:c
 
 ---
 
+## Сборка образов: два профиля
+
+Профиль задаётся переменной `BUILD_PROFILE` (в окружении или в `.env`, который
+читают `rebuild-and-run.sh` и lint/coverage-скрипты):
+
+| Профиль | Образы | apt в Ubuntu | pip | Что нужно |
+|---|---|---|---|---|
+| `public` (по умолчанию) | Docker Hub | стандартные источники дистрибутива | `https://pypi.org/simple` | интернет на машине, `.env` не нужен |
+| `contour` | зеркало реестра (`REGISTRY`) | `APT_MIRROR` | `PIP_INDEX_URL` (зеркало PyPI) | `.env` с адресами зеркал контура |
+
+Обычная сборка на машине с интернетом — `./rebuild-and-run.sh`: использует
+публичные дефолты, даже если в `.env` остались старые адреса зеркал.
+
+Для закрытого контура скопируйте `.env.example` в `.env`, установите
+`BUILD_PROFILE=contour` и при необходимости переопределите `REGISTRY`,
+`APT_MIRROR`, `PIP_INDEX_URL`, `BASE_IMAGE` (дефолты в `scripts/build-profile.sh`
+соответствуют контуру dp.nlmk).
+
+Тот же профиль автоматически используется при сборке builder-образа в
+`scripts/run-clang-tidy.sh`, `scripts/run-cppcheck.sh`, `scripts/run-shellcheck.sh`
+и при генерации покрытия (`scripts/run-coverage.sh`). В `Dockerfile`/`Dockerfile.test`
+все ARG по умолчанию публичные; зеркала передаются только как build args.
+
+---
+
 ## Замечание по диагностике и эксплуатации
 
 При диагностике контейнеров и health-check'ов необходимо ориентироваться на NATS-контур:
