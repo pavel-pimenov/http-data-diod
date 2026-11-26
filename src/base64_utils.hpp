@@ -3,6 +3,7 @@
 
 #include "base64/base64.hpp"
 #include <string>
+#include <string_view>
 
 namespace base64 {
 // Thin compatibility layer over the canonical implementation in
@@ -15,6 +16,16 @@ inline std::string encode(const std::string &input) { return to_base64(input); }
 // Throws std::runtime_error on malformed input.
 inline std::string decode(const std::string &input) {
   return from_base64(input);
+}
+
+[[nodiscard]] inline std::string encode_if_binary(std::string_view body,
+                                                  bool is_binary) {
+  return is_binary ? to_base64(body) : std::string(body);
+}
+
+[[nodiscard]] inline std::string decode_if_binary(std::string_view body,
+                                                  bool is_binary) {
+  return is_binary ? from_base64(body) : std::string(body);
 }
 } // namespace base64
 

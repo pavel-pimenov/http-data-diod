@@ -3,7 +3,9 @@
 
 #include "error_categorizer.hpp"
 #include <prometheus/counter.h>
+#include <format>
 #include <string>
+#include <string_view>
 
 // ============================================================================
 // Error Metrics Structs
@@ -38,6 +40,24 @@ using error_categorizer::processing_error_type_to_string;
 // ============================================================================
 // Error Handling Functions
 // ============================================================================
+
+[[nodiscard]] inline std::string format_http_error_message(
+    std::string_view error_msg, std::string_view operation, int attempt,
+    std::string_view url) {
+  if (!url.empty() && attempt > 0) {
+    return std::format("HTTP {} error for URL: {} (attempt {}): {}", operation,
+                       url, attempt, error_msg);
+  }
+  if (!url.empty()) {
+    return std::format("HTTP {} error for URL: {}: {}", operation, url,
+                       error_msg);
+  }
+  if (attempt > 0) {
+    return std::format("HTTP {} error (attempt {}): {}", operation, attempt,
+                       error_msg);
+  }
+  return std::format("HTTP {} error: {}", operation, error_msg);
+}
 
 void handle_error(const std::string &error_msg,
                   prometheus::Counter *metrics_counter = nullptr,

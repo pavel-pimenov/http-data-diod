@@ -1156,6 +1156,14 @@ TEST_CASE("Base64: Binary data roundtrip", "[base64]") {
   REQUIRE(base64::decode(base64::encode(binary)) == binary);
 }
 
+TEST_CASE("Base64: conditional encode/decode follows binary flag", "[base64]") {
+  const std::string raw_body("\x78\xDA\x00\x01\xff\xfe", 6);
+  REQUIRE(base64::encode_if_binary(raw_body, false) == raw_body);
+  REQUIRE(base64::decode_if_binary(
+              base64::encode_if_binary(raw_body, true), true) == raw_body);
+  REQUIRE(base64::decode_if_binary("{\"a\":1}", false) == "{\"a\":1}");
+}
+
 // ============================================================================
 // JsonUtils tests
 // ============================================================================
@@ -3019,6 +3027,18 @@ TEST_CASE("Common utils: find_header_optional", "[common-utils]") {
   REQUIRE(!find_header_optional(headers, "x-empty").has_value());
 }
 
+TEST_CASE("Common utils: find_nonempty_header skips missing/empty",
+          "[common-utils]") {
+  httplib::Headers headers;
+  headers.emplace("x-token", "abc");
+  headers.emplace("x-empty", "");
+  const auto token = find_nonempty_header(headers, "x-token");
+  REQUIRE(token.has_value());
+  REQUIRE(test_support::require_value(token, "x-token header") == "abc");
+  REQUIRE_FALSE(find_nonempty_header(headers, "x-missing").has_value());
+  REQUIRE_FALSE(find_nonempty_header(headers, "x-empty").has_value());
+}
+
 TEST_CASE("Common utils: resolve_parent_id", "[common-utils]") {
   REQUIRE(resolve_parent_id("span1", "fallback") == "span1");
   REQUIRE(resolve_parent_id("", "fallback") == "fallback");
@@ -3313,6 +3333,18 @@ TEST_CASE("Common utils: fail_request_categorized labels the error type",
   REQUIRE(value_of("TIMEOUT_ERROR") == 1.0);    // 504 + "timeout" в тексте
   REQUIRE(value_of("PROTOCOL_ERROR") == 1.0);   // 500 + "invalid" в тексте
   REQUIRE(value_of("SERVER_ERROR") == 1.0);     // 500 без ключевого слова
+}
+
+TEST_CASE("Common utils: format_http_error_message url/attempt variants",
+          "[common-utils]") {
+  REQUIRE(format_http_error_message("conn refused", "query", 2, "http://x") ==
+          "HTTP query error for URL: http://x (attempt 2): conn refused");
+  REQUIRE(format_http_error_message("conn refused", "query", 0, "http://x") ==
+          "HTTP query error for URL: http://x: conn refused");
+  REQUIRE(format_http_error_message("conn refused", "query", 2, "") ==
+          "HTTP query error (attempt 2): conn refused");
+  REQUIRE(format_http_error_message("conn refused", "query", 0, "") ==
+          "HTTP query error: conn refused");
 }
 
 TEST_CASE("Common utils: handle_http_error formats url and attempt",

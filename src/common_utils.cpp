@@ -127,21 +127,7 @@ void handle_http_error(const std::string &error_msg,
                        prometheus::Counter *metrics_counter,
                        const std::string &operation, int attempt,
                        const std::string &url) {
-  std::string full_error_msg;
-  if (!url.empty() && attempt > 0) {
-    full_error_msg = std::format("HTTP {} error for URL: {} (attempt {}): {}",
-                                 operation, url, attempt, error_msg);
-  } else if (!url.empty()) {
-    full_error_msg =
-        std::format("HTTP {} error for URL: {}: {}", operation, url, error_msg);
-  } else if (attempt > 0) {
-    full_error_msg = std::format("HTTP {} error (attempt {}): {}", operation,
-                                 attempt, error_msg);
-  } else {
-    full_error_msg = std::format("HTTP {} error: {}", operation, error_msg);
-  }
-
-  Logger::error(full_error_msg);
+  Logger::error(format_http_error_message(error_msg, operation, attempt, url));
 
   if (metrics_counter) {
     metrics_counter->Increment();

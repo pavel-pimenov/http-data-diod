@@ -23,7 +23,7 @@ client ──POST /v1/sql/oracle/query──▶ l2-proxy (8888)
 
 | Сервис | Роль | Что задействовано |
 |--------|------|-------------------|
-| `postgres` | БД | `postgres:17-alpine`, демо-схема из `sql/postgres.sql`. Profile `databases` (`DB_POSTGRES_ENABLED=true`); при внешнем узле-БД работает `DB_POSTGRES_HOST` |
+| `postgres` | БД | `postgres:17.12-alpine`, демо-схема из `sql/postgres.sql`. Profile `databases` (`DB_POSTGRES_ENABLED=true`); при внешнем узле-БД работает `DB_POSTGRES_HOST` |
 | `oracle` | БД | `gvenzl/oracle-xe:21.3.0-slim`, демо-схема из `sql/oracle.sql`. Profile `databases`: `docker compose --profile databases up -d oracle` + `DB_ORACLE_ENABLED=true` |
 | `l2-proxy` | HTTP-вход | регистрирует БД из `DB_POSTGRES_*` / `DB_ORACLE_*` env, роутит `/v1/sql/*` в NATS |
 | `l2-worker` | Исполнитель | Oracle OCI-клиент встроен в общий `runtime-base` (единый бинарник, режим через `MODE`), держит пулы сессий, отвечает на `service.db.query` |

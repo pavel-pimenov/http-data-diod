@@ -1,3 +1,4 @@
+#include "base64_utils.hpp"
 #include "common_utils.hpp"
 #include "constants.hpp"
 #include "db_gateway_routing.hpp"
@@ -19,7 +20,6 @@
 #include "worker_reconnect_state.hpp"
 #include <algorithm>
 #include <atomic>
-#include <base64.hpp>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -467,10 +467,8 @@ int L2Worker::send_l2_response(const RequestData &metadata,
   http_response.m_status = l2_response.m_status_code;
   json const response_headers_json = prepare_response_headers(http_response);
 
-  std::string l2_response_stored = l2_response.m_body;
-  if (response_data.m_is_binary) {
-    l2_response_stored = base64::to_base64(l2_response.m_body);
-  }
+  const std::string l2_response_stored =
+      base64::encode_if_binary(l2_response.m_body, response_data.m_is_binary);
 
   const nlohmann::json response_json = build_nats_response_envelope(
       l2_response.m_status_code, metadata.m_request_id, l2_response_stored,

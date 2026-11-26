@@ -140,7 +140,7 @@ drain, reply-loss).
 
 Реализовано:
 - `glitchtip` сервис в `docker-compose.yml` (теперь всегда в стеке, без профиля)
-  + выделенный `glitchtip-db` (Postgres); образ `glitchtip/glitchtip:6`
+  + выделенный `glitchtip-db` (Postgres); образ `glitchtip/glitchtip:7`
 - E2E-проверка доставки: `scripts/sentry-e2e-test.py` +
   `scripts/sentry-mock-receiver.py` (локальный mock-приёмник на хосте)
 - `scripts/run-glitchtip-stack.sh` (start/stop helper)

@@ -10,7 +10,7 @@ services:
   nats-server:
     container_name: nats-server
     logging: *default-logging
-    image: ${REGISTRY:-}nats:2.15.2-alpine
+    image: ${REGISTRY:-}nats:2.15.3-alpine
     restart: unless-stopped
     ports:
       - "4222:4222"  # NATS client port
@@ -41,9 +41,11 @@ services:
           CONF=/tmp/nats-auth.conf;
           cat \"$${SRC}\" > \"$${CONF}\";
           if [ -n \"$${NATS_TOKEN}\" ]; then
-            echo 'authorization { token: "'"$${NATS_TOKEN}"'" }' >> \"$${CONF}\";
+            printf 'authorization { token: \"%s\" }' \"$${NATS_TOKEN}\" >> \"$${CONF}\";
+            echo >> \"$${CONF}\";
           elif [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; then
-            echo 'authorization { user: "'"$${NATS_USER}"'" password: "'"$${NATS_PASSWORD}"'" }' >> \"$${CONF}\";
+            printf 'authorization { user: \"%s\" password: \"%s\" }' \"$${NATS_USER}\" \"$${NATS_PASSWORD}\" >> \"$${CONF}\";
+            echo >> \"$${CONF}\";
           fi;
         fi;
         exec nats-server -c \"$${CONF}\"
@@ -69,7 +71,7 @@ services:
   nats-exporter:
     container_name: nats-exporter
     logging: *default-logging
-    image: ${REGISTRY:-}natsio/prometheus-nats-exporter:0.20.0
+    image: ${REGISTRY:-}natsio/prometheus-nats-exporter:0.20.3
     restart: unless-stopped
     ports:
       - "7778:7777"  # NATS exporter metrics port (7777 inside container, 7778 on host)
@@ -108,7 +110,7 @@ services:
   jaeger:
     container_name: jaeger
     logging: *default-logging
-    image: ${REGISTRY:-}jaegertracing/jaeger:2.15.1
+    image: ${REGISTRY:-}jaegertracing/jaeger:2.23.0
     restart: unless-stopped
     ports:
       - "16686:16686"  # UI
@@ -128,7 +130,7 @@ services:
   victoria-metrics:
     container_name: l2-victoria-metrics
     logging: *default-logging
-    image: ${REGISTRY:-}victoriametrics/victoria-metrics:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/victoria-metrics:v1.157.0
     restart: unless-stopped
     ports:
       - "8428:8428"
@@ -152,7 +154,7 @@ services:
   vmagent:
     container_name: vmagent
     logging: *default-logging
-    image: ${REGISTRY:-}victoriametrics/vmagent:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/vmagent:v1.157.0
     restart: unless-stopped
     ports:
       - "8429:8429"
@@ -184,7 +186,7 @@ services:
   vmalert:
     container_name: vmalert
     logging: *default-logging
-    image: ${REGISTRY:-}victoriametrics/vmalert:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/vmalert:v1.157.0
     restart: unless-stopped
     ports:
       - "8880:8880"
@@ -293,7 +295,7 @@ services:
 
   l2-test:
     container_name: l2-test
-    image: ${REGISTRY:-}curlimages/curl:latest
+    image: ${REGISTRY:-}curlimages/curl:8.23.0
 #    depends_on:
 #      - l2-server
     networks:
@@ -355,7 +357,7 @@ services:
   glitchtip-db:
     container_name: glitchtip-db
     logging: *default-logging
-    image: ${REGISTRY:-}postgres:17-alpine
+    image: ${REGISTRY:-}postgres:17.12-alpine
     restart: unless-stopped
     mem_limit: ${GLITCHTIP_DB_MEM_LIMIT:-256m}
     environment:
@@ -376,7 +378,7 @@ services:
   glitchtip:
     container_name: glitchtip
     logging: *default-logging
-    image: ${REGISTRY:-}glitchtip/glitchtip:6
+    image: ${REGISTRY:-}glitchtip/glitchtip:7
     restart: unless-stopped
     mem_limit: ${GLITCHTIP_MEM_LIMIT:-1g}
     ports:
@@ -422,10 +424,11 @@ services:
   postgres:
     container_name: postgres
     logging: *default-logging
-    # Pinned to 17: postgres-data volume was re-initialized by PG17, and 16
-    # refuses to start on it ("database files are incompatible"). Do NOT bump
-    # without pg_upgrade or wiping the volume (data loss).
-    image: ${REGISTRY:-}postgres:17-alpine
+    # Pinned to the latest patch of 17: postgres-data volume was re-initialized
+    # by PG17, and 16 refuses to start on it ("database files are incompatible").
+    # Do NOT bump the major version without pg_upgrade or wiping the volume
+    # (data loss).
+    image: ${REGISTRY:-}postgres:17.12-alpine
     restart: unless-stopped
     profiles:
       - databases
@@ -454,7 +457,7 @@ services:
   swagger-ui:
     container_name: swagger-ui
     logging: *default-logging
-    image: ${REGISTRY:-}swaggerapi/swagger-ui:latest
+    image: ${REGISTRY:-}swaggerapi/swagger-ui:v5.36.0
     restart: unless-stopped
     ports:
       - "8081:8080"
@@ -632,7 +635,7 @@ services:
   nginx:
     container_name: nginx
     logging: *default-logging
-    image: ${REGISTRY:-}nginx:alpine
+    image: ${REGISTRY:-}nginx:1.30.8-alpine
     restart: unless-stopped
     ports:
       - "29003:80"
@@ -653,7 +656,7 @@ services:
   nginx-exporter:
     container_name: nginx-exporter
     logging: *default-logging
-    image: ${REGISTRY:-}nginx/nginx-prometheus-exporter:1.1
+    image: ${REGISTRY:-}nginx/nginx-prometheus-exporter:1.5.3
     restart: unless-stopped
     ports:
       - "9113:9113"
@@ -951,7 +954,7 @@ services:
   l2-hub:
     container_name: l2-hub
     logging: *default-logging
-    image: ${REGISTRY:-}nginx:alpine
+    image: ${REGISTRY:-}nginx:1.30.8-alpine
     restart: unless-stopped
     ports:
       - "443:443"
@@ -1072,7 +1075,7 @@ services:
   grafana:
     container_name: grafana
     logging: *default-logging
-    image: ${REGISTRY:-}grafana/grafana:12.4
+    image: ${REGISTRY:-}grafana/grafana:13.3.2
     restart: unless-stopped
     ports:
       - "3000:3000"

@@ -61,7 +61,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # REGISTRY_MIRROR prefixes the image so it is pulled via the registry proxy
 # in an isolated contour (same registry as the compose nats-server service).
 ARG REGISTRY_MIRROR=
-FROM ${REGISTRY_MIRROR}nats:2.15.2-alpine AS nats-server-image
+FROM ${REGISTRY_MIRROR}nats:2.15.3-alpine AS nats-server-image
 
 # Main build stage: apt deps + NATS C client + application.
 # NATS is built here (no separate deps-builder stage) so the pipeline runs

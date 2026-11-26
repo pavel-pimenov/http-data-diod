@@ -1,4 +1,5 @@
 #include "response_builder.hpp"
+#include "base64_utils.hpp"
 #include "common_utils.hpp"
 #include "constants.hpp"
 #include "app_context.hpp"
@@ -8,7 +9,6 @@
 #include "logger.hpp"
 #include "nlohmann/json.hpp"
 #include "tracing_helpers.hpp"
-#include <base64.hpp>
 #include <string>
 #include <cstdint>
 
@@ -46,10 +46,10 @@ void set_response_content(httplib::Response &res,
       "application/json");
 
   // For binary data, decode from base64 into a separate buffer
-  std::string decoded_binary_response;
+  // Base64 decode using libbase64 library (faster than manual implementation)
+  const std::string decoded_binary_response =
+      base64::decode_if_binary(l2_response, is_binary);
   if (is_binary) {
-    // Base64 decode using libbase64 library (faster than manual implementation)
-    decoded_binary_response = base64::from_base64(l2_response);
     Logger::debug("Proxy decoded binary response, size={}",
                   decoded_binary_response.size());
   }

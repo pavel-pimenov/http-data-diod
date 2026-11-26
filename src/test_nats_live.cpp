@@ -4,7 +4,7 @@
 // against it, so the whole request/reply path — including the disconnected/
 // reconnected callbacks and envelope round-trips — runs for real.
 //
-// The server binary is COPYed into the builder image from nats:2.14-alpine
+// The server binary is COPYed into the builder image from nats:2.15.3-alpine
 // (src/Dockerfile); tests SKIP when it is not present so local runs without a
 // server still pass. Offline fail-fast tests (no broker) ship in the same
 // file too: they reuse the TLS-CA trick from test_proxy_handlers.cpp — the

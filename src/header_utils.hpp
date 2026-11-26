@@ -204,24 +204,26 @@ public:
 // Header-value lookup helpers shared by the request/response paths. Kept here
 // (alongside the other httplib::Headers utilities) so the umbrella common_utils
 // header can re-export them without hosting the implementations.
-[[nodiscard]] inline std::string
-get_header_value(const httplib::Headers &headers, std::string_view name,
-                 std::string_view default_value = "unknown") {
-  const auto it = headers.find(std::string(name));
-  if (it != headers.end() && !it->second.empty()) {
-    return it->second;
-  }
-  return std::string(default_value);
-}
-
-// Returns optional<string_view> so callers can chain via and_then/transform/or_else.
 [[nodiscard]] inline std::optional<std::string_view>
-find_header_optional(const httplib::Headers &headers, std::string_view name) {
+find_nonempty_header(const httplib::Headers &headers, std::string_view name) {
   const auto it = headers.find(std::string(name));
   if (it != headers.end() && !it->second.empty()) {
     return std::string_view(it->second);
   }
   return std::nullopt;
+}
+
+[[nodiscard]] inline std::string
+get_header_value(const httplib::Headers &headers, std::string_view name,
+                 std::string_view default_value = "unknown") {
+  return std::string(
+      find_nonempty_header(headers, name).value_or(default_value));
+}
+
+// Returns optional<string_view> so callers can chain via and_then/transform/or_else.
+[[nodiscard]] inline std::optional<std::string_view>
+find_header_optional(const httplib::Headers &headers, std::string_view name) {
+  return find_nonempty_header(headers, name);
 }
 
 [[nodiscard]] inline std::string shorten_user_agent(std::string_view ua) {

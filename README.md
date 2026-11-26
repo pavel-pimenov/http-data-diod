@@ -219,7 +219,7 @@ crontab** (sudo на хосте нет):
 
 | Драйвер | Образ / протокол | Статус по умолчанию | Включение |
 |---|---|---|---|
-| PostgreSQL | `postgres:17-alpine`, libpq, порт 5432 | **включён** драйвер (`DB_POSTGRES_ENABLED=true`), сервис не стартует | profile `databases` или внешний `DB_POSTGRES_HOST` |
+| PostgreSQL | `postgres:17.12-alpine`, libpq, порт 5432 | **включён** драйвер (`DB_POSTGRES_ENABLED=true`), сервис не стартует | profile `databases` или внешний `DB_POSTGRES_HOST` |
 | Oracle | `gvenzl/oracle-xe:21.3.0-slim`, ODPI-C / OCI client (из XE-образа, встроен в общий `runtime-base`), порт 1521 | **отключён** (`DB_ORACLE_ENABLED=false`) | profile `databases` + `DB_ORACLE_ENABLED=true` |
 
 Весь шлюз включается/выключается флагом `DB_QUERY_ENABLED` (default `true`). Подробный пример с командами и выводом — в `docs/http-db-gate-example.md`.
@@ -1008,7 +1008,7 @@ python3 scripts/generate-perses-dashboards.py --output-dir ./monitoring/perses/g
 
 ### Grafana-дашборды (sidecar, `GRAFANA_URL` может указывать на другой хост)
 
-Grafana (порт 3000, образ `grafana/grafana:12.4`, логин `admin/admin`, named
+Grafana (порт 3000, образ `grafana/grafana:13.3.2`, логин `admin/admin`, named
 volume `grafana-storage`) — один из UI. Дашборды и Prometheus-датасорс
 (proxy на VictoriaMetrics) накатывает **sidecar-контейнер**
 `grafana-dashboards-sync` (сервис в `docker-compose.yml`, стадия `grafana-sync`
