@@ -29,7 +29,7 @@ prepare_request_data(const std::string &request_id, const std::string &method,
   // test-port payloads, opaque binary) is base64-encoded because a raw
   // std::string with invalid UTF-8 cannot be serialized by nlohmann::json.
   // The worker decodes it back byte-for-byte (see kBodyIsBinary).
-  const bool is_binary = !body.empty() && !nlohmann::json::accept(body);
+  const bool is_binary = is_nonjson_body(body);
   request_data[NatsContract::kBody] = base64::encode_if_binary(body, is_binary);
   if (is_binary) {
     request_data[NatsContract::kBodyIsBinary] = true;

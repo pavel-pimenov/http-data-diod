@@ -1221,6 +1221,16 @@ TEST_CASE("JsonUtils: is_array", "[json-utils]") {
   REQUIRE_FALSE(JsonUtils::is_array("string"));
 }
 
+TEST_CASE("JsonUtils: is_nonjson_body", "[json-utils]") {
+  REQUIRE_FALSE(is_nonjson_body(""));
+  REQUIRE_FALSE(is_nonjson_body("{}"));
+  REQUIRE_FALSE(is_nonjson_body("null"));
+  REQUIRE_FALSE(is_nonjson_body(R"("text")"));
+  REQUIRE(is_nonjson_body("not json"));
+  REQUIRE(is_nonjson_body("   "));
+  REQUIRE(is_nonjson_body(std::string("\x78\xDA\x00\x01\xff\xfe", 6)));
+}
+
 TEST_CASE("JsonUtils: build_nats_response_envelope full fields", "[json-utils]") {
   json headers = {{"content-type", "application/json"}};
   json env = build_nats_response_envelope(

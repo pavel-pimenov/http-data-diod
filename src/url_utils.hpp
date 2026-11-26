@@ -1,6 +1,7 @@
 #ifndef URL_UTILS_HPP
 #define URL_UTILS_HPP
 
+#include "header_utils.hpp"
 #include "httplib/httplib.h"
 #include "logger.hpp"
 #include "port_utils.hpp"
@@ -97,29 +98,25 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
 // the client. X-Forwarded-For, in contrast, accumulates client-supplied
 // values (nginx uses $proxy_add_x_forwarded_for).
 [[nodiscard]] inline std::string extract_client_ip(const httplib::Request &req) {
-  const auto xri_it = req.headers.find("x-real-ip");
-  if (xri_it != req.headers.end() && !xri_it->second.empty()) {
-    return xri_it->second;
+  if (const auto xri = find_nonempty_header(req.headers, "x-real-ip")) {
+    return std::string(*xri);
   }
 
-  const auto xff_it = req.headers.find("x-forwarded-for");
-  if (xff_it != req.headers.end() && !xff_it->second.empty()) {
-    const auto &xff = xff_it->second;
+  if (const auto xff = find_nonempty_header(req.headers, "x-forwarded-for")) {
     // Take the last address: the one appended by the trusted proxy closest to
     // the backend (leftmost entries may be client-supplied).
-    const size_t comma_pos = xff.rfind(',');
+    const size_t comma_pos = xff->rfind(',');
     const auto client_ip =
-        comma_pos == std::string::npos ? xff : xff.substr(comma_pos + 1);
+        comma_pos == std::string_view::npos ? *xff : xff->substr(comma_pos + 1);
     const size_t start = client_ip.find_first_not_of(" \t");
     const size_t end = client_ip.find_last_not_of(" \t");
-    if (start != std::string::npos && end != std::string::npos) {
-      return client_ip.substr(start, end - start + 1);
+    if (start != std::string_view::npos && end != std::string_view::npos) {
+      return std::string(client_ip.substr(start, end - start + 1));
     }
   }
 
-  const auto cf_it = req.headers.find("cf-connecting-ip");
-  if (cf_it != req.headers.end() && !cf_it->second.empty()) {
-    return cf_it->second;
+  if (const auto cf = find_nonempty_header(req.headers, "cf-connecting-ip")) {
+    return std::string(*cf);
   }
 
   return req.remote_addr;

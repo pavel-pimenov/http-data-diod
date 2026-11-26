@@ -81,7 +81,7 @@ void RequestHandler::handle_post(const httplib::Request &req,
   // Real binary upstream traffic carries zlib-compressed bodies; with
   // raw pass-through enabled they are forwarded verbatim (base64 over NATS)
   // instead of being rejected as invalid JSON.
-  if (!body.empty() && !nlohmann::json::accept(body) &&
+  if (is_nonjson_body(body) &&
       !m_ctx.m_config.m_proxy.m_raw_body_passthrough) {
     count_rejection(error_categorizer::RejectionReason::INVALID_JSON);
     fail_request_categorized(res, http_status::kBadRequest,

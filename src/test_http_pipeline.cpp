@@ -5,6 +5,7 @@
 #include "http_client.hpp"
 #include "http_client_pool.hpp"
 #include "httplib/httplib.h"
+#include "nlohmann/json.hpp"
 #include "test_http_support.hpp"
 #include "test_metrics_support.hpp"
 
@@ -21,6 +22,7 @@
 #include <prometheus/registry.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -214,6 +216,17 @@ TEST_CASE("HttpClient: make_error_json and make_error_response helpers",
   const auto response = make_error_response(502, "bad gateway");
   REQUIRE(response.m_status == 502);
   REQUIRE(response.m_body == R"({"error":"bad gateway"})");
+
+  REQUIRE(make_nats_error_reply_body("Invalid request format") ==
+          R"({"error":"Invalid request format"})");
+  REQUIRE(make_nats_error_reply_body("Internal server error", "boom") ==
+          R"({"error":"Internal server error","message":"boom"})");
+  REQUIRE(make_nats_error_reply_body("x", "") == R"({"error":"x","message":""})");
+
+  const auto escaped = nlohmann::json::parse(make_nats_error_reply_body(
+      "bad \"request\"", std::string_view("line1\nline2")));
+  REQUIRE(escaped["error"] == "bad \"request\"");
+  REQUIRE(escaped["message"] == "line1\nline2");
 }
 
 // ---------------------------------------------------------------------------

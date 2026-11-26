@@ -6,7 +6,9 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "cpp_httplib_config.h"
 #include "httplib/httplib.h"
@@ -33,6 +35,19 @@ inline HttpResponse make_error_response(int status,
                                         const std::string &message) {
   return HttpResponse{make_error_json(message).dump(), httplib::Headers{},
                       status};
+}
+
+// Builds the JSON body of a NATS error reply. An absent detail leaves only the
+// `error` key; an empty detail still adds an empty `message` key, matching the
+// previous hand-rolled replies.
+[[nodiscard]] inline std::string
+make_nats_error_reply_body(std::string_view message,
+                           std::optional<std::string_view> detail = std::nullopt) {
+  auto body = make_error_json(std::string(message));
+  if (detail.has_value()) {
+    body["message"] = std::string(*detail);
+  }
+  return body.dump();
 }
 
 class HttpClient {

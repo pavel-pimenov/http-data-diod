@@ -436,6 +436,9 @@ TEST_CASE("Tracing helpers: get_traceparent_header reads the header",
           "[tracing-helpers]") {
   httplib::Headers headers;
   REQUIRE(get_traceparent_header(headers) == "");
+  headers.emplace("traceparent", "");
+  REQUIRE(get_traceparent_header(headers) == "");
+  headers.clear();
   headers.emplace("traceparent", "00-abc-def-01");
   REQUIRE(get_traceparent_header(headers) == "00-abc-def-01");
 }

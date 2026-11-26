@@ -504,6 +504,30 @@ TEST_CASE("Request data: X-Real-IP wins over cf-connecting-ip",
   REQUIRE(extract_client_ip(req) == "1.2.3.4");
 }
 
+TEST_CASE("Request data: empty X-Real-IP falls back to XFF", "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-real-ip", "");
+  req.headers.emplace("x-forwarded-for", "5.5.5.5");
+  REQUIRE(extract_client_ip(req) == "5.5.5.5");
+}
+
+TEST_CASE("Request data: whitespace XFF falls back to cf-connecting-ip",
+          "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-forwarded-for", " , ");
+  req.headers.emplace("cf-connecting-ip", "7.7.7.7");
+  REQUIRE(extract_client_ip(req) == "7.7.7.7");
+}
+
+TEST_CASE("Request data: last XFF entry is trimmed", "[request-data]") {
+  httplib::Request req;
+  req.remote_addr = "9.9.9.9";
+  req.headers.emplace("x-forwarded-for", "a, b,c \t");
+  REQUIRE(extract_client_ip(req) == "c");
+}
+
 TEST_CASE("Request data: query string is taken after the ?", "[request-data]") {
   httplib::Request req;
   req.target = "/v1/sql/oracle/query?a=1&b=2";

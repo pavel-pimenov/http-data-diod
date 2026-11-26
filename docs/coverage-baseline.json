@@ -194,10 +194,10 @@
       "branches_covered": 78
     },
     "http_client.hpp": {
-      "lines": 15,
-      "covered": 14,
-      "branches": 64,
-      "branches_covered": 32
+      "lines": 21,
+      "covered": 20,
+      "branches": 78,
+      "branches_covered": 40
     },
     "http_client_pool.cpp": {
       "lines": 132,
@@ -248,10 +248,10 @@
       "branches_covered": 85
     },
     "json_utils.hpp": {
-      "lines": 66,
-      "covered": 65,
-      "branches": 219,
-      "branches_covered": 137
+      "lines": 68,
+      "covered": 67,
+      "branches": 223,
+      "branches_covered": 141
     },
     "l2_routing.hpp": {
       "lines": 87,
@@ -272,10 +272,10 @@
       "branches_covered": 41
     },
     "l2_worker_nats.cpp": {
-      "lines": 365,
-      "covered": 325,
-      "branches": 818,
-      "branches_covered": 390
+      "lines": 364,
+      "covered": 324,
+      "branches": 806,
+      "branches_covered": 384
     },
     "logger.hpp": {
       "lines": 274,
@@ -315,9 +315,9 @@
     },
     "nats_client.cpp": {
       "lines": 571,
-      "covered": 481,
+      "covered": 482,
       "branches": 1044,
-      "branches_covered": 473
+      "branches_covered": 475
     },
     "nats_client.hpp": {
       "lines": 1,
@@ -388,14 +388,14 @@
     "request_data_preparer.cpp": {
       "lines": 22,
       "covered": 21,
-      "branches": 64,
-      "branches_covered": 36
+      "branches": 60,
+      "branches_covered": 32
     },
     "request_handler.cpp": {
       "lines": 45,
       "covered": 45,
-      "branches": 52,
-      "branches_covered": 36
+      "branches": 50,
+      "branches_covered": 35
     },
     "request_handler.hpp": {
       "lines": 2,
@@ -497,7 +497,7 @@
       "lines": 211,
       "covered": 208,
       "branches": 393,
-      "branches_covered": 247
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -509,7 +509,7 @@
       "lines": 70,
       "covered": 70,
       "branches": 140,
-      "branches_covered": 88
+      "branches_covered": 89
     },
     "thread_pool_wrapper.hpp": {
       "lines": 28,
@@ -548,10 +548,10 @@
       "branches_covered": 59
     },
     "tracing_helpers.hpp": {
-      "lines": 129,
-      "covered": 128,
-      "branches": 302,
-      "branches_covered": 168
+      "lines": 128,
+      "covered": 127,
+      "branches": 290,
+      "branches_covered": 161
     },
     "tracing_metrics.hpp": {
       "lines": 3,
@@ -560,10 +560,10 @@
       "branches_covered": 7
     },
     "url_utils.hpp": {
-      "lines": 68,
-      "covered": 68,
-      "branches": 168,
-      "branches_covered": 108
+      "lines": 63,
+      "covered": 63,
+      "branches": 140,
+      "branches_covered": 94
     },
     "utf8_utils.hpp": {
       "lines": 55,

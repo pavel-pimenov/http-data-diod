@@ -4,6 +4,7 @@
 #include "app_context.hpp"
 #include "constants.hpp"
 #include "common_utils.hpp"
+#include "header_utils.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "nlohmann/json.hpp"
@@ -18,8 +19,8 @@
 // string when absent. Shared by the trace-context extraction helpers and the
 // rate-limit rejection path (which needs the raw header before setup_tracing).
 inline std::string get_traceparent_header(const httplib::Headers &headers) {
-  const auto traceparent_it = headers.find("traceparent");
-  return (traceparent_it != headers.end()) ? traceparent_it->second : "";
+  return std::string(
+      find_nonempty_header(headers, "traceparent").value_or(""));
 }
 
 // Forward declaration: defined further below, but used by begin_request_trace.

@@ -392,7 +392,7 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
       Logger::error("Failed to parse request JSON for NATS request");
       task.m_activity.m_status = http_status::kBadRequest;
       send_nats_response(reply_to,
-                         make_error_json("Invalid request format").dump());
+                         make_nats_error_reply_body("Invalid request format"));
       return;
     }
 
@@ -444,9 +444,8 @@ void L2Worker::process_request_from_nats(const std::string &request_json,
     Logger::error("Error processing NATS request: {}", e.what());
     task.m_activity.m_status = http_status::kInternalServerError;
 
-    nlohmann::json error_json = make_error_json("Internal server error");
-    error_json["message"] = e.what();
-    send_nats_response(reply_to, error_json.dump());
+    send_nats_response(
+        reply_to, make_nats_error_reply_body("Internal server error", e.what()));
 
     record_l2_call_metrics(start_us);
   }

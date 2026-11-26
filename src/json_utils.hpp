@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 
 using json = nlohmann::json;
 
@@ -87,6 +88,12 @@ inline constexpr const char *kCode = "code";
 inline constexpr const char *kMessage = "message";
 inline constexpr const char *kDetail = "detail";
 } // namespace DbResponseContract
+
+// Empty bodies are allowed; non-empty bodies must parse as JSON to stay on the
+// normal path. Syntax-only check: no DOM allocation and no parse errors thrown.
+[[nodiscard]] inline bool is_nonjson_body(std::string_view body) {
+  return !body.empty() && !json::accept(body);
+}
 
 class JsonUtils {
 public:
