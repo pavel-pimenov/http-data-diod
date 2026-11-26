@@ -69,7 +69,7 @@ extern "C" {
 
 // define ODPI-C version information
 #define DPI_MAJOR_VERSION   26
-#define DPI_MINOR_VERSION   0
+#define DPI_MINOR_VERSION   1
 #define DPI_PATCH_LEVEL     0
 #define DPI_VERSION_SUFFIX
 
@@ -1215,6 +1215,10 @@ DPI_EXPORT int dpiConn_setDbOp(dpiConn *conn, const char *value,
 // set execution context id associated with the connection
 DPI_EXPORT int dpiConn_setEcontextId(dpiConn *conn, const char *value,
         uint32_t valueLength);
+
+// set end user security context on the session handle
+DPI_EXPORT int dpiConn_setEndUserSecurityContextFromOson(dpiConn *conn,
+        const void *oson, uint32_t osonLength);
 
 // set external name associated with the connection
 DPI_EXPORT int dpiConn_setExternalName(dpiConn *conn, const char *value,

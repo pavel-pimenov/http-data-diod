@@ -1086,6 +1086,20 @@ typedef struct jsSubOptions
          * messages. There are no redeliveries and no acks.
          * Flow control and heartbeats are required and set by default, but
          * the heartbeats value can be overridden in the consumer configuration.
+         *
+         * The library recreates the consumer when it detects that messages
+         * were missed, that heartbeats are missed, or after a reconnect.
+         * The new consumer resumes after the last message received by the
+         * subscription. If no message was received yet, it is created with
+         * the deliver policy, start sequence or start time of the consumer
+         * configuration, which for instance means that with #js_DeliverNew
+         * messages stored before the consumer is recreated are not received.
+         *
+         * If jsConsumerConfig.Name is set, it is the name of the first consumer.
+         * When recreated, the consumer is named `<Name>_<n>`, where `n` is
+         * incremented each time. If permissions restrict which consumers can
+         * be created, they need to allow these names too. The name of the
+         * current consumer can be found with #natsSubscription_GetConsumerInfo.
          */
         bool                    Ordered;        ///< If true, this will be an ordered consumer.
 
@@ -3286,7 +3300,21 @@ natsOptions_SetName(natsOptions *opts, const char *name);
  *
  * Indicates to the server if the client wants a secure (SSL/TLS) connection.
  *
- * The default is `false`.
+ * The default is `false`. However, the secure mode is enabled, and TLS is
+ * then required for every server, when any of these is configured, unless
+ * this function was called explicitly:
+ * - a `tls://` URL (#natsOptions_SetURL, #natsOptions_SetServers),
+ * - trusted CA certificates, a client certificate chain, ciphers or cipher
+ *   suites, an expected hostname, skipping server verification, or a
+ *   verification callback.
+ *
+ * Calling this function with `false` is the explicit opt-out: those settings
+ * then no longer require TLS by themselves. A server whose URL has the
+ * `tls://` scheme, or that requires TLS, is still connected to with TLS.
+ *
+ * \note Calling this function with `false` releases the SSL context, which
+ * discards the TLS settings configured so far (for instance trusted CA
+ * certificates). Configure them after this call.
  *
  * \warning Once this option is set and if this #natsOptions object is passed
  * to any #natsConnection_Connect call, and connections are still active,
@@ -3375,6 +3403,9 @@ natsOptions_AllowConcurrentTLSHandshakes(natsOptions *opts);
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param fileName the file containing the CA certificates.
  *
@@ -3392,6 +3423,9 @@ natsOptions_LoadCATrustedCertificates(natsOptions *opts, const char *fileName);
  * You can get extra information by calling #nats_GetLastError.
  *
  * \warning See warning in #natsOptions_SetSecure.
+ *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
  *
  * @param opts the pointer to the #natsOptions object.
  * @param path the path containing the CA certificates.
@@ -3424,6 +3458,9 @@ natsOptions_LoadCATrustedCertificatesPath(natsOptions *opts, const char *path);
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param certificates the string containing the concatenated CA certificates.
  */
@@ -3441,6 +3478,9 @@ natsOptions_SetCATrustedCertificates(natsOptions *opts, const char *certificates
  * See #natsOptions_LoadCATrustedCertificates regarding error reports.
  *
  * \warning See warning in #natsOptions_SetSecure.
+ *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
  *
  * @param opts the pointer to the #natsOptions object.
  * @param certsFileName the file containing the client certificates.
@@ -3462,6 +3502,9 @@ natsOptions_LoadCertificatesChain(natsOptions *opts,
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param certsFileName the file containing the client certificates.
  * @param keyFileName the file containing the client private key.
@@ -3479,6 +3522,9 @@ natsOptions_LoadCertificatesChainDynamic(natsOptions *opts,
  * @see natsOptions_LoadCertificatesChain
  *
  * \warning See warning in #natsOptions_SetSecure.
+ *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
  *
  * @param opts the pointer to the #natsOptions object.
  * @param cert the memory location containing the client certificates.
@@ -3503,6 +3549,9 @@ natsOptions_SetCertificatesChain(natsOptions *opts,
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param ciphers the ciphers suite.
  */
@@ -3521,6 +3570,9 @@ natsOptions_SetCiphers(natsOptions *opts, const char *ciphers);
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Setting this option makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param ciphers the ciphers suite.
  */
@@ -3534,6 +3586,9 @@ natsOptions_SetCipherSuites(natsOptions *opts, const char *ciphers);
  * is created, not at the time of this call.
  *
  * \warning See warning in #natsOptions_SetSecure.
+ *
+ * \note Setting a hostname makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
  *
  * @param opts the pointer to the #natsOptions object.
  * @param hostname the expected server certificate hostname.
@@ -3552,6 +3607,9 @@ natsOptions_SetExpectedHostname(natsOptions *opts, const char *hostname);
  *
  * \warning See warning in #natsOptions_SetSecure.
  *
+ * \note Passing `true` makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
+ *
  * @param opts the pointer to the #natsOptions object.
  * @param skip set it to <c>true</c> to disable - or skip - server certificate verification.
  */
@@ -3566,6 +3624,9 @@ natsOptions_SkipServerVerification(natsOptions *opts, bool skip);
  * #natsOptions_SkipServerVerification.
  *
  * \warning See warning in #natsOptions_SetSecure.
+ *
+ * \note Setting a callback makes TLS required (it enables the secure mode),
+ * unless #natsOptions_SetSecure was called explicitly. See #natsOptions_SetSecure.
  *
  * @param opts the pointer to the #natsOptions object.
  * @param callback the custom SSL verification handler to invoke.
@@ -5864,10 +5925,11 @@ natsConnection_Sign(natsConnection *nc,
  * return the #NATS_NO_SERVER_SUPPORT error.
  *
  * @see natsConnection_GetLocalIPAndPort to get the local IP and port instead.
+ * @see natsConnection_GetRemoteIPAndPort to get the remote (server) IP and port instead.
  *
  * @param nc the pointer to the #natsConnection object.
  * @param ip the memory location where to store the client's IP string.
- * The user is responsible from freeing this memory.
+ * The user is responsible for freeing this memory.
  */
 NATS_EXTERN natsStatus
 natsConnection_GetClientIP(natsConnection *nc, char **ip);
@@ -5919,19 +5981,48 @@ natsConnection_HasHeaderSupport(natsConnection *nc);
  * \note The user is responsible for freeing the memory allocated
  * for the returned IP string.
  *
+ * @see natsConnection_GetRemoteIPAndPort to get the remote IP and port instead.
+ *
  * @param nc the pointer of the #natsConnection object.
  * @param ip the memory location where to store the local IP string.
- * The user is responsible from freeing this memory.
+ * The user is responsible for freeing this memory.
  * @param port the memory location where to store the local port.
  *
  * @return #NATS_OK on success.
  * @return #NATS_CONNECTION_DISCONNECTED if disconnected.
- * @return #NATS_CONNECTION_CLOSED is connection is closed.
+ * @return #NATS_CONNECTION_CLOSED if connection is closed.
  * @return #NATS_SYS_ERROR if a system error getting the IP and port occurred.
  * @return #NATS_NO_MEMORY if the library was unable to allocate memory for the returned IP string.
  */
 NATS_EXTERN natsStatus
 natsConnection_GetLocalIPAndPort(natsConnection *nc, char **ip, int *port);
+
+/** \brief Returns the connection remote IP and port.
+ *
+ * Returns the IP and port of the server this connection is currently
+ * connected to, as seen from the connection's socket.
+ *
+ * \note If the connection goes through a proxy (see #natsOptions_SetProxyConnHandler),
+ * the returned IP and port are the proxy's, not the NATS server's.
+ *
+ * \note The user is responsible for freeing the memory allocated
+ * for the returned IP string.
+ *
+ * @see natsConnection_GetLocalIPAndPort to get the local IP and port instead.
+ *
+ * @param nc the pointer of the #natsConnection object.
+ * @param ip the memory location where to store the remote IP string.
+ * The user is responsible for freeing this memory.
+ * @param port the memory location where to store the remote port.
+ *
+ * @return #NATS_OK on success.
+ * @return #NATS_CONNECTION_DISCONNECTED if disconnected.
+ * @return #NATS_CONNECTION_CLOSED if connection is closed.
+ * @return #NATS_SYS_ERROR if a system error getting the IP and port occurred.
+ * @return #NATS_NO_MEMORY if the library was unable to allocate memory for the returned IP string.
+ */
+NATS_EXTERN natsStatus
+natsConnection_GetRemoteIPAndPort(natsConnection *nc, char **ip, int *port);
 
 /** \brief Closes the connection.
  *

@@ -1800,6 +1800,18 @@ _copyString(char **new_str, const char *str, int l)
     return NATS_OK;
 }
 
+// Returns the metadata part of an ack reply subject (what follows the
+// "$JS.ACK." prefix), suitable for js_getMetaData(), or NULL if `reply`
+// is not an ack subject or has nothing after the prefix.
+const char*
+js_ackMetaData(const char *reply)
+{
+    if (!nats_HasPrefix(reply, jsAckPrefix) || (reply[jsAckPrefixLen] == '\0'))
+        return NULL;
+
+    return reply+jsAckPrefixLen;
+}
+
 natsStatus
 js_getMetaData(const char *reply,
     char **domain,
@@ -2038,7 +2050,7 @@ jsSub_processSequenceMismatch(natsSubscription *sub, natsMsg *msg, bool *sm)
     {
         if (jsi->ordered)
         {
-            s = jsSub_resetOrderedConsumer(sub, jsi->sseq+1);
+            s = jsSub_resetOrderedConsumer(sub);
         }
         else if (!jsi->ssmn)
         {
@@ -2618,7 +2630,7 @@ _hbTimerFired(natsTimer *timer, void* closure)
         {
             // If we fail in that call, we will report to async err callback
             // (if one is specified).
-            s = jsSub_resetOrderedConsumer(sub, sub->jsi->sseq+1);
+            s = jsSub_resetOrderedConsumer(sub);
         }
         nats_unlockSubAndDispatcher(sub);
     }
@@ -2896,6 +2908,24 @@ js_checkConsName(const char *cons, bool isDurable)
         }
     }
     return NATS_OK;
+}
+
+// Sets the ordered consumer resume sequence from the consumer's start
+// position, unless already known.
+// Lock should be held.
+static void
+_setOrderedConsResumeSeq(jsSub *jsi, jsConsumerInfo *ci)
+{
+    // Delivered.Stream is the start position only if nothing was delivered.
+    if ((jsi->sseq > 0) || (ci->Delivered.Consumer > 0))
+        return;
+
+    // Keep the original policy for DeliverLastPerSubject with a snapshot
+    // to deliver, otherwise superseded values would be replayed.
+    if ((ci->Config->DeliverPolicy == js_DeliverLastPerSubject) && (ci->NumPending > 0))
+        return;
+
+    jsi->sseq = ci->Delivered.Stream+1;
 }
 
 static natsStatus
@@ -3235,6 +3265,8 @@ PROCESS_INFO:
             // set only if jsi->consumer is NULL!
             if (jsi->consumer == NULL)
             {
+                if (jsi->ordered)
+                    _setOrderedConsResumeSeq(jsi, info);
                 DUP_STRING(s, jsi->consumer, info->Name);
                 if (s == NATS_OK)
                 {
@@ -3916,14 +3948,37 @@ _recreateOrderedCons(void *closure)
         t = oci->thread;
         jsi = sub->jsi;
         s = js_cloneConsumerConfig(jsi->ocCfg, &cc);
+        // A user provided name can't be reused, otherwise this could be treated
+        // as an update of the existing consumer, so derive a new one from it.
+        if ((s == NATS_OK) && !nats_IsStringEmpty(cc->Name))
+        {
+            char *name = NULL;
+
+            if (nats_asprintf(&name, "%s_%d", cc->Name, ++(jsi->ocSerial)) < 0)
+            {
+                s = nats_setDefaultError(NATS_NO_MEMORY);
+                js_destroyConsumerConfig(cc);
+                cc = NULL;
+            }
+            else
+            {
+                NATS_FREE((char*) cc->Name);
+                cc->Name = name;
+            }
+        }
         natsSub_Unlock(sub);
 
         if (s == NATS_OK)
         {
             // Create consumer request for starting policy.
             cc->DeliverSubject = oci->ndlv;
-            cc->DeliverPolicy  = js_DeliverByStartSequence;
-            cc->OptStartSeq    = oci->sseq;
+            // If sseq is 0, keep the original deliver policy.
+            if (oci->sseq > 0)
+            {
+                cc->DeliverPolicy  = js_DeliverByStartSequence;
+                cc->OptStartSeq    = oci->sseq;
+                cc->OptStartTime   = 0;
+            }
 
             s = js_AddConsumer(&ci, jsi->js, jsi->stream, cc, NULL, NULL);
             if (s == NATS_OK)
@@ -3936,6 +3991,7 @@ _recreateOrderedCons(void *closure)
                     NATS_FREE(jsi->consumer);
                     jsi->consumer = NULL;
                     DUP_STRING(s, jsi->consumer, ci->Name);
+                    _setOrderedConsResumeSeq(jsi, ci);
                 }
                 natsSub_Unlock(sub);
 
@@ -3973,7 +4029,7 @@ _recreateOrderedCons(void *closure)
 // We will create a new consumer and rewire the low level subscription.
 // Lock should be held.
 natsStatus
-jsSub_resetOrderedConsumer(natsSubscription *sub, uint64_t sseq)
+jsSub_resetOrderedConsumer(natsSubscription *sub)
 {
     natsStatus          s           = NATS_OK;
     natsConnection      *nc         = sub->conn;
@@ -4034,7 +4090,7 @@ jsSub_resetOrderedConsumer(natsSubscription *sub, uint64_t sseq)
 
         oci->osid = osid;
         oci->nsid = sub->sid;
-        oci->sseq = sseq;
+        oci->sseq = jsi->sseq;
         oci->nc   = nc;
         oci->sub  = sub;
         oci->max  = max;
@@ -4064,28 +4120,29 @@ jsSub_checkOrderedMsg(natsSubscription *sub, natsMsg *msg, bool *reset)
     jsSub       *jsi = NULL;
     uint64_t    sseq = 0;
     uint64_t    dseq = 0;
+    const char  *meta = js_ackMetaData(natsMsg_GetReply(msg));
 
     *reset = false;
 
-    // Ignore msgs with no reply like HBs and flowcontrol, they are handled elsewhere.
-    if (natsMsg_GetReply(msg) == NULL)
+    // Ignore msgs with no ack reply like HBs and flowcontrol, they are handled elsewhere.
+    if (meta == NULL)
         return NATS_OK;
 
     // Normal message here.
-    s = js_getMetaData(natsMsg_GetReply(msg), NULL, NULL, NULL, NULL, &sseq, &dseq, NULL, NULL, 2);
+    s = js_getMetaData(meta, NULL, NULL, NULL, NULL, &sseq, &dseq, NULL, NULL, 2);
     if (s == NATS_OK)
     {
         jsi = sub->jsi;
         if (dseq != jsi->dseq)
         {
             *reset = true;
-            s = jsSub_resetOrderedConsumer(sub, jsi->sseq+1);
+            s = jsSub_resetOrderedConsumer(sub);
         }
         else
         {
             // Update our tracking here.
             jsi->dseq = dseq+1;
-            jsi->sseq = sseq;
+            jsi->sseq = sseq+1;
         }
     }
     return NATS_UPDATE_ERR_STACK(s);
