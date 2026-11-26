@@ -71,7 +71,7 @@ if [ "$ENABLE_ASAN" = true ]; then
     sleep 10
 else
     echo -e "${YELLOW}[1/3] Checking if services are running...${NC}"
-    if ! curl -sf --connect-timeout 3 "http://localhost:7777" > /dev/null 2>&1; then
+    if ! curl -sf --connect-timeout 3 "http://localhost:29003" > /dev/null 2>&1; then
         echo -e "${RED}Services not running. Starting...${NC}"
         ./rebuild-and-run.sh
         sleep 10
@@ -90,8 +90,8 @@ echo ""
 echo -e "${YELLOW}[3/3] Starting load test...${NC}"
 echo ""
 
-python3 load_test_memory.py \
-    --url "http://localhost:7777" \
+python3 load-test-memory.py \
+    --url "http://localhost:29003" \
     --duration "$DURATION" \
     --concurrent "$CONCURRENT" \
     --payload-size "$PAYLOAD_SIZE" \

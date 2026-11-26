@@ -10,7 +10,7 @@ services:
   nats-server:
     container_name: nats-server
     logging: *default-logging
-    image: nats:2.14-alpine
+    image: ${REGISTRY:-}nats:2.15.2-alpine
     restart: unless-stopped
     ports:
       - "4222:4222"  # NATS client port
@@ -24,19 +24,23 @@ services:
       - NATS_ENABLE_TLS=${NATS_ENABLE_TLS:-false}
     command: >
       sh -c "
-        # Ports, JetStream store dir and max_payload (16 MiB) live in
-        # nats/nats.conf: the payload limit has no CLI flag in nats-server.
-        # Auth/TLS stay on the command line because they depend on env vars.
-        CMD='-c /etc/nats/nats.conf';
-        if [ -n \"$${NATS_TOKEN}\" ]; then
-          CMD=\"$${CMD} --auth $${NATS_TOKEN}\";
-        elif [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; then
-          CMD=\"$${CMD} --user $${NATS_USER} --pass $${NATS_PASSWORD}\";
+        # Static base config (port, JetStream, max_payload, TLS) lives in
+        # nats/nats.conf, mounted read-only. Only optional auth is appended at
+        # runtime to a throwaway /tmp config (a copy of nats.conf plus the
+        # authorization block) so the secret never appears in the nats-server
+        # command line (visible via /proc/<pid>/cmdline) nor is committed to
+        # git; it lives only in the container env and the /tmp file.
+        CONF=/etc/nats/nats.conf;
+        if [ -n \"$${NATS_TOKEN}\" ] || { [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; }; then
+          CONF=/tmp/nats-auth.conf;
+          cat /etc/nats/nats.conf > \"$${CONF}\";
+          if [ -n \"$${NATS_TOKEN}\" ]; then
+            echo 'authorization { token: "'"$${NATS_TOKEN}"'" }' >> \"$${CONF}\";
+          elif [ -n \"$${NATS_USER}\" ] && [ -n \"$${NATS_PASSWORD}\" ]; then
+            echo 'authorization { user: "'"$${NATS_USER}"'" password: "'"$${NATS_PASSWORD}"'" }' >> \"$${CONF}\";
+          fi;
         fi;
-        if [ \"$${NATS_ENABLE_TLS}\" = \"true\" ]; then
-          CMD=\"$${CMD} --tls --tlscert /etc/nats/certs_nats/server.crt --tlskey /etc/nats/certs_nats/server.key\";
-        fi;
-        exec nats-server $${CMD}
+        exec nats-server -c \"$${CONF}\"
       "
     volumes:
       - nats-data:/data
@@ -58,7 +62,7 @@ services:
   nats-exporter:
     container_name: nats-exporter
     logging: *default-logging
-    image: natsio/prometheus-nats-exporter:0.20.0
+    image: ${REGISTRY:-}natsio/prometheus-nats-exporter:0.20.0
     restart: unless-stopped
     ports:
       - "7778:7777"  # NATS exporter metrics port (7777 inside container, 7778 on host)
@@ -81,7 +85,7 @@ services:
   nats-gui:
     container_name: nats-gui
     logging: *default-logging
-    image: sphqxe/nats-webui:latest
+    image: ${REGISTRY:-}sphqxe/nats-webui:latest
     restart: unless-stopped
     ports:
       - "7779:80"
@@ -97,7 +101,7 @@ services:
   jaeger:
     container_name: jaeger
     logging: *default-logging
-    image: jaegertracing/jaeger:2.15.1
+    image: ${REGISTRY:-}jaegertracing/jaeger:2.15.1
     restart: unless-stopped
     ports:
       - "16686:16686"  # UI
@@ -115,15 +119,12 @@ services:
 
   # VictoriaMetrics - Prometheus-compatible metrics storage (lighter than Prometheus)
   victoria-metrics:
-    # Renamed host-side: the FlylinkDC++ hub stack already owns a container
-    # named `victoria-metrics` and host port 8428. Service DNS on l2_network
-    # stays `victoria-metrics:8428` for vmagent/vmalert/Perses.
     container_name: l2-victoria-metrics
     logging: *default-logging
-    image: victoriametrics/victoria-metrics:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/victoria-metrics:v1.97.0
     restart: unless-stopped
     ports:
-      - "8430:8428"
+      - "8428:8428"
     volumes:
       - victoria-metrics-data:/victoria-metrics-data
     command:
@@ -144,7 +145,7 @@ services:
   vmagent:
     container_name: vmagent
     logging: *default-logging
-    image: victoriametrics/vmagent:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/vmagent:v1.97.0
     restart: unless-stopped
     ports:
       - "8429:8429"
@@ -176,7 +177,7 @@ services:
   vmalert:
     container_name: vmalert
     logging: *default-logging
-    image: victoriametrics/vmalert:v1.97.0
+    image: ${REGISTRY:-}victoriametrics/vmalert:v1.97.0
     restart: unless-stopped
     ports:
       - "8880:8880"
@@ -223,7 +224,7 @@ services:
       - SETUID
       - SETGID
     ports:
-      - "3333:8088"
+      - "29001:8088"
       - "19092:19092"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -285,7 +286,7 @@ services:
 
   l2-test:
     container_name: l2-test
-    image: curlimages/curl:latest
+    image: ${REGISTRY:-}curlimages/curl:latest
 #    depends_on:
 #      - l2-server
     networks:
@@ -311,7 +312,7 @@ services:
   oracle:
     container_name: oracle
     logging: *default-logging
-    image: gvenzl/oracle-xe:21.3.0-slim
+    image: ${REGISTRY:-}gvenzl/oracle-xe:21.3.0-slim
     restart: unless-stopped
     profiles:
       - databases
@@ -335,21 +336,20 @@ services:
       retries: 10
       start_period: 90s
 
-  # Self-hosted Sentry-compatible error tracking (glitchtip). Started on demand:
-  #   docker compose --profile glitchtip up -d
-  # or automatically by rebuild-and-run.sh when ENABLE_GLITCHTIP=true.
-  # Register the first user in the UI (http://localhost:8000), create an
-  # organization + project, then point the stack at the project DSN with
+  # Self-hosted Sentry-compatible error tracking (glitchtip). Always part of the
+  # stack (Sentry-совместимый аналог Sentry, порт 8000). Интеграция с C++
+  # через SENTRY_DSN: l2-proxy / l2-worker / l2-server шлют события и
+  # performance-транзакции в GlitchTip.
+  # После первого запуска зарегистрируй юзера в UI (http://localhost:8000),
+  # создай организацию + проект и подставь DSN проекта в .env / docker-compose:
   #   SENTRY_DSN=http://<public-key>@glitchtip:8000/<project-id>
-  # glitchtip-db is a dedicated PostgreSQL (image already present locally);
-  # the main postgres service stays untouched (DB gateway).
+  # glitchtip-db — выделенный PostgreSQL (образ уже есть локально);
+  # основной postgres не задействован (DB gateway).
   glitchtip-db:
     container_name: glitchtip-db
     logging: *default-logging
-    image: postgres:17-alpine
+    image: ${REGISTRY:-}postgres:17-alpine
     restart: unless-stopped
-    profiles:
-      - glitchtip
     mem_limit: ${GLITCHTIP_DB_MEM_LIMIT:-256m}
     environment:
       - POSTGRES_USER=${GLITCHTIP_DB_USER:-glitchtip}
@@ -369,10 +369,8 @@ services:
   glitchtip:
     container_name: glitchtip
     logging: *default-logging
-    image: glitchtip/glitchtip:6
+    image: ${REGISTRY:-}glitchtip/glitchtip:6
     restart: unless-stopped
-    profiles:
-      - glitchtip
     mem_limit: ${GLITCHTIP_MEM_LIMIT:-1g}
     ports:
       - "8000:8000"
@@ -420,7 +418,7 @@ services:
     # Pinned to 17: postgres-data volume was re-initialized by PG17, and 16
     # refuses to start on it ("database files are incompatible"). Do NOT bump
     # without pg_upgrade or wiping the volume (data loss).
-    image: postgres:17-alpine
+    image: ${REGISTRY:-}postgres:17-alpine
     restart: unless-stopped
     profiles:
       - databases
@@ -449,7 +447,7 @@ services:
   swagger-ui:
     container_name: swagger-ui
     logging: *default-logging
-    image: swaggerapi/swagger-ui:v5.17.14
+    image: ${REGISTRY:-}swaggerapi/swagger-ui:latest
     restart: unless-stopped
     ports:
       - "8081:8080"
@@ -476,7 +474,8 @@ services:
       dockerfile: Dockerfile
       target: ${L2_PROXY_DOCKER_TARGET:-runtime}
       args:
-        BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
         ENABLE_ASAN: "${ENABLE_ASAN:-false}"
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
@@ -496,9 +495,9 @@ services:
       - SETUID
       - SETGID
     ports:
-      # Host 8888 belongs to the FlylinkDC++ hub (ptokax). Inside the compose
-      # network the proxy keeps 8888, which is what nginx/worker use.
-      - "8890:8888"
+      # Inside the compose network the proxy keeps 8888, which is what
+      # nginx/worker use.
+      - "29002:8888"
       - "19090:19090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -514,16 +513,16 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - REQUEST_TIMEOUT_SECONDS=30
-      # Limit on the number of HTTP tasks waiting in the proxy's task queue
-      # (0 = unlimited: the queue grows with the load, saturation is visible
-      # through l2_proxy_task_queue_size / l2_proxy_task_queue_wait_seconds).
-      # A non-zero value turns queue overflow into a rejected request instead
-      # of unbounded memory growth.
+      # Limit on the number of HTTP tasks waiting in the proxy's task queue.
+      # 0 selects the automatic bound (8 tasks per worker thread, the same rule
+      # the worker pool applies); a non-zero value sets it explicitly. Either
+      # way queue overflow becomes a rejected request instead of unbounded
+      # memory growth, and l2_proxy_task_queue_saturated has a denominator.
       - L2_PROXY_MAX_QUEUED_REQUESTS=${L2_PROXY_MAX_QUEUED_REQUESTS:-0}
-      # Forward non-JSON request bodies (zlib-compressed FlylinkDC++ test-port
-      # payloads) verbatim: they are base64-encoded over NATS and decoded by
-      # the worker. false = legacy behaviour (400 Invalid JSON). The bundled
-      # l2-server stub speaks JSON, so only the live chain enables this.
+      # Forward non-JSON request bodies (zlib-compressed payloads) verbatim:
+      # they are base64-encoded over NATS and decoded by the worker.
+      # false = legacy behaviour (400 Invalid JSON). The bundled l2-server stub
+      # speaks JSON, so only an external upstream enables this.
       - PROXY_RAW_BODY_PASSTHROUGH=${PROXY_RAW_BODY_PASSTHROUGH:-false}
       - JAEGER_URL=http://jaeger:9411/api/v2/spans
       - ENABLE_TRACING=true
@@ -625,10 +624,10 @@ services:
   nginx:
     container_name: nginx
     logging: *default-logging
-    image: nginx:alpine
+    image: ${REGISTRY:-}nginx:alpine
     restart: unless-stopped
     ports:
-      - "7777:80"
+      - "29003:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -646,7 +645,7 @@ services:
   nginx-exporter:
     container_name: nginx-exporter
     logging: *default-logging
-    image: nginx/nginx-prometheus-exporter:1.1
+    image: ${REGISTRY:-}nginx/nginx-prometheus-exporter:1.1
     restart: unless-stopped
     ports:
       - "9113:9113"
@@ -665,13 +664,14 @@ services:
     build:
       context: ./src
       dockerfile: Dockerfile
-      # Default target is the plain `runtime` (no Oracle OCI client, no
-      # gvenzl/oracle-xe image). Set `runtime-db` only when the worker must
-      # talk to Oracle (the image is then pulled just to extract the client):
-      #   L2_WORKER_DOCKER_TARGET=runtime-db ./rebuild-and-run.sh
+      # The Oracle OCI client is baked into the shared runtime-base, so the
+      # single l2-proxy binary (any MODE: proxy/worker/server) can talk to
+      # Oracle DBs. `runtime-db` is kept as an alias of `runtime` for backward
+      # compatibility with the old opt-in target.
       target: ${L2_WORKER_DOCKER_TARGET:-runtime}
       args:
-        BASE_IMAGE: "${BASE_IMAGE:-ubuntu:26.04}"
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
         APT_MIRROR: "${APT_MIRROR:-}"
         ENABLE_ASAN: "${ENABLE_ASAN:-false}"
         ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
@@ -709,8 +709,7 @@ services:
       - HTTP_POOL_SIZE=${HTTP_POOL_SIZE:-128}
       - HTTP_POOL_IDLE_TIMEOUT_SECONDS=${HTTP_POOL_IDLE_TIMEOUT_SECONDS:-300}
       # Upstream HTTP backend. Defaults to the bundled l2-server test stub;
-      # the live chain override (docker-compose.live.yml) points it at the
-      # real PTOKAX hub (ptokax:37014).
+      # L2_SERVER_URLS overrides it with a JSON array of real upstreams.
       - L2_SERVER_PROTOCOL=${L2_SERVER_PROTOCOL:-http}
       - L2_SERVER_HOST=${L2_SERVER_HOST:-l2-server}
       - L2_SERVER_PORT=${L2_SERVER_PORT:-8088}
@@ -769,8 +768,8 @@ services:
       - NATS_TLS_KEY_FILE=${NATS_TLS_KEY_FILE:-}
       - NATS_TLS_CA_CERT_FILE=${NATS_TLS_CA_CERT_FILE:-}
       # HTTP DB gateway: the worker owns the driver connection pools (Oracle
-      # ODPI-C + PostgreSQL libpq). The runtime image carries libpq; the Oracle
-      # OCI client lives only in the opt-in runtime-db target. Databases may be
+      # ODPI-C + PostgreSQL libpq). The runtime image carries both libpq and the
+      # Oracle OCI client (baked into the shared runtime-base). Databases may be
       # external: point DB_POSTGRES_HOST/DB_ORACLE_HOST at the DB node.
       # DB_QUERY_ENABLED=false disables the whole gateway. The subscription is
       # retried at startup until the databases are reachable, so the worker
@@ -815,21 +814,233 @@ services:
       nats-server:
         condition: service_healthy
 
-  # Perses — единственный UI дашбордов (порт 8089/8080). Grafana из стека
-  # удалена: 847-МБ образ и второй источник дашбордов ничего не добавляли к
-  # Perses, который читает те же определения через
-  # scripts/generate-perses-dashboards.py.
+  # l2-db-spider: периодически опрашивает базы данных (Oracle/PostgreSQL)
+  # произвольными SELECT-запросами из INI-конфига DB_SPIDER_CONFIG_FILE и пишет
+  # результат в JSON-файлы <db>_<query>.json в ./spider-output (монтируется
+  # внутрь). Oracle-клиент встроен в общий runtime-base, так что Oracle
+  # доступен всем режимам (proxy/worker/server) без отдельного таргета.
+  l2-db-spider:
+    container_name: l2-db-spider
+    logging: *default-logging
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+      target: ${L2_WORKER_DOCKER_TARGET:-runtime}
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+        ENABLE_ASAN: "${ENABLE_ASAN:-false}"
+        ENABLE_PROFILER: "${ENABLE_PROFILER:-false}"
+        CACHE_BUST: "${CACHE_BUST:-1}"
+    restart: unless-stopped
+    mem_limit: ${L2_DB_SPIDER_MEM_LIMIT:-2048m}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    ports:
+      - "19094:19094"
+      - "19095:19095"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./logs:/root/logs
+      - ./spider-output:/spider
+      - ./crash-dumps:/crash-dumps
+      - ./spider-config.ini:/spider/spider-config.ini:ro
+      - ./spider-sql:/spider/spider-sql:ro
+    environment:
+      - MODE=l2-db-spider
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - DB_SPIDER_ENABLED=${DB_SPIDER_ENABLED:-true}
+      - DB_SPIDER_INTERVAL_SECONDS=${DB_SPIDER_INTERVAL_SECONDS:-86400}
+      - DB_SPIDER_OUTPUT_DIR=/spider
+      - DB_SPIDER_CONFIG_FILE=/spider/spider-config.ini
+      - DB_SPIDER_PASSWORD=${DB_SPIDER_PASSWORD:-}
+      - DB_SPIDER_USER_CCM2=${DB_SPIDER_USER_CCM2:-}
+      - DB_SPIDER_USER_CCM4=${DB_SPIDER_USER_CCM4:-}
+      - DB_SPIDER_USER_CCM5=${DB_SPIDER_USER_CCM5:-}
+      - DB_SPIDER_USER_BFM=${DB_SPIDER_USER_BFM:-}
+      - DB_SPIDER_PASSWORD_BFM=${DB_SPIDER_PASSWORD_BFM:-}
+      - DB_SPIDER_USER_MES=${DB_SPIDER_USER_MES:-}
+      - DB_SPIDER_PASSWORD_MES=${DB_SPIDER_PASSWORD_MES:-}
+      - DB_SPIDER_USER_ENERGY=${DB_SPIDER_USER_ENERGY:-}
+      - DB_SPIDER_PASSWORD_ENERGY=${DB_SPIDER_PASSWORD_ENERGY:-}
+      - DB_SPIDER_USER_KKC1CCY=${DB_SPIDER_USER_KKC1CCY:-}
+      - DB_SPIDER_PASSWORD_KKC1CCY=${DB_SPIDER_PASSWORD_KKC1CCY:-}
+      - DB_SPIDER_USER_KKC2CCY=${DB_SPIDER_USER_KKC2CCY:-}
+      - DB_SPIDER_PASSWORD_KKC2CCY=${DB_SPIDER_PASSWORD_KKC2CCY:-}
+      - DB_SPIDER_USER_NMES=${DB_SPIDER_USER_NMES:-}
+      - DB_SPIDER_PASSWORD_NMES=${DB_SPIDER_PASSWORD_NMES:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+      - CRASH_DUMP_DIR=/crash-dumps
+      - CRASH_TEST=${CRASH_TEST:-false}
+      - ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:halt_on_error=0:log_path=/memory-logs/l2-db-spider-asan}
+      - LSAN_OPTIONS=${LSAN_OPTIONS:-report_objects=1}
+      - UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=0}
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19095/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # l2-spider-ai: веб-сервер прогресса AI-генерации отчёта по данным l2-db-spider.
+  # Читает ./spider-output, шлёт данные внешней модели (AI_API_URL) и пишет
+  # report.md/report.pdf в ./spider-output/ai. Слушает порт 19096 (страница
+  # прогресса + JSON /progress + /report.md + /report.pdf). Отдельный образ
+  # pdf-report (Ubuntu 26.04 + reportlab), НЕ runtime-бинарник.
+  l2-spider-ai:
+    container_name: l2-spider-ai
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: spider-ai
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+    restart: unless-stopped
+    ports:
+      - "19096:19096"
+    volumes:
+      - ./spider-output:/work/spider-output
+    environment:
+      - SPIDER_AI_PORT=19096
+      - AI_API_URL=${AI_API_URL:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_TIMEOUT=${AI_TIMEOUT:-600}
+      - AI_AI_ROWS=${AI_AI_ROWS:-40}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-6000}
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19096/progress"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # l2-hub — стартовая страница-хаб со всеми сервисами стека (плашки с
+  # ссылками на их веб-интерфейсы и live-статусами). Статический nginx,
+  # отдаёт ./www на порту 443. Удобно переключаться между сервисами.
+  l2-hub:
+    container_name: l2-hub
+    logging: *default-logging
+    image: ${REGISTRY:-}nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./www:/usr/share/nginx/html:ro
+      - ./www/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/ssl:ro
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # l2-heat-scraper — перебор плавок (GetHeatData) через прокси-цепочку l2 и
+  # сохранение ответа каждой плавки в отдельный JSON-файл в ./heat-output.
+  # Запускается по demand (docker compose run l2-heat-scraper), не restart.
+  # Параметры (start/count) задаются env или CLI; позже вынесем в GUI.
+  l2-heat-scraper:
+    container_name: l2-heat-scraper
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: heat-scraper
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+    restart: "no"
+    volumes:
+      - ./heat-output:/work/heat-output
+    environment:
+      - HEAT_SCRAPE_URL=${HEAT_SCRAPE_URL:-http://nl-sp-p3pg-ad1.ao.nlmk:29003/DataHubRobots/DataHubSrv}
+      - HEAT_SCRAPE_USER=${HEAT_SCRAPE_USER:-}
+      - HEAT_SCRAPE_PASSWORD=${HEAT_SCRAPE_PASSWORD:-}
+      - HEAT_SCRAPE_CLIENT_ID=${HEAT_SCRAPE_CLIENT_ID:-}
+      - HEAT_SCRAPE_START=${HEAT_SCRAPE_START:-23143}
+      - HEAT_SCRAPE_COUNT=${HEAT_SCRAPE_COUNT:-100}
+      - HEAT_SCRAPE_OUTPUT_DIR=/work/heat-output
+    networks:
+      - l2_network
+    command: ["--output-dir", "/work/heat-output"]
+
+  # l2-heat-ai — веб-сервер прогресса AI-генерации отчёта по плавкам (GetHeatData).
+  # Читает heat_*.json из ./heat-output, шлёт их AI-модели, отдаёт report.md/pdf
+  # на HTML-странице прогресса. Порт 19097. По аналогии с l2-spider-ai.
+  l2-heat-ai:
+    container_name: l2-heat-ai
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: heat-ai
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+    restart: unless-stopped
+    ports:
+      - "19097:19097"
+    volumes:
+      - ./heat-output:/work/heat-output
+    environment:
+      - HEAT_AI_PORT=19097
+      - HEAT_AI_MAX_HEATS=${HEAT_AI_MAX_HEATS:-500}
+      - AI_API_URL=${AI_API_URL:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_TIMEOUT=${AI_TIMEOUT:-600}
+      - AI_AI_ROWS=${AI_AI_ROWS:-80}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-6000}
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:19097/progress"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Perses — лёгкий UI дашбордов (порт 8089/8080). Оба UI (Grafana и Perses)
+  # читают одни и те же определения панелей из
+  # scripts/generate-grafana-dashboards.py: Perses через нативный конвертер
+  # scripts/generate-perses-dashboards.py, Grafana через
+  # scripts/generate-grafana-dashboards.py --correct-dashboards.
   # Хост-порт 8080 занят сторонними процессами, поэтому наружу пробрасываем 8089.
   # Дашборды и глобальный Prometheus-датасорс (proxy на VictoriaMetrics)
-  # накатываются скриптом scripts/generate-perses-dashboards.py по REST API.
+  # накатываются скриптами по REST API.
   # Docker-healthcheck не вешаем: базовый образ distroless (без curl/sh),
   # готовность проверяем в rebuild-and-run.sh через host-curl.
   perses:
-    # Renamed host-side: the FlylinkDC++ hub stack already runs a `perses`
-    # container. Host port 8089 stays the diode instance's entry point.
+    # Renamed host-side to l2-perses (host port 8089 stays the diode
+    # instance's entry point).
     container_name: l2-perses
     logging: *default-logging
-    image: persesdev/perses:v0.54.0
+    image: ${REGISTRY:-}persesdev/perses:v0.55.1
     restart: unless-stopped
     ports:
       - "8089:8080"
@@ -837,6 +1048,94 @@ services:
       - perses-data:/perses
     depends_on:
       - l2-proxy
+    networks:
+      - l2_network
+
+  # Grafana — второй UI дашбордов (порт 3000). Возвращён в стек: читает те же
+  # определения панелей из scripts/generate-grafana-dashboards.py, что и Perses,
+  # поэтому даёт полную витрину метрик (PromQL, template variables) в классическом
+  # интерфейсе. Дашборды и Prometheus-датасорс (proxy на VictoriaMetrics)
+  # накатываются scripts/generate-grafana-dashboards.py --correct-dashboards.
+  grafana:
+    container_name: grafana
+    logging: *default-logging
+    image: ${REGISTRY:-}grafana/grafana:12.4
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - l2-proxy
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - l2_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "--max-time", "5", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # One-shot sidecar: generates/updates Grafana dashboards via the generator
+  # script on startup. The target Grafana may live on another host — point
+  # GRAFANA_URL at it (e.g. http://grafana-host:3000). Exits 0 after a
+  # successful sync (restart on-failure only retries on error).
+  grafana-dashboards-sync:
+    container_name: grafana-dashboards-sync
+    image: ${GRAFANA_SYNC_IMAGE:-${REGISTRY:-}l2-dashboards-sync:${GRAFANA_SYNC_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: grafana-sync
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+    restart: on-failure
+    environment:
+      - GRAFANA_URL=${GRAFANA_URL:-http://grafana:3000}
+      - GRAFANA_USER=${GRAFANA_USER:-admin}
+      - GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    networks:
+      - l2_network
+
+  # Registry report server: web UI to collect/show reports about Docker
+  # registries (sizes, tags). Reports are saved to a named volume. Credentials
+  # for registries come from .env (REGISTRY_<NAME>_URL/_USER/_PASSWORD).
+  registry-report-server:
+    container_name: registry-report-server
+    image: ${REGISTRY_REPORT_IMAGE:-${REGISTRY:-}l2-registry-report-server:${REGISTRY_REPORT_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: registry-report-server
+      args:
+        BASE_IMAGE: "${BASE_IMAGE:-${REGISTRY:-}ubuntu:26.04}"
+        REGISTRY_MIRROR: "${REGISTRY:-}"
+        APT_MIRROR: "${APT_MIRROR:-}"
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      - REPORT_SERVER_PORT=8083
+      - REPORT_DIR=/data
+      - REGISTRY_IA_URSU_URL=${REGISTRY_IA_URSU_URL:-}
+      - REGISTRY_IA_URSU_USER=${REGISTRY_IA_URSU_USER:-}
+      - REGISTRY_IA_URSU_PASSWORD=${REGISTRY_IA_URSU_PASSWORD:-}
+      - REGISTRY_IA_TEST_URL=${REGISTRY_IA_TEST_URL:-}
+      - REGISTRY_IA_TEST_USER=${REGISTRY_IA_TEST_USER:-}
+      - REGISTRY_IA_TEST_PASSWORD=${REGISTRY_IA_TEST_PASSWORD:-}
+    volumes:
+      - registry-reports:/data
     networks:
       - l2_network
 
@@ -848,6 +1147,8 @@ networks:
         - subnet: 172.24.0.0/16
 
 volumes:
+  grafana-storage:
+    driver: local
   perses-data:
     driver: local
   victoria-metrics-data:
@@ -863,4 +1164,6 @@ volumes:
   glitchtip-db-data:
     driver: local
   glitchtip-uploads:
+    driver: local
+  registry-reports:
     driver: local

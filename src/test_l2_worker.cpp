@@ -417,7 +417,7 @@ TEST_CASE("utf8_utils: validator matches what nlohmann::json accepts",
   REQUIRE(utf8_utils::is_valid_utf8("\xF0\x9F\x98\x80"));
   REQUIRE(utf8_utils::is_valid_utf8(std::string_view("\x00\x01\x7F", 3)));
 
-  // Lone continuation byte, as in the PTOKAX 404 page that broke the worker.
+  // Lone continuation byte, as in a legacy upstream 404 page.
   REQUIRE_FALSE(utf8_utils::is_valid_utf8(std::string("\x00\xE1", 2)));
   REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xC3"));
   REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xC3\x28"));
@@ -427,7 +427,7 @@ TEST_CASE("utf8_utils: validator matches what nlohmann::json accepts",
   REQUIRE_FALSE(utf8_utils::is_valid_utf8("\xFF"));
 
   // Sanitizer keeps valid text and replaces every invalid byte with U+FFFD, so
-  // the value can be serialized (cp1251 Date header from PTOKAX errors).
+  // the value can be serialized (cp1251 Date header from legacy errors).
   REQUIRE(utf8_utils::sanitize_invalid("plain ascii") == "plain ascii");
   REQUIRE(utf8_utils::sanitize_invalid("\xD0\xBF\xD1\x80\xD0\xB8") ==
           "\xD0\xBF\xD1\x80\xD0\xB8");

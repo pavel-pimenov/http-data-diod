@@ -4,3 +4,5 @@
 *:/app/httplib/*
 *:/app/odpi/*
 *:/app/prometheus-cpp/*
+*:/app/fmt/*
+*:/app/spdlog/*

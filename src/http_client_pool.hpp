@@ -74,7 +74,11 @@ private:
   std::shared_ptr<Counters> m_counters{std::make_shared<Counters>()};
 
 
-  PoolMetrics m_metrics;
+  // Metrics kept in a shared_ptr so the release hook installed on every
+  // client can hold it alive: a connection dropped by a throwing consumer may
+  // outlive the pool object, and the hook must not touch a destroyed
+  // reference_wrapper (use-after-free).
+  std::shared_ptr<PoolMetrics> m_metrics;
 
 public:
   // Constructor with acquire timeout (default 30 seconds)

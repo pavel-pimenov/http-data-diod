@@ -1,5 +1,6 @@
 #include "config.hpp"
 #include "constants.hpp"
+#include "ini_parser.hpp"
 #include "json_utils.hpp"
 #include "logger.hpp"
 #include "nats_client.hpp"
@@ -8,8 +9,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <initializer_list>
+#include <sstream>
 #include <string>
 
 // Defined in version.cpp (kept in its own TU so version bumps recompile only
@@ -35,6 +39,38 @@ template <typename T>
 void log_env_default(const std::string &env_name, const T &default_val) {
   Logger::info("Using default {}: {} (override with {} environment variable)",
                env_name, default_val, env_name);
+}
+} // namespace
+
+namespace {
+// Replaces %VAR% placeholders in a string with the value of the environment
+// variable VAR (so secrets can live in .env instead of the INI file). Unknown
+// placeholders are left as-is. Returns the expanded string.
+std::string expand_env_placeholders(const std::string &input) {
+  std::string out;
+  out.reserve(input.size());
+  for (size_t i = 0; i < input.size();) {
+    const size_t pct = input.find('%', i);
+    if (pct == std::string::npos) {
+      out.append(input, i, std::string::npos);
+      break;
+    }
+    out.append(input, i, pct - i);
+    const size_t close = input.find('%', pct + 1);
+    if (close == std::string::npos) {
+      out.push_back('%');
+      break;
+    }
+    const std::string var = input.substr(pct + 1, close - pct - 1);
+    const char *val = std::getenv(var.c_str());
+    if (val) {
+      out.append(val);
+    } else {
+      out.append(input, pct, close - pct + 1);
+    }
+    i = close + 1;
+  }
+  return out;
 }
 } // namespace
 
@@ -96,18 +132,20 @@ void validate_ports_and_timeouts(const Config &cfg, ConfigChecker &check) {
 
 void validate_mode_and_urls(const Config &cfg, ConfigChecker &check) {
   // Mode & log level
-  check(one_of(cfg.m_app.m_mode, {"proxy", "worker", "l2-server"}),
-        std::format(
-            "Invalid mode: {} (must be 'proxy', 'worker', or 'l2-server')",
-            cfg.m_app.m_mode));
+  check(one_of(cfg.m_app.m_mode, {"proxy", "worker", "l2-server",
+                                  "l2-db-spider"}),
+        std::format("Invalid mode: {} (must be 'proxy', 'worker', "
+                    "'l2-server', or 'l2-db-spider')",
+                    cfg.m_app.m_mode));
   check(
       one_of(cfg.m_app.m_log_level, {"DEBUG", "INFO", "WARN", "ERROR"}),
       std::format(
           "Invalid log level: {} (must be 'DEBUG', 'INFO', 'WARN', or 'ERROR')",
           cfg.m_app.m_log_level));
 
-  // URLs (only proxy/worker build a real URL; l2-server leaves them empty)
-  if (cfg.m_app.m_mode != "l2-server") {
+  // URLs (only proxy/worker build a real URL; l2-server and l2-db-spider
+  // leave them empty — the spider only talks to databases, not to L2 servers)
+  if (cfg.m_app.m_mode != "l2-server" && cfg.m_app.m_mode != "l2-db-spider") {
     check(!cfg.m_server.m_url.empty(), "L2 server URL cannot be empty");
     check(!cfg.m_server.m_urls.empty(), "L2 server URLs cannot be empty");
   }
@@ -157,7 +195,7 @@ void validate_threading_and_pool(const Config &cfg, ConfigChecker &check) {
                     cfg.m_proxy.m_max_retries));
   check(non_negative(cfg.m_proxy.m_max_queued_requests),
         std::format("Invalid L2_PROXY_MAX_QUEUED_REQUESTS: {} (must be >= 0, "
-                    "0 = unlimited)",
+                    "0 = automatic bound)",
                     cfg.m_proxy.m_max_queued_requests));
   check(positive(cfg.m_proxy.m_http_pool_size),
         std::format("Invalid HTTP pool size: {} (must be > 0)",
@@ -313,6 +351,59 @@ void validate_dedup_and_duplicates(const Config &cfg, ConfigChecker &check) {
   }
 }
 
+void validate_spider(const Config &cfg, ConfigChecker &check) {
+  if (!cfg.m_spider.m_enabled) {
+    return;
+  }
+  check(!cfg.m_spider.m_output_dir.empty(),
+        "DB_SPIDER_OUTPUT_DIR cannot be empty");
+  check(!cfg.m_spider.m_config_file.empty(),
+        "DB_SPIDER_CONFIG_FILE cannot be empty");
+  check(non_negative(cfg.m_spider.m_interval_seconds),
+        std::format("Invalid DB_SPIDER_INTERVAL_SECONDS: {} (must be >= 0)",
+                    cfg.m_spider.m_interval_seconds));
+  check(!cfg.m_spider.m_databases.empty(),
+        "DB spider: no databases configured (DB_SPIDER_CONFIG_FILE has no [db:...] sections)");
+  for (const auto &db : cfg.m_spider.m_databases) {
+    check(!db.m_name.empty(), "DB spider: database name cannot be empty");
+    check(db.m_driver == "oracle" || db.m_driver == "postgres",
+          std::format("DB spider '{}': unknown driver '{}'", db.m_name,
+                      db.m_driver));
+    check(!db.m_host.empty(),
+          std::format("DB spider '{}': host cannot be empty", db.m_name));
+    check(in_range(db.m_port, net_limits::kMinTcpPort, net_limits::kMaxTcpPort),
+          std::format("DB spider '{}': invalid port {} (must be 1-65535)",
+                      db.m_name, db.m_port));
+    if (db.m_driver == "oracle") {
+      check(!db.m_service.empty(),
+            std::format("DB spider '{}': service cannot be empty", db.m_name));
+    } else {
+      check(!db.m_database.empty(),
+            std::format("DB spider '{}': database cannot be empty", db.m_name));
+    }
+    check(!db.m_user.empty(),
+          std::format("DB spider '{}': user cannot be empty", db.m_name));
+    check(db.m_pool_min >= 1 && db.m_pool_max >= db.m_pool_min,
+          std::format("DB spider '{}': invalid pool (min={} max={})",
+                      db.m_name, db.m_pool_min, db.m_pool_max));
+    for (const auto &q : db.m_queries) {
+      check(!q.m_name.empty(),
+            std::format("DB spider '{}': query name cannot be empty",
+                        db.m_name));
+      check(!q.m_sql.empty(),
+            std::format("DB spider '{}': query '{}' sql cannot be empty",
+                        db.m_name, q.m_name));
+      check(positive(q.m_timeout_ms),
+            std::format("DB spider '{}': query '{}' invalid timeout_ms {}",
+                        db.m_name, q.m_name, q.m_timeout_ms));
+      // max_rows: -1 = без лимита (полный фетч), >0 — лимит строк.
+      check(q.m_max_rows == -1 || positive(q.m_max_rows),
+            std::format("DB spider '{}': query '{}' invalid max_rows {}",
+                        db.m_name, q.m_name, q.m_max_rows));
+    }
+  }
+}
+
 void validate_tracing(const Config &cfg, ConfigChecker &check) {
   // Tracing settings
   check(cfg.m_tracing.m_batch_size > 0,
@@ -349,6 +440,7 @@ void Config::load_from_env() {
   load_l2_server_config();
   load_server_timeout_config();
   load_feature_config();
+  load_spider_config();
   if (uses_nats()) {
     load_nats_config();
     load_db_query_config();
@@ -425,7 +517,7 @@ void Config::load_server_timeout_config() {
       get_env_double("SENTRY_SAMPLE_RATE", m_sentry.m_sample_rate);
   m_sentry.m_timeout_ms = get_env_int("SENTRY_TIMEOUT_MS", m_sentry.m_timeout_ms);
   m_sentry.m_max_queue_size =
-      get_env_int("SENTRY_MAX_QUEUE_SIZE", 256);
+      get_env_int("SENTRY_MAX_QUEUE_SIZE", m_sentry.m_max_queue_size);
   if (!m_sentry.m_dsn.empty()) {
     Logger::info(
         "Sentry DSN configured: project={} release={} environment={} "
@@ -592,6 +684,15 @@ void Config::load_nats_config() {
   }
   if (m_nats.m_enable_tls) {
     Logger::info("NATS TLS: enabled");
+    Logger::info("NATS TLS CA cert file: {}",
+                 m_nats.m_tls_ca_cert_file.empty() ? "(not set)"
+                                                   : m_nats.m_tls_ca_cert_file);
+    Logger::info("NATS TLS client cert file: {}",
+                 m_nats.m_tls_cert_file.empty() ? "(not set)"
+                                                : m_nats.m_tls_cert_file);
+    Logger::info("NATS TLS client key file: {}",
+                 m_nats.m_tls_key_file.empty() ? "(not set)"
+                                               : m_nats.m_tls_key_file);
   }
 
   Logger::info("NATS is the only messaging backend");
@@ -653,12 +754,12 @@ void Config::load_db_query_config() {
     db.m_name = "oracle";
     db.m_driver = "oracle";
     db.m_host = get_env_string("DB_ORACLE_HOST", "oracle");
-    db.m_port = get_env_int("DB_ORACLE_PORT", 1521);
+    db.m_port = get_env_int("DB_ORACLE_PORT", db.m_port);
     db.m_service = get_env_string("DB_ORACLE_SERVICE", "XEPDB1");
     db.m_user = get_env_string("DB_ORACLE_USER", "");
     db.m_password = get_env_string("DB_ORACLE_PASSWORD", "");
-    db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", 1);
-    db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", 5);
+    db.m_pool_min = get_env_int("DB_ORACLE_POOL_MIN", db.m_pool_min);
+    db.m_pool_max = get_env_int("DB_ORACLE_POOL_MAX", db.m_pool_max);
     db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
     db.m_max_rows = m_db_query.m_default_max_rows;
     m_db_query.m_databases.push_back(db);
@@ -671,18 +772,128 @@ void Config::load_db_query_config() {
     db.m_name = "postgres";
     db.m_driver = "postgres";
     db.m_host = get_env_string("DB_POSTGRES_HOST", "postgres");
-    db.m_port = get_env_int("DB_POSTGRES_PORT", 5432);
+    db.m_port = get_env_int("DB_POSTGRES_PORT", config_defaults::kPostgresPort);
     db.m_database = get_env_string("DB_POSTGRES_DB", "postgres");
     db.m_user = get_env_string("DB_POSTGRES_USER", "");
     db.m_password = get_env_string("DB_POSTGRES_PASSWORD", "");
-    db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", 1);
-    db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", 5);
+    db.m_pool_min = get_env_int("DB_POSTGRES_POOL_MIN", db.m_pool_min);
+    db.m_pool_max = get_env_int("DB_POSTGRES_POOL_MAX", db.m_pool_max);
     db.m_query_timeout_ms = m_db_query.m_default_timeout_ms;
     db.m_max_rows = m_db_query.m_default_max_rows;
     m_db_query.m_databases.push_back(db);
     Logger::info("DB Gateway: registered database '{}' (driver={} host={}:{} "
                  "db={})",
                  db.m_name, db.m_driver, db.m_host, db.m_port, db.m_database);
+  }
+}
+
+void Config::load_spider_config() {
+  m_spider.m_enabled = get_env_bool("DB_SPIDER_ENABLED", m_spider.m_enabled);
+  m_spider.m_interval_seconds =
+      get_env_int("DB_SPIDER_INTERVAL_SECONDS", m_spider.m_interval_seconds);
+  m_spider.m_output_dir =
+      get_env_string("DB_SPIDER_OUTPUT_DIR", m_spider.m_output_dir);
+  m_spider.m_config_file =
+      get_env_string("DB_SPIDER_CONFIG_FILE", m_spider.m_config_file);
+  if (!m_spider.m_enabled) {
+    return;
+  }
+  try {
+    std::vector<IniParser::Section> sections;
+    std::string ini_error;
+    if (!IniParser::parse_file(m_spider.m_config_file, sections, ini_error)) {
+      Logger::error("DB spider: failed to load config '{}': {}",
+                    m_spider.m_config_file, ini_error);
+      return;
+    }
+    // [spider] — global settings.
+    if (const auto *spider_sec = IniParser::find_section(sections, "spider")) {
+      if (auto v = IniParser::get_key(*spider_sec, "interval_seconds")) {
+        m_spider.m_interval_seconds = std::stoi(*v);
+      }
+      if (auto v = IniParser::get_key(*spider_sec, "output_dir")) {
+        m_spider.m_output_dir = *v;
+      }
+    }
+    // [db:<name>] sections — connection details (order of appearance preserved).
+    std::vector<Spider::Db> dbs;
+    for (const auto &sec : sections) {
+      if (sec.name.rfind("db:", 0) != 0) {
+        continue;
+      }
+      Spider::Db db;
+      db.m_name = IniParser::trim(sec.name.substr(3));
+      if (auto v = IniParser::get_key(sec, "driver")) db.m_driver = *v;
+      if (auto v = IniParser::get_key(sec, "host")) db.m_host = *v;
+      if (auto v = IniParser::get_key(sec, "port")) db.m_port = std::stoi(*v);
+      if (auto v = IniParser::get_key(sec, "service")) db.m_service = *v;
+      if (auto v = IniParser::get_key(sec, "database")) db.m_database = *v;
+      if (auto v = IniParser::get_key(sec, "user")) db.m_user = expand_env_placeholders(*v);
+      if (auto v = IniParser::get_key(sec, "password"))
+        db.m_password = expand_env_placeholders(*v);
+      if (auto v = IniParser::get_key(sec, "pool_min")) db.m_pool_min = std::stoi(*v);
+      if (auto v = IniParser::get_key(sec, "pool_max")) db.m_pool_max = std::stoi(*v);
+      if (!db.m_name.empty()) {
+        dbs.push_back(std::move(db));
+      }
+    }
+    // [query:<name>] sections — queries bound to a database via `db=`.
+    for (const auto &sec : sections) {
+      if (sec.name.rfind("query:", 0) != 0) {
+        continue;
+      }
+      Spider::DbQuery query;
+      // Имя запроса: из ключа `name` (если есть), иначе — из имени секции.
+      // Имя секции может быть уникальным (напр. ccm2_shared_pool), а реальное
+      // имя запроса (для файла <db>_<query>.json) — задаётся через name=.
+      std::string query_name = IniParser::trim(sec.name.substr(6));
+      if (auto v = IniParser::get_key(sec, "name")) query_name = *v;
+      query.m_name = query_name;
+      std::string db_ref;
+      if (auto v = IniParser::get_key(sec, "db")) db_ref = *v;
+      if (auto v = IniParser::get_key(sec, "sql")) query.m_sql = *v;
+      if (auto v = IniParser::get_key(sec, "sql_file")) {
+        // Читаем SQL из внешнего файла (путь относительно ini-конфига).
+        // Позволяет вынести общие системные запросы (shared_pool и т.п.)
+        // в отдельные .sql-файлы и переиспользовать их для всех баз.
+        const std::string fname = *v;
+        const std::filesystem::path base =
+            std::filesystem::path(m_spider.m_config_file).parent_path();
+        const std::filesystem::path full = base / fname;
+        std::ifstream fh(full);
+        if (fh) {
+          std::stringstream ss;
+          ss << fh.rdbuf();
+          query.m_sql = ss.str();
+        } else {
+          Logger::error("DB spider: query '{}' cannot read sql_file '{}'",
+                        query_name, full.string());
+        }
+      }
+      if (auto v = IniParser::get_key(sec, "timeout_ms")) query.m_timeout_ms = std::stoi(*v);
+      if (auto v = IniParser::get_key(sec, "max_rows")) query.m_max_rows = std::stoi(*v);
+      if (!query.m_name.empty() && !query.m_sql.empty() && !db_ref.empty()) {
+        const std::string db_lower = IniParser::to_lower(db_ref);
+        auto it = std::find_if(dbs.begin(), dbs.end(),
+                               [&](const Spider::Db &db) {
+                                 return IniParser::to_lower(db.m_name) == db_lower;
+                               });
+        if (it != dbs.end()) {
+          it->m_queries.push_back(std::move(query));
+        } else {
+          Logger::warn("DB spider: query '{}' references unknown db '{}'",
+                       query.m_name, db_ref);
+        }
+      }
+    }
+    for (auto &db : dbs) {
+      m_spider.m_databases.push_back(std::move(db));
+    }
+    Logger::info("DB spider: configured {} database(s) from '{}'",
+                 m_spider.m_databases.size(), m_spider.m_config_file);
+  } catch (const std::exception &e) {
+    Logger::error("DB spider: failed to parse config '{}': {}",
+                  m_spider.m_config_file, e.what());
   }
 }
 
@@ -792,6 +1003,7 @@ bool Config::validate(bool log_issues) const {
   validate_protocols_and_ssl(*this, checker);
   validate_threading_and_pool(*this, checker);
   validate_nats_and_db_query(*this, checker);
+  validate_spider(*this, checker);
   validate_rate_limiting(*this, checker);
   validate_dedup_and_duplicates(*this, checker);
   validate_tracing(*this, checker);

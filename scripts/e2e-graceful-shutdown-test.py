@@ -20,11 +20,17 @@ import argparse
 import asyncio
 import json
 import random
-import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import List, Optional
 
 import aiohttp
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import e2e_utils
 
 CONCURRENCY = 64
 STEADY_SECONDS = 5.0
@@ -34,8 +40,8 @@ HEALTH_POLLS = 30
 # Container name -> (health URL, flood URL or None, log markers)
 SERVICES = {
     "l2-proxy": (
-        "http://localhost:8890/health",
-        "http://localhost:8890",
+        "http://localhost:29002/health",
+        "http://localhost:29002",
         [
             "Received signal 15",
             "All in-flight requests completed gracefully",
@@ -52,8 +58,8 @@ SERVICES = {
         ],
     ),
     "l2-server": (
-        "http://localhost:3333/health",
-        "http://localhost:3333",
+        "http://localhost:29001/health",
+        "http://localhost:29001",
         [
             "Received signal 15",
             "server thread joined",
@@ -126,8 +132,8 @@ class Worker:
                 self._complete(req_id, time.monotonic())
 
 
-async def test_service(container: str, health_url: str, flood_url: str | None,
-                       markers: list[str]) -> bool:
+async def test_service(container: str, health_url: str, flood_url: Optional[str],
+                       markers: List[str]) -> bool:
     print(f"\n{'=' * 70}\nTesting {container} (flood={flood_url or 'none'})\n"
           f"{'=' * 70}")
     stats = Stats()
@@ -145,9 +151,9 @@ async def test_service(container: str, health_url: str, flood_url: str | None,
 
         t0 = time.monotonic()
         print(f"[stop] docker stop -t {STOP_TIMEOUT_SECONDS} {container}")
-        proc = subprocess.run(
-            ["docker", "stop", "-t", str(STOP_TIMEOUT_SECONDS), container],
-            capture_output=True, text=True)
+        proc = await e2e_utils.docker(
+            ["stop", "-t", str(STOP_TIMEOUT_SECONDS), container],
+            timeout=STOP_TIMEOUT_SECONDS + 30)
         stats.stop_time = time.monotonic()
         stop_duration = stats.stop_time - t0
         stop_event.set()
@@ -160,12 +166,10 @@ async def test_service(container: str, health_url: str, flood_url: str | None,
             await asyncio.gather(*tasks, return_exceptions=True)
             stats.in_flight_at_stop = sum(len(w.in_flight) for w in workers)
 
-        insp = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
-            capture_output=True, text=True)
+        insp = await e2e_utils.docker(
+            ["inspect", "--format", "{{.State.ExitCode}}", container])
         exit_code = insp.stdout.strip()
-        logs = subprocess.run(
-            ["docker", "logs", container], capture_output=True, text=True).stdout
+        logs = (await e2e_utils.docker(["logs", container])).stdout
 
         print("=== RESULTS ===")
         print(f"docker stop rc: {proc.returncode} "
@@ -192,16 +196,15 @@ async def test_service(container: str, health_url: str, flood_url: str | None,
                       "(drain incomplete)")
             ok = ok and stats.in_flight_at_stop == 0
 
-    subprocess.run(["docker", "start", container], check=True, capture_output=True)
+    await e2e_utils.docker(["start", container])
     healthy = False
-    for _ in range(HEALTH_POLLS):
-        time.sleep(1)
-        r = subprocess.run(
-            ["curl", "-s", "-m", "2", "-o", "/dev/null", "-w", "%{http_code}",
-             health_url], capture_output=True, text=True)
-        if r.stdout.strip() == "200":
-            healthy = True
-            break
+    async with aiohttp.ClientSession() as session:
+        for _ in range(HEALTH_POLLS):
+            await asyncio.sleep(1)
+            status, _ = await e2e_utils.http_get(health_url, session, timeout=2)
+            if status == 200:
+                healthy = True
+                break
     print(f"healthy after restart: {'YES' if healthy else 'NO'}")
     return ok and healthy
 

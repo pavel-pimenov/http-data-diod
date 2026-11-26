@@ -1,0 +1,21 @@
+{
+  "user_env": "REGISTRY_IA_URSU_USER",
+  "password_env": "REGISTRY_IA_URSU_PASSWORD",
+  "repos": [
+    "wms-coilyard-helm-prod",
+    "sqcs-angc3-docker-prod",
+    "vid-stream-cgp-docker-prod",
+    "wms-coilyard-docker-prod",
+    "ia-ps-p3-docker-prod",
+    "ia-ursu-docker-prod",
+    "ia-test-helm",
+    "ia-test-docker-docker",
+    "fg-intercooling-helm-prod",
+    "dt-data-tools-public-docker",
+    "fg-inter-cool-docker-prod",
+    "strip-cooling-docker",
+    "upr-ritm-stan-prod-docker",
+    "rolls-sc-track-docker-prod",
+    "rolls-video-gr-docker-prod"
+  ]
+}

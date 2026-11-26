@@ -110,16 +110,28 @@ groups:
 
       - alert: L2ProxyTaskQueueSaturated
         expr: |
-          (sum(l2_proxy_task_queue_capacity) > 0)
-            and (sum(l2_proxy_task_queue_size) / sum(l2_proxy_task_queue_capacity) > 0.8)
+          sum(l2_proxy_task_queue_size)
+            / clamp_min(sum(l2_proxy_task_queue_capacity), 1) > 0.8
         for: 10m
         labels:
           severity: warning
           service: proxy
         annotations:
           summary: "Очередь задач прокси заполнена больше чем на 80%"
-          description: "Очередь задач прокси — {{ $value }} от предела. Пока предел не достигнут (L2_PROXY_MAX_QUEUED_REQUESTS=0 — без предела), правило молчит."
-          runbook: "README.md → «Алерты (оповещения)»: если дорастёт до 100% — сработает L2ProxyTaskQueueRejected; увеличьте L2_PROXY_MAX_QUEUED_REQUESTS."
+          description: "Очередь задач прокси — {{ $value }} от предела. Предел — L2_PROXY_MAX_QUEUED_REQUESTS, а при 0 (по умолчанию) автоматический: число потоков × 8, то есть минимум 1024 задачи."
+          runbook: "README.md → «Алерты (оповещения)»: если дорастёт до 100% — сработает L2ProxyTaskQueueRejected; увеличьте L2_PROXY_MAX_QUEUED_REQUESTS или число потоков (CPPHTTPLIB_THREAD_POOL_COUNT)."
+
+      - alert: L2ProxyTaskQueueWaitP99High
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(l2_proxy_task_queue_wait_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "P99 ожидания в очереди задач прокси выше 0,5 с"
+          description: "99-й перцентиль времени между приёмом соединения и стартом обработки — {{ $value }} с (цель проекта — P99 < 100 мс). Это чистое ожидание свободного потока: downstream (NATS/воркер) в нём не участвует, поэтому рост означает насыщение пула потоков прокси задолго до того, как запросы начнут падать (L2ProxyTaskQueueRejected)."
+          runbook: "README.md → «Алерты (оповещения)»: сравните l2_proxy_task_queue_wait_seconds с l2_proxy_request_duration_seconds — если растёт только ожидание, расширяйте пул потоков прокси или ставьте L2_PROXY_MAX_QUEUED_REQUESTS."
 
       - alert: L2ProxyNatsDisconnected
         expr: min(l2_proxy_nats_connected) < 1
@@ -440,3 +452,18 @@ groups:
           summary: "Сэмплер истории метрик падает"
           description: "Раундов сбора истории с исключением — {{ $value }}/с. Спарклайны на /stats устаревают, хотя процесс жив (с round 190 падение сэмплера не фатально, поэтому его видно только по метрике)."
           runbook: "README.md → «Алерты (оповещения)»: ищите в логе сервиса 'Metrics history sampling failed' — там текст исключения из registry->Collect()."
+
+      # l2-db-spider: последний цикл опроса баз закончился ошибкой (запросы не
+      # выполнились или JSON не записался). Метрика экспортируется только когда
+      # сервис запущен (DB_SPIDER_ENABLED=true), поэтому на стеке без spider
+      # алерт молчит.
+      - alert: L2DbSpiderUnhealthy
+        expr: min(l2_spider_healthy) < 1
+        for: 15m
+        labels:
+          severity: warning
+          service: spider
+        annotations:
+          summary: "l2-db-spider не может опросить базы"
+          description: "Последний цикл опроса баз закончился ошибкой ({{ $value }}). Запросы не выполнились или JSON не записался — словарь/динамика роста устаревают."
+          runbook: "README.md → «Алерты (оповещения)»: смотрите l2_spider_queries_total{status=\"error\"} по db/query — это SQL-ошибка или недоступность БД; проверьте логи l2-db-spider."

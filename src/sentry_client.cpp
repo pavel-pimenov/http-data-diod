@@ -35,7 +35,7 @@ std::optional<DsnData> parse_dsn(std::string_view dsn) {
     if (scheme != "http" && scheme != "https") {
       return std::nullopt;
     }
-    rest.remove_prefix(scheme_sep + 3);
+    rest.remove_prefix(scheme_sep + url_constants::kSchemeSeparatorLength);
   }
 
   const size_t at = rest.find('@');

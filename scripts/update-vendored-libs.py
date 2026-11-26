@@ -91,10 +91,10 @@ KEEP = {
 REFS = {
     "nlohmann-json": "v3.12.0",
     "prometheus-cpp": "66b615591d17808437fc1ed8a6b6624fdc34b77e",
-    "nats.c": "v3.14.0",
-    "cpp-httplib": "v0.63.0",
+    "nats.c": "v3.15.0",
+    "cpp-httplib": "v0.67.0",
     "base64": "master",
-    "odpi": "v26.0.0",
+    "odpi": "v26.1.0",
 }
 
 GIT_REPOS = {

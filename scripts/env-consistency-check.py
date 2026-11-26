@@ -5,8 +5,8 @@ Every environment variable the *production* C++ code reads (via Config::
 get_env_*() helpers or a plain getenv() literal) must be wired in
 docker-compose.yml (service environment list/mapping, build args, or a
 ``${VAR:-...}`` interpolation).  Test-only vars (TEST_*, FUZZ_VALUE in
-test_*.cpp) and vendored trees (httplib, prometheus-cpp, base64, json, odpi)
-are deliberately not scanned.
+test_*.cpp) and vendored trees (httplib, prometheus-cpp, base64, json, odpi,
+fmt, spdlog) are deliberately not scanned.
 
 Run: python3 scripts/env-consistency-check.py
 Exit: 0 when every C++-read var is present in docker-compose.yml, else 1.
@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = REPO_ROOT / "src"
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 
-VENDORED_DIRS = ("httplib", "prometheus-cpp", "base64", "json", "odpi")
+VENDORED_DIRS = ("httplib", "prometheus-cpp", "base64", "json", "odpi", "fmt", "spdlog")
 
 GET_ENV_RE = re.compile(r'get_env_[a-z_]*\(\s*"([A-Z0-9_]+)"')
 GETENV_RE = re.compile(r'\bgetenv\s*\(\s*"([A-Z0-9_]+)"')

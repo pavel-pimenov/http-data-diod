@@ -90,7 +90,7 @@ DUPLICATE_LOG_PATTERN = r"Frequent duplicate POSTs from client_id=({}) .*total=(
 # Default command line argument values (should match parse_args defaults)
 DEFAULT_URL = os.environ.get(
     'TEST_BASE_URL',
-    'http://nginx' if os.path.exists('/.dockerenv') else 'http://localhost:7777')
+    'http://nginx' if os.path.exists('/.dockerenv') else 'http://localhost:29003')
 DEFAULT_ITERATIONS = 100
 DEFAULT_CONCURRENT = 20
 
@@ -122,12 +122,12 @@ async def resolve_runtime_url(url: str) -> str:
     parsed_url = urlparse(url)
     if (parsed_url.scheme.lower() != 'http'
             or parsed_url.hostname != 'localhost'
-            or parsed_url.port != 7777):
+            or parsed_url.port != 29003):
         return normalize_runtime_url(url)
 
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection('127.0.0.1', 7777), timeout=1.0)
+            asyncio.open_connection('127.0.0.1', 29003), timeout=1.0)
         writer.write(b"GET /nginx-health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         await writer.drain()
         response = await asyncio.wait_for(reader.read(64), timeout=1.0)
@@ -141,9 +141,9 @@ async def resolve_runtime_url(url: str) -> str:
     if os.path.exists('/.dockerenv'):
         fallback_url = 'http://nginx'
     else:
-        fallback_url = 'http://127.0.0.1:8890'
+        fallback_url = 'http://127.0.0.1:29002'
     logger.warning(
-        "localhost:7777 is not responding over HTTP; using l2-proxy fallback %s",
+        "localhost:29003 is not responding over HTTP; using l2-proxy fallback %s",
         fallback_url)
     return fallback_url
 
@@ -590,7 +590,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(description="HTTP Proxy Message Consistency Test")
     parser.add_argument("--url", default=DEFAULT_URL,
-                        help="Target URL for requests (default: http://localhost:7777)")
+                        help="Target URL for requests (default: http://localhost:29003)")
     parser.add_argument("--iterations", type=int, default=DEFAULT_ITERATIONS,
                         help="Number of requests to send (default: {})".format(DEFAULT_ITERATIONS))
     parser.add_argument("--duration", type=float, default=0.0,

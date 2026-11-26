@@ -1,15 +1,16 @@
 #!/bin/bash
-# Start the glitchtip profile (self-hosted Sentry-compatible server + its
+# Start the glitchtip stack (self-hosted Sentry-compatible server + its
 # dedicated postgres) and point l2-proxy / l2-worker at it WITHOUT a full
-# image rebuild. Unlike the old sentry-mock, glitchtip has no fixed DSN: you
-# register the first user, create an organization + project in the UI
-# (http://localhost:8000), copy the project DSN and pass it via SENTRY_DSN.
+# image rebuild. GlitchTip is always part of the compose stack (no profile);
+# unlike the old sentry-mock it has no fixed DSN: you register the first user,
+# create an organization + project in the UI (http://localhost:8000), copy the
+# project DSN and pass it via SENTRY_DSN.
 #
 # Usage:
 #   SENTRY_DSN="http://<public-key>@glitchtip:8000/<project-id>" \
 #       ./scripts/run-glitchtip-stack.sh            # start glitchtip + reconfigure
 #   ./scripts/run-glitchtip-stack.sh                # start glitchtip (keep current SENTRY_DSN)
-#   ./scripts/run-glitchtip-stack.sh --stop         # tear down glitchtip profile
+#   ./scripts/run-glitchtip-stack.sh --stop         # tear down glitchtip
 #
 # After the script finishes:
 #   docker logs -f glitchtip     # watch incoming events / migrations
@@ -32,8 +33,8 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # --stop: tear down glitchtip and restore SENTRY_DSN=''
 # ---------------------------------------------------------------------------
 if [[ "${1:-}" == "--stop" ]]; then
-    log_info "Stopping glitchtip profile..."
-    docker compose --profile glitchtip down glitchtip glitchtip-db
+    log_info "Stopping glitchtip..."
+    docker compose down glitchtip glitchtip-db
 
     log_info "Recreating l2-server + l2-proxy + l2-worker with SENTRY_DSN cleared..."
     SENTRY_DSN="" docker compose up -d --force-recreate l2-server l2-proxy l2-worker
@@ -47,8 +48,8 @@ fi
 # ---------------------------------------------------------------------------
 # Start glitchtip server
 # ---------------------------------------------------------------------------
-log_info "Starting glitchtip + glitchtip-db (profile glitchtip)..."
-docker compose --profile glitchtip up -d glitchtip glitchtip-db
+log_info "Starting glitchtip + glitchtip-db..."
+docker compose up -d glitchtip glitchtip-db
 
 # Wait for the UI to accept connections on port 8000
 READY=0
@@ -79,7 +80,7 @@ fi
 log_info "Waiting for l2-server + l2-proxy + l2-worker to come back up (max 60 s)..."
 HEALTHY=0
 for i in $(seq 1 60); do
-    if curl -sf http://localhost:8890/health/ready >/dev/null 2>&1 \
+    if curl -sf http://localhost:29002/health/ready >/dev/null 2>&1 \
        && curl -sf http://localhost:19093/health/ready >/dev/null 2>&1; then
         HEALTHY=1
         break

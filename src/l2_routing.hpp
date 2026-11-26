@@ -103,34 +103,48 @@ namespace l2_routing {
     return true;
   }
 
-  for (const auto &allowed_base : l2_server_urls) {
+  // Два прохода: сначала матчим апстримы с КОНКРЕТНЫМ base_path (не "/"),
+  // потом catch-all (base "/"). Так стаб (base "/") не перехватывает
+  // конкретные пути ODS (DataHub/GantPool), а /metrics, / и /favicon.ico
+  // по-прежнему идут на первый апстрим (echo/favicon стаба).
+  const auto match_base =
+      [&](const std::string &allowed_base, bool catch_all_only) {
     try {
       const ParsedUrl parsed = parse_url(allowed_base);
-      // Base canonicalized so a trailing slash does not break the boundary
-      // match: "/api/" and "/api" accept the same family.
       const std::string base_path = canonicalize_path(parsed.m_path);
-      // Base "/" matches any absolute path; otherwise require prefix match
-      // with segment boundary ("/api" matches "/api/v1" but not "/apiv2")
-      if (base_path == "/") {
-        selected_url = allowed_base;
-        return true;
+      const bool is_catch_all = (base_path == "/");
+      if (is_catch_all != catch_all_only) {
+        return false;  // не тот проход
       }
-      if (normalized_path == base_path ||
-          (normalized_path.rfind(base_path, 0) == 0 &&
-           (normalized_path.size() == base_path.size() ||
-            normalized_path[base_path.size()] == '/'))) {
-        selected_url = allowed_base;
-        return true;
+      if (is_catch_all) {
+        return true;  // catch-all матчит любой путь
       }
+      return (normalized_path == base_path ||
+              (normalized_path.rfind(base_path, 0) == 0 &&
+               (normalized_path.size() == base_path.size() ||
+                normalized_path[base_path.size()] == '/')));
     } catch (const std::exception &e) {
       // Fallback: legacy prefix check on raw allowed_base string
       Logger::debug("Canonicalize failed for allowed_base '{}', legacy prefix "
                     "fallback: {}",
                     allowed_base, e.what());
-      if (normalized_path.rfind(allowed_base, 0) == 0) {
-        selected_url = allowed_base;
-        return true;
-      }
+      return !catch_all_only &&
+             normalized_path.rfind(allowed_base, 0) == 0;
+    }
+  };
+
+  // Проход 1: конкретные base_path (DataHub/GantPool и т.п.).
+  for (const auto &allowed_base : l2_server_urls) {
+    if (match_base(allowed_base, false)) {
+      selected_url = allowed_base;
+      return true;
+    }
+  }
+  // Проход 2: catch-all (base "/") — стаб echo/favicon.
+  for (const auto &allowed_base : l2_server_urls) {
+    if (match_base(allowed_base, true)) {
+      selected_url = allowed_base;
+      return true;
     }
   }
 

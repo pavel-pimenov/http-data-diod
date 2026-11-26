@@ -72,6 +72,8 @@ cmake_install.cmake
 .env
 .env.proxy.worker
 !.env.example
+spider-output/
+heat-output/
 
 certs/
 certs_nats/
@@ -87,3 +89,4 @@ pvs-studio.log
 src/l2-proxy-version.h
 
 coverage-report/
+*.pdf

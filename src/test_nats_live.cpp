@@ -293,6 +293,17 @@ NatsConfig live_nats_cfg(const std::string &subject, int port) {
   return cfg;
 }
 
+// live_nats_cfg with an explicit connect timeout (ms). Guards the units of the
+// NATS connect timeout: natsOptions_SetTimeout() takes milliseconds, so a value
+// that was accidentally shrunk to seconds (e.g. ms_to_seconds) made the connect
+// deadline ~0 ms and every cross-host connect time out instantly.
+NatsConfig live_nats_cfg(const std::string &subject, int port,
+                         int connect_timeout_ms) {
+  NatsConfig cfg = live_nats_cfg(subject, port);
+  cfg.m_connect_timeout_ms = connect_timeout_ms;
+  return cfg;
+}
+
 EnvVars fail_fast_env(const std::string &subject) {
   EnvVars vars;
   vars["MODE"] = "proxy";
@@ -792,6 +803,37 @@ TEST_CASE("NatsClient: connect fails fast when the broker is unreachable",
   CHECK(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - api_start)
             .count() < 10000);
+}
+
+TEST_CASE("NatsClient: connect timeout is applied in milliseconds",
+          "[nats-live]") {
+  // Regression guard for round 261: the connect timeout was passed through
+  // ms_to_seconds(), so natsOptions_SetTimeout() received seconds (e.g. 5)
+  // while the nats.c library expects milliseconds (5000). The connect
+  // deadline therefore became ~0 ms and every cross-host connect timed out
+  // instantly. A non-answering address (TEST-NET-1, unrouted) forces the
+  // client to wait for the connect deadline instead of failing fast, so the
+  // elapsed time proves the timeout is really ~1.5 s and not ~0 ms.
+  const int connect_timeout_ms = 1500;
+  NatsConfig cfg =
+      live_nats_cfg(unique_subject("nats.connecttimeout"), 4222,
+                    connect_timeout_ms);
+  // TEST-NET-1 (RFC 5737) is guaranteed unrouted: SYN is dropped, so the
+  // connect waits for the deadline instead of failing fast.
+  cfg.m_host = "192.0.2.1";
+  NatsClient client(cfg);
+  const auto start = std::chrono::steady_clock::now();
+  REQUIRE_FALSE(client.connect());
+  const auto elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  // Sanity bound: must have actually waited for the connect deadline (not
+  // returned in ~0 ms) and must not hang well beyond it.
+  REQUIRE(elapsed_ms >= 500);
+  REQUIRE(elapsed_ms <= 8000);
+  REQUIRE_FALSE(client.is_connected());
+  REQUIRE(client.get_last_error().has_value());
 }
 
 TEST_CASE("NatsClient: health check fails fast once the broker stops",

@@ -51,7 +51,7 @@ def run_test(name: str, iterations: int, concurrent: int) -> TestResult:
 
     cmd = [
         'python3', 'message_counter.py',
-        '--url', 'http://localhost:7777',
+        '--url', 'http://localhost:29003',
         '--iterations', str(iterations),
         '--concurrent', str(concurrent)
     ]

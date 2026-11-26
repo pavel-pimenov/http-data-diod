@@ -264,7 +264,7 @@ TEST_CASE("AppContext: history buffer pre-creates a series per registry",
   // sparkline health is visible before the first sample lands.
   std::ranges::sort(histories);
   REQUIRE(histories == std::vector<std::string>{"common", "proxy", "server",
-                                                "worker"});
+                                                "spider", "worker"});
 }
 
 TEST_CASE("AppContext: labelled families keep their label contract",

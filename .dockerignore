@@ -1,0 +1,61 @@
+# Root .dockerignore — applies to any build whose context is the repository
+# root (e.g. the grafana-dashboards-sync sidecar in .gitlab-ci.yml). Keeps
+# secrets, credentials and build junk out of the image layers / kaniko cache.
+# NOTE: runtime services use context ./src with src/.dockerignore instead.
+
+# --- secrets & credentials (never in build context / image layers) ---
+.env
+.env.proxy.worker
+certs/
+certs_nats/
+ssl/
+*.key
+*.pem
+
+# --- VCS ---
+.git
+.github
+
+# --- build artifacts ---
+build/
+build-lint/
+build_tests/
+build-asan/
+build-tmp/
+build-pvs/
+build-cov/
+build_test/
+CMakeFiles
+src/build/
+src/build_test/
+src/build-lint/
+src/build-cov/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.dll
+*.pyc
+*.log
+
+# --- runtime data / dumps ---
+logs/
+crash-dumps/
+spider-output/
+heat-output/
+coverage-report/
+reports/
+*.pdf
+*.gz
+*.zip
+
+# --- local dev dirs ---
+venv
+.venv
+.vscode
+__pycache__/
+node_modules/
+
+# --- docs kept small in context (not needed by any build) ---
+docs/

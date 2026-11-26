@@ -124,6 +124,7 @@ private:
       const std::string &client_id, uint64_t bucket);
 
   // Admin/debug GET endpoints; dispatch helpers for handle_get.
+  void handle_stats(const httplib::Request &req, httplib::Response &res);
   void handle_crash_test(const httplib::Request &req,
                          httplib::Response &res) const;
   static void handle_stacktrace(httplib::Response &res);

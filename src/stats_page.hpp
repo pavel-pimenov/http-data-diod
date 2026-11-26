@@ -304,7 +304,7 @@ inline std::string build_stats_html(
   std::ostringstream html;
   html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
   html << "<meta charset=\"utf-8\">\n";
-  html << "<meta http-equiv=\"refresh\" content=\""
+  html << R"(<meta http-equiv="refresh" content=")"
        << stats_page::kRefreshSeconds << "\">\n";
   html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
   html << "<title>" << escape_html(service_name) << " — status</title>\n";

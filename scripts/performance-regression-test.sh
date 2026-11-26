@@ -11,7 +11,7 @@
 set -e
 
 # Configuration
-URL="${URL:-http://localhost:7777}"
+URL="${URL:-http://localhost:29003}"
 ITERATIONS="${ITERATIONS:-100}"
 CONCURRENT="${CONCURRENT:-10}"
 BODY_SIZE="${BODY_SIZE:-0.01}"  # MB

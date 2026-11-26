@@ -88,6 +88,10 @@ public:
                      int &) override {
     return json::object();
   }
+  int stream_query(const std::string &, const json &, int, int, int &,
+                   json &, RowCallback) override {
+    return 0;
+  }
   bool ping(int) override { return true; }
   void set_error_metrics(prometheus::Family<prometheus::Counter> *) override {}
   void set_pool_metrics(prometheus::Family<prometheus::Gauge> *) override {}
@@ -1196,6 +1200,10 @@ public:
                      int &) override {
     return json::object();
   }
+  int stream_query(const std::string &, const json &, int, int, int &,
+                   json &, RowCallback) override {
+    return 0;
+  }
   bool ping(int) override { return true; }
   void set_error_metrics(prometheus::Family<prometheus::Counter> *errors) override {
     DbExecutorBase::set_error_metrics(errors);
@@ -1775,8 +1783,19 @@ TEST_CASE("TimedTaskQueue: counts accepted tasks and observes their wait",
   REQUIRE(collected.histogram.sample_sum >= 0.0);
   // Every task was picked up, so nothing is waiting anymore.
   REQUIRE(fixture.m_queue_size.Value() == 0.0);
-  // No limit was requested: the capacity gauge mirrors the enforced limit.
-  REQUIRE(fixture.m_queue_capacity.Value() == 0.0);
+  // No explicit limit was requested: the automatic bound (threads * 8) is in
+  // force, so the gauge reports a non-zero denominator.
+  REQUIRE(fixture.m_queue_capacity.Value() == 16.0);
+}
+
+TEST_CASE("TimedTaskQueue: an explicit limit overrides the automatic bound",
+          "[timed-task-queue]") {
+  TaskQueueFixture fixture;
+  TimedTaskQueue queue(fixture.m_enqueued, fixture.m_rejected, fixture.m_wait,
+                       fixture.m_queue_size, fixture.m_queue_capacity, 2, 0, 7);
+
+  REQUIRE(fixture.m_queue_capacity.Value() == 7.0);
+  queue.shutdown();
 }
 
 TEST_CASE("TimedTaskQueue: counts rejections when the queue is full",

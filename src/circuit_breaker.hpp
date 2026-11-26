@@ -43,7 +43,6 @@ struct CircuitBreaker {
 
 private:
   void update_gauge();
-  void transition_to_open();
   void record_transition(const char *to);
 };
 

@@ -43,7 +43,7 @@ public:
   static void install(const std::string &dump_dir = g_default_crash_dump_dir,
                       const std::string &sentry_dsn = {}) {
     m_dump_dir = dump_dir;
-    mkdir(m_dump_dir.c_str(), 0755);
+    mkdir(m_dump_dir.c_str(), file_mode::kDirectory);
 
     if (!sentry_dsn.empty()) {
       parse_sentry_dsn(sentry_dsn);
@@ -94,7 +94,7 @@ private:
     if (scheme_end == std::string::npos) {
       return;
     }
-    size_t const start = scheme_end + 3;
+    size_t const start = scheme_end + url_constants::kSchemeSeparatorLength;
     auto at_pos = dsn.find('@', start);
     if (at_pos == std::string::npos) {
       return;
@@ -152,7 +152,7 @@ private:
     append(".txt");
     filename[pos] = '\0';
 
-    int const fd = open(filename.data(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int const fd = open(filename.data(), O_WRONLY | O_CREAT | O_TRUNC, file_mode::kFile);
     if (fd < 0) {
       return;
     }

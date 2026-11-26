@@ -18,17 +18,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# shellcheck source=lib-common.sh
+. "$SCRIPT_DIR/lib-common.sh"
 
 LINT_IMAGE="http-data-diod:builder"
 
@@ -43,13 +34,6 @@ changed_sh_files() {
 
 all_sh_files() {
     git ls-files '*.sh'
-}
-
-ensure_builder_image() {
-    if ! docker image inspect "$LINT_IMAGE" >/dev/null 2>&1; then
-        log_info "Builder image not found, building ${LINT_IMAGE}..."
-        docker build --target builder -t "$LINT_IMAGE" "$PROJECT_ROOT/src"
-    fi
 }
 
 format_findings() {

@@ -202,7 +202,7 @@ private:
   // NATS option-callback handlers; invoked on the NATS async-callback thread.
   void on_disconnected(natsConnection *nc);
   void on_reconnected(natsConnection *nc);
-  void on_async_nats_error(natsStatus err);
+  void on_async_nats_error(natsStatus err, natsConnection *nc = nullptr);
   void on_closed(natsConnection *nc);
   // C thunks that cast the closure back to NatsClient and delegate. Static
   // members so they convert to plain C callback pointers and can access the
@@ -258,8 +258,6 @@ private:
   bool set_msg_headers(natsMsg *msg, const NatsHeaders &headers,
                        const std::string &operation);
 
-  // Convert timeout
-  static int ms_to_seconds(int ms) { return (ms + 999) / 1000; }
 };
 
 #endif // NATS_CLIENT_HPP

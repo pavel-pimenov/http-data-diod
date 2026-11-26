@@ -12,8 +12,8 @@
 #   - warnings in project files    -> prints them and exits 0 (the codebase has
 #     pre-existing style warnings, e.g. Prometheus metric members in snake_case)
 #   - diagnostics from system headers (/usr/include, ...) and bundled third-party
-#     code (httplib, base64, nats/src) are filtered out: fmt/spdlog consteval
-#     false positives are not actionable in project code.
+#     code (httplib, base64, nats/src, fmt, spdlog) are filtered out: fmt/spdlog
+#     consteval false positives are not actionable in project code.
 #   - the lint compile DB is built with -DFMT_CONSTEVAL=: fmt guards its
 #     compile-time format-string check with FMT_CONSTEVAL, and with consteval
 #     enabled clang cannot constant-evaluate fmt's FMT_STRING for spdlog's
@@ -40,17 +40,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# shellcheck source=lib-common.sh
+. "$SCRIPT_DIR/lib-common.sh"
+init_project_paths
 
 LINT_IMAGE="http-data-diod:builder"
 L2_DIR="src"
@@ -58,7 +50,7 @@ BUILD_DIR="$L2_DIR/build-lint"
 BUILD_DIR_CONTAINER="/app/build-lint"
 
 # Diagnostics located outside project sources (system headers and bundled 3rd-party code)
-IGNORE_PATH_RE='^(/usr/|/app/(nats/src|httplib|base64|prometheus-cpp|odpi|json)/)'
+IGNORE_PATH_RE='^(/usr/|/app/(nats/src|httplib|base64|prometheus-cpp|odpi|json|fmt|spdlog)/)'
 
 changed_cpp_files() {
     local f
@@ -66,7 +58,7 @@ changed_cpp_files() {
         case "$f" in
             $L2_DIR/*.cpp|$L2_DIR/*.cc|$L2_DIR/*.h|$L2_DIR/*.hpp)
                 case "$f" in
-                    */httplib/*|*/base64/*) continue ;;
+                    */httplib/*|*/base64/*|*/fmt/*|*/spdlog/*) continue ;;
                 esac
                 echo "$f"
                 ;;
@@ -78,37 +70,19 @@ all_cpp_files() {
     # Full sweep lints translation units only: headers are covered via the
     # include graph of the .cpp files, so linting each header as its own TU
     # would be redundant and very slow (e.g. the bundled nats C headers).
-    # Bundled third-party libraries (httplib, base64, prometheus-cpp)
-    # are skipped the same way as in the "changed" mode.
+    # Bundled third-party libraries (httplib, base64, prometheus-cpp, fmt,
+    # spdlog) are skipped the same way as in the "changed" mode.
     local f
     for f in $(git ls-files "$L2_DIR"); do
         case "$f" in
             $L2_DIR/*.cpp|$L2_DIR/*.cc)
                 case "$f" in
-                    */httplib/*|*/base64/*|*/prometheus-cpp/*) continue ;;
+                    */httplib/*|*/base64/*|*/prometheus-cpp/*|*/fmt/*|*/spdlog/*) continue ;;
                 esac
                 echo "$f"
                 ;;
         esac
     done
-}
-
-ensure_builder_image() {
-    if ! docker image inspect "$LINT_IMAGE" >/dev/null 2>&1; then
-        log_info "Builder image not found, building ${LINT_IMAGE}..."
-        docker build --target builder -t "$LINT_IMAGE" "$L2_DIR"
-    fi
-}
-
-ensure_version_header() {
-    # l2-proxy-version.h is build-generated and not tracked in git. clang-tidy
-    # lints the host sources (mounted into the container), so on a fresh
-    # checkout (no cached header from rebuild-and-run.sh) the generated file
-    # must be produced on the host, not only inside the Docker image.
-    if [ ! -f "$L2_DIR/l2-proxy-version.h" ]; then
-        log_info "Generating $L2_DIR/l2-proxy-version.h (not tracked in git)"
-        "$L2_DIR/generate_version.sh" > "$L2_DIR/l2-proxy-version.h"
-    fi
 }
 
 ensure_compile_commands() {

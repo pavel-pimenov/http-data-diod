@@ -31,6 +31,7 @@ AppContext::AppContext() {
   init_proxy_metrics();
   init_worker_metrics();
   init_server_metrics();
+  init_spider_metrics();
 
   m_sentry = std::make_unique<SentryClient>(
       m_config.m_sentry.m_dsn, m_sentry_metrics->m_events_sent,
@@ -48,6 +49,7 @@ void AppContext::stop_stats_history() const {
   for (auto *history : {m_proxy_stats_history.get(),
                         m_worker_stats_history.get(),
                         m_server_stats_history.get(),
+                        m_spider_stats_history.get(),
                         m_common_stats_history.get()}) {
     if (history) {
       history->stop();
@@ -70,6 +72,7 @@ void AppContext::init_common() {
   m_proxy_registry = std::make_shared<prometheus::Registry>();
   m_worker_registry = std::make_shared<prometheus::Registry>();
   m_server_registry = std::make_shared<prometheus::Registry>();
+  m_spider_registry = std::make_shared<prometheus::Registry>();
   m_common_registry = std::make_shared<prometheus::Registry>();
   MetricRegistrar const reg_common(m_common_registry);
 
@@ -104,10 +107,12 @@ void AppContext::init_common() {
   m_proxy_stats_history = make_history(m_proxy_registry, "proxy");
   m_worker_stats_history = make_history(m_worker_registry, "worker");
   m_server_stats_history = make_history(m_server_registry, "server");
+  m_spider_stats_history = make_history(m_spider_registry, "spider");
   m_common_stats_history = make_history(m_common_registry, "common");
   m_proxy_stats_history->start();
   m_worker_stats_history->start();
   m_server_stats_history->start();
+  m_spider_stats_history->start();
   m_common_stats_history->start();
 
   m_tracing_metrics = std::make_unique<TracingMetrics>(TracingMetrics{
@@ -605,4 +610,31 @@ void AppContext::init_server_metrics() {
           "l2_server_health_ready",
           "Readiness state (1 = ready, 0 = not ready) mirrored from "
           "/health/ready")});
+}
+
+void AppContext::init_spider_metrics() {
+  MetricRegistrar const reg_spider(m_spider_registry);
+  m_spider.m_metrics = std::make_unique<SpiderMetrics>(SpiderMetrics{
+      reg_spider.counter_family(
+          "l2_spider_polls_total",
+          "Total l2-db-spider poll cycles attempted, labeled by outcome "
+          "(ok/error)"),
+      reg_spider.counter_family(
+          "l2_spider_queries_total",
+          "Total spider query executions by database, query name and status"),
+      reg_spider.gauge(
+          "l2_spider_last_poll_duration_seconds",
+          "Duration of the last spider poll cycle (all databases) in seconds"),
+      reg_spider.gauge(
+          "l2_spider_last_success_timestamp",
+          "Unix timestamp of the last successful spider JSON write"),
+      reg_spider.gauge(
+          "l2_spider_healthy",
+          "l2-db-spider health (1 = last poll cycle succeeded, 0 = failed)")});
+
+  // Materialize the poll outcome series up front: a healthy spider always
+  // reports "ok", so the family must exist before the first poll.
+  auto &polls = m_spider.m_metrics->m_polls_total;
+  polls.Add({{"outcome", "ok"}});
+  polls.Add({{"outcome", "error"}});
 }

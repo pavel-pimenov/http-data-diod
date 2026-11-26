@@ -30,14 +30,31 @@ inline constexpr int kServerErrorMin = 500;
 
 namespace service_port {
 inline constexpr int kProxyMetrics = 19090;
-inline constexpr int kWorkerMetrics = 19091;
-inline constexpr int kServerMetrics = 19092;
-inline constexpr int kWorkerHealth = 19093;
-} // namespace service_port
+inline constexpr int kWorkerMetrics = 19091;inline constexpr int kServerMetrics = 19092;
+ inline constexpr int kWorkerHealth = 19093;
+ inline constexpr int kSpiderMetrics = 19094;
+ inline constexpr int kSpiderHealth = 19095;
+ } // namespace service_port
+
+namespace url_constants {
+// Length of "://" — the scheme separator every URL parser skips over.
+inline constexpr std::size_t kSchemeSeparatorLength = 3;
+} // namespace url_constants
+namespace file_mode {
+// Permission bits for crash dumps and their directory (Linux only code paths).
+inline constexpr int kDirectory = 0755;
+inline constexpr int kFile = 0644;
+} // namespace file_mode
+
 
 namespace http_server_limits {
 inline constexpr int kKeepAliveMaxCount = 100;
 inline constexpr int kKeepAliveTimeoutSeconds = 5;
+// Automatic task-queue bound per worker thread: when a configured queue limit
+// is 0 ("no explicit limit") both the proxy task queue and the worker pool
+// apply threads * this value, so a traffic burst turns into explicit
+// rejections instead of unbounded memory growth.
+inline constexpr std::size_t kQueuedTasksPerThread = 8;
 inline constexpr std::size_t kMaxRequestPayloadBytes =
     std::size_t{10} * 1024 * 1024; // 10 MB, large enough for batched DB requests
 } // namespace http_server_limits

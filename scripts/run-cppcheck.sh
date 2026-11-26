@@ -27,17 +27,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_ROOT"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# shellcheck source=lib-common.sh
+. "$SCRIPT_DIR/lib-common.sh"
 
 LINT_IMAGE="http-data-diod:builder"
 L2_DIR="src"
@@ -48,7 +39,7 @@ changed_cpp_files() {
         case "$f" in
             $L2_DIR/*.cpp|$L2_DIR/*.cc|$L2_DIR/*.h|$L2_DIR/*.hpp)
                 case "$f" in
-                    */httplib/*|*/base64/*|*/odpi/*|*/json/*|*/nats/*|*/prometheus-cpp/*) continue ;;
+                    */httplib/*|*/base64/*|*/odpi/*|*/json/*|*/nats/*|*/prometheus-cpp/*|*/fmt/*|*/spdlog/*) continue ;;
                 esac
                 echo "$f"
                 ;;
@@ -62,29 +53,12 @@ all_cpp_files() {
         case "$f" in
             $L2_DIR/*.cpp|$L2_DIR/*.cc|$L2_DIR/*.h|$L2_DIR/*.hpp)
                 case "$f" in
-                    */httplib/*|*/base64/*|*/odpi/*|*/json/*|*/nats/*|*/prometheus-cpp/*) continue ;;
+                    */httplib/*|*/base64/*|*/odpi/*|*/json/*|*/nats/*|*/prometheus-cpp/*|*/fmt/*|*/spdlog/*) continue ;;
                 esac
                 echo "$f"
                 ;;
         esac
     done
-}
-
-ensure_builder_image() {
-    if ! docker image inspect "$LINT_IMAGE" >/dev/null 2>&1; then
-        log_info "Builder image not found, building ${LINT_IMAGE}..."
-        docker build --target builder -t "$LINT_IMAGE" "$L2_DIR"
-    fi
-}
-
-ensure_version_header() {
-    # l2-proxy-version.h is build-generated and not tracked in git. cppcheck
-    # checks the host sources (mounted into the container), so on a fresh
-    # checkout the generated header must exist for the includes to resolve.
-    if [ ! -f "$L2_DIR/l2-proxy-version.h" ]; then
-        log_info "Generating $L2_DIR/l2-proxy-version.h (not tracked in git)"
-        "$L2_DIR/generate_version.sh" > "$L2_DIR/l2-proxy-version.h"
-    fi
 }
 
 main() {
@@ -130,7 +104,7 @@ main() {
         --suppress=missingIncludeSystem \
         --suppressions-list=/app/cppcheck-suppressions.txt \
         -DL2_PROXY_BUILD_MODE="release" \
-        -I/app -I/app/httplib -I/app/base64 -I/app/odpi/include -I/app/json -I/app/nats/src \
+        -I/app -I/app/httplib -I/app/base64 -I/app/odpi/include -I/app/json -I/app/nats/src -I/app/fmt -I/app/spdlog \
         -j "$jobs" \
         --template='{file}:{line}: {severity}: {id}: {message}' \
         "${container_files[@]}" 2>&1 || true)

@@ -1,5 +1,11 @@
 # TODO / Продолжение работы
 
+## Правило портов (29*=данные, 19*=метрики)
+
+- `29xxx` — рабочие/данные порты: `29001` (l2-server), `29002` (l2-proxy), `29003` (nginx)
+- `19xxx` — метрики: `19090` (l2-proxy metrics), `19091` (l2-worker metrics), `19092` (l2-server metrics), `19093` (l2-worker health)
+- Отразить правило в README (раздел портов) и network-architecture.md.
+
 ## Раунд 24 — Sentry transactions: release, сэмплинг, E2E, фиксы сборки
 
 `SENTRY_RELEASE` попадает в транзакции; отдельный `SENTRY_SAMPLE_RATE`
@@ -101,7 +107,7 @@ drain, reply-loss).
 - **Branches 41.5%** в целом — крупный задел (gcovr `--branch` метрика), но
   ветви в header-heavy шаблонном коде требуют точечных тест-кейсов
 
-### 2. Chaos-тестирование (fault_tolerance_test.py) — ГОТОВО
+### 2. Chaos-тестирование (fault-tolerance-test.py) — ГОТОВО
 
 Все 9 сценариев реализованы и стабильны:
 1. NATS reconnect
@@ -126,12 +132,11 @@ drain, reply-loss).
 ### 4. Self-hosted Sentry — ГОТОВО
 
 Реализовано:
-- `glitchtip` сервис в `docker-compose.yml` (профиль `glitchtip`) + выделенный
-  `glitchtip-db` (Postgres); образ `glitchtip/glitchtip:6`
+- `glitchtip` сервис в `docker-compose.yml` (теперь всегда в стеке, без профиля)
+  + выделенный `glitchtip-db` (Postgres); образ `glitchtip/glitchtip:6`
 - E2E-проверка доставки: `scripts/sentry-e2e-test.py` +
   `scripts/sentry-mock-receiver.py` (локальный mock-приёмник на хосте)
 - `scripts/run-glitchtip-stack.sh` (start/stop helper)
-- `rebuild-and-run.sh` с `ENABLE_GLITCHTIP=true`
 - Grafana-панель `l2-sentry-delivery` (uid) в `generate-grafana-dashboards.py`
 
 ### 5. Видимость кросс-сервисных метрик (архитектурное)
@@ -170,4 +175,6 @@ Functions 95.2%, Branches 41.4%.
 
 NATS-ветка отключена — все изменения и тесты только для NATS-режима.
 СУБД (postgres/oracle) запускаются по demand: `docker compose --profile databases up -d`.
-Sentry (glitchtip) запускается по demand: `docker compose --profile glitchtip up -d`.
+Sentry-совместимый GlitchTip (`http://localhost:8000`) теперь **всегда** в стеке:
+после первого запуска зарегистрируй юзера, создай проект и подставь
+`SENTRY_DSN=http://<key>@glitchtip:8000/<project-id>` в `.env`.

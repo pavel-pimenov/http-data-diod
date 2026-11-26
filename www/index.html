@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>l2-http-diod — Хаб сервисов</title>
+<style>
+  :root{
+    --bg:#d4d0c8; --panel:#f1efe9; --blue:#0a246a; --blue2:#3a6ea5;
+    --txt:#000; --sub:#5a5a5a; --border:#7a96df;
+    --header1:#0a246a; --header2:#3a6ea5; --header-txt:#fff; --header-sub:#d6e4f5;
+    --grn:#2e7d32; --red:#c62828; --port-bg:#d6e4f5; --status-bd:#999;
+    --card1:#ffffff; --card2:#f1efe9;
+  }
+  /* Тёмная тема (альтернатива XP) */
+  body[data-theme="dark"]{
+    --bg:#0f172a; --panel:#1e293b; --blue:#38bdf8; --blue2:#0ea5e9;
+    --txt:#e2e8f0; --sub:#94a3b8; --border:#334155;
+    --header1:#0b1220; --header2:#1e293b; --header-txt:#38bdf8; --header-sub:#94a3b8;
+    --grn:#4ade80; --red:#f87171; --port-bg:#273549; --status-bd:#475569;
+    --card1:#1e293b; --card2:#273549;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:"Tahoma","Segoe UI",system-ui,sans-serif;
+       font-size:13px;transition:background .2s,color .2s;}
+  header{padding:12px 20px;background:linear-gradient(180deg,var(--header1) 0%,var(--header2) 100%);
+      color:var(--header-txt);border-bottom:1px solid var(--border);display:flex;
+      align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  header .h-text{flex:1;}
+  header h1{margin:0;font-size:20px;color:var(--header-txt);font-weight:600;
+      text-shadow:1px 1px 0 rgba(0,0,0,.4);}
+  header p{margin:4px 0 0;color:var(--header-sub);font-size:12px;}
+  #theme-toggle{padding:4px 10px;font-size:12px;border-radius:3px;cursor:pointer;
+      border:1px solid var(--border);background:var(--card2);color:var(--txt);
+      font-family:inherit;}
+  #theme-toggle:hover{border-color:var(--blue2);}
+  main{padding:16px 20px;max-width:1400px;margin:0 auto;}
+  section{margin-bottom:18px;}
+  section h2{font-size:14px;color:var(--blue);border-left:3px solid var(--blue);
+      padding-left:8px;margin:0 0 10px;font-weight:600;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
+  /* Плашки: панель с закруглёнными углами, рамкой и классическим градиентом
+     кнопки (Windows XP / Delphi). */
+  .card{background:linear-gradient(180deg,var(--card1) 0%,var(--card2) 100%);
+      border:1px solid var(--border);border-radius:4px;
+      padding:7px 10px;box-shadow:inset 1px 1px 0 rgba(255,255,255,.15),
+      1px 1px 3px rgba(0,0,0,.25);position:relative;}
+  .card:hover{border-color:var(--blue2);box-shadow:inset 1px 1px 0 rgba(255,255,255,.15),
+      0 0 4px rgba(10,36,106,.4);}
+  .card a.title,.card .title{font-size:13px;font-weight:600;color:var(--blue);
+      text-decoration:none;display:block;margin-bottom:2px;}
+  .card a.title:hover{text-decoration:underline;color:var(--blue2);}
+  .card .desc{font-size:11px;color:var(--sub);line-height:1.3;}
+  .card .port{display:inline-block;margin-top:4px;font-size:10px;color:var(--blue);
+      background:var(--port-bg);padding:1px 6px;border-radius:3px;font-family:monospace;}
+  .card .status{float:right;font-size:10px;padding:1px 6px;border-radius:3px;
+      border:1px solid var(--status-bd);}
+  .up{background:#e8f5e9;color:var(--grn);}
+  body[data-theme="dark"] .up{background:#14532d44;}
+  .down{background:#ffebee;color:var(--red);}
+  body[data-theme="dark"] .down{background:#7f1d1d44;}
+  footer{padding:10px 20px;color:var(--sub);font-size:11px;border-top:1px solid var(--status-bd);
+      background:var(--panel);}
+  .legend{font-size:11px;color:var(--sub);margin-bottom:10px;}
+</style>
+</head>
+<body data-theme="xp">
+<header>
+  <div class="h-text">
+    <h1>l2-http-diod — Хаб сервисов</h1>
+    <p>Все сервисы docker-compose стека: мониторинг, прокси, БД, NATS, отчёты.</p>
+  </div>
+  <button id="theme-toggle" type="button" onclick="toggleTheme()" title="Переключить тему">Тёмная</button>
+</header>
+<main>
+  <div class="legend">Статус-индикаторы проверяют доступность портов каждые 10&nbsp;сек (внутри браузера).</div>
+
+  <section>
+    <h2>📊 Мониторинг и дашборды</h2>
+    <div class="grid" data-group="mon">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:3000/api/health">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:3000" target="_blank">Grafana</a>
+        <div class="desc">Дашборды метрик l2-* (PromQL, переменные, алерты).</div>
+        <span class="port">:3000</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8089">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8089" target="_blank">Perses</a>
+        <div class="desc">Лёгкий UI дашбордов (те же панели, что в Grafana).</div>
+        <span class="port">:8089</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8428/-/healthy">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8428/vmui" target="_blank">VictoriaMetrics</a>
+        <div class="desc">СУБД метрик: VMUI-запросы, хранение 15 дней.</div>
+        <span class="port">:8428</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:16686">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:16686" target="_blank">Jaeger</a>
+        <div class="desc">UI распределённой трассировки (span, поиск по сервисам).</div>
+        <span class="port">:16686</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>🔧 Сервисы l2</h2>
+    <div class="grid" data-group="l2">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:29002/health">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:29002/health" target="_blank">l2-proxy</a>
+        <div class="desc">HTTP-прокси NATS-запросов. Health-эндпоинт, метрики :19090.</div>
+        <span class="port">:29002</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:19091/health">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:19091/metrics" target="_blank">l2-worker</a>
+        <div class="desc">Обработчик задач NATS: метрики :19091, ready :19093.</div>
+        <span class="port">:19091</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:29001/health">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:29001/health" target="_blank">l2-server</a>
+        <div class="desc">Тестовый стаб-сервер (не продакшен): :29001.</div>
+        <span class="port">:29001</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:19094/metrics">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:19094/metrics" target="_blank">l2-db-spider</a>
+        <div class="desc">Опрос БД (Oracle) по расписанию, JSON в spider-output. Health :19095.</div>
+        <span class="port">:19094</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:19096/progress">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:19096" target="_blank">l2-spider-ai</a>
+        <div class="desc">AI-генерация отчёта по данным spider: прогресс, report.md/pdf.</div>
+        <span class="port">:19096</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:19097/progress">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:19097" target="_blank">l2-heat-ai</a>
+        <div class="desc">AI-отчёт по плавкам (GetHeatData): прогресс, report.md/pdf.</div>
+        <span class="port">:19097</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📡 NATS</h2>
+    <div class="grid" data-group="nats">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:7779">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:7779" target="_blank">NATS GUI</a>
+        <div class="desc">Веб-интерфейс NATS: стримы, подписчики, сообщения.</div>
+        <span class="port">:7779</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8222/healthz">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8222/healthz" target="_blank">NATS Server</a>
+        <div class="desc">Мониторинг/health NATS-сервера (4222 — брокер).</div>
+        <span class="port">:8222</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:7778/metrics">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:7778/metrics" target="_blank">nats-exporter</a>
+        <div class="desc">Prometheus-метрики NATS (собираются vmagent).</div>
+        <span class="port">:7778</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>🐛 Ошибки и API</h2>
+    <div class="grid" data-group="err">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8000">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8000" target="_blank">GlitchTip</a>
+        <div class="desc">Crash-стектрейсы и исключения (аналог Sentry).</div>
+        <span class="port">:8000</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8081">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8081" target="_blank">Swagger UI</a>
+        <div class="desc">Интерактивная документация API (openapi).</div>
+        <span class="port">:8081</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:29003">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:29003" target="_blank">nginx (ODS)</a>
+        <div class="desc">Прокси к ODS-эндпоинтам DataHub (nginx).</div>
+        <span class="port">:29003</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>📋 Отчёты</h2>
+    <div class="grid" data-group="report">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8083">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8083" target="_blank">Registry Reports</a>
+        <div class="desc">Отчёты по Docker-реестрам: размеры, теги, диаграммы. Генерация и история проверок.</div>
+        <span class="port">:8083</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>🗄️ Базы данных</h2>
+    <div class="grid" data-group="db">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:1521">…</span>
+        <div class="title">Oracle</div>
+        <div class="desc">Внешняя Oracle БД (ccm3t/ccm2/ccm4/ccm5), порт 1521.</div>
+        <span class="port">:1521</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:5432">…</span>
+        <div class="title">PostgreSQL</div>
+        <div class="desc">Postgres 17 (GlitchTip, dev-тесты).</div>
+        <span class="port">:5432</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>⚙️ Служебные</h2>
+    <div class="grid" data-group="aux">
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8429/health">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8429/metrics" target="_blank">vmagent</a>
+        <div class="desc">Скрапер метрик с сервисов l2 в VictoriaMetrics.</div>
+        <span class="port">:8429</span></div>
+      <div class="card"><span class="status" data-check="http://nl-sp-p3pg-ad1:8880/-/healthy">…</span>
+        <a class="title" href="http://nl-sp-p3pg-ad1:8880" target="_blank">vmalert</a>
+        <div class="desc">Правила алертов и нотификации по метрикам.</div>
+        <span class="port">:8880</span></div>
+    </div>
+  </section>
+</main>
+<footer>Сгенерировано для стека l2-http-diod · порт 443 · плашки кликабельны · статусы — live-check</footer>
+
+<script>
+  // Переключение темы «XP / Тёмная», сохраняется в localStorage.
+  function applyTheme(theme){
+    document.body.dataset.theme = theme;
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = theme === 'dark' ? 'XP' : 'Тёмная';
+    try { localStorage.setItem('l2-hub-theme', theme); } catch (e) {}
+  }
+  function toggleTheme(){
+    applyTheme(document.body.dataset.theme === 'dark' ? 'xp' : 'dark');
+  }
+  (function initTheme(){
+    try {
+      const saved = localStorage.getItem('l2-hub-theme');
+      if (saved === 'dark' || saved === 'xp') applyTheme(saved);
+    } catch (e) {}
+  })();
+
+  // Проверка доступности портов (через img/JSON, чтобы избежать CORS-блоков
+  // на fetch к разным портам). Используем лёгкий beacon.
+  const checks = document.querySelectorAll('[data-check]');
+  function ping(url){
+    return new Promise((res)=>{
+      const img = new Image();
+      const t = setTimeout(()=>{img.onload=img.onerror=null;res(false)},3000);
+      img.onload = ()=>{clearTimeout(t);res(true)};
+      img.onerror = ()=>{clearTimeout(t);res(true)};  // ответ есть даже при 4xx/5xx
+      img.src = url + '?' + Date.now();
+    });
+  }
+  async function refresh(){
+    for(const el of checks){
+      const ok = await ping(el.dataset.check);
+      const s = el;
+      s.textContent = ok ? 'UP' : 'DOWN';
+      s.className = 'status ' + (ok ? 'up' : 'down');
+    }
+  }
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+</body>
+</html>

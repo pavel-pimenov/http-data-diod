@@ -34,6 +34,29 @@ setup_macos_docker() {
 
 setup_macos_docker
 
+# Load .env (if present) so L2_WORKER_DOCKER_TARGET and other overrides from
+# the local environment are visible to the build. docker compose reads .env for
+# ${VAR} substitution, but this script's `export VAR=default` below would
+# otherwise shadow the .env value.
+# A plain `source .env` is unsafe: lines like
+#   L2_SERVER_URLS=["http://...", "https://..."]
+# are JSON arrays that bash cannot source (the '[' is glob-expanded and the URL
+# is run as a command). Only simple `VAR=value` lines (no leading whitespace,
+# no brackets/spaces in the value) are loaded here.
+if [ -f .env ]; then
+    set -a
+    while IFS='=' read -r _key _value; do
+        case "$_key" in
+            '' | \#* | *[[:space:]]*) continue ;;
+        esac
+        case "$_value" in
+            *'['* | *[[:space:]]*) continue ;;
+        esac
+        export "$_key=$_value"
+    done < .env
+    set +a
+fi
+
 # Track build time
 BUILD_START_TIME=$(date +%s)
 
@@ -42,13 +65,22 @@ BUILD_START_TIME=$(date +%s)
 #   VM_NAME=my-node ./rebuild-and-run.sh
 export VM_NAME="${VM_NAME:-$(hostname)}"
 
+# ---------------------------------------------------------------------------
+# Contour proxy configuration (per-contour, overridable in .env):
+#   REGISTRY   container-registry proxy prefix for all external images
+#              (docker-compose `image:` + Dockerfile FROM/COPY --from).
+#              Empty string = pull straight from Docker Hub (internet build).
+#   APT_MIRROR apt repository mirror for Ubuntu 26.04 package installs inside
+#              the images. Empty string = use the distro's default sources.
+# Values come from .env (loaded above) per closed contour; e.g. this node uses
+# docker-registry.dp.nlmk.com/ + repos.dp.nlmk.com/..., another contour may use
+# repo.ia.nlmk/k8s-oci/dockerhub/ + repo.ia.nlmk/artifactory/ubuntu_repo/.
+# Empty fallback = Docker Hub / distro defaults.
+export REGISTRY="${REGISTRY:-}"
+export APT_MIRROR="${APT_MIRROR:-}"
+
 ENABLE_ASAN=false
 COMPOSE_ARGS=()
-# Opt-in dev Sentry ingest: when enabled, start the glitchtip profile
-# (self-hosted Sentry-compatible server + its dedicated postgres) and point
-# the services' SENTRY_DSN at it. Default off — production stacks set their
-# own SENTRY_DSN and do not run the glitchtip instance.
-export ENABLE_GLITCHTIP="${ENABLE_GLITCHTIP:-false}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -112,7 +144,9 @@ docker compose down --remove-orphans 2>/dev/null || true
 # Clean up any conflicting containers (e.g., Grafana)
 echo "Cleaning up conflicting containers..."
 docker rm -f l2-perses 2>/dev/null || true
-docker rm -f l2-proxy l2-worker l2-server nginx jaeger nginx-exporter postgres oracle 2>/dev/null || true
+docker rm -f l2-proxy l2-worker l2-server l2-db-spider nginx jaeger nginx-exporter postgres oracle 2>/dev/null || true
+mkdir -p spider-output
+touch spider-config.ini
 sleep 1
 
 export DOCKER_BUILDKIT=1
@@ -163,10 +197,10 @@ BUILD_STEP_START=$(date +%s)
 # --profile is a compose up flag; docker compose build rejects it (profiles
 # select which services.up starts, they do not narrow the build). Keep
 # COMPOSE_ARGS for the up/down invocations below.
-# L2_BAKE_CACHE=gha (CI only, with setup-buildx-action) builds through
-# `docker buildx bake` so the build layers are cached between CI runs via the
-# GitHub Actions cache backend. Tags must be set explicitly: bake does not
-# derive the compose project image names automatically.
+# L2_BAKE_CACHE=gha (CI only, with a buildx cache backend) builds through
+# `docker buildx bake` so the build layers are cached between CI runs. Tags
+# must be set explicitly: bake does not derive the compose project image names
+# automatically.
 L2_COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
 build_images() {
     local no_cache="${1:-}"
@@ -216,9 +250,6 @@ echo ""
 # the subcommand): it only affects *which services get (re)started*, never the
 # build above, so it is added here, not to the build invocations.
 CONTAINER_START=$(date +%s)
-if [ "$ENABLE_GLITCHTIP" = "true" ]; then
-    COMPOSE_ARGS+=("--profile" "glitchtip")
-fi
 docker compose ${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"} up -d --remove-orphans
 
 # Wait for containers to start
@@ -336,7 +367,7 @@ if [ "${ENABLE_ASAN:-false}" = true ]; then
 fi
 echo "=========================================="
 
-# Sync Perses dashboards (единственный UI после удаления Grafana)
+# Sync Perses dashboards (лёгкий UI; определения панелей — из генератора Grafana)
 echo ""
 if [ -f "scripts/generate-perses-dashboards.py" ]; then
     PERSES_URL="${PERSES_URL:-http://localhost:8089}"
@@ -365,3 +396,10 @@ if [ -f "scripts/generate-perses-dashboards.py" ]; then
         echo "   python3 scripts/generate-perses-dashboards.py"
     fi
 fi
+
+# Grafana dashboard sync moved into the grafana-dashboards-sync sidecar
+# container (docker-compose). It runs the generator on startup against the
+# GRAFANA_URL env var, so the target Grafana may live on another host.
+# On-demand sync from the host is still possible:
+#   GRAFANA_URL=$GRAFANA_URL GRAFANA_USER=admin GRAFANA_PASSWORD=admin \
+#     python3 scripts/generate-grafana-dashboards.py --correct-dashboards

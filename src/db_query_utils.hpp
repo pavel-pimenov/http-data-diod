@@ -60,8 +60,51 @@ inline std::string next_word_lower(const std::string &s, size_t &pos) {
   return to_lower(word);
 }
 
+// True when the statement contains a statement terminator ';' outside string
+// literals other than a single trailing one. Multi-statement queries (e.g.
+// "SELECT 1; DROP TABLE t") must be rejected: the read-only check only looks at
+// the first keyword, but the pg/oracle drivers execute every statement, so a
+// single-statement SELECT could smuggle a DDL/DML after a trailing ';'.
+inline bool has_extra_statement_terminator(const std::string &stripped) {
+  const size_t n = stripped.size();
+  char quote = '\0';
+  for (size_t i = 0; i < n; ++i) {
+    const char c = stripped[i];
+    if (quote != '\0') {
+      if (c == quote) {
+        // Doubled quote escape ('' and "") keeps the literal open.
+        if (i + 1 < n && stripped[i + 1] == quote) {
+          ++i;
+        } else {
+          quote = '\0';
+        }
+      }
+      continue;
+    }
+    if (c == '\'' || c == '"' || c == '`') {
+      quote = c;
+      continue;
+    }
+    if (c == ';') {
+      // A terminator is only allowed as the very last non-whitespace token.
+      bool trailing = true;
+      for (size_t j = i + 1; j < n; ++j) {
+        if (!std::isspace(static_cast<unsigned char>(stripped[j]))) {
+          trailing = false;
+          break;
+        }
+      }
+      if (!trailing) {
+        return true; // ';' followed by more SQL -> multi-statement
+      }
+    }
+  }
+  return false;
+}
+
 // True when the statement is a read-only query: the first meaningful keyword
-// (after stripping comments and leading parentheses) is SELECT or WITH.
+// (after stripping comments and leading parentheses) is SELECT or WITH, and the
+// statement carries no multi-statement terminator.
 inline bool is_read_only_sql(const std::string &sql) {
   const std::string stripped = strip_sql_comments(sql);
   size_t pos = 0;
@@ -69,7 +112,10 @@ inline bool is_read_only_sql(const std::string &sql) {
     ++pos;
   }
   const std::string first = next_word_lower(stripped, pos);
-  return first == "select" || first == "with";
+  if (!(first == "select" || first == "with")) {
+    return false;
+  }
+  return !has_extra_statement_terminator(stripped);
 }
 
 // Parsed DbQueryContract request received by the worker over NATS.
@@ -276,9 +322,11 @@ public:
       : m_state{.m_max_rows = max_rows} {}
 
   // Returns false when the row limit is reached (and marks the result as
-  // truncated); the caller must stop fetching.
+  // truncated); the caller must stop fetching. max_rows <= 0 means unlimited
+  // (full fetch, never truncated) — used by l2-db-spider for complete dumps.
   bool try_add(json &&row) {
-    if (m_state.m_rows.size() >= m_state.m_max_rows) {
+    if (m_state.m_max_rows > 0 &&
+        m_state.m_rows.size() >= m_state.m_max_rows) {
       m_state.m_truncated = true;
       return false;
     }

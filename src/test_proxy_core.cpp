@@ -625,9 +625,10 @@ TEST_CASE("Header utils: headers_to_json preserves all pairs",
 
 TEST_CASE("Header utils: non-UTF-8 header values stay serializable",
           "[header-utils]") {
-  // PTOKAX answers errors with a Windows-1251 Date header ("Сб" = D1 E1);
-  // putting it into the NATS envelope verbatim aborted the whole response with
-  // json type_error.316, so the client got 500 instead of the upstream status.
+  // Legacy upstreams answer errors with a Windows-1251 Date header
+  // ("Сб" = D1 E1); putting it into the NATS envelope verbatim aborted the whole
+  // response with json type_error.316, so the client got 500 instead of the
+  // upstream status.
   httplib::Headers const source = {
       {"Content-Type", "text/plain; charset=utf-8"},
       {"Date", std::string("\xD1\xE1, 31 \xEE\xEA\xF2 2026 10:38:36 GMT")},

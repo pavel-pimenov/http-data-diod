@@ -1,11 +1,27 @@
 # syntax=docker/dockerfile:1
 
+# Build location is configurable for an isolated (offline) contour:
+#   - BASE_IMAGE:   the Ubuntu base image, fully resolved (optionally prefixed
+#                   with the registry proxy), e.g. docker-registry.dp.nlmk.com/ubuntu:26.04
+#   - REGISTRY_MIRROR: prefix prepended to the other external image references
+#                   (FROM nats:2.15.2-alpine, oracle-libs, ...) so they are pulled
+#                   through a registry proxy instead of Docker Hub.
+#   - APT_MIRROR:   apt repository mirror for Ubuntu package installs (defaults
+#                   to the proxy repo; set empty to use the distro defaults).
+# All three default to the isolated-contour proxy endpoints and can be
+# overridden per build to point at another registry/apt proxy.
 ARG BASE_IMAGE=ubuntu:26.04
+ARG REGISTRY_MIRROR=
+ARG APT_MIRROR=
+ARG GIT_SHA=unknown
 
 # Shared base layer: run apt-get update once, reuse across all stages
 FROM ${BASE_IMAGE} AS ubuntu-base
 ARG DEBIAN_FRONTEND=noninteractive
 ARG APT_MIRROR=
+# DEBIAN_FRONTEND as ENV (not just ARG) so it is inherited by every derived
+# stage and suppresses apt's debconf Dialog/Readline noise in the build log.
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-noninteractive}
 ENV APT_MIRROR=${APT_MIRROR}
 
 # Configure apt mirror for closed network (when APT_MIRROR is set)
@@ -30,14 +46,13 @@ RUN set -eux; \
 # runtime-base and runtime need no apt of their own: one fewer
 # apt-get update per cold build and no apt lock contention between
 # the runtime and builder stages.
-# Only libs the l2-proxy binary actually links (ldd) are kept: libfmt10
-# (spdlog is used header-only, so libspdlog is NOT a runtime dep), libssl3t64
-# and libpq5 (plus their transitive deps libzstd1/zlib1g/libstdc++6).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+# Only libs the l2-proxy binary actually links (ldd) are kept: libssl3t64
+# and libpq5 (plus their transitive deps libzstd1/zlib1g/libstdc++6). fmt and
+# spdlog are vendored header-only (fmt 12.2.1 + spdlog 1.17.0), so neither
+# libfmt10 nor libspdlog are runtime deps anymore.
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    libfmt10 \
     libssl3t64 \
     libpq5 \
     ca-certificates \
@@ -52,59 +67,38 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 FROM ubuntu-base AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
 
 # Install build dependencies (stable layer — rarely changes)
-# libfmt-dev is omitted on purpose: it is a hard dependency of libspdlog-dev
-# (installed automatically). libzstd-dev and pkg-config are not referenced by
-# the application or either CMake build (zstd comes at link time from the
-# libzstd1 runtime lib, pulled in by libssl3t64).
+# fmt and spdlog are vendored header-only (fmt/ and spdlog/ in the source
+# tree), so neither libfmt-dev nor libspdlog-dev are installed; the older apt
+# versions would otherwise override the vendored ones. libzstd-dev and
+# pkg-config are not referenced by the application or either CMake build (zstd
+# comes at link time from the libzstd1 runtime lib, pulled in by libssl3t64).
 # libcli11-dev is gone: CLI11 was never included by any project source, so the
 # package only added download/install time to every build.
 # libgoogle-perftools-dev is NOT installed here: it is needed only by
 # ENABLE_PROFILER=ON builds and is installed in its own conditional layer
 # below (keeps the heavy base apt layer cached and out of the default image).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
-    ccache \
     ninja-build \
     ca-certificates \
     cmake \
     zlib1g-dev \
     libssl-dev \
-    libspdlog-dev \
-    clang-tidy \
-    clang-format \
-    cppcheck \
-    shellcheck \
-    catch2 \
     libpq-dev \
-    postgresql \
     && apt-get clean
 
-# Drop the distro default cluster auto-created at package install time: the
-# live DB unit tests (src/test_db_live.cpp) run their own ephemeral cluster
-# per build. In a container without systemd the package's init script cannot
-# manage it anyway, and a stray postgres on 5432 would only waste disk.
-RUN set -eux; \
-    for v in /usr/lib/postgresql/*/; do \
-      v=${v%/}; v=${v##*/}; \
-      pg_dropcluster --stop "${v}" main >/dev/null 2>&1 || true; \
-    done; \
-    rm -rf /etc/postgresql /var/lib/postgresql/* /var/run/postgresql
-
-# NATS server binary for unit tests that need a live broker
-# (src/test_nats_live.cpp). Same tag as the compose nats-server service.
-COPY --from=nats:2.14-alpine /usr/local/bin/nats-server /usr/local/bin/nats-server
-
-# ccache tuning: on 4-core hosts the 5 GiB default evicts unity batches between
-# Dockerfile tweaks; raise the cap and compress so hits survive longer. The
-# cache itself lives in the BuildKit cache mount at /root/.ccache and persists
-# across rebuilds.
-ENV CCACHE_MAXSIZE=10G \
-    CCACHE_COMPRESS=1
+# NOTE: ccache is intentionally NOT used in this deployment Dockerfile. It
+# relies on a BuildKit `RUN --mount=type=cache,target=/root/.ccache` (present
+# only in Dockerfile.test), which kaniko cannot run, so its cache never
+# survives a kaniko rebuild — hits stay at 0% and it only adds a wasted 10 GiB
+# layer. kaniko layer caching (--cache-repo) covers the apt/NATS/Oracle layers
+# instead; the app build layer recompiles on every source change.
 
 WORKDIR /app
 
@@ -113,13 +107,12 @@ WORKDIR /app
 # that touches the application sources (COPY . . below comes after).
 COPY nats ./nats
 
-RUN --mount=type=cache,target=/root/.ccache \
+RUN \
     echo "=== Building NATS C client ===" && \
     cd /app/nats && \
     rm -rf build && mkdir build && cd build && \
     cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/usr/local \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
           -DNATS_BUILD_LIB_STATIC=ON \
           -DNATS_BUILD_LIB_SHARED=OFF \
           -DNATS_BUILD_EXAMPLES=OFF \
@@ -157,36 +150,33 @@ ARG CACHE_BUST=1
 # tcmalloc_and_profiler). It lives in its own layer so the default build
 # neither downloads nor carries it, and so the heavy base apt layer above
 # stays cached for both build modes.
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     if [ "$ENABLE_PROFILER" = "true" ]; then \
         apt-get update && \
         apt-get install -y --no-install-recommends libgoogle-perftools-dev && \
         apt-get clean; \
     fi
-# The /app/build mount persists the ninja build dir between RUN invocations, so
-# a code change recompiles only the affected unity batch and relinks instead of
-# rebuilding everything via ccache. The id embeds the build mode + CACHE_BUST:
-# switching sanitizers/profiler or bumping CACHE_BUST yields a clean build dir.
-RUN --mount=type=cache,target=/root/.ccache \
-    --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
+# The /app/build dir is recreated each build (kaniko keeps no cache mount), so
+# the app compiles from scratch; CACHE_BUST lets CI force a clean rebuild by
+# bumping the value or setting it via env, independent of kaniko layer cache.
+RUN \
     echo "CACHE_BUST=${CACHE_BUST}" && \
     mkdir -p build && cd build && \
     if [ "$ENABLE_ASAN" = "true" ]; then \
         echo "Build mode: DEBUG + sanitizers (ASan, LSan via detect_leaks=1, UBSan) -fsanitize=address,undefined" && \
         cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug \
               -DENABLE_ASAN=ON \
-              -DBUILD_TESTS=ON ..; \
+              -DBUILD_TESTS=OFF ..; \
     elif [ "$ENABLE_PROFILER" = "true" ]; then \
         echo "Build mode: RelWithDebInfo + gperftools heap profiler" && \
         cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
               -DENABLE_PROFILER=ON \
-              -DBUILD_TESTS=ON ..; \
+              -DBUILD_TESTS=OFF ..; \
     else \
         echo "Build mode: RelWithDebInfo (optimized, no sanitizers)" && \
         cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
               -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
-              -DBUILD_TESTS=ON ..; \
+              -DBUILD_TESTS=OFF ..; \
     fi && \
     echo "=== cmake configure done ===" && \
     _T1=$(date +%s) && \
@@ -195,142 +185,171 @@ RUN --mount=type=cache,target=/root/.ccache \
     _T2=$(date +%s) && \
     echo "=== build timing ===" && \
     echo "  compile:    $((_T2 - _T1))s" && \
-    mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy && \
-    echo "=== ccache stats ===" && ccache -s | head -14
+    mkdir -p /app/out && cp /app/build/l2-proxy /app/out/l2-proxy
 
-# Unit tests run in their own RUN step (same build dir via the cache mount):
-# the results stay at the end of the build output instead of scrolling past a
-# clean build's compile progress, and the test gate becomes a separate cachable
-# step that re-runs only when the sources (parent layers) actually changed.
-# The two binaries run SEQUENTIALLY (not `&`/`wait`): the live NATS/PostgreSQL
-# tests spawn a real broker and ephemeral DB clusters, and on small hosts
-# (2 vCPU / 4 GiB) running both concurrently doubles the peak RSS and can
-# OOM-kill the test Postgres, failing the gate with "connection refused".
-RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
-    cd /app/build && _T4=$(date +%s); \
-    ./test_components && \
-    _T5=$(date +%s) && \
-    echo "=== unit tests (test_components): $((_T5 - _T4))s, all passed ==="
-RUN --mount=type=cache,id=appbuild-${ENABLE_ASAN}-${ENABLE_PROFILER}-${CACHE_BUST},target=/app/build \
-    cd /app/build && _T4=$(date +%s); \
-    ./test_proxy_core && \
-    _T5=$(date +%s) && \
-    echo "=== unit tests (test_proxy_core): $((_T5 - _T4))s, all passed ==="
+# PDF report stage: converts a markdown report (l2-db-spider output) into a
+# landscape A4 PDF with a left-hand section tree (bookmarks/outline) for
+# navigation. Built on the shared ubuntu-base (Ubuntu 26.04) so it gets the
+# same apt-mirror handling and a modern Python (no 3.7 workarounds needed for
+# reportlab). Only used via `docker build --target pdf-report` — it is NOT part
+# of any runtime image.
+FROM ubuntu-base AS pdf-report
+ARG DEBIAN_FRONTEND=noninteractive
 
-# Keep debug info (DWARF) for crash handler stack trace resolution
-
-# Coverage stage: build with --coverage (no Unity Build), run the unit tests
-# and render the HTML report with gcovr inside the container. The report lands
-# in /app/out/coverage/ (coverage.html + per-file details): `scripts/
-# run-coverage.sh` copies it out of the image. Covers only project sources
-# (src), excluding bundled third-party dirs (prometheus-cpp, httplib, base64,
-# json).
-#
-# Note: the gcovr --filter must stay as a single backslash here. A doubled one
-# (`\\.`) is passed literally to the regex and matches nothing (0% report).
-#
-# First gcovr pass (gcovr ORs the exit codes): line >= 90% and branch >= 40%
-# over the full src scope; it renders coverage.html AND cov.json in one
-# invocation (JSON needs the `--json=FILE` form: a bare `--json` plus a
-# separate `-o` is silently skipped when two formats are requested). cov.json
-# feeds scripts/coverage-regression-check.py (per-file vs
-# docs/coverage-baseline.json). The stronger production gate is the second
-# pass: branch >= 50% on production-only sources (test_*.cpp excluded) — unit
-# tests must not hide gaps in the shipped code paths.
-FROM builder AS coverage
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
-    && apt-get install -y --no-install-recommends gcovr \
+RUN \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    fonts-dejavu-core \
     && apt-get clean
-# ccache is enabled even for the --coverage build: ccache (>=4.x) stores the
-# coverage-note (.gcno) side file and re-emits it on a cache hit (validated on
-# ccache 4.12: a hit regenerates a byte-identical .gcno next to the object).
-# The cache lives in the /root/.ccache mount shared with the builder stage.
-#
-# Precompiled headers are disabled here (CMAKE_DISABLE_PRECOMPILE_HEADERS):
-# a compile that consumes a PCH via `-include .../cmake_pch.hxx` is NOT
-# cacheable by ccache, which dropped the cacheable share of the coverage TUs
-# to ~30% and left the compile at ~112s even with a warm cache. Without PCH
-# every TU is cacheable (141/141) and a warm run recompiles nothing
-# (~6s vs ~112s); only the touched TU is rebuilt. PCH speeds up a cold build
-# only, and the coverage build is repeated, so the trade is clearly worth it.
-# The build-cov dir is dropped every run: keep .gcda/.gcno deterministic.
-RUN --mount=type=cache,target=/root/.ccache \
-    echo "CACHE_BUST=1" && \
-    rm -rf build-cov && mkdir build-cov && cd build-cov && \
-    cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON \
-          -DCMAKE_UNITY_BUILD=OFF \
-          -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O0 -g --coverage" \
-          -DCMAKE_EXE_LINKER_FLAGS="--coverage" .. && \
-    _T1=$(date +%s) && \
-    ninja -j$(nproc) test_components test_proxy_core && \
-    _T2=$(date +%s) && \
-    echo "=== coverage build timing: $((_T2 - _T1))s ===" && \
-    echo "=== ccache stats ===" && ccache -s | grep -iE "cacheable|hits|misses"
-# The two unit-test binaries run sequentially. Parallel execution was measured
-# as a wash (~85s vs ~88s: test_components dominates and the two mostly
-# serialise on the shared CPU), and it made a fresh build drop a single
-# http_client line once (timing-sensitive network test), which the per-file
-# regression gate would flag. Sequential keeps the counters deterministic.
-RUN cd build-cov && _T1=$(date +%s); \
-    ./test_components && ./test_proxy_core && \
-    _T2=$(date +%s) && \
-    echo "=== coverage unit tests: $((_T2 - _T1))s, all passed ==="
-RUN mkdir -p /app/out/coverage && cd build-cov && \
-    gcovr --object-directory . --root /app \
-          --filter '/app/.*\.(cpp|hpp|h)$' \
-          --exclude '/app/prometheus-cpp/.*' \
-          --exclude '/app/httplib/.*' \
-          --exclude '/app/base64/.*' \
-          --exclude '/app/json/.*' \
-          --html --html-details -o /app/out/coverage/coverage.html \
-          --json=/app/out/coverage/cov.json \
-          --gcov-ignore-errors=all \
-          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
-          --fail-under-line 90 \
-          --fail-under-branch 40 && \
-    gcovr --object-directory . --root /app \
-          --filter '/app/.*\.(cpp|hpp|h)$' \
-          --exclude '/app/prometheus-cpp/.*' \
-          --exclude '/app/httplib/.*' \
-          --exclude '/app/base64/.*' \
-          --exclude '/app/json/.*' \
-          --exclude '/app/.*test_[^/]*\.cpp$' \
-          --json -o /dev/null \
-          --gcov-ignore-errors=all \
-          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
-          --fail-under-branch 50 && \
-    echo "=== coverage report rendered ==="
 
-# Lint stage: reconfigure with compile_commands.json + no Unity Build, then run clang-tidy.
-# Uses a fresh build dir so per-file compile_commands.json entries are generated
-# (a reused Unity build dir would leave only unity_* entries and clang-tidy would
-# analyze sources without flags). Runs on all project .cpp files; a curated
-# pre-commit gate (scripts/run-clang-tidy.sh) lints only the changed files.
-FROM builder AS lint
-RUN rm -rf build-lint && mkdir build-lint && cd build-lint && \
-    cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          -DCMAKE_UNITY_BUILD=OFF \
-          -DL2_PROXY_TEST_PCH=OFF \
-          -DL2_PROXY_APP_PCH=OFF \
-          .. && \
-    find /app -name '*.cpp' ! -path '*/httplib/*' ! -path '*/base64/*' | \
-    xargs clang-tidy -p . \
-    --header-filter='.*\.(hpp|h)$' \
-    2>&1 || true
+# reportlab is the only dependency (pure-Python PDF generation; DejaVuSans
+# provides the Cyrillic glyphs). No native build deps (PIL) are needed for
+# text/table-only reports. pip installs through the corporate PyPI proxy
+# (same artifactory as the host pip.conf): pypi.org is unreachable in a
+# closed contour.
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    --index-url https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple \
+    --trusted-host repos.dp.nlmk.com \
+    reportlab==4.4.3
+
+WORKDIR /work
+COPY scripts/spider_report_pdf.py /usr/local/bin/spider_report_pdf.py
+RUN chmod 755 /usr/local/bin/spider_report_pdf.py
+
+# Usage: docker run --rm -v <abs>/spider-output:/data pdf-report \
+#            /data/report.md /data/report.pdf
+ENTRYPOINT ["python3", "/usr/local/bin/spider_report_pdf.py"]
+
+# AI report service stage: a web server that shows the live progress of the
+# l2-db-spider AI report generation (reads spider-output JSONs, sends them to an
+# external model endpoint, writes report.md/report.pdf). Listens on SPIDER_AI_PORT
+# (default 19096). Reuses pdf-report (has reportlab + Cyrillic font) and adds the
+# web server script. NOT part of any runtime image.
+FROM pdf-report AS spider-ai
+COPY scripts/spider_report.py /usr/local/bin/spider_report.py
+COPY scripts/spider-ai-server.py /usr/local/bin/spider-ai-server.py
+RUN chmod 755 /usr/local/bin/spider_report.py /usr/local/bin/spider-ai-server.py \
+    && mkdir -p /work/spider-output
+
+EXPOSE 19096
+# Usage: docker run --rm -p 19096:19096 -v <abs>/spider-output:/work/spider-output \
+#            -e AI_API_URL=... -e AI_API_KEY=... -e AI_MODEL=... spider-ai \
+#            --input-dir /work/spider-output --output-dir /work/spider-output/ai
+ENTRYPOINT ["python3", "/usr/local/bin/spider-ai-server.py"]
+CMD ["--input-dir", "/work/spider-output", "--output-dir", "/work/spider-output/ai"]
+
+# heat-scraper: перебор плавок (GetHeatData) через прокси-цепочку l2 и сохранение
+# ответа каждой плавки в отдельный JSON-файл. На базе pdf-report (python3 уже
+# установлен); использует только встроенный urllib — внешних зависимостей нет.
+# NOT part of any runtime image; запускается по demand (docker compose run).
+FROM pdf-report AS heat-scraper
+COPY scripts/heat-scraper.py /usr/local/bin/heat-scraper.py
+RUN chmod 755 /usr/local/bin/heat-scraper.py
+WORKDIR /work
+ENTRYPOINT ["python3", "/usr/local/bin/heat-scraper.py"]
+
+# heat-ai: веб-сервер прогресса AI-генерации отчёта по плавкам (GetHeatData).
+# На базе pdf-report (python3 + reportlab + шрифты). Копирует heat_report.py
+# (анализ плавок), heat-ai-server.py (веб-сервер) и spider_report.py
+# (переиспользуется для конфига AI/чата), spider_report_pdf.py (PDF).
+# Слушает на HEAT_AI_PORT (default 19097). NOT part of any runtime image.
+FROM pdf-report AS heat-ai
+COPY scripts/heat_report.py /usr/local/bin/heat_report.py
+COPY scripts/heat-ai-server.py /usr/local/bin/heat-ai-server.py
+COPY scripts/spider_report.py /usr/local/bin/spider_report.py
+COPY scripts/spider_report_pdf.py /usr/local/bin/spider_report_pdf.py
+RUN chmod 755 /usr/local/bin/heat_report.py /usr/local/bin/heat-ai-server.py \
+    && mkdir -p /work/heat-output
+EXPOSE 19097
+ENTRYPOINT ["python3", "/usr/local/bin/heat-ai-server.py"]
+CMD ["--input-dir", "/work/heat-output", "--output-dir", "/work/heat-output/ai"]
+
+# Grafana dashboard sync stage: a one-shot sidecar that generates/updates
+# dashboards on a Grafana instance via its API. Runs as a separate compose
+# service so the target Grafana can live on any host (GRAFANA_URL env). Needs
+# python3 + requests and the dashboard generator + its metric-consistency
+# dependencies (metrics-common/metrics-golden-check). Not part of any runtime
+# image.
+FROM ubuntu-base AS grafana-sync
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    curl \
+    && apt-get clean
+
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    --index-url https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple \
+    --trusted-host repos.dp.nlmk.com \
+    requests
+
+WORKDIR /opt/dashboards
+COPY scripts/generate-grafana-dashboards.py /opt/dashboards/generate-grafana-dashboards.py
+COPY scripts/metrics-consistency-check.py /opt/dashboards/metrics-consistency-check.py
+COPY scripts/metrics_common.py /opt/dashboards/metrics_common.py
+COPY scripts/metrics-golden-check.py /opt/dashboards/metrics-golden-check.py
+RUN chmod 755 /opt/dashboards/generate-grafana-dashboards.py
+
+# One-shot: waits for Grafana to become ready (GRAFANA_URL), then applies
+# dashboards. Defaults mirror rebuild-and-run.sh. Exits 0 on success so
+# restart: "on-failure" does not loop a healthy run.
+ENTRYPOINT ["sh", "-c", "GRAFANA_URL=${GRAFANA_URL:-http://localhost:3000} python3 /opt/dashboards/generate-grafana-dashboards.py --correct-dashboards"]
+
+# Registry report server stage: a small web UI that collects and shows reports
+# about Docker registry repositories (sizes, tags), saves them to a volume and
+# renders a page with charts. Built on the shared ubuntu-base (Ubuntu 26.04) so
+# it gets a modern Python. Needs python3 + flask + the registry-report logic.
+# nodejs is added so the inline <script> of the served HTML can be syntax-checked
+# with `node --check` (scripts/check-registry-report-js.sh) — the UI's JS is a
+# single in-page script and a syntax error silently kills the whole page.
+# Runs as its own compose service on a dedicated port (REPORT_SERVER_PORT).
+FROM ubuntu-base AS registry-report-server
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    nodejs \
+    && apt-get clean
+
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+    --index-url https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple \
+    --trusted-host repos.dp.nlmk.com \
+    flask
+
+WORKDIR /opt/registry-report
+COPY scripts/registry-report-server.py /opt/registry-report/registry-report-server.py
+COPY config/registries.json /opt/registry-report/config/registries.json
+RUN chmod 755 /opt/registry-report/registry-report-server.py
+
+# Serves the report UI on REPORT_SERVER_PORT (default 8083). Reports are
+# persisted to REPORT_DIR (default /data), a named volume mounted by compose.
+ENV REPORT_DIR=/data
+ENV REPORT_SERVER_PORT=8083
+EXPOSE 8083
+ENTRYPOINT ["python3", "/opt/registry-report/registry-report-server.py"]
+
+# Oracle OCI client libraries for the DB gateway. The libs are pulled from the
+# gvenzl/oracle-xe:21.3.0-slim image (already used for the oracle service)
+# instead of downloading the Instant Client from download.oracle.com — that
+# host is not reachable in a closed network.
+# REGISTRY_MIRROR prefixes the image for the isolated (registry-proxy) contour.
+ARG REGISTRY_MIRROR=
+FROM ${REGISTRY_MIRROR}gvenzl/oracle-xe:21.3.0-slim AS oracle-libs
 
 # Shared runtime base - common filesystem layout, binary, ports and base runtime libraries
 FROM ubuntu-base AS runtime-base
 
 # addr2line (binutils) is needed at runtime: the crash handler resolves stack
 # frames to src file:line in-place (crash_handler.hpp => annotate_exe_frames).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     binutils \
@@ -351,58 +370,12 @@ WORKDIR /root/
 # image layer (/app/out) so it survives for COPY --from=builder.
 COPY --from=builder /app/out/l2-proxy .
 
-# Unprivileged runtime: every entry drops to the 'app' user (uid 10001) via
-# docker-entrypoint.sh (chown of host-mounted writable dirs happens at start).
-# Host dirs and ports are all above 1024, so no capabilities are required for
-# the payload; docker-compose additionally drops all caps (see cap_drop).
-RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
-    && chown -R app:app /root /memory-logs /profiles /crash-dumps
-
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod 755 /app/docker-entrypoint.sh
-
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
-
-EXPOSE 8888 19090 19091 19092 8088
-
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8888/health/ready || exit 1
-
-# exec replaces the shell so the binary becomes PID 1: docker stop (SIGTERM)
-# reaches the process directly and graceful shutdown (drain, trace flush) runs.
-CMD ["sh", "-c", "exec ./l2-proxy"]
-
-# Optimized runtime stage - minimal Ubuntu with only essential libraries.
-# All runtime libs (incl. libssl3t64) come from the ubuntu-base stage.
-FROM runtime-base AS runtime
-
-# Runtime stage with AddressSanitizer/LeakSanitizer support
-FROM runtime-base AS runtime-asan
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    libasan8 \
-    libubsan1 \
-    && apt-get clean \
-    && rm -rf /tmp/*
-
-ENV ASAN_OPTIONS=detect_leaks=1:halt_on_error=0:log_path=/memory-logs/asan
-ENV LSAN_OPTIONS=report_objects=1
-
-# Oracle OCI client libraries for the DB gateway (used only by the runtime-db
-# stage, so the plain runtime image never contains the client).
-# The libs are pulled from the gvenzl/oracle-xe:21.3.0-slim image (already used
-# for the oracle service) instead of downloading the Instant Client from
-# download.oracle.com — that host is not reachable in a closed network.
-FROM gvenzl/oracle-xe:21.3.0-slim AS oracle-libs
-
-# Runtime stage with the Oracle OCI client for the DB gateway (l2-worker).
-# Adds the client libs next to the runtime-base layout and registers them with
-# the dynamic loader so embedded ODPI-C finds libclntsh.so via dlopen().
-FROM runtime-base AS runtime-db
-
+# Oracle OCI client libraries — baked into the SHARED runtime-base because the
+# single l2-proxy binary runs in any MODE (proxy/worker/server) and the worker
+# mode connects to Oracle DBs. The libs are pulled from the gvenzl/oracle-xe
+# image (already used for the oracle service) instead of download.oracle.com
+# (unreachable in a closed network). REGISTRY_MIRROR prefixes the image for the
+# isolated (registry-proxy) contour.
 # The Oracle Home of Oracle XE 21c ships the same OCI client libraries (the
 # client is a subset of the DB install). Only the client libs ODPI-C needs are
 # copied: libclntsh.so.21.1 plus its only non-system dependencies
@@ -418,8 +391,7 @@ COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/lib/libnnz21.so /opt/or
 COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/oracore/zoneinfo /opt/oracle/instantclient_21_13/oracore/zoneinfo
 COPY --from=oracle-libs /opt/oracle/product/21c/dbhomeXE/nls /opt/oracle/instantclient_21_13/nls
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libaio1t64 \
@@ -447,11 +419,54 @@ RUN set -eux; \
     ln -sf "$LIBAIO_PATH" "${LIBAIO_DIR}/libaio.so.1"; \
     ldconfig
 
+# Unprivileged runtime: every entry drops to the 'app' user (uid 10001) via
+# docker-entrypoint.sh (chown of host-mounted writable dirs happens at start).
+# Host dirs and ports are all above 1024, so no capabilities are required for
+# the payload; docker-compose additionally drops all caps (see cap_drop).
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && chown -R app:app /root /memory-logs /profiles /crash-dumps
+
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod 755 /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+EXPOSE 8888 19090 19091 19092 19093 19094 19095 8088
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost:8888/health/ready || exit 1
+
+# exec replaces the shell so the binary becomes PID 1: docker stop (SIGTERM)
+# reaches the process directly and graceful shutdown (drain, trace flush) runs.
+CMD ["sh", "-c", "exec ./l2-proxy"]
+
+# Optimized runtime stage - minimal Ubuntu with only essential libraries.
+# All runtime libs (incl. libssl3t64) come from the ubuntu-base stage.
+FROM runtime-base AS runtime
+
+# Runtime stage with AddressSanitizer/LeakSanitizer support
+FROM runtime-base AS runtime-asan
+
+RUN \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libasan8 \
+    libubsan1 \
+    && apt-get clean \
+    && rm -rf /tmp/*
+
+ENV ASAN_OPTIONS=detect_leaks=1:halt_on_error=0:log_path=/memory-logs/asan
+ENV LSAN_OPTIONS=report_objects=1
+
+# runtime-db is kept as an alias of runtime: the Oracle OCI client is now baked
+# into the shared runtime-base, so any mode (proxy/worker/server) of the single
+# l2-proxy binary can connect to Oracle DBs.
+FROM runtime AS runtime-db
+
 # Runtime stage with gperftools heap profiling support
 FROM runtime-base AS runtime-profiler
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     libgoogle-perftools4t64 \
@@ -471,8 +486,7 @@ ENV HEAP_PROFILE_INUSE_INTERVAL=1073741824
 # always uses the plain (non-sanitized) build.
 FROM runtime-base AS runtime-valgrind
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+RUN \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     valgrind \

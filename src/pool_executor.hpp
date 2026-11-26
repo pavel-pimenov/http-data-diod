@@ -34,7 +34,16 @@ inline auto execute_http_command_with_status(HttpClientPoolType *pool,
     int const status_code = http_client->get_last_status_code();
     pool->release_connection(std::move(http_client));
     return std::make_pair(result, status_code);
+  } catch (const std::exception &e) {
+    Logger::warn("HTTP command threw, invalidating and releasing connection: {}",
+                 e.what());
+    http_client->invalidate();
+    pool->release_connection(std::move(http_client));
+    throw;
   } catch (...) {
+    Logger::warn(
+        "HTTP command threw a non-std exception, invalidating and releasing "
+        "connection");
     http_client->invalidate();
     pool->release_connection(std::move(http_client));
     throw;
