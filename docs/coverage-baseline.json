@@ -49,6 +49,12 @@
       "branches": 14,
       "branches_covered": 9
     },
+    "crash_dsn.hpp": {
+      "lines": 28,
+      "covered": 27,
+      "branches": 40,
+      "branches_covered": 27
+    },
     "crash_dump_counter.hpp": {
       "lines": 23,
       "covered": 20,
@@ -171,9 +177,9 @@
     },
     "http_client.cpp": {
       "lines": 97,
-      "covered": 94,
+      "covered": 93,
       "branches": 136,
-      "branches_covered": 82
+      "branches_covered": 78
     },
     "http_client.hpp": {
       "lines": 15,
@@ -324,6 +330,12 @@
       "covered": 18,
       "branches": 30,
       "branches_covered": 18
+    },
+    "port_utils.hpp": {
+      "lines": 12,
+      "covered": 12,
+      "branches": 12,
+      "branches_covered": 11
     },
     "proxy_init.cpp": {
       "lines": 108,
@@ -479,7 +491,7 @@
       "lines": 70,
       "covered": 70,
       "branches": 140,
-      "branches_covered": 86
+      "branches_covered": 89
     },
     "thread_pool_wrapper.hpp": {
       "lines": 28,
@@ -530,8 +542,8 @@
       "branches_covered": 7
     },
     "url_utils.hpp": {
-      "lines": 69,
-      "covered": 69,
+      "lines": 68,
+      "covered": 68,
       "branches": 168,
       "branches_covered": 108
     },

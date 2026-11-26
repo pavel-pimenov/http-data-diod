@@ -11,6 +11,7 @@
 #include "l2_routing.hpp"
 #include "logger.hpp"
 #include "nlohmann/json.hpp"
+#include "port_utils.hpp"
 #include "prometheus/counter.h"
 #include "prometheus/gauge.h"
 #include "prometheus/client_metric.h"
@@ -1633,5 +1634,21 @@ TEST_CASE("Readiness: a thrown check maps to health_check_failed",
       found = found || std::string_view(registered) == std::string_view(reason);
     }
     REQUIRE(found);
+  }
+}
+
+TEST_CASE("Port utils: strict TCP port parsing", "[port-utils]") {
+  using port_utils::parse_tcp_port;
+  REQUIRE(parse_tcp_port("1") == 1);
+  REQUIRE(parse_tcp_port("80") == 80);
+  REQUIRE(parse_tcp_port("8080") == 8080);
+  REQUIRE(parse_tcp_port("65535") == 65535);
+  REQUIRE(parse_tcp_port("0080") == 80);
+  // Out of range, empty, signed, padded or trailing garbage are rejected
+  // instead of being silently truncated like std::stoi would.
+  for (const char *bad :
+       {"0", "65536", "99999999999999999999", "", " ", "abc", "8080abc",
+        "+80", "-1", " 80", "80 ", "8 0", "0x50", "80.5", "∞"}) {
+    REQUIRE_FALSE(parse_tcp_port(bad).has_value());
   }
 }

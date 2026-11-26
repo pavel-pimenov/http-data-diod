@@ -3,6 +3,7 @@
 
 #include "httplib/httplib.h"
 #include "logger.hpp"
+#include "port_utils.hpp"
 #include <cstddef>
 #include <format>
 #include <stdexcept>
@@ -62,10 +63,11 @@ inline constexpr const char *kHealthReadyPath = "/health/ready";
           url.substr(port_start + 1, path_start != std::string_view::npos
                                          ? path_start - port_start - 1
                                          : std::string_view::npos));
-      try {
-        result.m_port = std::stoi(port_str);
-      } catch (...) {
-        // Fallback: non-numeric port in URL → use default for scheme
+      if (const auto port = port_utils::parse_tcp_port(port_str)) {
+        result.m_port = *port;
+      } else {
+        // Fallback: missing, non-numeric or out-of-range port in URL → use
+        // default for scheme
         Logger::debug("URL port parse failed, using default for scheme");
         result.m_port = result.m_is_https ? net_limits::kHttpsPort
                                           : net_limits::kHttpPort;

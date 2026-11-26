@@ -3406,6 +3406,21 @@ TEST_CASE("Common utils: parse_url falls back on non-numeric port",
   REQUIRE(https.m_is_https == true);
 }
 
+TEST_CASE("Common utils: parse_url rejects out-of-range ports with the default",
+          "[common-utils]") {
+  for (const char *url : {"http://example.com:0/x",
+                          "http://example.com:65536/x",
+                          "http://example.com:/x",
+                          "http://example.com:99999999999999999999/x"}) {
+    const auto parsed = parse_url(url);
+    REQUIRE(parsed.m_host == "example.com");
+    REQUIRE(parsed.m_port == 80);
+  }
+  const auto https = parse_url("https://example.com:70000/x");
+  REQUIRE(https.m_host == "example.com");
+  REQUIRE(https.m_port == 443);
+}
+
 TEST_CASE("Common utils: parse_url without trailing slash", "[common-utils]") {
   const auto u = parse_url("http://example.com");
   REQUIRE(u.m_host == "example.com");

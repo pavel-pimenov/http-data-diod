@@ -1,6 +1,7 @@
 // Unit tests for the crash-handler utility helpers (crash_utils.hpp): signal
 // name mapping, line trimming, C++ symbol demangling and /proc/self/exe path.
 
+#include "crash_dsn.hpp"
 #include "crash_dump_counter.hpp"
 #include "crash_utils.hpp"
 
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <signal.h>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 
 TEST_CASE("CrashUtils: signal_name maps known and unknown signals",
@@ -74,4 +76,55 @@ TEST_CASE("CrashDumpCounter: counts dump files and ignores everything else",
   REQUIRE_FALSE(crash_dump_counter::is_dump_file_name("crash_.txt"));
 
   std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("CrashDsn: parses scheme, key, host, port and project",
+          "[crash-utils]") {
+  {
+    const auto parsed = crash_dsn::parse_sentry_dsn("https://key@host/42");
+    REQUIRE(parsed.m_dsn_raw == "https://key@host/42");
+    REQUIRE(parsed.m_key == "key");
+    REQUIRE(parsed.m_host == "host");
+    REQUIRE(parsed.m_port == 443);
+    REQUIRE(parsed.m_project == "42");
+  }
+  {
+    const auto parsed =
+        crash_dsn::parse_sentry_dsn("http://public@sentry.local:8080/7");
+    REQUIRE(parsed.m_key == "public");
+    REQUIRE(parsed.m_host == "sentry.local");
+    REQUIRE(parsed.m_port == 8080);
+    REQUIRE(parsed.m_project == "7");
+  }
+  {
+    // No project part: the host still parses, project stays empty.
+    const auto parsed = crash_dsn::parse_sentry_dsn("http://key@host");
+    REQUIRE(parsed.m_host == "host");
+    REQUIRE(parsed.m_port == 80);
+    REQUIRE(parsed.m_project.empty());
+  }
+}
+
+TEST_CASE("CrashDsn: a malformed port never throws and falls back",
+          "[crash-utils]") {
+  for (const char *dsn :
+       {"https://key@host:notaport/42", "https://key@host:0/42",
+        "https://key@host:65536/42", "https://key@host:/42",
+        "http://key@host:99999999999999999999/42"}) {
+    const auto parsed = crash_dsn::parse_sentry_dsn(dsn);
+    REQUIRE(parsed.m_host == "host");
+    REQUIRE(parsed.m_port == (std::string_view(dsn).starts_with("https")
+                                  ? 443
+                                  : 80));
+  }
+}
+
+TEST_CASE("CrashDsn: an incomplete DSN disables Sentry without throwing",
+          "[crash-utils]") {
+  for (const char *dsn : {"", "not-a-dsn", "https://key/42", "https:///42"}) {
+    const auto parsed = crash_dsn::parse_sentry_dsn(dsn);
+    REQUIRE(parsed.m_host.empty());
+    REQUIRE(parsed.m_key.empty());
+    REQUIRE(parsed.m_project.empty());
+  }
 }

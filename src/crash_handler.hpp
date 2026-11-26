@@ -2,6 +2,7 @@
 #define CRASH_HANDLER_HPP
 
 #include "constants.hpp"
+#include "crash_dsn.hpp"
 #include "crash_utils.hpp"
 #include "logger.hpp"
 #include "l2-proxy-version.h"
@@ -89,39 +90,12 @@ private:
   static inline std::string m_dump_dir = g_default_crash_dump_dir;
 
   static void parse_sentry_dsn(const std::string &dsn) {
-    SentryDsnConfig::m_dsn_raw = dsn;
-    auto scheme_end = dsn.find("://");
-    if (scheme_end == std::string::npos) {
-      return;
-    }
-    size_t const start = scheme_end + url_constants::kSchemeSeparatorLength;
-    auto at_pos = dsn.find('@', start);
-    if (at_pos == std::string::npos) {
-      return;
-    }
-    SentryDsnConfig::m_key = dsn.substr(start, at_pos - start);
-    size_t const host_start = at_pos + 1;
-    auto slash_pos = dsn.find('/', host_start);
-    std::string host_port;
-    if (slash_pos == std::string::npos) {
-      host_port = dsn.substr(host_start);
-    } else {
-      host_port = dsn.substr(host_start, slash_pos - host_start);
-    }
-    auto colon = host_port.find(':');
-    if (colon != std::string::npos) {
-      SentryDsnConfig::m_host = host_port.substr(0, colon);
-      SentryDsnConfig::m_port = static_cast<uint16_t>(
-          std::stoi(host_port.substr(colon + 1)));
-    } else {
-      SentryDsnConfig::m_host = host_port;
-      SentryDsnConfig::m_port =
-          (dsn.substr(0, scheme_end) == "https") ? net_limits::kHttpsPort
-                                                 : net_limits::kHttpPort;
-    }
-    if (slash_pos != std::string::npos) {
-      SentryDsnConfig::m_project = dsn.substr(slash_pos + 1);
-    }
+    const crash_dsn::Parsed parsed = crash_dsn::parse_sentry_dsn(dsn);
+    SentryDsnConfig::m_dsn_raw = parsed.m_dsn_raw;
+    SentryDsnConfig::m_host = parsed.m_host;
+    SentryDsnConfig::m_port = parsed.m_port;
+    SentryDsnConfig::m_key = parsed.m_key;
+    SentryDsnConfig::m_project = parsed.m_project;
   }
 
   // async-signal-safe: only uses POSIX open/write/close and stack-allocated
