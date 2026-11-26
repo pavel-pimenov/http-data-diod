@@ -254,10 +254,10 @@
       "branches_covered": 41
     },
     "l2_worker_nats.cpp": {
-      "lines": 367,
+      "lines": 366,
       "covered": 326,
-      "branches": 830,
-      "branches_covered": 399
+      "branches": 822,
+      "branches_covered": 393
     },
     "logger.hpp": {
       "lines": 274,
@@ -479,7 +479,7 @@
       "lines": 211,
       "covered": 208,
       "branches": 393,
-      "branches_covered": 247
+      "branches_covered": 246
     },
     "string_utils.cpp": {
       "lines": 12,
@@ -552,6 +552,12 @@
       "covered": 54,
       "branches": 40,
       "branches_covered": 36
+    },
+    "worker_reconnect_state.hpp": {
+      "lines": 22,
+      "covered": 22,
+      "branches": 22,
+      "branches_covered": 22
     },
     "worker_request_parser.hpp": {
       "lines": 20,

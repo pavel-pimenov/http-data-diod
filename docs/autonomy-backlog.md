@@ -25,8 +25,13 @@ branch-хвосты (`sentry_client`, `trace_logger`, `tracing_helpers`, `stats_
    (остальные три уже на последних апстримных пинах); пины в скрипте и версии
    в `src/VENDORED-LIBS.md` обновлены, сборка/health/smoke/ci-gate зелёные.
    Пуш в origin — по отдельной просьбе пользователя.
-5. **217** — `db_gateway_routing`: 34/34 строк и нужные ветви 404/405 уже
-   покрыты — пункт заменить на анализ свежих дублей/длинных функций после 216.
+5. **217 — закрыт.** Решения reconnect-цикла `L2Worker::run_with_nats()`
+   вынесены в `src/worker_reconnect_state.hpp`: `WorkerReconnectState`
+   (край восстановления, флаги подписок, `backoff_failed`) и
+   `db_init_retry_due()`; table-driven тесты в `test_l2_worker.cpp`. Новый
+   хелпер 22/22 строк и ветвей, production 7203/7830 = 91.99%. Изначально
+   запланированный `db_gateway_routing` (34/34 строк, ветви 404/405 уже
+   покрыты) заменён как бессмысленный.
 6. **218** — `utf8_utils`: добить краевые ветви санитайзера (overlong,
    surrogate, обрезка на границе, > U+10FFFF) — только line/branch внутри
    допустимого.

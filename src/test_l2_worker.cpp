@@ -24,6 +24,7 @@
 #include "metrics_manager.hpp"
 #include "test_support.hpp"
 #include "utf8_utils.hpp"
+#include "worker_reconnect_state.hpp"
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -683,4 +684,72 @@ TEST_CASE("L2Worker: explicit thread pool type is honoured", "[l2-worker]") {
     const L2Worker worker(ctx);
     REQUIRE_FALSE(worker.is_nats_connected());
   }
+}
+
+TEST_CASE("L2Worker reconnect state: connection edges and subscription flags",
+          "[l2-worker]") {
+  WorkerReconnectState state;
+  state.set_subscription_active(true);
+  state.set_db_subscription_active(true);
+
+  REQUIRE_FALSE(state.observe_connection(false));
+  REQUIRE_FALSE(state.m_was_connected);
+  state.clear_on_disconnect(false, false);
+  REQUIRE(state.m_subscription_active);
+  REQUIRE(state.m_db_subscription_active);
+  state.clear_on_disconnect(true, false);
+  REQUIRE_FALSE(state.m_subscription_active);
+  REQUIRE_FALSE(state.m_db_subscription_active);
+
+  state.set_subscription_active(true);
+  state.set_db_subscription_active(true);
+  state.clear_on_disconnect(true, true);
+  REQUIRE(state.m_subscription_active);
+  REQUIRE(state.m_db_subscription_active);
+
+  REQUIRE(state.observe_connection(true));
+  REQUIRE_FALSE(state.m_subscription_active);
+  REQUIRE_FALSE(state.m_db_subscription_active);
+
+  state.set_subscription_active(true);
+  REQUIRE_FALSE(state.observe_connection(true));
+  REQUIRE(state.m_subscription_active);
+}
+
+TEST_CASE("L2Worker reconnect state: backoff outcome", "[l2-worker]") {
+  WorkerReconnectState state;
+  state.set_subscription_active(true);
+
+  REQUIRE_FALSE(state.backoff_failed(true, true));
+  REQUIRE(state.backoff_failed(false, true));
+  REQUIRE(state.backoff_failed(true, false));
+  REQUIRE(state.backoff_failed(false, false));
+
+  state.set_subscription_active(false);
+  REQUIRE(state.backoff_failed(true, true));
+  REQUIRE(state.backoff_failed(false, false));
+}
+
+TEST_CASE("L2Worker reconnect state: DB init retry cadence", "[l2-worker]") {
+  int retry_count = 0;
+  REQUIRE_FALSE(db_init_retry_due(retry_count, false, false, 50));
+  REQUIRE(retry_count == 0);
+  REQUIRE_FALSE(db_init_retry_due(retry_count, true, true, 50));
+  REQUIRE(retry_count == 0);
+  REQUIRE_FALSE(db_init_retry_due(retry_count, true, false, 0));
+  REQUIRE(retry_count == 0);
+
+  for (int pass = 1; pass < 50; ++pass) {
+    REQUIRE_FALSE(db_init_retry_due(retry_count, true, false, 50));
+  }
+  REQUIRE(retry_count == 49);
+  REQUIRE(db_init_retry_due(retry_count, true, false, 50));
+  REQUIRE(retry_count == 50);
+  REQUIRE_FALSE(db_init_retry_due(retry_count, true, false, 50));
+
+  retry_count = 0;
+  REQUIRE_FALSE(db_init_retry_due(retry_count, true, false, 3));
+  REQUIRE_FALSE(db_init_retry_due(retry_count, true, false, 3));
+  REQUIRE(db_init_retry_due(retry_count, true, false, 3));
+  REQUIRE(retry_count == 3);
 }

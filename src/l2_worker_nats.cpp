@@ -16,6 +16,7 @@
 #include "sentry_client.hpp"
 #include "trace_logger.hpp"
 #include "tracing_helpers.hpp"
+#include "worker_reconnect_state.hpp"
 #include <algorithm>
 #include <atomic>
 #include <base64.hpp>
@@ -152,23 +153,20 @@ void L2Worker::run_with_nats() {
 
   RetryHandler backoff(kReconnectBackoffMinPasses,
                        kReconnectBackoffMaxPasses);
-  bool subscription_active = false;
-  bool db_subscription_active = false;
-  bool was_connected = m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
+  WorkerReconnectState reconnect_state;
+  reconnect_state.m_was_connected =
+      m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
 
   while (!g_shutdown_flag) {
     const bool is_connected = m_clients.m_nats_client && m_clients.m_nats_client->is_connected();
 
-    if (is_connected && !was_connected) {
+    if (reconnect_state.observe_connection(is_connected)) {
       Logger::info("Worker detected restored NATS connection, forcing "
                    "subscription refresh");
-      subscription_active = false;
-      db_subscription_active = false;
       if (m_clients.m_nats_client) {
         m_clients.m_nats_client->unsubscribe();
       }
     }
-    was_connected = is_connected;
 
     if (!m_clients.m_nats_client) {
       Logger::error("NATS client is not initialized. Waiting before retry...");
@@ -192,12 +190,13 @@ void L2Worker::run_with_nats() {
     }
 
     if (m_clients.m_nats_client && m_clients.m_nats_client->is_connected() &&
-        !subscription_active) {
-      if (!subscribe_worker_subject()) {
+        !reconnect_state.m_subscription_active) {
+      const bool subscribed = subscribe_worker_subject();
+      reconnect_state.set_subscription_active(subscribed);
+      if (!subscribed) {
         Logger::warn("Subscription is not active yet, will retry in {}ms",
                      backoff.get_current_delay_ms());
       } else {
-        subscription_active = true;
         backoff.record_success();
         Logger::info("NATS worker is ready and waiting for messages");
       }
@@ -214,12 +213,14 @@ void L2Worker::run_with_nats() {
       // Per-database gateway readiness: publish independent of subscription so
       // a fully-down set of databases still shows 0 for each configured name.
       publish_db_gateway_ready_metric();
-      if (subscription_active) {
-        if (!db_subscription_active) {
-          db_subscription_active = ensure_db_query_subscription(backoff);
-        } else if (m_db_query_handler &&
-                   !m_db_query_handler->all_configured() &&
-                   ++m_state.m_db_init_retry_count % kDbInitRetryEveryPasses == 0) {
+      if (reconnect_state.m_subscription_active) {
+        if (!reconnect_state.m_db_subscription_active) {
+          reconnect_state.set_db_subscription_active(
+              ensure_db_query_subscription(backoff));
+        } else if (db_init_retry_due(
+                       m_state.m_db_init_retry_count, m_db_query_handler != nullptr,
+                       m_db_query_handler && m_db_query_handler->all_configured(),
+                       kDbInitRetryEveryPasses)) {
           // Pick up databases that came up after the subscription became
           // active (e.g. Oracle cold start): init() is incremental and only
           // creates the missing executors, so this never disturbs
@@ -232,10 +233,9 @@ void L2Worker::run_with_nats() {
       }
     }
 
-    if (m_clients.m_nats_client && !m_clients.m_nats_client->is_connected()) {
-      subscription_active = false;
-      db_subscription_active = false;
-    }
+    reconnect_state.clear_on_disconnect(
+        m_clients.m_nats_client != nullptr,
+        m_clients.m_nats_client && m_clients.m_nats_client->is_connected());
 
     {
       const int base_sleep_ms = backoff.get_current_delay_ms() * kLoopPassMs;
@@ -244,8 +244,9 @@ void L2Worker::run_with_nats() {
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
 
-    if (!subscription_active || !m_clients.m_nats_client ||
-        !m_clients.m_nats_client->is_connected()) {
+    if (reconnect_state.backoff_failed(
+            m_clients.m_nats_client != nullptr,
+            m_clients.m_nats_client && m_clients.m_nats_client->is_connected())) {
       backoff.record_failure();
     } else {
       backoff.record_success();

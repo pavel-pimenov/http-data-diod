@@ -20,14 +20,14 @@ healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены
 
 ## Текущий статус (25 — transaction groups по продуктам)
 
-Покрытие юнит-тестами: **768 test cases**, **4 128 assertions**
-(test_components 636/3132 + test_proxy_core 132/996). Замер через `scripts/run-coverage.sh`
+Покрытие юнит-тестами: **771 test cases**, **4 210 assertions**
+(test_components 639/3214 + test_proxy_core 132/996). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **production-файлы: 92.0% строк** (7181/7809) — пер-файловый гейт
+- **production-файлы: 92.0% строк** (7203/7830) — пер-файловый гейт
   `scripts/coverage-regression-check.py` против `docs/coverage-baseline.json`
-- **все файлы (с тестами): 94.7% строк**
-- **ветви: 41.3%** (33049/80127) — в это число входят throw-рёбра и макросы Catch2
-  в тестах; по production-файлам сырьё baseline — 53.3% (7633/14318), после round 212
+- **все файлы (с тестами): 94.7% строк** (17046/18001)
+- **ветви: 41.2%** (33205/80563) — в это число входят throw-рёбра и макросы Catch2
+  в тестах; по production-файлам сырьё baseline — 53.4% (7648/14332), после round 212
   `pg_value_utils.hpp` 122/176, `db_query_utils.hpp` 305/606,
   `db_query_executor_postgres.cpp` 157/286, `db_query_handler.cpp` 83/146.
 
