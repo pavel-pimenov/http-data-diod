@@ -115,7 +115,7 @@ int DbSpider::stream_output(Config::Spider::Db &db,
     err_out << "{\"generated_at\":" << TimeUtils::epoch_us()
             << ",\"db\":" << json(db.m_name).dump()
             << ",\"query\":" << json(query.m_name).dump()
-            << R"(,"status":"error","result":{"error":{"code":})"
+            << R"(,"status":"error","result":{"error":{"code":)"
             << json(code).dump()
             << ",\"message\":" << json(message).dump() << "}}}";
     err_out.close();
@@ -133,7 +133,7 @@ int DbSpider::stream_output(Config::Spider::Db &db,
     out << "{\"generated_at\":" << TimeUtils::epoch_us()
         << ",\"db\":" << json(db.m_name).dump()
         << ",\"query\":" << json(query.m_name).dump()
-        << R"(,"status":"ok","result":{"rows":})";
+        << R"(,"status":"ok","result":{"rows":)";
     // Stream the query: rows are written incrementally (each serialised via
     // json.dump with error_handler_t::replace so invalid UTF-8 from Oracle
     // text fields is replaced by U+FFFD instead of aborting), joined into a

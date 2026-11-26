@@ -12,39 +12,43 @@ branch-хвосты (`sentry_client`, `trace_logger`, `tracing_helpers`, `stats_
 
 ## Открытые
 
-0. **267 — закрыт.** Два профиля сборки образов (`BUILD_PROFILE=public` /
+0. **268 — закрыт.** Аргументы зеркал контура в обоих Kaniko-job'ах
+   `.gitlab-ci.yml`, шесть новых юнит-тестов по коду после merge и исправление
+   невалидного spider JSON (лишние скобки в `src/db_spider.cpp`); детали —
+   `docs/history/round-268-ci-args-and-spider-tests.md`.
+1. **267 — закрыт.** Два профиля сборки образов (`BUILD_PROFILE=public` /
    `contour`) с общим резолвером `scripts/build-profile.sh`; публичные дефолты
    в Dockerfile/compose и безопасный разбор `.env` в `contour-build-args.sh`,
    описание в `docs/history/round-267-*.md`.
-1. **266 — закрыт.** Слияние архива другой ветки (round 265) с текущей
+2. **266 — закрыт.** Слияние архива другой ветки (round 265) с текущей
    (round 217) через 3-way merge от общего предка `3b9bdba`; обе линии
    сохранены, 7 конфликтов разрешены, инфраструктурные адаптации
    (`PIP_INDEX_URL`, `nats-notls.conf`, exec-биты, lazy-метрика spider,
    gcovr-фильтры fmt/spdlog) описаны в `docs/history/round-266-*.md`.
-2. **213 — закрыт.** Унификация JSON-ошибок (`set_json_error_response`),
+3. **213 — закрыт.** Унификация JSON-ошибок (`set_json_error_response`),
    убрана двойная установка `status` в DB-gateway, константы `kNotReady*`
    для причин not-ready, тест `DuplicateDetector::eviction_reason_name`.
-3. **214 — закрыт.** Оценка готовности NATS вынесена в `readiness::evaluate_nats`
+4. **214 — закрыт.** Оценка готовности NATS вынесена в `readiness::evaluate_nats`
    (`src/readiness.hpp`), обработчик только логирует и пишет ответ; кейсы на
    все комбинации флагов ping/health/connected в тестах.
-4. **215 — закрыт.** Строгий разбор TCP-порта (`port_utils::parse_tcp_port`)
+5. **215 — закрыт.** Строгий разбор TCP-порта (`port_utils::parse_tcp_port`)
    в `parse_url` и `SENTRY_DSN`, чистый разбор DSN в `crash_dsn.hpp`.
-5. **216 — закрыт.** Обновление вендорных либ по просьбе пользователя: `nats.c`
+6. **216 — закрыт.** Обновление вендорных либ по просьбе пользователя: `nats.c`
    3.14.0→3.15.0, `cpp-httplib` 0.63.0→0.67.0, `odpi` 26.0.0→26.1.0
    (остальные три уже на последних апстримных пинах); пины в скрипте и версии
    в `src/VENDORED-LIBS.md` обновлены, сборка/health/smoke/ci-gate зелёные.
    Пуш в origin — по отдельной просьбе пользователя.
-6. **217 — закрыт.** Решения reconnect-цикла `L2Worker::run_with_nats()`
+7. **217 — закрыт.** Решения reconnect-цикла `L2Worker::run_with_nats()`
    вынесены в `src/worker_reconnect_state.hpp`: `WorkerReconnectState`
    (край восстановления, флаги подписок, `backoff_failed`) и
    `db_init_retry_due()`; table-driven тесты в `test_l2_worker.cpp`. Новый
    хелпер 22/22 строк и ветвей, production 7203/7830 = 91.99%. Изначально
    запланированный `db_gateway_routing` (34/34 строк, ветви 404/405 уже
    покрыты) заменён как бессмысленный.
-7. **218** — `utf8_utils`: добить краевые ветви санитайзера (overlong,
+8. **218** — `utf8_utils`: добить краевые ветви санитайзера (overlong,
    surrogate, обрезка на границе, > U+10FFFF) — только line/branch внутри
    допустимого.
-8. **219** — проход `clang-tidy`/`cppcheck` по изменённым файлам, мелкие
+9. **219** — проход `clang-tidy`/`cppcheck` по изменённым файлам, мелкие
    modernize/readability правки без изменения поведения.
 
 ## Правила выбора следующего пункта

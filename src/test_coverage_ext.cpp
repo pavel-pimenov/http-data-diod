@@ -284,6 +284,32 @@ TEST_CASE("Pool executor: exception in func invalidates and releases then "
   REQUIRE(pool.m_releases == 1);
 }
 
+TEST_CASE("Pool executor: non-std exception invalidates and releases then "
+          "rethrows",
+          "[pool-executor]") {
+  struct TrackingPool {
+    using client_type = MockHttpClient;
+    std::unique_ptr<MockHttpClient> m_released;
+    int m_acquires = 0;
+
+    std::unique_ptr<MockHttpClient> acquire_connection() {
+      ++m_acquires;
+      return std::make_unique<MockHttpClient>();
+    }
+    void release_connection(std::unique_ptr<MockHttpClient> client) {
+      m_released = std::move(client);
+    }
+  };
+  TrackingPool pool;
+  REQUIRE_THROWS_AS(execute_http_command_with_status(
+                        &pool,
+                        [](MockHttpClient *) -> int { throw 42; }),
+                    int);
+  REQUIRE(pool.m_acquires == 1);
+  REQUIRE(pool.m_released != nullptr);
+  REQUIRE(pool.m_released->m_invalidated);
+}
+
 // ============================================================================
 // metrics_manager.cpp
 // ============================================================================

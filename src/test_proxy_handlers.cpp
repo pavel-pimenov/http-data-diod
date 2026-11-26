@@ -18,6 +18,7 @@
 #include "config.hpp"
 #include "db_query_executor.hpp"
 #include "db_query_executor_oracle.hpp"
+#include "db_query_executor_postgres.hpp"
 #include "db_query_handler.hpp"
 #include "json_utils.hpp"
 #include "nats_client.hpp"
@@ -817,6 +818,54 @@ TEST_CASE("DbQueryHandler: reports readiness without a reachable database",
   handler.handle_request(ping, status, body);
   REQUIRE(status == 404);
   REQUIRE(body["error"]["code"] == "UNKNOWN_DATABASE");
+}
+
+TEST_CASE("DbQueryHandler: stream_request rejects malformed and unknown-db "
+          "requests",
+          "[db-query-handler]") {
+  DbQueryHandler handler;
+  int status = 0;
+  json columns;
+  auto const accept_all = [](json &&) { return true; };
+
+  REQUIRE(handler.stream_request(json::array(), status, columns, accept_all) ==
+          0);
+  REQUIRE(status == http_status::kBadRequest);
+
+  const json query{{DbQueryContract::kType, DbQueryContract::kTypeQuery},
+                   {DbQueryContract::kRequestId, "req-stream"},
+                   {DbQueryContract::kDb, "missing"},
+                   {DbQueryContract::kSql, "SELECT 1"}};
+  REQUIRE(handler.stream_request(query, status, columns, accept_all) == 0);
+  REQUIRE(status == http_status::kNotFound);
+}
+
+TEST_CASE("PostgresQueryExecutor: fail-fast paths without a connection",
+          "[db-executor]") {
+  DbConfig db;
+  db.m_name = "pg-unreachable";
+  db.m_driver = "postgres";
+  db.m_host = "127.0.0.1";
+  db.m_port = 1;
+  db.m_database = "test";
+  db.m_user = "test";
+  db.m_pool_min = 1;
+  db.m_pool_max = 1;
+  PostgresQueryExecutor executor(db);
+
+  int status = 0;
+  json const body =
+      executor.execute_query("SELECT 1", json::object(), 100, 10, status);
+  REQUIRE(status == http_status::kServiceUnavailable);
+  REQUIRE(body.contains("error"));
+
+  json columns;
+  int const rows = executor.stream_query(
+      "SELECT 1", json::object(), 100, 10, status, columns,
+      [](json &&) { return true; });
+  REQUIRE(rows == 0);
+  REQUIRE(status == http_status::kServiceUnavailable);
+  REQUIRE_FALSE(executor.ping(100));
 }
 
 TEST_CASE("create_db_query_executor: dispatches by driver",

@@ -1,3 +1,4 @@
+#include "app_context.hpp"
 #include "config.hpp"
 #include "db_spider.hpp"
 #include "ini_parser.hpp"
@@ -7,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <prometheus/counter.h>
 #include <string>
 
 namespace {
@@ -210,4 +212,155 @@ TEST_CASE("INI parser: missing file returns error") {
   std::string error;
   REQUIRE_FALSE(IniParser::parse_file("/tmp/no-such-file.ini", sections, error));
   REQUIRE_FALSE(error.empty());
+}
+
+TEST_CASE("DB spider: run_poll writes error JSON for a database without an "
+          "executor") {
+  const std::string ini = R"(
+[spider]
+interval_seconds = 0
+
+[db:pg-one]
+driver = postgres
+host = 127.0.0.1
+port = 15432
+database = d
+user = u
+password = p
+
+[query:q:one]
+db = pg-one
+sql = SELECT 1
+timeout_ms = 1000
+
+[query:q-two]
+db = pg-one
+sql = SELECT 2
+)";
+  const IniFileGuard ini_guard(ini);
+  const std::string out_dir =
+      "/tmp/spider-test-out-" + std::to_string(++IniFileGuard::counter);
+  const EnvGuard guard1("DB_SPIDER_ENABLED", "true");
+  const EnvGuard guard2("DB_SPIDER_CONFIG_FILE", ini_guard.m_path);
+  const EnvGuard guard3("DB_SPIDER_OUTPUT_DIR", out_dir);
+  const EnvGuard guard4("DB_SPIDER_INTERVAL_SECONDS", "0");
+
+  AppContext ctx;
+  REQUIRE(ctx.m_config.m_spider.m_databases.size() == 1);
+  // Mutate after validation: the factory now refuses the driver, so the
+  // handler has no executor and stream_output takes its documented error path.
+  ctx.m_config.m_spider.m_databases[0].m_driver = "unsupported";
+
+  DbSpider spider(ctx);
+  json const result = spider.run_poll();
+
+  REQUIRE(result.contains("databases"));
+  REQUIRE(result["databases"].size() == 1);
+  REQUIRE(result["databases"][0]["db"] == "pg-one");
+  REQUIRE(result["databases"][0]["driver"] == "unsupported");
+  auto const &queries = result["databases"][0]["queries"];
+  REQUIRE(queries.size() == 2);
+  REQUIRE(queries["q:one"]["status"] == "error");
+  REQUIRE(queries["q-two"]["status"] == "error");
+
+  // Names with punctuation are sanitized into file-name-safe segments.
+  std::ifstream in(out_dir + "/pg-one_q_one.json");
+  REQUIRE(in.is_open());
+  json file;
+  in >> file;
+  REQUIRE(file["db"] == "pg-one");
+  REQUIRE(file["query"] == "q:one");
+  REQUIRE(file["status"] == "error");
+  REQUIRE(file["result"]["error"]["code"] == 404);
+  REQUIRE(std::filesystem::exists(out_dir + "/pg-one_q-two.json"));
+
+  auto &metric = ctx.m_spider.m_metrics->m_queries_total.Add(
+      {{"db", "pg-one"}, {"query", "q:one"}, {"status", "error"}});
+  REQUIRE(metric.Value() == 1);
+  std::filesystem::remove_all(out_dir);
+}
+
+TEST_CASE("DB spider: unwritable output directory is reported as an error") {
+  const std::string ini = R"(
+[db:pg]
+driver = postgres
+host = 127.0.0.1
+port = 15432
+database = d
+user = u
+password = p
+
+[query:q]
+db = pg
+sql = SELECT 1
+)";
+  const IniFileGuard ini_guard(ini);
+  const std::string blocked =
+      "/tmp/spider-test-blocked-" + std::to_string(++IniFileGuard::counter);
+  {
+    std::ofstream out(blocked);
+    out << "a regular file, not a directory";
+  }
+  const EnvGuard guard1("DB_SPIDER_ENABLED", "true");
+  const EnvGuard guard2("DB_SPIDER_CONFIG_FILE", ini_guard.m_path);
+  const EnvGuard guard3("DB_SPIDER_OUTPUT_DIR", blocked);
+
+  AppContext ctx;
+  ctx.m_config.m_spider.m_databases[0].m_driver = "unsupported";
+
+  DbSpider spider(ctx);
+  json const result = spider.run_poll();
+
+  REQUIRE(result["databases"][0]["queries"].size() == 1);
+  REQUIRE(result["databases"][0]["queries"]["q"]["status"] == "error");
+  std::filesystem::remove(blocked);
+}
+
+TEST_CASE("DB spider: config supports name override, sql_file and env "
+          "placeholders") {
+  const std::string sql_path =
+      "/tmp/spider-test-" + std::to_string(++IniFileGuard::counter) + ".sql";
+  {
+    std::ofstream out(sql_path);
+    out << "SELECT 42";
+  }
+  const std::string ini = R"(
+[spider]
+interval_seconds = 0
+output_dir = /tmp/spider-out
+
+[db:pg]
+driver = postgres
+host = 127.0.0.1
+port = 15432
+database = d
+user = %SPIDER_TEST_USER%
+password = %SPIDER_TEST_PASS%
+
+[query:section_name]
+name = friendly
+db = pg
+sql_file = )" + sql_path + R"(
+timeout_ms = 250
+max_rows = 7
+)";
+  const IniFileGuard ini_guard(ini);
+  const EnvGuard guard1("DB_SPIDER_ENABLED", "true");
+  const EnvGuard guard2("DB_SPIDER_CONFIG_FILE", ini_guard.m_path);
+  const EnvGuard guard3("SPIDER_TEST_USER", "env_user");
+  const EnvGuard guard4("SPIDER_TEST_PASS", "env_pw");
+
+  Config cfg;
+  cfg.load_from_env();
+
+  REQUIRE(cfg.m_spider.m_databases.size() == 1);
+  auto const &db = cfg.m_spider.m_databases[0];
+  REQUIRE(db.m_user == "env_user");
+  REQUIRE(db.m_password == "env_pw");
+  REQUIRE(db.m_queries.size() == 1);
+  REQUIRE(db.m_queries[0].m_name == "friendly");
+  REQUIRE(db.m_queries[0].m_sql == "SELECT 42");
+  REQUIRE(db.m_queries[0].m_timeout_ms == 250);
+  REQUIRE(db.m_queries[0].m_max_rows == 7);
+  std::filesystem::remove(sql_path);
 }

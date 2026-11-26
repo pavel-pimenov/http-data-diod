@@ -26,16 +26,19 @@ healthcheck glitchtip и профиль в `rebuild-and-run.sh` починены
 
 ## Текущий статус (25 — transaction groups по продуктам)
 
-Покрытие юнит-тестами: **778 test cases**, **4 256 assertions**
-(test_components 646/3260 + test_proxy_core 132/996). Замер через `scripts/run-coverage.sh`
+Покрытие юнит-тестами: **784 test cases**, **4 294 assertions**
+(test_components 652/3298 + test_proxy_core 132/996). Замер через `scripts/run-coverage.sh`
 (gcovr в контейнере, HTML-отчёт в `coverage-report/`):
-- **production-файлы: 86.0% строк** (7495/8713) — пер-файловый гейт
+- **production-файлы: 88.2% строк** (7684/8713) — пер-файловый гейт
   `scripts/coverage-regression-check.py` против `docs/coverage-baseline.json`
-- **все файлы (с тестами): 91.8% строк** (17463/19018)
-- **ветви: 40.8%** (33901/83061) — в это число входят throw-рёбра и макросы Catch2
-  в тестах; по production-файлам сырьё baseline — 50.1% (8041/16036), после round 212
-  `pg_value_utils.hpp` 122/176, `db_query_utils.hpp` 305/606,
-  `db_query_executor_postgres.cpp` 157/286, `db_query_handler.cpp` 83/146.
+- **все файлы (с тестами): 92.9% строк** (17775/19141)
+- **ветви: 41.1%** (34442/83899) — в это число входят throw-рёбра и макросы Catch2
+  в тестах; по production-файлам — 51.5% (8250/16036). После round 268 самый
+  тёмный production-файл — `db_query_executor_postgres.cpp` 196/287 строк
+  (stream_query с параметрами требует live PG), затем `db_query_handler.hpp`
+  11/20 (`all_ready()` без инъекции executor'а) и `db_query_handler.cpp`
+  109/120; `db_spider.cpp` поднялся с 0/176 до 128/176, `pool_executor.hpp` —
+  до 25/26.
 
 Последние раунды: доведение файлов ниже 90% строкового покрытия
 до ≥90% (`duplicate_detector.cpp` 89.8%→94.5%,

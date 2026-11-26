@@ -17,10 +17,19 @@ stages:
       else
         export IMAGE_TAG="${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
       fi
+    - |
+      # Closed-contour build mirrors (same defaults as BUILD_PROFILE=contour in
+      # scripts/build-profile.sh). Kaniko does not run that script, so the
+      # values must be exported and passed explicitly to every image build.
+      export REGISTRY_MIRROR="${REGISTRY_MIRROR:-docker-registry.dp.nlmk.com/}"
+      export APT_MIRROR="${APT_MIRROR:-https://repos.dp.nlmk.com/artifactory/archive-ubuntu-remote/}"
+      export PIP_INDEX_URL="${PIP_INDEX_URL:-https://repos.dp.nlmk.com/artifactory/api/pypi/pypi/simple}"
+      export BASE_IMAGE="${BASE_IMAGE:-${REGISTRY_MIRROR}ubuntu:26.04}"
 
 # Deploy builds and pushes the runtime image only. Unit tests are NOT run in CI:
 # they require `docker compose` (live NATS/PostgreSQL) and run on a separate
-# machine (src/Dockerfile `test` stage via docker compose run / --target test).
+# machine (scripts/run-coverage.sh builds the coverage stage from
+# src/Dockerfile.test and runs the unit tests there).
 build_docker:
   <<: *kaniko_setup
   stage: deploy
@@ -30,6 +39,10 @@ build_docker:
         --dockerfile $CI_PROJECT_DIR/src/Dockerfile
         --target runtime
         --build-arg GIT_SHA=$CI_COMMIT_SHORT_SHA
+        --build-arg REGISTRY_MIRROR="$REGISTRY_MIRROR"
+        --build-arg APT_MIRROR="$APT_MIRROR"
+        --build-arg PIP_INDEX_URL="$PIP_INDEX_URL"
+        --build-arg BASE_IMAGE="$BASE_IMAGE"
         --skip-unused-stages=true
         --destination $IA_URSU_DOCKER_REPO_PATH/$CI_PROJECT_NAME:$IMAGE_TAG
         --destination $IA_URSU_DOCKER_REPO_PATH/$CI_PROJECT_NAME:current
@@ -57,6 +70,10 @@ build_dashboards_sync:
         --context $CI_PROJECT_DIR
         --dockerfile $CI_PROJECT_DIR/src/Dockerfile
         --target grafana-sync
+        --build-arg REGISTRY_MIRROR="$REGISTRY_MIRROR"
+        --build-arg APT_MIRROR="$APT_MIRROR"
+        --build-arg PIP_INDEX_URL="$PIP_INDEX_URL"
+        --build-arg BASE_IMAGE="$BASE_IMAGE"
         --skip-unused-stages=true
         --destination $IA_URSU_DOCKER_REPO_PATH/$CI_PROJECT_NAME-dashboards-sync:$IMAGE_TAG
         --destination $IA_URSU_DOCKER_REPO_PATH/$CI_PROJECT_NAME-dashboards-sync:current
