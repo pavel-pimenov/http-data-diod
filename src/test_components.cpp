@@ -1207,6 +1207,24 @@ TEST_CASE("JsonUtils: safe_get_bool", "[json-utils]") {
   REQUIRE(JsonUtils::safe_get_bool(j, "num", true) == true);
 }
 
+TEST_CASE("JsonUtils: get_string_or matches json::value semantics",
+          "[json-utils]") {
+  json const j = {{"key", "value"}, {"empty", ""}, {"num", 42}};
+  REQUIRE(JsonUtils::get_string_or(j, "key") == "value");
+  REQUIRE(JsonUtils::get_string_or(j, "empty", "fallback").empty());
+  REQUIRE(JsonUtils::get_string_or(j, "missing", "fallback") == "fallback");
+  REQUIRE_THROWS_AS(JsonUtils::get_string_or(j, "num", "fallback"),
+                    json::type_error);
+}
+
+TEST_CASE("JsonUtils: get_bool_or matches json::value semantics",
+          "[json-utils]") {
+  json const j = {{"flag", true}, {"off", false}, {"num", 1}};
+  REQUIRE(JsonUtils::get_bool_or(j, "flag"));
+  REQUIRE_FALSE(JsonUtils::get_bool_or(j, "off", true));
+  REQUIRE(JsonUtils::get_bool_or(j, "missing", true));
+  REQUIRE_THROWS_AS(JsonUtils::get_bool_or(j, "num", true), json::type_error);
+}
 
 TEST_CASE("JsonUtils: has_key", "[json-utils]") {
   json const j = {{"key", "value"}, {"null_key", nullptr}};
@@ -4028,7 +4046,12 @@ TEST_CASE("WorkerRequestParser: optional fields fall back to defaults",
     "request_id": "req-2",
     "method": "GET",
     "path": "/v1/bar",
-    "body": ""
+    "body": "",
+    "query": "",
+    "body_is_binary": false,
+    "proxy_traceparent": "",
+    "proxy_span_id": "",
+    "traceparent": ""
   })");
   const auto metadata =
       worker_request_parser::decode_nats_request(request_data);
@@ -4039,6 +4062,19 @@ TEST_CASE("WorkerRequestParser: optional fields fall back to defaults",
   REQUIRE(metadata.m_proxy_span_id.empty());
   REQUIRE(metadata.m_traceparent.empty());
   REQUIRE(metadata.m_forwarded_headers.empty());
+}
+
+TEST_CASE("WorkerRequestParser: wrong field type is not silently defaulted",
+          "[worker-nats]") {
+  const json request_data = json::parse(R"({
+    "request_id": "req-bad",
+    "method": "POST",
+    "path": "/v1/bad",
+    "body": "x",
+    "client_ip": 123
+  })");
+  REQUIRE_THROWS_AS(worker_request_parser::decode_nats_request(request_data),
+                    json::type_error);
 }
 
 TEST_CASE("WorkerRequestParser: forwarded headers are filtered with defaults",

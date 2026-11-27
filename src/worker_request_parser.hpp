@@ -34,7 +34,8 @@ struct WorkerRequestData {
   metadata.m_request_id =
       request_data[NatsContract::kRequestId].get<std::string>();
   metadata.m_path = request_data[NatsContract::kPath].get<std::string>();
-  metadata.m_query = request_data.value(NatsContract::kQuery, std::string{});
+  metadata.m_query =
+      JsonUtils::get_string_or(request_data, NatsContract::kQuery);
   metadata.m_method = request_data[NatsContract::kMethod].get<std::string>();
 
   // JSON bodies are carried verbatim; non-JSON bodies are base64 in the
@@ -42,21 +43,22 @@ struct WorkerRequestData {
   // before the upstream HTTP call.
   const std::string body = request_data[NatsContract::kBody].get<std::string>();
   metadata.m_body = base64::decode_if_binary(
-      body, request_data.value(NatsContract::kBodyIsBinary, false));
+      body,
+      JsonUtils::get_bool_or(request_data, NatsContract::kBodyIsBinary));
 
   // Extract optional fields with defaults
-  metadata.m_client_ip =
-      request_data.value(NatsContract::kClientIp, std::string("unknown"));
-  metadata.m_proxy_ip =
-      request_data.value(NatsContract::kProxyIp, std::string("unknown"));
+  metadata.m_client_ip = JsonUtils::get_string_or(
+      request_data, NatsContract::kClientIp, "unknown");
+  metadata.m_proxy_ip = JsonUtils::get_string_or(
+      request_data, NatsContract::kProxyIp, "unknown");
   metadata.m_proxy_traceparent =
-      request_data.value(NatsContract::kProxyTraceparent, std::string{});
+      JsonUtils::get_string_or(request_data, NatsContract::kProxyTraceparent);
   metadata.m_proxy_span_id =
-      request_data.value(NatsContract::kProxySpanId, std::string{});
+      JsonUtils::get_string_or(request_data, NatsContract::kProxySpanId);
 
   // Extract traceparent if present
   metadata.m_traceparent =
-      request_data.value(NatsContract::kTraceparent, std::string{});
+      JsonUtils::get_string_or(request_data, NatsContract::kTraceparent);
 
   if (request_data.contains(NatsContract::kHeaders)) {
     HeaderUtils::filter_headers_from_json(

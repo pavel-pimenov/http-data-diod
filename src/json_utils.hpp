@@ -132,6 +132,16 @@ public:
     return fallback;
   }
 
+  static std::string get_string_or(const json &j, const std::string &key,
+                                   std::string_view fallback = {}) {
+    return j.value(key, std::string(fallback));
+  }
+
+  static bool get_bool_or(const json &j, const std::string &key,
+                          bool fallback = false) {
+    return j.value(key, fallback);
+  }
+
   static bool has_key(const json &j, const std::string &key) {
     return j.contains(key) && !j[key].is_null();
   }

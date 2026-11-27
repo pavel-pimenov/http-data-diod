@@ -524,8 +524,8 @@ bool L2Worker::parse_request_data(const std::string &request_json,
                                  std::format(
                                      "Worker request validation failed: {}",
                                      parse_error),
-                                 j.value(NatsContract::kRequestId,
-                                         std::string{}),
+                                 JsonUtils::get_string_or(j,
+                                     NatsContract::kRequestId),
                                  {"worker_validation_error", "schema"});
                            }
                            return std::unexpected(parse_error);
