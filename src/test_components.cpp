@@ -1809,7 +1809,10 @@ TEST_CASE("ThreadPool: active_count follows the running tasks",
     f.get();
   }
   REQUIRE(active_while_busy == 2);
-  REQUIRE(pool.active_count() == 0);
+  // packaged_task publishes the future before the worker decrements the counter.
+  REQUIRE(test_wait_support::wait_for_condition(
+      [&pool] { return pool.active_count() == 0; }, 1000,
+      std::chrono::milliseconds(1)));
 }
 
 TEST_CASE("ThreadPool: accessors report queue and thread counts",
@@ -3202,6 +3205,7 @@ TEST_CASE("Common utils: set_json_error_response", "[common-utils]") {
   httplib::Response res;
   set_json_error_response(res, 400, "bad request", "req-1");
   REQUIRE(res.status == 400);
+  REQUIRE(res.get_header_value("Content-Type") == "application/json");
   auto body = JsonUtils::try_parse(res.body);
   REQUIRE(body.has_value());
   REQUIRE((*body)["error"] == "bad request");

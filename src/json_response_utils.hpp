@@ -13,19 +13,6 @@
 // endpoints. Hosted here so the umbrella common_utils header re-exports them
 // without embedding the implementations.
 
-// Writes a JSON error body with an optional request_id.
-inline void set_json_error_response(httplib::Response &res, int status,
-                                    std::string_view message,
-                                    std::string_view request_id = "") {
-  res.status = status;
-  nlohmann::json body;
-  body["error"] = message;
-  if (!request_id.empty()) {
-    body["request_id"] = request_id;
-  }
-  res.set_content(body.dump(), "application/json");
-}
-
 // Serializes a JSON body and sets the application/json content type. Replaces
 // the repeated `res.status = s; res.set_content(body.dump(), "application/json")`
 // idiom so the status+content-type pairing lives in one place.
@@ -33,6 +20,18 @@ inline void send_json_response(httplib::Response &res, int status,
                                const nlohmann::json &body) {
   res.status = status;
   res.set_content(body.dump(), "application/json");
+}
+
+// Writes a JSON error body with an optional request_id.
+inline void set_json_error_response(httplib::Response &res, int status,
+                                    std::string_view message,
+                                    std::string_view request_id = "") {
+  nlohmann::json body;
+  body["error"] = message;
+  if (!request_id.empty()) {
+    body["request_id"] = request_id;
+  }
+  send_json_response(res, status, body);
 }
 
 namespace detail {
