@@ -238,8 +238,8 @@
     "json_response_utils.hpp": {
       "lines": 47,
       "covered": 47,
-      "branches": 50,
-      "branches_covered": 28
+      "branches": 48,
+      "branches_covered": 27
     },
     "json_schema_validator.hpp": {
       "lines": 114,
@@ -315,9 +315,9 @@
     },
     "nats_client.cpp": {
       "lines": 571,
-      "covered": 482,
+      "covered": 481,
       "branches": 1044,
-      "branches_covered": 475
+      "branches_covered": 473
     },
     "nats_client.hpp": {
       "lines": 1,
@@ -497,7 +497,7 @@
       "lines": 211,
       "covered": 208,
       "branches": 393,
-      "branches_covered": 246
+      "branches_covered": 247
     },
     "string_utils.cpp": {
       "lines": 12,

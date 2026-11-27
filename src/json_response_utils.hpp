@@ -35,20 +35,24 @@ inline void send_json_response(httplib::Response &res, int status,
   res.set_content(body.dump(), "application/json");
 }
 
-inline void set_health_alive(httplib::Response &res,
-                             std::string_view service) {
+namespace detail {
+inline void set_health_status(httplib::Response &res, std::string_view status,
+                              std::string_view service) {
   res.status = http_status::kOk;
   res.set_content(
-      std::format(R"({{"status": "alive", "service": "{}"}})", service),
+      std::format(R"({{"status": "{}", "service": "{}"}})", status, service),
       "application/json");
+}
+} // namespace detail
+
+inline void set_health_alive(httplib::Response &res,
+                             std::string_view service) {
+  detail::set_health_status(res, "alive", service);
 }
 
 inline void set_health_ready(httplib::Response &res,
                              std::string_view service) {
-  res.status = http_status::kOk;
-  res.set_content(
-      std::format(R"({{"status": "ready", "service": "{}"}})", service),
-      "application/json");
+  detail::set_health_status(res, "ready", service);
 }
 
 // Readiness body for the NATS-backed services (worker/proxy): the same shape as

@@ -3217,14 +3217,12 @@ TEST_CASE("Common utils: set_health_alive and set_health_ready",
   httplib::Response alive;
   set_health_alive(alive, "proxy");
   REQUIRE(alive.status == 200);
-  REQUIRE(alive.body.find(R"("status": "alive")") != std::string::npos);
-  REQUIRE(alive.body.find(R"("service": "proxy")") != std::string::npos);
+  REQUIRE(alive.body == R"({"status": "alive", "service": "proxy"})");
 
   httplib::Response ready;
   set_health_ready(ready, "worker");
   REQUIRE(ready.status == 200);
-  REQUIRE(ready.body.find(R"("status": "ready")") != std::string::npos);
-  REQUIRE(ready.body.find(R"("service": "worker")") != std::string::npos);
+  REQUIRE(ready.body == R"({"status": "ready", "service": "worker"})");
 }
 
 TEST_CASE("Common utils: validate_and_parse_json valid input",
