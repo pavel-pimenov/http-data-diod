@@ -62,18 +62,15 @@ void set_response_content(httplib::Response &res,
   ctx.m_proxy.m_metrics->m_response_size_bytes.Observe(
       static_cast<double>(response_body.size()));
 
-  // Set response content and headers
+  // Preserve the upstream Content-Type (the legacy test-port answers
+  // text/html on unknown paths); application/json remains the default when
+  // the backend sent none. Binary data uses the same setter with the
+  // decoded raw bytes already selected in response_body above.
   if (is_binary) {
-    // For binary data, use the raw response (no compression)
     Logger::debug("Proxy sending binary response, content_type={}, size={}",
                   content_type, response_body.size());
-    res.set_content(response_body, content_type);
-  } else {
-    // Preserve the upstream Content-Type (the legacy test-port answers
-    // text/html on unknown paths); application/json remains the default when
-    // the backend sent none.
-    res.set_content(response_body, content_type);
   }
+  res.set_content(response_body, content_type);
 
   set_traceparent_response_header(res, trace_ctx);
 
