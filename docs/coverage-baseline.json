@@ -440,8 +440,8 @@
       "branches_covered": 0
     },
     "response_builder.cpp": {
-      "lines": 31,
-      "covered": 29,
+      "lines": 33,
+      "covered": 31,
       "branches": 52,
       "branches_covered": 30
     },
@@ -509,7 +509,7 @@
       "lines": 70,
       "covered": 70,
       "branches": 140,
-      "branches_covered": 89
+      "branches_covered": 88
     },
     "thread_pool_wrapper.hpp": {
       "lines": 28,

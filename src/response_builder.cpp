@@ -53,24 +53,26 @@ void set_response_content(httplib::Response &res,
     Logger::debug("Proxy decoded binary response, size={}",
                   decoded_binary_response.size());
   }
+  const std::string &response_body =
+      is_binary ? decoded_binary_response : l2_response;
 
   increment_and_log_response_sent(ctx.m_proxy.m_metrics->m_bytes_sent, "Proxy",
                                   request_id, status_code);
 
-  ctx.m_proxy.m_metrics->m_response_size_bytes.Observe(static_cast<double>(
-      is_binary ? decoded_binary_response.size() : l2_response.size()));
+  ctx.m_proxy.m_metrics->m_response_size_bytes.Observe(
+      static_cast<double>(response_body.size()));
 
   // Set response content and headers
   if (is_binary) {
     // For binary data, use the raw response (no compression)
     Logger::debug("Proxy sending binary response, content_type={}, size={}",
-                  content_type, decoded_binary_response.size());
-    res.set_content(decoded_binary_response, content_type);
+                  content_type, response_body.size());
+    res.set_content(response_body, content_type);
   } else {
     // Preserve the upstream Content-Type (the legacy test-port answers
     // text/html on unknown paths); application/json remains the default when
     // the backend sent none.
-    res.set_content(l2_response, content_type);
+    res.set_content(response_body, content_type);
   }
 
   set_traceparent_response_header(res, trace_ctx);

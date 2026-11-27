@@ -1339,6 +1339,8 @@ TEST_CASE("ResponseBuilder: binary base64 envelope is decoded",
   REQUIRE(res.body == raw_binary);
   REQUIRE(res.get_header_value("Content-Type") ==
           "application/octet-stream");
+  REQUIRE(ctx.m_proxy.m_metrics->m_response_size_bytes.Collect()
+              .histogram.sample_sum == static_cast<double>(raw_binary.size()));
 }
 
 TEST_CASE("ResponseBuilder: non-binary envelope keeps upstream Content-Type",
@@ -1355,6 +1357,8 @@ TEST_CASE("ResponseBuilder: non-binary envelope keeps upstream Content-Type",
   REQUIRE(res.status == 200);
   REQUIRE(res.body == "<html>legacy</html>");
   REQUIRE(res.get_header_value("Content-Type") == "text/html");
+  REQUIRE(ctx.m_proxy.m_metrics->m_response_size_bytes.Collect()
+              .histogram.sample_sum == static_cast<double>(res.body.size()));
 }
 
 TEST_CASE("JsonUtils: get_body_* tolerate missing pieces", "[json-utils]") {
