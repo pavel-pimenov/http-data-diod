@@ -27,7 +27,18 @@
    `db_query_utils.hpp:51` (не блокирующее); cppcheck и offline-гейт зелёные,
    `git diff --check` чистый. Если повторный coverage или rebuild покажут
    проблему — зафиксировать отдельным round 277, не переписывая историю.
-5. После зелёных прогонов удалить старые `/tmp/*.txt`.
+5. Результат coverage, пришедший уже после коммита: юнит-тесты **прошли**
+   (`All tests passed (3332 assertions in 659 test cases)` +
+   `999 assertions in 135 test cases`), production 97 файлов,
+   7693/8726 = 88.16%, но per-file gate **упал**:
+   `REGRESSION nats_client.cpp: 84.24% -> 84.06% (-0.18 п.п.), непокрытых строк +1`.
+   Исходник `nats_client.cpp` в round 276 не менялся — похоже на
+   недетерминизм покрытия по сетевым/NATS-веткам (в round 275 тот же файл
+   проходил). На новом компе перезапустить `./scripts/run-coverage.sh` и
+   сравнить; если повторится — разобраться отдельным round 277, baseline
+   "затирать" не нужно. `SHIFT response_builder.cpp` ожидаем с round 275.
+6. `./rebuild-and-run.sh` также запущен перед выключением; его результат
+   дождаться на новом компе, затем health-check, smoke и удалить `/tmp/*.txt`.
 
 Следующий кандидат (round 277, компактный): снова устранить дублирование
 `res.status = ...; res.set_content(..., "application/json")` в оставшихся
